@@ -16,7 +16,6 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'org.slf4j', name: 'slf4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
     testImplementation testFixtures(project(path:':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer'))

@@ -9,11 +9,11 @@ dependencies {
 
     implementation group: 'com.google.guava', name: 'guava'
     implementation group: 'org.slf4j', name: 'slf4j-api'
+
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'org.codehaus.groovy', name: 'groovy-all'
-    implementation group: "org.graalvm.js", name: 'js'
-    implementation group: "org.graalvm.js", name: 'js-scriptengine'
+    implementation group: "org.graalvm.polyglot", name: 'polyglot'
+    implementation group: "org.graalvm.polyglot", name: 'js-community'
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')

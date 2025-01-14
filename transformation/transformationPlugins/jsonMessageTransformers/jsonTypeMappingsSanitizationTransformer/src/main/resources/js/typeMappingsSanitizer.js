@@ -134,19 +134,17 @@ function includesTypeNames(inputMap) {
     if (flagMatch) {
         return JSON.parse(flagMatch[1]);
     }
-    var majorVersion = inputMap.properties.version.major;
-    if (majorVersion) {
-        if (majorVersion >= 7) {
-            return false;
-        } else if (majorVersion <= 6) {
-            return true;
-        } else {
-            throw new Error("include_type_name was not set on the incoming URI." +
-                "The template needs to know what version the original request was targeted for " +
-                "in order to properly understand the semantics and what was intended.  " +
-                "Without that, this transformation cannot map the request " +
-                "to an unambiguous request for the target");
-        }
+    var majorVersion = inputMap.properties?.version?.major;
+    if (majorVersion >= 7) {
+        return false;
+    } else if (majorVersion <= 6) {
+        return true;
+    } else {
+        throw new Error("include_type_name was not set on the incoming URI." +
+            "The template needs to know what version the original request was targeted for " +
+            "in order to properly understand the semantics and what was intended.  " +
+            "Without that, this transformation cannot map the request " +
+            "to an unambiguous request for the target");
     }
 }
 
@@ -226,8 +224,8 @@ function rewriteCreateIndex(match, inputMap) {
     const body = inputMap.request.payload.inlinedJsonBody || {};
     const mappings = body.mappings;
 
-    if (!mappings || (mappings.properties && !mappings.properties?.properties)) {
-        // Do not modify if types are not found
+    if (!mappings || (mappings.properties && !mappings.properties?.properties) || !includesTypeNames(inputMap)) {
+        // Do not modify if types are not found or if include_type_name is not set
         return inputMap.request;
     }
 
@@ -240,14 +238,20 @@ function rewriteCreateIndex(match, inputMap) {
     return createIndexAsUnionedExcise(sourceTypeToTargetIndicesMap, inputMap);
 }
 
+// Define regex patterns as constants
+const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^\/]*)\/([^\/]*)\/(.*)/;
+const GET_DOC_REGEX      = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/;
+const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
+const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^\/]*)/;
+
 function routeHttpRequest(source_document, context) {
     const methodAndUri = `${source_document.method} ${source_document.URI}`;
     const documentAndContext = {
         request: source_document,
         index_mappings: context.index_mappings,
         regex_index_mappings: context.regex_index_mappings,
-        properties: context.properties
-    }
+        properties: context.source_properties
+    };
 
     return route(
         documentAndContext,
@@ -255,10 +259,10 @@ function routeHttpRequest(source_document, context) {
         context.flags,
         () => (source_document),
         [
-            [/(?:PUT|POST) \/([^\/]*)\/([^\/]*)\/(.*)/, rewriteDocRequest, 'rewrite_add_request_to_strip_types'],
-            [/GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/, rewriteDocRequest, 'rewrite_get_request_to_strip_types'],
-            [/(?:PUT|POST) \/_bulk/, rewriteBulk, 'rewrite_bulk'],
-            [/(?:PUT|POST) \/([^\/]*)/, rewriteCreateIndex, 'rewrite_create_index']
+            [PUT_POST_DOC_REGEX, rewriteDocRequest, 'rewrite_add_request_to_strip_types'],
+            [GET_DOC_REGEX, rewriteDocRequest, 'rewrite_get_request_to_strip_types'],
+            [BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
+            [CREATE_INDEX_REGEX, rewriteCreateIndex, 'rewrite_create_index']
         ]
     );
 }
@@ -281,7 +285,18 @@ function processBulkIndex(docBackfillPair, context) {
     return docBackfillPair;
 }
 
+// Helper to print nested maps
+function replacer(key, value) {
+    // Check if the value is a Map, and convert it to an object
+    if (value instanceof Map) {
+        return Object.fromEntries(value);
+    }
+    return value; // Return the value as-is for other types
+}
+
 function detectAndTransform(document, context) {
+    // Example log
+    // console.log("Context: ", JSON.stringify(context, replacer, 2));
     if (!document) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
@@ -294,3 +309,6 @@ function detectAndTransform(document, context) {
         return document;
     }
 }
+
+// Entrypoint
+(() => detectAndTransform)()

@@ -13,7 +13,6 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.google.guava', name: 'guava'
     implementation group: 'org.slf4j', name: 'slf4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
     testFixturesImplementation project(':TrafficCapture:trafficReplayer')
     testFixturesImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')

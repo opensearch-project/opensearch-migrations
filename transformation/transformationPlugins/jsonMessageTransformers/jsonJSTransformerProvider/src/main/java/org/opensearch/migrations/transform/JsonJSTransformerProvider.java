@@ -8,7 +8,6 @@ import lombok.SneakyThrows;
 public class JsonJSTransformerProvider implements IJsonTransformerProvider {
 
     public static final String INITIALIZATION_SCRIPT = "initializationScript";
-    public static final String INVOCATION_SCRIPT = "invocationScript";
     public static final String BINDINGS_PROVIDER = "bindingsProvider";
 
     /**
@@ -52,16 +51,15 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
     @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
-        var config = validateAndExtractConfig(jsonConfig, new String[]{INITIALIZATION_SCRIPT, INVOCATION_SCRIPT}, new String[]{BINDINGS_PROVIDER});
+        var config = validateAndExtractConfig(jsonConfig, new String[]{INITIALIZATION_SCRIPT}, new String[]{BINDINGS_PROVIDER});
 
-        String initializationScript = (String) config.get(INITIALIZATION_SCRIPT);
-        String invocationScript = (String) config.get(INVOCATION_SCRIPT);
+        String script = (String) config.get(INITIALIZATION_SCRIPT);
         Function<Object, Object> bindingsProvider = (Function<Object, Object>) config.get(BINDINGS_PROVIDER);
 
-        if (initializationScript == null || invocationScript == null) {
-            throw new IllegalArgumentException("'initializationScript' and 'invocationScript' must be provided.");
+        if (script == null) {
+            throw new IllegalArgumentException("'script' must be provided.");
         }
 
-        return new JavascriptTransformer(initializationScript, invocationScript, bindingsProvider);
+        return new JavascriptTransformer(script, bindingsProvider);
     }
 }

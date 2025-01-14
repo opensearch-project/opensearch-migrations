@@ -401,7 +401,7 @@ public class TrafficReplayer {
                 topContext,
                 uri,
                 authTransformer,
-                new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
+                () -> new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,

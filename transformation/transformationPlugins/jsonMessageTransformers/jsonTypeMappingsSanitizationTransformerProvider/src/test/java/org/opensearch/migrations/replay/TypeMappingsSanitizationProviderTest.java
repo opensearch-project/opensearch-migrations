@@ -17,7 +17,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 @Slf4j
@@ -91,7 +90,6 @@ public class TypeMappingsSanitizationProviderTest {
     }
 
     @Test
-    @Disabled("I'm not sure what Greg was intending to test with this")
     public void testMappingWithoutTypesAndLatestSourceInfoDoesNothing() throws Exception {
         var testString = TestRequestBuilder.makePutIndexRequest("commingled_docs", true, false);
         var fullTransformerConfig =
@@ -100,13 +98,13 @@ public class TypeMappingsSanitizationProviderTest {
                     Map.of("major",  (Object) 6,
                         "minor", (Object) 10)),
                 "regexIndexMappings", List.of(List.of("(.*)", "(.*)", "$1")));
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
-        var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig)) {
+            var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        }
     }
 
     @Test
-    @Disabled("I'm not sure what Greg was intending to test with this")
     public void testTypeMappingsWithSourcePropertiesWorks() throws Exception {
         var testString = TestRequestBuilder.makePutIndexRequest("commingled_docs", true, false);
         var fullTransformerConfig =
@@ -114,26 +112,22 @@ public class TypeMappingsSanitizationProviderTest {
                     Map.of("major",  (Object) 5,
                         "minor", (Object) 10)),
                 "regexIndexMappings", List.of(List.of("(.*)", ".*", "$1")));
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
-        var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig)) {
+            var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        }
     }
 
     @Test
-    @Disabled("I'm not sure what Greg was intending to test with this")
-    public void testMappingsButNoSourcePropertiesThrows() throws Exception {
-        var testString = makeCreateIndexRequestWithoutTypes();
-        var noopString = "{\n" +
-            "  \"URI\" : \"/\",\n" +
-            "  \"method\" : \"GET\"\n" +
-            "}";
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(Map.of());
-        var thrownException =
+    public void testTypeMappingsButNoSourcePropertiesThrows() throws Exception {
+        var testString = makeCreateIndexRequestWithTypes();
+        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(Map.of())) {
             Assertions.assertThrows(Exception.class, () ->
-            transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
+                transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
+        }
     }
 
-    private static @NonNull String makeCreateIndexRequestWithoutTypes() {
+    private static @NonNull String makeCreateIndexRequestWithTypes() {
         return "{\n" +
             "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\": \"PUT\",\n" +
             "  \"" + JsonKeysForHttpMessage.URI_KEY + "\": \"/geonames\",\n" +
@@ -150,9 +144,11 @@ public class TypeMappingsSanitizationProviderTest {
             "        }\n" +
             "      }," +
             "      \"mappings\": {" +
-            "        \"properties\": {\n" +
-            "          \"field1\": { \"type\": \"text\" }\n" +
-            "        }" +
+            "        \"type\": {\n" +
+            "          \"properties\": {\n" +
+            "            \"field1\": { \"type\": \"text\" }\n" +
+            "          }\n" +
+            "        }\n" +
             "      }\n" +
             "    }\n" +
             "  }\n" +

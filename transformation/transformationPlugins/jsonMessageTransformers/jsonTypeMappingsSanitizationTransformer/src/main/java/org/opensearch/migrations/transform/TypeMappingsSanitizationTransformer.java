@@ -31,7 +31,7 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
         Map<String, Object> featureFlags)
         throws IOException
     {
-        super(getScripts(), "detectAndTransform(source_document, context)",
+        super(getScripts(),
             makeSourceWrapperFunction(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
     }
 
@@ -54,12 +54,10 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
             );
 
         return incomingJson -> Map.of(
-            "source_document", incomingJson,
-            "context", Map.of(
                 "index_mappings", indexMappings,
                 "regex_index_mappings", regexIndexMappings,
                 "featureFlags", featureFlags,
-                "source_properties", sourceProperties == null ? Map.of() : sourceProperties));
+                "source_properties", sourceProperties == null ? Map.of() : sourceProperties);
     }
 
     private static String getScripts() throws IOException {

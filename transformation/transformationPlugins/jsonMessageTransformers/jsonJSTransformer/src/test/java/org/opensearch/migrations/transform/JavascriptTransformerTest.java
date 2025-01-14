@@ -9,13 +9,12 @@ import org.junit.jupiter.api.Test;
 @Slf4j
 public class JavascriptTransformerTest {
 
-    private static final String INIT_SCRIPT = "";
-    private static final String INVOCATION_SCRIPT = "({docSize: Object.keys(document).length+2 })";
+    private static final String INIT_SCRIPT = "(document) => ({docSize: Object.keys(document).length+2 })";
 
     @Test
     @SuppressWarnings("unchecked")
     public void testInlinedScriptPerformance() throws Exception {
-        var testTransformer = new JavascriptTransformer(INIT_SCRIPT, INVOCATION_SCRIPT,
+        var testTransformer = new JavascriptTransformer(INIT_SCRIPT,
             incoming -> Map.of("document", incoming));
 
         var testDoc = Map.of("hi", (Object)"world");
