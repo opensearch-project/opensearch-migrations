@@ -1,5 +1,5 @@
 # Using same base image as other Java containers in this repo
-FROM amazoncorretto:11-al2023-headless
+FROM amazoncorretto:17-al2023-headless
 
 # Install the AWS CLI in the container
 RUN dnf install -y aws-cli --setopt=install_weak_deps=False && \

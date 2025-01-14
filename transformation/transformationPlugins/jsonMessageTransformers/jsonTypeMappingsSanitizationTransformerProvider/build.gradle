@@ -11,9 +11,11 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
 
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
     testImplementation testFixtures(project(path:':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer'))

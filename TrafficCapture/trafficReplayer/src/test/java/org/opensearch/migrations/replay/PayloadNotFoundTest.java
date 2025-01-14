@@ -31,7 +31,7 @@ public class PayloadNotFoundTest {
             + "}\n";
 
         var transformer = new TransformationLoader().getTransformerFactoryLoader("newhost", null,
-            "[{\"TypeMappingSanitizationTransformerProvider\":\"\"}]");
+            "[{\"TypeMappingSanitizationTransformerProvider\":{}}]");
         var e = Assertions.assertThrows(Exception.class,
             () -> transformer.transformJson(FAULTING_MAP));
         Assertions.assertTrue(((PayloadAccessFaultingMap)FAULTING_MAP.payload()).missingPayloadWasAccessed());

@@ -8,9 +8,6 @@ plugins {
     id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 repositories {
     // Use the plugin portal to apply community plugins in convention plugins.
     gradlePluginPortal()

@@ -65,3 +65,94 @@ application {
     // Define the main class for the application.
     mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy'
 }
+
+tasks.register("verifyCompatibilityWithJDK11") {
+    group = "verification"
+    description = "Verify Java major versions of compiled classes and dependencies for compatibility with JDK 11."
+
+    // Declare task inputs
+    inputs.files(fileTree("${buildDir}/classes/java/main")).withPropertyName("compiledClasses")
+    inputs.files(configurations.compileClasspath).withPropertyName("compileClasspath")
+    inputs.files(configurations.runtimeClasspath).withPropertyName("runtimeClasspath")
+
+    // Declare outputs (optional if no files are written, just up-to-date checking)
+    outputs.upToDateWhen { true }
+
+    doLast {
+        // Task implementation logic
+        def isCompatible = true
+        def analyzedFiles = [] // To avoid duplicate processing
+
+        def getMajorVersion = { InputStream inputStream ->
+            inputStream.skip(6)
+            def majorVersion = inputStream.read() << 8 | inputStream.read()
+            inputStream.close()
+            return majorVersion
+        }
+
+        def processClassFile = { InputStream inputStream, String name, String source ->
+            def majorVersion = getMajorVersion(inputStream)
+            if (majorVersion > 55) {
+                isCompatible = false
+                println "Incompatible class file in ${source}: ${name} (Java major version ${majorVersion})"
+            }
+        }
+
+        def analyzeCompiledClasses = {
+            def outputDir = file("${buildDir}/classes/java/main")
+            if (outputDir.exists()) {
+                println "Analyzing compiled classes in ${outputDir}..."
+                fileTree(dir: outputDir, include: '**/*.class').forEach { classFile ->
+                    classFile.withInputStream { inputStream ->
+                        processClassFile(inputStream, classFile.name, outputDir.toString())
+                    }
+                }
+            } else {
+                println "No compiled classes found in ${outputDir}."
+            }
+        }
+
+        def analyzeDependencies = { configuration ->
+            println "\nAnalyzing ${configuration.name} dependencies..."
+            configuration.files.each { dependency ->
+                if (dependency.name.endsWith(".jar") && !analyzedFiles.contains(dependency)) {
+                    analyzedFiles.add(dependency)
+                    def zipStream = new java.util.zip.ZipInputStream(new FileInputStream(dependency))
+                    def entry
+                    while ((entry = zipStream.nextEntry) != null) {
+                        if (entry.name.endsWith(".class")) {
+                            if (entry.name.startsWith("META-INF/versions/")) {
+                                def versionDir = entry.name.split("/")[2]
+                                def versionNumber = versionDir.isInteger() ? versionDir.toInteger() : 0
+                                if (versionNumber > 11) {
+                                    continue
+                                }
+                            }
+                            def tempFile = File.createTempFile("class", ".tmp")
+                            tempFile.deleteOnExit()
+                            tempFile.withOutputStream { it << zipStream }
+                            tempFile.withInputStream { inputStream ->
+                                processClassFile(inputStream, entry.name, dependency.name)
+                            }
+                        }
+                    }
+                    zipStream.close()
+                }
+            }
+        }
+
+        analyzeCompiledClasses()
+        analyzeDependencies(configurations.compileClasspath)
+        analyzeDependencies(configurations.runtimeClasspath)
+
+        if (!isCompatible) {
+            throw new GradleException("Incompatible class files detected! Ensure all classes are compatible with JDK 11 (major version ≤ 55).")
+        }
+    }
+    dependsOn tasks.named("assemble")
+}
+
+// Add class version verification to slowTest
+tasks.named("slowTest") {
+    finalizedBy("verifyCompatibilityWithJDK11")
+}

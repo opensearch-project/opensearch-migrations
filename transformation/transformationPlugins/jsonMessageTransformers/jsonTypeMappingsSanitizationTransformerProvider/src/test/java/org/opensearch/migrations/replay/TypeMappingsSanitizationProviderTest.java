@@ -10,12 +10,10 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.TestRequestBuilder;
 import org.opensearch.migrations.transform.TypeMappingSanitizationTransformerProvider;
-import org.opensearch.migrations.transform.jinjava.ThrowTag;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hubspot.jinjava.interpret.FatalTemplateErrorsException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -39,7 +37,10 @@ public class TypeMappingsSanitizationProviderTest {
                     "type2", "indexb"),
                 "indexc", Map.of(
                     "type2", "indexc")),
-            "regexMappings", List.of(List.of("(time.*)", "(type.*)", "\\1_And_\\2")));
+            "regexIndexMappings", List.of(
+                    List.of("(time.*)", "(type.*)", "$1_And_$2"),
+                    List.of("(.*)", "(.*)", "$1") // Type Union
+                ));
         final String TEST_INPUT_REQUEST = "{\n"
             + "  \"method\": \"PUT\",\n"
             + "  \"URI\": \"/indexa/type2/someuser\",\n"
@@ -70,15 +71,15 @@ public class TypeMappingsSanitizationProviderTest {
             + "}\n";
 
         var provider = new TypeMappingSanitizationTransformerProvider();
-        Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {
-        });
         {
-            Object transformedDocument = provider.createTransformer(config).transformJson(inputMap);
+            Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
+            var transformedDocument = provider.createTransformer(config).transformJson(inputMap);
             Assertions.assertEquals(JsonNormalizer.fromString(EXPECTED),
                 JsonNormalizer.fromObject(transformedDocument));
         }
         {
-            Object resultFromNullConfig = provider.createTransformer(null).transformJson(inputMap);
+            Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
+            var resultFromNullConfig = provider.createTransformer(Map.of()).transformJson(inputMap);
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
                     EXPECTED.replace(
@@ -95,10 +96,12 @@ public class TypeMappingsSanitizationProviderTest {
             Map.of("sourceProperties",
                 Map.of("version",
                     Map.of("major",  (Object) 6,
-                        "minor", (Object) 10)));
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
-        Object resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+                        "minor", (Object) 10)),
+                "regexIndexMappings", List.of(List.of("(.*)", "(.*)", "$1")));
+        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig)) {
+            var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        }
     }
 
     @Test
@@ -108,29 +111,23 @@ public class TypeMappingsSanitizationProviderTest {
             Map.of("sourceProperties", Map.of("version",
                     Map.of("major",  (Object) 5,
                         "minor", (Object) 10)),
-                "regex_index_mappings", List.of(List.of("", "", "")));
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
-        Object resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+                "regexIndexMappings", List.of(List.of("(.*)", ".*", "$1")));
+        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig)) {
+            var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        }
     }
 
     @Test
-    public void testMappingsButNoSourcePropertiesThrows() throws Exception {
-        var testString = makeCreateIndexRequestWithoutTypes();
-        var noopString = "{\n" +
-            "  \"URI\" : \"/\",\n" +
-            "  \"method\" : \"GET\"\n" +
-            "}";
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(null);
-        var thrownException =
-            Assertions.assertThrows(FatalTemplateErrorsException.class, () ->
-            transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
-        Assertions.assertNotNull(
-            findCausalException(thrownException.getErrors().iterator().next().getException(),
-                e->e==null || e instanceof ThrowTag.JinjavaThrowTagException));
+    public void testTypeMappingsButNoSourcePropertiesThrows() throws Exception {
+        var testString = makeCreateIndexRequestWithTypes();
+        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(Map.of())) {
+            Assertions.assertThrows(Exception.class, () ->
+                transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
+        }
     }
 
-    private static @NonNull String makeCreateIndexRequestWithoutTypes() {
+    private static @NonNull String makeCreateIndexRequestWithTypes() {
         return "{\n" +
             "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\": \"PUT\",\n" +
             "  \"" + JsonKeysForHttpMessage.URI_KEY + "\": \"/geonames\",\n" +
@@ -147,9 +144,11 @@ public class TypeMappingsSanitizationProviderTest {
             "        }\n" +
             "      }," +
             "      \"mappings\": {" +
-            "        \"properties\": {\n" +
-            "          \"field1\": { \"type\": \"text\" }\n" +
-            "        }" +
+            "        \"type\": {\n" +
+            "          \"properties\": {\n" +
+            "            \"field1\": { \"type\": \"text\" }\n" +
+            "          }\n" +
+            "        }\n" +
             "      }\n" +
             "    }\n" +
             "  }\n" +

@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
@@ -63,7 +64,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         IRootReplayerContext context,
         URI serverUri,
         IAuthTransformerFactory authTransformer,
-        IJsonTransformer jsonTransformer,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
         TrafficStreamLimiter trafficStreamLimiter,
         IWorkTracker<Void> requestWorkTracker,
         IRetryVisitorFactory retryVisitorFactory
@@ -82,7 +83,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
         this.liveTrafficStreamLimiter = trafficStreamLimiter;
         this.requestWorkTracker = requestWorkTracker;
-        inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
+        inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformerSupplier, authTransformer);
         successfulRequestCount = new AtomicInteger();
         exceptionRequestCount = new AtomicInteger();
         nextChunkFutureRef = new AtomicReference<>();

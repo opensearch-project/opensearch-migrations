@@ -2,9 +2,6 @@ plugins {
   id "java-library"
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 ext {
   protobufVersion='3.25.5'
 }
@@ -123,6 +120,10 @@ dependencies {
 
     def json = '20240303'
     api group: 'org.json', name: 'json', version: json
+
+    def graalVersion = '24.1.1'
+    api group: "org.graalvm.polyglot", name: 'polyglot', version: graalVersion
+    api group: "org.graalvm.polyglot", name: 'js-community', version: graalVersion
 
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs

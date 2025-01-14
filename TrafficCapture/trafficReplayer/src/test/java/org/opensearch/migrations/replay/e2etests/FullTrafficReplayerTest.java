@@ -90,7 +90,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 context,
                 serverUri,
                 authTransformerFactory,
-                jsonTransformer,
+                () -> jsonTransformer,
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     serverUri,
                     allowInsecureConnections,

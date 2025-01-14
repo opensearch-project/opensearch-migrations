@@ -6,7 +6,7 @@ on:
 
 env:
   python-version: '3.11'
-  java-version: '11'
+  java-version: '17'
   gradle-version: '8.0.2'
   node-version: '18.x'
 

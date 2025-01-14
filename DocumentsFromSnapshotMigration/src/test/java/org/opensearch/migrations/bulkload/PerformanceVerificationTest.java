@@ -101,7 +101,7 @@ public class PerformanceVerificationTest {
         int maxDocsPerBulkRequest = 1000;
         long maxBytesPerBulkRequest = Long.MAX_VALUE; // No Limit on Size
         int maxConcurrentWorkItems = 10;
-        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, null);
+        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, () -> null);
 
         // Create a mock IDocumentReindexContext
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);
