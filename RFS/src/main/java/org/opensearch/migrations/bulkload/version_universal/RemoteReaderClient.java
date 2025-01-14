@@ -18,7 +18,17 @@ import reactor.core.publisher.Mono;
 public class RemoteReaderClient extends OpenSearchClient {
 
     public RemoteReaderClient(ConnectionContext connection) {
-        super(connection);
+        super(connection, null);
+    }
+
+    @Override
+    protected String getCreateIndexPath(String indexName) {
+        return indexName;
+    }
+
+    @Override
+    protected String getBulkRequestPath(String indexName) {
+        return indexName + "/_bulk";
     }
 
     protected Map<String, String> getTemplateEndpoints() {
@@ -36,7 +46,7 @@ public class RemoteReaderClient extends OpenSearchClient {
                 .flatMap(this::getJsonForTemplateApis)
                 .map(json -> Map.entry(entry.getKey(), json))
                 .doOnError(e -> log.error("Error fetching template {}: {}", entry.getKey(), e.getMessage()))
-                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             )
             .collectMap(Entry::getKey, Entry::getValue)
             .block();
@@ -72,7 +82,7 @@ public class RemoteReaderClient extends OpenSearchClient {
                 .getAsync(endpoint, null)
                 .flatMap(this::getJsonForIndexApis)
                 .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             )
             .collectList()
             .block();

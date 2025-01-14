@@ -30,6 +30,13 @@ class DataGeneratorEndToEnd {
         }
     }
 
+    @Test
+    void generateData_ES_6_8() throws Exception {
+        try (var targetCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23)) {
+            generateData(targetCluster);
+        }
+    }
+
     @SneakyThrows
     void generateData(final SearchClusterContainer targetCluster) {
         // ACTION: Set up the target clusters
