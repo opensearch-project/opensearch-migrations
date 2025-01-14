@@ -88,8 +88,6 @@ class OpenSearchClient_ES_6_8_Test {
 
     @Test
     void testBulkRequestHasType_doc() {
-        // This test gets stuck! I can't figure out why. Somewhere in the `sendBulkRequest`, it's presumably waiting for
-        // an async to return, but I can't figure out what. Running in debug hasn't turned anything up.
         var docId1 = "tt1979320";
         var docId2 = "tt0816711";
 
