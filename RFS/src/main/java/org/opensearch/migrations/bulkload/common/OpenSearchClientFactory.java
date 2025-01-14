@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 
 import java.lang.reflect.InvocationTargetException;
-import java.time.Duration;
 import java.util.HashSet;
 import java.util.Optional;
 
@@ -20,21 +19,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
-import reactor.util.retry.Retry;
 
 @Getter
 @Slf4j
 public class OpenSearchClientFactory {
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
     private ConnectionContext connectionContext;
     private Version version;
-    protected final RestClient client;
-    protected static final ObjectMapper objectMapper = new ObjectMapper();
-
-    public OpenSearchClientFactory(RestClient client) {
-        this.client = client;
-    }
-
+    RestClient client;
+ 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
+        if (connectionContext == null) {
+            throw new IllegalArgumentException("Connection context was not provided in constructor.");
+        }
         this.connectionContext = connectionContext;
         this.client = new RestClient(connectionContext);
     }
@@ -42,9 +40,6 @@ public class OpenSearchClientFactory {
     public OpenSearchClient determineVersionAndCreate() {
         if (version == null) {
             version = getClusterVersion();
-        }
-        if (connectionContext == null) {
-            throw new IllegalArgumentException("Connection context was not provided in constructor."); // not crazy about this
         }
         var clientClass = getOpenSearchClientClass(version);
         try {
@@ -69,7 +64,7 @@ public class OpenSearchClientFactory {
     }
 
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
-        if (version == null || VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
+        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
         } else if (VersionMatchers.isES_6_X.test(version)) {
             return OpenSearchClient_ES_6_8.class;
@@ -84,14 +79,6 @@ public class OpenSearchClientFactory {
             .flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH)
             .major(2)
             .build();
-    private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
-    private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
-    private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
-    private static final Retry SNAPSHOT_RETRY_STRATEGY = Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
-            .maxBackoff(DEFAULT_MAX_BACKOFF);
-    protected static final Retry CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY =
-            Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
-                    .maxBackoff(DEFAULT_MAX_BACKOFF);
 
     public Version getClusterVersion() {
         var versionFromRootApi = client.getAsync("", null)
@@ -106,7 +93,7 @@ public class OpenSearchClientFactory {
                     return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
                 })
                 .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
                 .block();
 
         // Compatibility mode is only enabled on OpenSearch clusters responding with the version of 7.10.2
@@ -116,7 +103,7 @@ public class OpenSearchClientFactory {
         return client.getAsync("_cluster/settings", null)
                 .flatMap(this::checkCompatibilityModeFromResponse)
                 .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
                 .flatMap(hasCompatibilityModeEnabled -> {
                     log.atInfo().setMessage("Checking CompatibilityMode, was enabled? {}").addArgument(hasCompatibilityModeEnabled).log();
                     if (Boolean.FALSE.equals(hasCompatibilityModeEnabled)) {
@@ -125,7 +112,7 @@ public class OpenSearchClientFactory {
                     return client.getAsync("_nodes/_all/nodes,version?format=json", null)
                             .flatMap(this::getVersionFromNodes)
                             .doOnError(e -> log.error(e.getMessage()))
-                            .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY);
+                            .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY);
                 })
                 .onErrorResume(e -> {
                     log.atWarn()

@@ -1,16 +1,19 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
+import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
@@ -35,7 +38,6 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -50,8 +52,6 @@ import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemE
 
 @ExtendWith(MockitoExtension.class)
 class OpenSearchClientTest {
-    private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}";
-    private static final String ROOT_RESPONSE_OS_1_0_0 = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"1.0.0\"}}";
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
         .enable(StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION)
         .build();
@@ -59,7 +59,7 @@ class OpenSearchClientTest {
     @Mock(strictness = Strictness.LENIENT)
     RestClient restClient;
 
-    @Mock
+    @Mock(strictness = Strictness.LENIENT)
     ConnectionContext connectionContext;
 
     @Mock
@@ -69,11 +69,9 @@ class OpenSearchClientTest {
 
     @BeforeEach
     void beforeTest() {
-        doReturn(connectionContext).when(restClient).getConnectionContext();
-        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
-        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
-        openSearchClient = spy(new OpenSearchClientFactory(restClient).determineVersionAndCreate(restClient, failedRequestLogger));
-        clearInvocations(restClient);
+        when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+        openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11")));
     }
 
     @Test

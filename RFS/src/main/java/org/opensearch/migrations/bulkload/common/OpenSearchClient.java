@@ -35,7 +35,7 @@ public abstract class OpenSearchClient {
     private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
     private static final Retry SNAPSHOT_RETRY_STRATEGY = Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
         .maxBackoff(DEFAULT_MAX_BACKOFF);
-    protected static final Retry CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY =
+    public static final Retry CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY =
         Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
             .maxBackoff(DEFAULT_MAX_BACKOFF);
     private static final Retry CREATE_ITEM_EXISTS_RETRY_STRATEGY =
@@ -312,7 +312,7 @@ public abstract class OpenSearchClient {
 
     protected abstract String getBulkRequestPath(String indexName);
 
-    Retry getBulkRetryStrategy() {
+    protected Retry getBulkRetryStrategy() {
         return BULK_RETRY_STRATEGY;
     }
 

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.net.URI;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -24,7 +25,6 @@ import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -66,7 +66,7 @@ class OpenSearchClientFactoryTest {
     @Mock(strictness = Strictness.LENIENT)
     RestClient restClient;
 
-    @Mock
+    @Mock(strictness = Strictness.LENIENT)
     ConnectionContext connectionContext;
 
     @Mock
@@ -76,10 +76,11 @@ class OpenSearchClientFactoryTest {
 
     @BeforeEach
     void beforeTest() {
-        doReturn(connectionContext).when(restClient).getConnectionContext();
-//        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
-//        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
-        openSearchClientFactory = spy(new OpenSearchClientFactory(restClient));
+        when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(connectionContext.isAwsSpecificAuthentication()).thenReturn(false);
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+        openSearchClientFactory = spy(new OpenSearchClientFactory(connectionContext));
+        openSearchClientFactory.client = restClient;
     }
 
     @Test
