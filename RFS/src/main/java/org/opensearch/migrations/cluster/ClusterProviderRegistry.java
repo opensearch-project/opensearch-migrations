@@ -79,9 +79,8 @@ public class ClusterProviderRegistry {
      * @return The remote resource creator
      */
     public ClusterWriter getRemoteWriter(ConnectionContext connection, Version versionOverride, DataFilterArgs dataFilterArgs) {
-        var clientFactory = new OpenSearchClientFactory(connection);
         var version = Optional.ofNullable(versionOverride)
-            .orElseGet(() -> clientFactory.getClusterVersion());
+            .orElseGet(() -> new OpenSearchClientFactory(connection).getClusterVersion());
 
         var remoteProvider = getRemoteProviders(connection)
             .filter(p -> p.compatibleWith(version))

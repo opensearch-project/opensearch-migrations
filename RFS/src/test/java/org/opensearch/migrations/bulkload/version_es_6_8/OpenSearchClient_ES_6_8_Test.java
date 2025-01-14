@@ -10,6 +10,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
@@ -31,6 +32,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -93,11 +95,12 @@ class OpenSearchClient_ES_6_8_Test {
 
         var successResponse = bulkItemResponse(false, List.of(itemEntry(docId1), itemEntry(docId2)));
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
-        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(successResponse));
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(successResponse));
+        when(restClient.supportsGzipCompression()).thenReturn(false);
 
-//        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
+        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
 
-        Mockito.verify(restClient).postAsync("indexName/_doc/_bulk", null, null);
+        Mockito.verify(restClient).postAsync(eq("indexName/_doc/_bulk"), any(), any(), any());
 
         verifyNoInteractions(failedRequestLogger);
     }
