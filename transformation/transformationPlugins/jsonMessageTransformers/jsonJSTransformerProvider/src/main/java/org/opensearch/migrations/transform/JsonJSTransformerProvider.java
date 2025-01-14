@@ -3,12 +3,14 @@ package org.opensearch.migrations.transform;
 import java.util.Map;
 import java.util.function.Function;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 
 public class JsonJSTransformerProvider implements IJsonTransformerProvider {
 
     public static final String INITIALIZATION_SCRIPT = "initializationScript";
-    public static final String BINDINGS_PROVIDER = "bindingsProvider";
+    public static final String BINDINGS_OBJECT = "bindingsObject";
 
     /**
      * Validates and retrieves a configuration map, ensuring it contains required keys.
@@ -51,10 +53,19 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
     @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
-        var config = validateAndExtractConfig(jsonConfig, new String[]{INITIALIZATION_SCRIPT}, new String[]{BINDINGS_PROVIDER});
+        var config = validateAndExtractConfig(jsonConfig, new String[]{INITIALIZATION_SCRIPT}, new String[]{BINDINGS_OBJECT});
 
         String script = (String) config.get(INITIALIZATION_SCRIPT);
-        Function<Object, Object> bindingsProvider = (Function<Object, Object>) config.get(BINDINGS_PROVIDER);
+        Function<Object, Object> bindingsProvider;
+        Object bindingsOutput;
+        ObjectMapper objectMapper = new ObjectMapper();
+        try {
+            String bindingsMapString = (String) config.get(BINDINGS_OBJECT);
+            bindingsOutput = objectMapper.readValue(bindingsMapString, new TypeReference<>() {});
+            bindingsProvider = (ignored) -> bindingsOutput;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse the bindings map", e);
+        }
 
         if (script == null) {
             throw new IllegalArgumentException("'script' must be provided.");
