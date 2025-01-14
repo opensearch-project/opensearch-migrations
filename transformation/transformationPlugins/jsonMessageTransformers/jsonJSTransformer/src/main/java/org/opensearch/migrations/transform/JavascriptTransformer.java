@@ -72,11 +72,8 @@ public class JavascriptTransformer implements IJsonTransformer {
     }
 
     @SneakyThrows
-    @SuppressWarnings("unchecked")
     public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
-        assert incomingJson instanceof Map;
-        var incomingJsonMap = (Map<String, Object>) incomingJson;
-        return runScriptAsFuture(javascriptTransform, incomingJson, bindingsProvider.apply(incomingJsonMap));
+        return runScriptAsFuture(javascriptTransform, incomingJson, bindingsProvider.apply(incomingJson));
     }
 
     @Override
@@ -97,7 +94,9 @@ public class JavascriptTransformer implements IJsonTransformer {
 
         @Override
         public void flush() throws IOException {
-            if (out instanceof ByteArrayOutputStream baos) {
+            if (out instanceof ByteArrayOutputStream) {
+                // Note: We cannot replace 'baos' with pattern variable until MIGRATIONS-2344
+                var baos = (ByteArrayOutputStream) out;
                 logger.atLevel(level).setMessage("{}")
                     .addArgument(() -> baos.toString(StandardCharsets.UTF_8))
                     .log();
