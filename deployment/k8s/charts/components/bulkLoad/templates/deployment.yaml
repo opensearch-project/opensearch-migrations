@@ -1,0 +1,39 @@
+{{ $envMountName := "env-vars" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "generic.fullname" . }}
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: {{ include "generic.fullname" . }}
+  template:
+    metadata:
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }}
+      labels:
+        app: {{ include "generic.fullname" . }}
+        env: v1
+    spec:
+      initContainers:
+        {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
+           "MountName" $envMountName
+           "include" .Template.Include)) | nindent 8 }}
+      containers:
+        - name: bulk-load
+          image: migrations/reindex_from_snapshot:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              echo `cat /shared/vars.sh`
+              source /shared/vars.sh
+              exec /rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $ARGS
+          volumeMounts:
+            - name: {{ $envMountName }}
+              mountPath: /shared
+      volumes:
+        - name: {{ $envMountName }}
+          emptyDir: {}

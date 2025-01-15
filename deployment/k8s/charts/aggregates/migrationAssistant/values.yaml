@@ -1,0 +1,103 @@
+conditionalPackageInstalls:
+  bulkLoader: true
+  kafka: true
+  replayer: true
+  jaeger: false
+  prometheus: false
+  proxy: true
+  grafana: false
+
+
+capture-proxy:
+  enabled: true
+  parameters:
+    destinationUri:
+      configMapName: "source-cluster-endpoint"
+      yamlPath: "endpoint"
+    insecureDestination:
+      configMapName: "source-cluster-endpoint"
+      yamlPath: "allow_insecure"
+
+migration-console:
+  parameters:
+    nothingImportant:
+      value: false
+
+bulk-document-loader:
+  parameters:
+    luceneDir:
+      value: /tmp
+      allowRuntimeOverride: true
+    snapshotName:
+      value: rfs
+      allowRuntimeOverride: true
+    targetHost:
+      value: https://opensearch-cluster-master.mcc:9200/
+      allowRuntimeOverride: true
+    snapshotLocalDir:
+      value: /snapshot
+      allowRuntimeOverride: true
+
+replayer:
+  parameters:
+    targetUri:
+      value: https://opensearch-cluster-master.mcc:9200/
+      allowRuntimeOverride: true
+    kafkaTrafficBrokers:
+      value: captured-traffic-kafka-bootstrap.ma.svc:9092
+      allowRuntimeOverride: true
+
+
+captured-traffic-kafka-cluster:
+  environment: test
+
+  clusterName: captured-traffic
+
+  replicas: 1
+  storageType: ephemeral
+  storageSize: 100Gi
+  storageDeleteClaim: true
+  dedicatedController:
+    replicas: 1
+    storageSize: 10Gi
+
+jaeger:
+  allInOne:
+    enabled: true
+  provisionDataStore:
+    cassandra: false
+  storage:
+    type: memory
+  agent:
+    enabled: false
+  collector:
+    enabled: false
+  query:
+    enabled: false
+
+grafana:
+  ## Grafana data sources configuration
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus-server.prometheus.svc.cluster.local:9090
+          isDefault: true
+          editable: true
+        - name: Jaeger
+          type: jaeger
+          access: proxy
+          url: http://jaeger-query.jaeger.svc.cluster.local:16686
+          isDefault: false
+          editable: true
+
+  ## Set up the sidecar to import data sources (usually enabled by default)
+  sidecar:
+    datasources:
+      enabled: true
+    dashboards:
+      enabled: true
+      label: grafana_dashboard

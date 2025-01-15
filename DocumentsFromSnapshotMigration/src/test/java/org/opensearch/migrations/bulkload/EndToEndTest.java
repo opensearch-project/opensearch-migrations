@@ -10,7 +10,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -106,11 +106,12 @@ public class EndToEndTest extends SourceTestBase {
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
-            var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-                .host(sourceCluster.getUrl())
-                .insecure(true)
-                .build()
-                .toConnectionContext());
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(sourceCluster.getUrl())
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new FileSystemSnapshotCreator(
                 snapshotName,
                 sourceClient,

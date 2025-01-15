@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.data.WorkloadGenerator;
@@ -111,17 +111,18 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
-                CompletableFuture.runAsync(() -> esSourceContainer.start()),
-                CompletableFuture.runAsync(() -> osTargetContainer.start()),
+                CompletableFuture.runAsync(esSourceContainer::start),
+                CompletableFuture.runAsync(osTargetContainer::start),
                 CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
             ).join();
 
             // Populate the source cluster with data
-            var client = new OpenSearchClient(ConnectionContextTestParams.builder()
-                .host(esSourceContainer.getUrl())
-                .build()
-                .toConnectionContext()
+            var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext()
             );
+            var client = clientFactory.determineVersionAndCreate();
             var generator = new WorkloadGenerator(client);
             generator.generate(new WorkloadOptions());
 
@@ -167,13 +168,12 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         int timeoutSeconds = 90;
-
         String initialLeaseDuration = failHow == FailHow.NEVER ? "PT10M" : "PT1S";
 
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
             "--max-connections", "1",
-            "--initial-lease-duration", initialLeaseDuration
+            "--initial-lease-duration", initialLeaseDuration,
         };
 
         ProcessBuilder processBuilder = setupProcess(

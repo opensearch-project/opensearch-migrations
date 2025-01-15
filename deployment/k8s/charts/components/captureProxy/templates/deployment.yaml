@@ -1,0 +1,45 @@
+{{ $mountName := "env-vars" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "generic.fullname" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "generic.fullname" . }}
+  template:
+    metadata:
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }}
+      labels:
+        app: {{ include "generic.fullname" . }}
+        env: v1
+    spec:
+      initContainers:
+        {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
+           "MountName" $mountName
+           "include" .Template.Include)) | nindent 8 }}
+        - name: wait-for-kafka
+          image: bitnami/kubectl:latest  # or any image with curl/kubectl
+          command: [ 'sh', '-c',
+                     'until kubectl wait --for=condition=Ready kafka/captured-traffic -n {{.Release.Namespace }} --timeout=10s; do echo waiting for kafka cluster is ready; sleep 1; done' ]
+      containers:
+        - name: captureproxy
+          image: migrations/capture_proxy:latest
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              source /shared/vars.sh
+              exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS
+          ports:
+            - containerPort: 9200
+          volumeMounts:
+            - name: {{ $mountName }}
+              mountPath: /shared
+      volumes:
+        - name: {{ $mountName }}
+          emptyDir: {}

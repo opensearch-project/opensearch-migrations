@@ -81,6 +81,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var dataFilterArgs = new DataFilterArgs();
             dataFilterArgs.indexAllowlist = List.of(originalIndexName);
             arguments.dataFilterArgs = dataFilterArgs;
+            arguments.sourceVersion = upgradedSourceCluster.getContainerVersion().getVersion();
 
             // Use union method for multi-type mappings
             arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
