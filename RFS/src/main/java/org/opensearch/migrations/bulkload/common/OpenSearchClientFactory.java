@@ -191,9 +191,7 @@ public class OpenSearchClientFactory {
 
             if (foundVersions.isEmpty()) {
                 return Mono.error(new OpenSearchClient.OperationFailed("Unable to find any version numbers", resp));
-            }
-
-            if (foundVersions.size() == 1) {
+            } else if (foundVersions.size() == 1) {
                 return Mono.just(foundVersions.stream().findFirst().get());
             }
 
