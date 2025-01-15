@@ -46,7 +46,7 @@ public class OpenSearchClientFactory {
             return clientClass.getConstructor(ConnectionContext.class, Version.class)
                     .newInstance(connectionContext, version);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException("Failed to instantiate OpenSearchClient", e);
+            throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }
     }
 
@@ -59,7 +59,7 @@ public class OpenSearchClientFactory {
             return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class)
                     .newInstance(restClient, failedRequestsLogger, version);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException("Failed to instantiate OpenSearchClient", e);
+            throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }
     }
 
@@ -191,9 +191,7 @@ public class OpenSearchClientFactory {
 
             if (foundVersions.isEmpty()) {
                 return Mono.error(new OpenSearchClient.OperationFailed("Unable to find any version numbers", resp));
-            }
-
-            if (foundVersions.size() == 1) {
+            } else if (foundVersions.size() == 1) {
                 return Mono.just(foundVersions.stream().findFirst().get());
             }
 
@@ -209,5 +207,10 @@ public class OpenSearchClientFactory {
         return client.getConnectionContext().isAwsSpecificAuthentication() ? Flavor.AMAZON_MANAGED_OPENSEARCH : Flavor.OPENSEARCH;
     }
 
+    public static class ClientInstantiationException extends RuntimeException {
+        public ClientInstantiationException(String message, Exception cause) {
+            super(message, cause);
+        }
+    }
 
 }
