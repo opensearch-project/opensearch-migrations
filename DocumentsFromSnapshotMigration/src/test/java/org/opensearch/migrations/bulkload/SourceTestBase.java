@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -17,9 +18,11 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
+import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
@@ -36,13 +39,18 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
-import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -52,11 +60,13 @@ import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
+
 @Slf4j
 public class SourceTestBase {
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
+    public static final String SNAPSHOT_NAME = "test_snapshot";
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
@@ -109,7 +119,6 @@ public class SourceTestBase {
         return process.exitValue();
     }
 
-
     @NotNull
     protected static ProcessBuilder setupProcess(String[] processArgs) {
         String classpath = System.getProperty("java.class.path");
@@ -131,7 +140,6 @@ public class SourceTestBase {
         processBuilder.redirectOutput();
         return processBuilder;
     }
-
 
     @AllArgsConstructor
     public static class ExpectedMigrationWorkTerminationException extends RuntimeException {
@@ -172,7 +180,8 @@ public class SourceTestBase {
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
-        Version version,
+        Version sourceVersion,
+        Version targetVersion,
         boolean compressionEnabled
     ) {
         for (int runNumber = 1; ; ++runNumber) {
@@ -184,7 +193,8 @@ public class SourceTestBase {
                     targetAddress,
                     clockJitter,
                     testContext,
-                    version,
+                    sourceVersion,
+                    targetVersion,
                     compressionEnabled
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
@@ -214,8 +224,8 @@ public class SourceTestBase {
         }
 
         @Override
-        public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
-            return super.readDocuments(startSegmentIndex, startDoc).map(docTransformer::apply);
+        public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
+            return super.readDocuments(startDoc).map(docTransformer);
         }
     }
 
@@ -230,7 +240,8 @@ public class SourceTestBase {
         String targetAddress,
         Random clockJitter,
         DocumentMigrationTestContext context,
-        Version version,
+        Version sourceVersion,
+        Version targetVersion,
         boolean compressionEnabled
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
@@ -247,7 +258,7 @@ public class SourceTestBase {
                 return d;
             };
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, sourceRepo);
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo);
 
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
@@ -265,41 +276,35 @@ public class SourceTestBase {
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
-            try (var workCoordinator = new OpenSearchWorkCoordinator(
-                new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+            AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+            var connectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
                     .build()
-                    .toConnectionContext()),
-                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                UUID.randomUUID().toString(),
-                Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
+                    .toConnectionContext();
+            try (var workCoordinator = coordinatorFactory.get(
+                    new CoordinateWorkHttpClient(connectionContext),
+                    TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                    UUID.randomUUID().toString(),
+                    Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
             )) {
-                var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
-                        .host(targetAddress)
-                        .compressionEnabled(compressionEnabled)
-                        .build()
-                        .toConnectionContext());
+                var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
-                    readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
-                    new OpenSearchWorkCoordinator(
-                        new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
-                            .host(targetAddress)
-                            .build()
-                            .toConnectionContext()),
-                        TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                        UUID.randomUUID().toString(),
-                        Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
-                    ),
-                    Duration.ofMinutes(10),
-                    processManager,
-                    sourceResourceProvider.getIndexMetadata(),
-                    snapshotName,
-                    indexAllowlist,
-                    sourceResourceProvider.getShardMetadata(),
-                    unpackerFactory,
-                    MAX_SHARD_SIZE_BYTES,
-                    context);
+                        readerFactory,
+                        new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
+                        progressCursor,
+                        workCoordinator,
+                        Duration.ofMinutes(10),
+                        processManager,
+                        sourceResourceProvider.getIndexMetadata(),
+                        snapshotName,
+                        indexAllowlist,
+                        sourceResourceProvider.getShardMetadata(),
+                        unpackerFactory,
+                        MAX_SHARD_SIZE_BYTES,
+                        context,
+                        new AtomicReference<>(),
+                        new WorkItemTimeProvider());
             }
         } finally {
             deleteTree(tempDir);
@@ -316,5 +321,78 @@ public class SourceTestBase {
                 }
             });
         }
+    }
+
+    @AllArgsConstructor
+    @Getter
+    public static class RunData {
+        Path tempDirSnapshot;
+        Path tempDirLucene;
+        ToxiProxyWrapper proxyContainer;
+    }
+
+    public enum FailHow {
+        NEVER,
+        AT_STARTUP,
+        WITH_DELAYS
+    }
+
+    @NotNull
+    public static ProcessBuilder setupProcess(
+        Path tempDirSnapshot,
+        Path tempDirLucene,
+        String targetAddress,
+        String[] additionalArgs
+    ) {
+        String classpath = System.getProperty("java.class.path");
+        String javaHome = System.getProperty("java.home");
+        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+
+        List<String> argsList = new ArrayList<>(Arrays.asList(
+            "--snapshot-name",
+            SNAPSHOT_NAME,
+            "--snapshot-local-dir",
+            tempDirSnapshot.toString(),
+            "--lucene-dir",
+            tempDirLucene.toString(),
+            "--target-host",
+            targetAddress,
+            "--index-allowlist",
+            "geonames",
+            "--source-version",
+            "ES_7_10"
+        ));
+
+        if (additionalArgs != null && additionalArgs.length > 0) {
+            argsList.addAll(Arrays.asList(additionalArgs));
+        }
+
+        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
+            .addArgument(() -> argsList.toString())
+            .log();
+        ProcessBuilder processBuilder = new ProcessBuilder(
+            javaExecutable,
+            "-cp",
+            classpath,
+            "org.opensearch.migrations.RfsMigrateDocuments"
+        );
+        processBuilder.command().addAll(argsList);
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+        return processBuilder;
+    }
+
+    public void createSnapshot(
+        SearchClusterContainer sourceContainer,
+        String snapshotName,
+        SnapshotTestContext testSnapshotContext
+    ) throws Exception {
+        var args = new CreateSnapshot.Args();
+        args.snapshotName = snapshotName;
+        args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+        args.sourceArgs.host = sourceContainer.getUrl();
+
+        var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+        snapshotCreator.run();
     }
 }
