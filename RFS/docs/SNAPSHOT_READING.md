@@ -137,7 +137,7 @@ Next, Lucene takes this information and reads the segments from each given name 
 This is done by reading the Segment Entries File, which gives information like the following which is used to read the Segment Data File:
 ```
 entries:
-    "._Lucene50_0.doc" : { offset: 46, length: 128 }
+    "_Lucene50_0.doc" : { offset: 46, length: 128 }
     "_Lucene50_0.tim" : { offset: 174, length: 436 }
     ...
 ```
