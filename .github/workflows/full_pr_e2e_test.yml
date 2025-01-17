@@ -18,7 +18,7 @@ jobs:
   full-es68-e2e-aws-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate Actor is a Maintainer
+      - name: Check Github Actor is a Maintainer
         id: check-maintainer
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
