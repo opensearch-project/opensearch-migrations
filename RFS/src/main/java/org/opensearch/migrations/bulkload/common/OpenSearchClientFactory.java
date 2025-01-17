@@ -100,7 +100,7 @@ public class OpenSearchClientFactory {
         if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
             return versionFromRootApi;
         }
-        return client.getAsync("_cluster/settings", null)
+        return client.getAsync("_cluster/settings?include_defaults=true", null)
                 .flatMap(this::checkCompatibilityModeFromResponse)
                 .doOnError(e -> log.error(e.getMessage()))
                 .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)

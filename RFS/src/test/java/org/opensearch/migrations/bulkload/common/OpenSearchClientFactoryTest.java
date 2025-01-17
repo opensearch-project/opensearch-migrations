@@ -86,13 +86,13 @@ class OpenSearchClientFactoryTest {
     @Test
     void testGetClusterVersion_ES_7_10() {
         setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
-        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
 
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
         verify(restClient).getAsync("", null);
-        verify(restClient).getAsync("_cluster/settings", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
         verifyNoMoreInteractions(restClient);
     }
 
@@ -100,21 +100,21 @@ class OpenSearchClientFactoryTest {
     void testGetClusterVersion_OS_CompatibilityModeEnabled() {
         when(connectionContext.isAwsSpecificAuthentication()).thenReturn(true);
         setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
-        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED);
         setupOkResponse(restClient, "_nodes/_all/nodes,version?format=json", NODES_RESPONSE_OS_2_13_0);
 
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("AOS 2.13.0")));
         verify(restClient).getAsync("", null);
-        verify(restClient).getAsync("_cluster/settings", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
         verify(restClient).getAsync("_nodes/_all/nodes,version?format=json", null);
     }
 
     @Test
     void testGetClusterVersion_OS_CompatibilityModeDisableEnabled() {
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
-        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
 
         var version = openSearchClientFactory.getClusterVersion();
 
@@ -129,13 +129,13 @@ class OpenSearchClientFactoryTest {
         setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
 
         var versionResponse = new HttpResponse(403, "Forbidden", Map.of(), "");
-        when(restClient.getAsync("_cluster/settings", null)).thenReturn(Mono.just(versionResponse));
+        when(restClient.getAsync("_cluster/settings?include_defaults=true", null)).thenReturn(Mono.just(versionResponse));
 
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
         verify(restClient).getAsync("", null);
-        verify(restClient).getAsync("_cluster/settings", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
         verifyNoMoreInteractions(restClient);
     }
 
