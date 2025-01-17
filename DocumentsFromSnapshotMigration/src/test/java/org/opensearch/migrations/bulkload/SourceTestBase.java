@@ -358,14 +358,16 @@ public class SourceTestBase {
             "--target-host",
             targetAddress,
             "--index-allowlist",
-            "geonames",
-            "--source-version",
-            "ES_7_10"
+            "geonames"
         ));
 
         if (additionalArgs != null && additionalArgs.length > 0) {
             argsList.addAll(Arrays.asList(additionalArgs));
+            if (!argsList.contains("--source-version")) {
+                argsList.addAll(Arrays.asList("--source-version", "ES_7_10"));
+            }
         }
+
 
         log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
             .addArgument(() -> argsList.toString())
