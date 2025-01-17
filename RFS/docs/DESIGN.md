@@ -41,39 +41,7 @@ The ultimate goal of RFS is to enable the movement of the data in a large (multi
 
 Elasticsearch Snapshots are a directory tree containing both data and metadata.  Each Elasticsearch Index has its own sub-directory, and each Elasticsearch Shard has its own sub-directory under the directory of its parent Elasticsearch Index.  The raw data for a given Elasticsearch Shard is store in its corresponding Shard sub-directory as a collection of Lucene files, which Elasticsearch obfuscates.  Metadata files exist in the snapshot to provide details about the snapshot as a whole, the source cluster’s global metadata and settings, each index in the snapshot, and each shard in the snapshot.
 
-Below is an example for the structure of an Elasticsearch 7.10 snapshot, along with a breakdown of its contents
-
-```
-/filesystem/path/repo/snapshots/
-├── index-0 <-------------------------------------------- [1]
-├── index.latest
-├── indices
-│   ├── DG4Ys006RDGOkr3_8lfU7Q <------------------------- [2]
-│   │   ├── 0 <------------------------------------------ [3]
-│   │   │   ├── __iU-NaYifSrGoeo_12o_WaQ <--------------- [4]
-│   │   │   ├── __mqHOLQUtToG23W5r2ZWaKA <--------------- [4]
-│   │   │   ├── index-gvxJ-ifiRbGfhuZxmVj9Hg 
-│   │   │   └── snap-eBHv508cS4aRon3VuqIzWg.dat <-------- [5]
-│   │   └── meta-tDcs8Y0BelM_jrnfY7OE.dat <-------------- [6]
-│   └── _iayRgRXQaaRNvtfVfRdvg
-│       ├── 0
-│       │   ├── __DNRvbH6tSxekhRUifs35CA
-│       │   ├── __NRek2UuKTKSBOGczcwftng
-│       │   ├── index-VvqHYPQaRcuz0T_vy_bMyw
-│       │   └── snap-eBHv508cS4aRon3VuqIzWg.dat
-│       └── meta-tTcs8Y0BelM_jrnfY7OE.dat
-├── meta-eBHv508cS4aRon3VuqIzWg.dat <-------------------- [7]
-└── snap-eBHv508cS4aRon3VuqIzWg.dat <-------------------- [8]
-```
-
-1. **Repository Metadata File**: JSON encoded; contains a mapping between the snapshots within the repo and the Elasticsearch Indices/Shards stored within it
-2. **Index Directory**: Contains all the data/metadata for a specific Elasticsearch Index
-3. **Shard Directory**: Contains all the data/metadata for a specific Shard of an Elasticsearch Index
-4. **Lucene Files**: Lucene Index files, lightly-obfuscated by the snapshotting process; large files from the source filesystem are split in multiple parts
-5. **Shard Metadata File**: SMILE encoded; contains details about all the Lucene files in the shard and a mapping between their in-Snapshot representation and their original representation on the source machine they were pulled from (e.g. original file name, etc)
-6. **Index Metadata File**: SMILE encoded; contains things like the index aliases, settings, mappings, number of shards, etc
-7. **Global Metadata File**: SMILE encoded; contains things like the legacy, index, and component templates
-8. **Snapshot Metadata File**: SMILE encoded; contains things like whether the snapshot succeeded, the number of shards, how many shards succeeded, the ES/OS version, the indices in the snapshot, etc
+Read more about [Snapshot Reading](./SNAPSHOT_READING.md)
 
 ## Ultra-High Level Design
 The responsibility of performing an RFS operation is performed by a group of one or more RFS Workers (see Figure 1, below).
