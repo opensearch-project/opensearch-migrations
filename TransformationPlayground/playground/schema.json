@@ -1,0 +1,353 @@
+openapi: 3.0.3
+info:
+  title: Transformation API
+  version: 0.1.0
+  description: API for JSON transformation logic.
+paths:
+  /api/schema/:
+    get:
+      operationId: api_schema_retrieve
+      description: |-
+        OpenApi3 schema for this API. Format can be selected via content negotiation.
+
+        - YAML: application/vnd.oai.openapi
+        - JSON: application/vnd.oai.openapi+json
+      parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - json
+          - yaml
+      - in: query
+        name: lang
+        schema:
+          type: string
+          enum:
+          - af
+          - ar
+          - ar-dz
+          - ast
+          - az
+          - be
+          - bg
+          - bn
+          - br
+          - bs
+          - ca
+          - ckb
+          - cs
+          - cy
+          - da
+          - de
+          - dsb
+          - el
+          - en
+          - en-au
+          - en-gb
+          - eo
+          - es
+          - es-ar
+          - es-co
+          - es-mx
+          - es-ni
+          - es-ve
+          - et
+          - eu
+          - fa
+          - fi
+          - fr
+          - fy
+          - ga
+          - gd
+          - gl
+          - he
+          - hi
+          - hr
+          - hsb
+          - hu
+          - hy
+          - ia
+          - id
+          - ig
+          - io
+          - is
+          - it
+          - ja
+          - ka
+          - kab
+          - kk
+          - km
+          - kn
+          - ko
+          - ky
+          - lb
+          - lt
+          - lv
+          - mk
+          - ml
+          - mn
+          - mr
+          - ms
+          - my
+          - nb
+          - ne
+          - nl
+          - nn
+          - os
+          - pa
+          - pl
+          - pt
+          - pt-br
+          - ro
+          - ru
+          - sk
+          - sl
+          - sq
+          - sr
+          - sr-latn
+          - sv
+          - sw
+          - ta
+          - te
+          - tg
+          - th
+          - tk
+          - tr
+          - tt
+          - udm
+          - ug
+          - uk
+          - ur
+          - uz
+          - vi
+          - zh-hans
+          - zh-hant
+      tags:
+      - api
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/yaml:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/vnd.oai.openapi+json:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /transforms/index/create/:
+    post:
+      operationId: transforms_index_create_create
+      tags:
+      - transforms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransformsIndexCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TransformsIndexCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TransformsIndexCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransformsIndexCreateResponse'
+          description: ''
+  /transforms/index/test/:
+    post:
+      operationId: transforms_index_test_create
+      tags:
+      - transforms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransformsIndexTestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TransformsIndexTestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TransformsIndexTestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransformsIndexTestResponse'
+          description: ''
+components:
+  schemas:
+    SourceVersionEnum:
+      enum:
+      - Elasticsearch 6.8
+      - Elasticsearch 7.10
+      type: string
+      description: |-
+        * `Elasticsearch 6.8` - ES_6_8
+        * `Elasticsearch 7.10` - ES_7_10
+    TargetVersionEnum:
+      enum:
+      - OpenSearch 2.17
+      type: string
+      description: '* `OpenSearch 2.17` - OS_2_17'
+    TransformLanguageEnum:
+      enum:
+      - Python
+      type: string
+      description: '* `Python` - PYTHON'
+    TransformsIndexCreateRequest:
+      type: object
+      properties:
+        source_version:
+          $ref: '#/components/schemas/SourceVersionEnum'
+        target_version:
+          $ref: '#/components/schemas/TargetVersionEnum'
+        transform_language:
+          $ref: '#/components/schemas/TransformLanguageEnum'
+        input_shape:
+          type: object
+          properties:
+            index_name:
+              type: string
+            index_json:
+              type: object
+          required:
+          - index_name
+          - index_json
+        transform_logic:
+          type: string
+        user_guidance:
+          type: string
+        test_target_url:
+          type: string
+          format: uri
+      required:
+      - input_shape
+      - source_version
+      - target_version
+      - transform_language
+    TransformsIndexCreateResponse:
+      type: object
+      properties:
+        output_shape:
+          type: array
+          items:
+            type: object
+            properties:
+              index_name:
+                type: string
+              index_json:
+                type: object
+            required:
+            - index_name
+            - index_json
+        transform_logic:
+          type: string
+        validation_report:
+          type: array
+          items:
+            type: string
+        validation_outcome:
+          type: string
+      required:
+      - output_shape
+      - transform_logic
+      - validation_outcome
+      - validation_report
+    TransformsIndexTestRequest:
+      type: object
+      properties:
+        transform_language:
+          $ref: '#/components/schemas/TransformLanguageEnum'
+        source_version:
+          $ref: '#/components/schemas/SourceVersionEnum'
+        target_version:
+          $ref: '#/components/schemas/TargetVersionEnum'
+        input_shape:
+          type: object
+          properties:
+            index_name:
+              type: string
+            index_json:
+              type: object
+          required:
+          - index_name
+          - index_json
+        transform_logic:
+          type: string
+        test_target_url:
+          type: string
+          format: uri
+      required:
+      - input_shape
+      - source_version
+      - target_version
+      - transform_language
+      - transform_logic
+    TransformsIndexTestResponse:
+      type: object
+      properties:
+        output_shape:
+          type: array
+          items:
+            type: object
+            properties:
+              index_name:
+                type: string
+              index_json:
+                type: object
+            required:
+            - index_name
+            - index_json
+        transform_logic:
+          type: string
+        validation_report:
+          type: array
+          items:
+            type: string
+        validation_outcome:
+          type: string
+      required:
+      - output_shape
+      - transform_logic
+      - validation_outcome
+      - validation_report
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

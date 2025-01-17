@@ -1,0 +1,39 @@
+{
+  "name": "playground_frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate-api-client": "openapi-generator-cli generate -i ../playground/schema.json -g typescript-axios -o src/generated-api-client",
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint && npx prettier . --check",
+    "lint:fix": "next lint --fix && npx prettier . --write"
+  },
+  "dependencies": {
+    "@cloudscape-design/components": "^3.0.839",
+    "@cloudscape-design/global-styles": "^1.0.32",
+    "@openapitools/openapi-generator-cli": "^2.15.3",
+    "eslint-config-prettier": "^9.1.0",
+    "next": "^15.0.2",
+    "prettier": "^3.4.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8",
+    "eslint-config-next": "15.0.2",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  },
+  "prettier": {
+    "arrowParens": "always",
+    "singleQuote": true,
+    "tabWidth": 2,
+    "trailingComma": "none"
+  }
+}
