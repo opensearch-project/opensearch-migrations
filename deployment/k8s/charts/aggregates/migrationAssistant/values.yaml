@@ -1,49 +1,64 @@
 conditionalPackageInstalls:
-  bulkLoader: true
-  kafka: true
-  replayer: true
+  bulkLoader: false
+  grafana: false
   jaeger: false
+  kafka: false
+  migrationConsole: false
   prometheus: false
   proxy: true
-  grafana: false
+  replayer: false
+  sharedConfigs: true
+
+
+shared-configs:
+  globalParameters:
+    sourceCluster:
+      allowRuntimeOverride: true
+      object:
+        endpoint: "http://sourcecluster.example.com:9200"
+        allowInsecure: "true"
 
 
 capture-proxy:
-  enabled: true
   parameters:
     destinationUri:
-      configMapName: "source-cluster-endpoint"
-      yamlPath: "endpoint"
+      source: otherConfig
+      configMapName: "source-cluster"
+      configMapKey: "endpoint"
     insecureDestination:
-      configMapName: "source-cluster-endpoint"
-      yamlPath: "allow_insecure"
+      source: otherConfig
+      configMapName: "source-cluster"
+      configMapKey: "allowInsecure"
 
-migration-console:
-  parameters:
-    nothingImportant:
-      value: false
+migration-console: {}
 
 bulk-document-loader:
   parameters:
     luceneDir:
+      source: parameterConfig
       value: /tmp
       allowRuntimeOverride: true
     snapshotName:
+      source: parameterConfig
       value: rfs
       allowRuntimeOverride: true
     targetHost:
+      source: parameterConfig
       value: https://opensearch-cluster-master.mcc:9200/
       allowRuntimeOverride: true
     snapshotLocalDir:
+      source: parameterConfig
       value: /snapshot
       allowRuntimeOverride: true
 
 replayer:
   parameters:
     targetUri:
+      source: parameterConfig
       value: https://opensearch-cluster-master.mcc:9200/
       allowRuntimeOverride: true
     kafkaTrafficBrokers:
+      source: parameterConfig  # eventually this will become a list from a shared config
       value: captured-traffic-kafka-bootstrap.ma.svc:9092
       allowRuntimeOverride: true
 

@@ -1,4 +1,3 @@
-useSharedConfigs: false
 parameters:
   initialLeaseDuration:
     value: PT10M

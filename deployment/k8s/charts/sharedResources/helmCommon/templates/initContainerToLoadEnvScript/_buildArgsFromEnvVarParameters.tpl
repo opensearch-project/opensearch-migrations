@@ -20,6 +20,12 @@
         {{- end }}
     {{- end }}
 
+    {{- $myList := .ArityZeroParameters | default list -}}
+    {{- $aritylessDict := dict }}
+    {{- range $myList }}
+      {{- $_ := set $aritylessDict . "" }}
+    {{- end }}
+
     {{- range $key, $param := .Parameters }}
         {{- $envVarName := snakecase $key | upper -}}
         {{- $formattedKeyFlagName := "" -}}
@@ -35,13 +41,6 @@
                 {{- $lines = append $lines (printf "  export %s=\"$%s %s $%s\"" $argsName $argsName $formattedKeyFlagName $envVarName) -}}
                 {{- $lines = append $lines (printf "fi") -}}
             {{- end -}}
-        {{- else if hasKey $param "list" -}}
-            {{- $lines = append $lines (printf "if [ -n \"$%s\" ]; then" $envVarName) -}}
-            {{- $lines = append $lines (printf "  LIST_ITEMS=$(echo \"$%s\" | yq eval '.[ ]' - | xargs -I{} echo -n \"{} \")" $envVarName $envVarName) -}}
-            {{- if not (eq "" $formattedKeyFlagName) -}}
-                {{- $lines = append $lines (printf "  export %s=\"$%s %s $LIST_ITEMS\"" $argsName $argsName $formattedKeyFlagName) -}}
-            {{- end -}}
-            {{- $lines = append $lines (printf "fi") -}}
         {{- else if hasKey $param "present" -}}
             {{- $lines = append $lines (printf "if [ \"$%s\" = \"true\" ] || [ \"$%s\" = \"1\" ]; then" $envVarName $envVarName) -}}
             {{- if eq "" $formattedKeyFlagName -}}

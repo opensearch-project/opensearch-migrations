@@ -4,7 +4,7 @@
   image: migrations/k8s_config_map_util_scripts
   imagePullPolicy: IfNotPresent
   env:
-    {{- include "generic.pullEnvVarsFromConfigMaps" (dict
+{{ include "generic.pullEnvVarsFromConfigMaps" (dict
          "Parameters" .Values.parameters
          "PackageName" (include "generic.fullname" .)
          "include" .Template.Include
@@ -18,6 +18,7 @@
           "Parameters" .Values.parameters
           "PackageName" (include "generic.fullname" .)
           "PositionalArguments" .PositionalArguments
+          "ArityZeroParameters" .ArityZeroParameters
           "include" .Template.Include
           "Template" .Template) | nindent 6 }}
       /.venv/bin/python print_env_vars_as_exports.py > /shared/vars.sh

@@ -2,8 +2,9 @@ sharedLogsVolumeEnabled: false
 sharedLogsPvc: ""
 snapshotVolumeEnabled: false
 snapshotVolumePvc: ""
-useSharedConfigs: false
 parameters:
   migrationApiEnabled:
+    sourceType: parameterConfig
+    parameterType: booleanFlag
     value: false
     allowRuntimeOverride: false
