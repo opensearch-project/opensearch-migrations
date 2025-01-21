@@ -1,3 +1,4 @@
+# These are default values for a local environment and should be changed for a cloud deployment
 source_cluster:
   endpoint: "https://capture-proxy:9200"
   allow_insecure: true
