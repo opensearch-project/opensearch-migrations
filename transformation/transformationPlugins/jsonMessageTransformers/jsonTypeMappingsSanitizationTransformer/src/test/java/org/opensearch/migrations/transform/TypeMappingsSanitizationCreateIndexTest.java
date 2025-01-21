@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -30,7 +31,8 @@ public class TypeMappingsSanitizationCreateIndexTest {
                 "user", "communal"));
         var regexIndexMappings = List.of(
             List.of("time-(.*)", "(.*)", "time-$1-$2"));
-        return new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
+        var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(5, 8));
+        return new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
     }
 
     private static String makeMultiTypePutIndexRequest(String indexName, Boolean includeTypeName) {

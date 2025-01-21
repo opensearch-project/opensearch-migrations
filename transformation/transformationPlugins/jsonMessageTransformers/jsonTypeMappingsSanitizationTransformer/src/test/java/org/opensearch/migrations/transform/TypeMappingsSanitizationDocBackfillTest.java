@@ -3,6 +3,7 @@ package org.opensearch.migrations.transform;
 import java.util.LinkedHashMap;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -26,8 +27,8 @@ public class TypeMappingsSanitizationDocBackfillTest {
             "  \"source\": { \"field1\": \"value1\" }\n" +
             "}";
 
-
-        var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null);
+        var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null,
+            new SourceProperties("ES", new SourceProperties.Version(7, 10)), null);
         var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
         var resultObj = indexTypeMappingRewriter.transformJson(docObj);
         log.atInfo().setMessage("resultStr = {}").addArgument(() -> {

@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
@@ -32,11 +31,11 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
         throws IOException
     {
         super(getScripts(),
-            makeSourceWrapperFunction(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
+            makeContext(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
     }
 
-    private static Function<Object, Object>
-    makeSourceWrapperFunction(SourceProperties sourceProperties,
+    private static Object
+    makeContext(SourceProperties sourceProperties,
                               Map<String, Object> featureFlagsIncoming,
                               Map<String, Map<String, String>> indexMappingsIncoming,
                               List<List<String>> regexIndexMappingsIncoming)
@@ -53,11 +52,15 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
                 )
             );
 
-        return incomingJson -> Map.of(
+        return new MapProxyObject(Map.of(
                 "index_mappings", indexMappings,
                 "regex_index_mappings", regexIndexMappings,
                 "featureFlags", featureFlags,
-                "source_properties", sourceProperties == null ? Map.of() : sourceProperties);
+                "source_properties", sourceProperties == null ? Map.of() :
+                Map.of("version",
+                    Map.of("major", sourceProperties.getVersion().getMajor(),
+                        "minor", sourceProperties.getVersion().getMinor())
+                )));
     }
 
     private static String getScripts() throws IOException {

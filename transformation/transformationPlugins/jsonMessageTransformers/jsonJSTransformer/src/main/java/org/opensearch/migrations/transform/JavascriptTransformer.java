@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Function;
 
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -29,16 +28,14 @@ import org.slf4j.event.Level;
 @Slf4j
 public class JavascriptTransformer implements IJsonTransformer {
     private final String JS_TRANSFORM_LOGGER_NAME = "JavascriptTransformer";
-    private final Function<Object, Object> bindingsProvider;
     private Value javascriptTransform;
 
-    private final Context context;
+    private final Context polyglotContext;
     private final OutputStream infoStream;
     private final OutputStream errorStream;
 
     public JavascriptTransformer(String script,
-                                 Function<Object, Object> bindingsProvider) {
-        this.bindingsProvider = bindingsProvider;
+                                 Object context) {
         var sourceCode = Source.create("js", script);
         var engine = Engine.newBuilder("js")
             .option("engine.WarnInterpreterOnly", "false")
@@ -56,24 +53,24 @@ public class JavascriptTransformer implements IJsonTransformer {
             var jsLogger = LoggerFactory.getLogger(JS_TRANSFORM_LOGGER_NAME);
             this.infoStream = new LoggingOutputStream(jsLogger, Level.INFO);
             this.errorStream = new LoggingOutputStream(jsLogger, Level.ERROR);
-            this.context = builder
+            this.polyglotContext = builder
                 .out(infoStream)
                 .err(errorStream)
                 .build();
-            this.javascriptTransform = context.eval(sourceCode);
+            this.javascriptTransform = this.polyglotContext.eval(sourceCode).execute(context);
         }
 
     @Override
     public void close() throws Exception {
         this.javascriptTransform = null;
-        this.context.close();
+        this.polyglotContext.close();
         this.infoStream.close();
         this.errorStream.close();
     }
 
     @SneakyThrows
     public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
-        return runScriptAsFuture(javascriptTransform, incomingJson, bindingsProvider.apply(incomingJson));
+        return runScriptAsFuture(javascriptTransform, incomingJson);
     }
 
     @Override

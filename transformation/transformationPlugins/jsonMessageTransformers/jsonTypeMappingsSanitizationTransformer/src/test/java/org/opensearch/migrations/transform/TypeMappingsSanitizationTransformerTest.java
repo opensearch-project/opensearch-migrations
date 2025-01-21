@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +36,8 @@ class TypeMappingsSanitizationTransformerTest {
                 "user", "communal"));
         var regexIndexMappings = List.of(
             List.of("time-(.*)", "(.*)", "time-$1-$2"));
-        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
+        var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(7, 10));
+        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
     }
 
 
@@ -134,7 +136,8 @@ class TypeMappingsSanitizationTransformerTest {
             "    }\n" +
             "  }\n" +
             "}";
-        var rewriter = new TypeMappingsSanitizationTransformer(null, null);
+        var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(5, 6));
+        var rewriter = new TypeMappingsSanitizationTransformer(null, null, sourceProperties, null);
         var resultObj = rewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(expectedString),
             JsonNormalizer.fromObject(resultObj));

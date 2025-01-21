@@ -1,7 +1,6 @@
 package org.opensearch.migrations.transform;
 
 import java.util.Map;
-import java.util.function.Function;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,13 +55,11 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
         var config = validateAndExtractConfig(jsonConfig, new String[]{INITIALIZATION_SCRIPT}, new String[]{BINDINGS_OBJECT});
 
         String script = (String) config.get(INITIALIZATION_SCRIPT);
-        Function<Object, Object> bindingsProvider;
         Object bindingsOutput;
         ObjectMapper objectMapper = new ObjectMapper();
         try {
             String bindingsMapString = (String) config.get(BINDINGS_OBJECT);
             bindingsOutput = objectMapper.readValue(bindingsMapString, new TypeReference<>() {});
-            bindingsProvider = (ignored) -> bindingsOutput;
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse the bindings map", e);
         }
@@ -71,6 +68,6 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
             throw new IllegalArgumentException("'script' must be provided.");
         }
 
-        return new JavascriptTransformer(script, bindingsProvider);
+        return new JavascriptTransformer(script, bindingsOutput);
     }
 }

@@ -285,8 +285,8 @@ function processBulkIndex(docBackfillPair, context) {
     return docBackfillPair;
 }
 
-// Helper to print nested maps
-function replacer(key, value) {
+// Replacer function for console.log to print nested maps
+function mapToPlainObjectReplacer(key, value) {
     // Check if the value is a Map, and convert it to an object
     if (value instanceof Map) {
         return Object.fromEntries(value);
@@ -295,8 +295,6 @@ function replacer(key, value) {
 }
 
 function detectAndTransform(document, context) {
-    // Example log
-    // console.log("Context: ", JSON.stringify(context, replacer, 2));
     if (!document) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
@@ -310,5 +308,16 @@ function detectAndTransform(document, context) {
     }
 }
 
-// Entrypoint
-(() => detectAndTransform)()
+function main(context) {
+    console.log("Context: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));
+
+    // Validate context, todo: include more validation
+    if (!context || !context?.source_properties?.version?.major) {
+        console.error("Context Missing source_properties: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));
+        throw new Error("No source_properties defined - required to transform correctly!");
+    }
+    return (document) => detectAndTransform(document, context);
+}
+
+// Entrypoint function
+(() => main)()

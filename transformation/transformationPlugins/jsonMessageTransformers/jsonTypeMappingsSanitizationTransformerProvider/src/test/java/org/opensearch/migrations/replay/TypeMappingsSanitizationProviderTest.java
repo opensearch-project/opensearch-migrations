@@ -3,18 +3,15 @@ package org.opensearch.migrations.replay;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Predicate;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.TestRequestBuilder;
 import org.opensearch.migrations.transform.TypeMappingSanitizationTransformerProvider;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -30,8 +27,8 @@ public class TypeMappingsSanitizationProviderTest {
         var config = Map.of("staticMappings",
             Map.of(
                 "indexa", Map.of(
-                    "type1", "indexa_1",
-                    "type2", "indexa_2"),
+                    "type1", "indexa_type1",
+                    "type2", "indexa_type2"),
                 "indexb", Map.of(
                     "type1", "indexb",
                     "type2", "indexb"),
@@ -40,7 +37,13 @@ public class TypeMappingsSanitizationProviderTest {
             "regexIndexMappings", List.of(
                     List.of("(time.*)", "(type.*)", "$1_And_$2"),
                     List.of("(.*)", "(.*)", "$1") // Type Union
-                ));
+                ),
+            "sourceProperties", Map.of(
+                "version", Map.of(
+                    "major", 6,
+                    "minor", 8
+                ))
+            );
         final String TEST_INPUT_REQUEST = "{\n"
             + "  \"method\": \"PUT\",\n"
             + "  \"URI\": \"/indexa/type2/someuser\",\n"
@@ -73,13 +76,7 @@ public class TypeMappingsSanitizationProviderTest {
         var provider = new TypeMappingSanitizationTransformerProvider();
         {
             Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
-            var transformedDocument = provider.createTransformer(config).transformJson(inputMap);
-            Assertions.assertEquals(JsonNormalizer.fromString(EXPECTED),
-                JsonNormalizer.fromObject(transformedDocument));
-        }
-        {
-            Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
-            var resultFromNullConfig = provider.createTransformer(Map.of()).transformJson(inputMap);
+            var resultFromNullConfig = provider.createTransformer(config).transformJson(inputMap);
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
                     EXPECTED.replace(
@@ -119,46 +116,8 @@ public class TypeMappingsSanitizationProviderTest {
     }
 
     @Test
-    public void testTypeMappingsButNoSourcePropertiesThrows() throws Exception {
-        var testString = makeCreateIndexRequestWithTypes();
-        try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(Map.of())) {
-            Assertions.assertThrows(Exception.class, () ->
-                transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
-        }
+    public void testTypeMappingsButNoSourcePropertiesThrows() {
+        Assertions.assertThrows(Exception.class, () -> new TypeMappingSanitizationTransformerProvider().createTransformer(Map.of()));
     }
 
-    private static @NonNull String makeCreateIndexRequestWithTypes() {
-        return "{\n" +
-            "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\": \"PUT\",\n" +
-            "  \"" + JsonKeysForHttpMessage.URI_KEY + "\": \"/geonames\",\n" +
-            "  \"" + JsonKeysForHttpMessage.PROTOCOL_KEY + "\": \"HTTP/1.1\"," +
-            "  \"" + JsonKeysForHttpMessage.HEADERS_KEY + "\": {\n" +
-            "    \"Host\": \"capture-proxy:9200\"\n" +
-            "  }," +
-            "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
-            "    \"" + JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY + "\": {\n" +
-            "      \"settings\": {\n" +
-            "        \"index\": {\n" +
-            "          \"number_of_shards\": 3,  \n" +
-            "          \"number_of_replicas\": 2 \n" +
-            "        }\n" +
-            "      }," +
-            "      \"mappings\": {" +
-            "        \"type\": {\n" +
-            "          \"properties\": {\n" +
-            "            \"field1\": { \"type\": \"text\" }\n" +
-            "          }\n" +
-            "        }\n" +
-            "      }\n" +
-            "    }\n" +
-            "  }\n" +
-            "}";
-    }
-
-    public static Throwable findCausalException(Throwable t, Predicate<Throwable> p) {
-        while (!p.test(t)) {
-            t = t.getCause();
-        }
-        return t;
-    }
 }

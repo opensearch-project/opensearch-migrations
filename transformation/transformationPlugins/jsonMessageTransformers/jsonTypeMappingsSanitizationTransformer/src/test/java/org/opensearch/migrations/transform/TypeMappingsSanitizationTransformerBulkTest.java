@@ -7,8 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -34,7 +34,8 @@ public class TypeMappingsSanitizationTransformerBulkTest {
         var regexIndexMappings = List.of(
             List.of("time-(.*)", "(.*)", "time-$1-$2")
         );
-        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
+        var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(7, 10));
+        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
     }
 
     @Test
@@ -125,18 +126,14 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 totalNanos += System.nanoTime() - start;
                 totalCounted++;
             }
-            log.atDebug().setMessage("resultStr = {}").addArgument(() -> {
-                try {
-                    return OBJECT_MAPPER.writeValueAsString(resultObj);
-                } catch (JsonProcessingException e) {
-                    throw new RuntimeException(e);
-                }
-            }).log();
             Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
         }
-        log.atInfo().setMessage("Total time={} over {} runs")
+        log.atInfo().setMessage("Total time={} over {} runs. Avg: {}, Uncompressed Throughput: {} MBps")
             .addArgument(Duration.ofNanos(totalNanos))
             .addArgument(totalCounted)
+            .addArgument(Duration.ofNanos(totalNanos).dividedBy(totalRuns))
+            .addArgument(testString.length() / (Duration.ofNanos(totalNanos).dividedBy(totalRuns).toNanos() / 1000d / 1000d / 1000d) / 1024d / 1024d)
+
             .log();
     }
 
