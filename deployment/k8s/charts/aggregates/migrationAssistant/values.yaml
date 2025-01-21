@@ -1,12 +1,12 @@
 conditionalPackageInstalls:
-  bulkLoader: false
+  bulkLoader: true
   grafana: false
   jaeger: false
-  kafka: false
-  migrationConsole: false
+  kafka: true
+  migrationConsole: true
   prometheus: false
   proxy: true
-  replayer: false
+  replayer: true
   sharedConfigs: true
 
 
@@ -16,7 +16,12 @@ shared-configs:
       allowRuntimeOverride: true
       object:
         endpoint: "http://sourcecluster.example.com:9200"
-        allowInsecure: "true"
+        allowInsecure: true
+    kafkaBrokers:
+      allowRuntimeOverride: false
+      object:
+        brokers: "captured-traffic-kafka-bootstrap.ma.svc:9092"
+
 
 
 capture-proxy:
@@ -29,6 +34,11 @@ capture-proxy:
       source: otherConfig
       configMapName: "source-cluster"
       configMapKey: "allowInsecure"
+    kafkaConnection:
+      source: otherConfig
+      configMapName: "kafka-brokers"
+      configMapKey: "brokers"
+
 
 migration-console: {}
 
@@ -58,10 +68,9 @@ replayer:
       value: https://opensearch-cluster-master.mcc:9200/
       allowRuntimeOverride: true
     kafkaTrafficBrokers:
-      source: parameterConfig  # eventually this will become a list from a shared config
-      value: captured-traffic-kafka-bootstrap.ma.svc:9092
-      allowRuntimeOverride: true
-
+      source: otherConfig  # eventually this will become a list from a shared config
+      configMapName: "kafka-brokers"
+      configMapKey: "brokers"
 
 captured-traffic-kafka-cluster:
   environment: test

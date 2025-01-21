@@ -5,7 +5,7 @@ parameters:
     allowRuntimeOverride: false
   listenPort:
     source: parameterConfig
-    value: "9200"
+    value: 9200
     allowRuntimeOverride: false
 #  noCapture:
 #    source: parameterConfig
@@ -15,7 +15,7 @@ parameters:
   insecureDestination:
     source: parameterConfig
     parameterType: booleanFlag
-    value: "true"
+    value: true
     allowRuntimeOverride: false
 # TODO - setup cert management
 #  sslConfigFile:

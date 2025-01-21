@@ -1,6 +1,7 @@
 parameters:
-#  positionalParameters:
-#    - https://opensearchtarget:9200
+  targetUri:
+    postionalArgumentIndex: 0
+    value: "https://opensearchtarget.example.com:9200"
   speedupFactor:
     value: 2
     allowRuntimeOverride: true

@@ -19,7 +19,6 @@ spec:
       initContainers:
         {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
            "MountName" $mountName
-           "ArityZeroParameters" (list "noCapture" "enableMSKAuth" "insecureDestination")
            "include" .Template.Include)) | nindent 8 }}
         - name: wait-for-kafka
           image: bitnami/kubectl:latest  # or any image with curl/kubectl

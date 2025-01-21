@@ -18,7 +18,6 @@
           "Parameters" .Values.parameters
           "PackageName" (include "generic.fullname" .)
           "PositionalArguments" .PositionalArguments
-          "ArityZeroParameters" .ArityZeroParameters
           "include" .Template.Include
           "Template" .Template) | nindent 6 }}
       /.venv/bin/python print_env_vars_as_exports.py > /shared/vars.sh
