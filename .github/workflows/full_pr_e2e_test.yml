@@ -15,31 +15,14 @@ permissions:
   contents: read # to fetch code (actions/checkout)
 
 jobs:
+  get-require-approval:
+    uses: ./.github/workflows/require-approval.yml
+
   full-es68-e2e-aws-test:
+    needs: [get-require-approval]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check Github Actor is a Maintainer
-        id: check-maintainer
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: |
-          echo "Checking if $GITHUB_ACTOR is a maintainer..."
-
-          # Query the API to get the actor's permissions
-          permission=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "${{ github.api_url }}/repos/${{ github.repository }}/collaborators/${GITHUB_ACTOR}/permission" \
-            | jq -r '.permission')
-
-          echo "Actor permissions: $permission"
-          echo "actor_permission=$permission" >> $GITHUB_ENV
-
-          # Fail if the actor is not a maintainer
-          if [ "$permission" != "admin" ] && [ "$permission" != "write" ]; then
-            echo "::error::This workflow can only be triggered by a maintainer."
-            exit 1
-          fi
       - name: Sanitize branch and repo names
         env:
           BRANCH_NAME: ${{ github.event.pull_request.head.ref || github.ref_name }}
