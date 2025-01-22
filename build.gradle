@@ -8,7 +8,6 @@ plugins {
 }
 
 allprojects {
-    apply plugin: 'jacoco'
     repositories {
         mavenCentral()
     }
@@ -110,10 +109,10 @@ spotless {
 }
 
 subprojects {
-    apply plugin: 'java'
-    apply plugin: 'jacoco'
-    apply plugin: 'maven-publish'
     apply plugin: "com.diffplug.spotless"
+    apply plugin: 'jacoco'
+    apply plugin: 'java'
+    apply plugin: 'maven-publish'
 
     java {
         toolchain {
