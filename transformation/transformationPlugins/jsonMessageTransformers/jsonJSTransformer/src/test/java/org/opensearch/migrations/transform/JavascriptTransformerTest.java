@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 @Slf4j
 public class JavascriptTransformerTest {
 
-    private static final String INIT_SCRIPT = "((document) => ({docSize: Object.keys(document).length+2 }))";
+    private static final String INIT_SCRIPT = "((context) => (document) => ({docSize: Object.keys(document).length+2 }))";
 
     @Test
     @SuppressWarnings("unchecked")
