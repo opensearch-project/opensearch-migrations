@@ -1,10 +1,10 @@
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
-//   id "com.dorongold.task-tree" version "2.1.1"
-    id 'io.freefair.lombok' version '8.6' apply false
+//    id "com.dorongold.task-tree" version "2.1.1"
     id "com.diffplug.spotless" version '6.25.0'
-    id 'me.champeau.jmh' version '0.7.2' apply false
+    id 'io.freefair.lombok' version '8.6' apply false
     id 'jacoco'
+    id 'me.champeau.jmh' version '0.7.2' apply false
 }
 
 allprojects {
