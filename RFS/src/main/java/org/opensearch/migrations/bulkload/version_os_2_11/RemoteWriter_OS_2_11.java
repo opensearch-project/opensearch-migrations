@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.version_os_2_11;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.cluster.ClusterWriter;
@@ -76,7 +77,8 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
 
     private OpenSearchClient getClient() {
         if (client == null) {
-            client = new OpenSearchClient(getConnection());
+            var clientFactory = new OpenSearchClientFactory(getConnection());
+            client = clientFactory.determineVersionAndCreate();
         }
         return client;
     }
