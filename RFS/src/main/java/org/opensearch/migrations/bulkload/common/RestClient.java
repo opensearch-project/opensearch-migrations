@@ -77,17 +77,50 @@ public class RestClient {
         this.connectionContext = connectionContext;
 
         SslProvider sslProvider;
-        if (connectionContext.isInsecure()) {
+        if (connectionContext.hasCustomCerts()) {
+            try {
+                SslContextBuilder builder = SslContextBuilder.forClient();
+
+                if (connectionContext.getCaCert() != null) {
+                    builder.trustManager(connectionContext.getCaCert());
+                }
+
+                if (connectionContext.getClientCert() != null && connectionContext.getClientCertKey() != null) {
+                    builder.keyManager(
+                        connectionContext.getClientCert(),
+                        connectionContext.getClientCertKey()
+                    );
+                }
+
+                SslContext sslContext = builder.build();
+
+                sslProvider = SslProvider.builder()
+                    .sslContext(sslContext)
+                    .handlerConfigurator(sslHandler -> {
+                        SSLEngine engine = sslHandler.engine();
+                        SSLParameters sslParameters = engine.getSSLParameters();
+                        engine.setSSLParameters(sslParameters);
+                    })
+                    .build();
+
+            } catch (SSLException e) {
+                throw new IllegalStateException("Unable to construct custom SslProvider", e);
+            }
+        } else if (connectionContext.isInsecure()) {
             try {
                 SslContext sslContext = SslContextBuilder.forClient()
                     .trustManager(InsecureTrustManagerFactory.INSTANCE)
                     .build();
-                sslProvider = SslProvider.builder().sslContext(sslContext).handlerConfigurator(sslHandler -> {
-                    SSLEngine engine = sslHandler.engine();
-                    SSLParameters sslParameters = engine.getSSLParameters();
-                    sslParameters.setEndpointIdentificationAlgorithm(null);
-                    engine.setSSLParameters(sslParameters);
-                }).build();
+
+                sslProvider = SslProvider.builder()
+                    .sslContext(sslContext)
+                    .handlerConfigurator(sslHandler -> {
+                        SSLEngine engine = sslHandler.engine();
+                        SSLParameters sslParameters = engine.getSSLParameters();
+                        sslParameters.setEndpointIdentificationAlgorithm(null);
+                        engine.setSSLParameters(sslParameters);
+                    })
+                    .build();
             } catch (SSLException e) {
                 throw new IllegalStateException("Unable to construct SslProvider", e);
             }

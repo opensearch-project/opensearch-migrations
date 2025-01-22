@@ -470,3 +470,66 @@ curl -X PUT "localhost:19200/_snapshot/test_repository/rfs-snapshot" -H "Content
   "include_global_state": true
 }'
 ```
+
+### SSL Certs
+
+Sample certs for testing mutual TLS with RestClient.
+
+Create the CA key + cert:
+```sh
+openssl genrsa -out test-ca.key 2048
+openssl req -x509 -new -nodes \
+  -key test-ca.key \
+  -sha256 -days 36500 \
+  -out test-ca.crt \
+  -subj "/CN=Test CA"
+```
+
+Create server key + CSR:
+```sh
+openssl genpkey -algorithm RSA -out test-server.key -pkeyopt rsa_keygen_bits:2048
+openssl req -new -key test-server.key \
+  -out test-server.csr \
+  -subj "/CN=localhost"
+```
+
+Sign server cert with the CA:
+```sh
+openssl x509 -req \
+  -in test-server.csr \
+  -CA test-ca.crt \
+  -CAkey test-ca.key \
+  -CAcreateserial \
+  -out test-server.crt \
+  -days 36500 -sha256
+```
+
+Create client key + CSR:
+```sh
+openssl genpkey -algorithm RSA -out test-client.key -pkeyopt rsa_keygen_bits:2048
+openssl req -new \
+  -key test-client.key \
+  -out test-client.csr \
+  -subj "/CN=Test Client"
+```
+
+Sign client cert with CA:
+```sh
+openssl x509 -req \
+  -in test-client.csr \
+  -CA test-ca.crt \
+  -CAkey test-ca.key \
+  -CAcreateserial \
+  -out test-client.crt \
+  -days 36500 -sha256
+```
+
+Cleanup:
+```sh
+rm test-server.csr test-client.csr test-ca.srl
+```
+
+Final files of interest:
+- `test-ca.key` and `test-ca.crt`
+- `test-server.key` and `test-server.crt`
+- `test-client.key` and `test-client.crt`
