@@ -6,9 +6,12 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+import org.opensearch.migrations.transform.jsProxyObjects.ArrayProxyObject;
+import org.opensearch.migrations.transform.jsProxyObjects.ListProxyArray;
 import org.opensearch.migrations.transform.jsProxyObjects.MapProxyObject;
 
 import lombok.SneakyThrows;
@@ -112,18 +115,30 @@ public class JavascriptTransformer implements IJsonTransformer {
         }
     }
 
+    @SuppressWarnings("unchecked")
     static Value runScript(Value jsCallableObject, Object... args) {
         var convertedArgs = Arrays.stream(args)
             .map(o -> {
-                if (o instanceof Map<?,?>) {
-                    var map = (Map<String, Object>) o;
-                    return new MapProxyObject(map);
+                if (o instanceof Map<?, ?>) {
+                    return new MapProxyObject((Map<String, Object>) o);
+                } else if (o instanceof List<?>) {
+                    return new ListProxyArray((List<Object>) o);
+                } else if (o instanceof Object[]) {
+                    return new ArrayProxyObject((Object[]) o);
+                } else if (isPrimitiveOrWrapper(o)) {
+                    return o;
                 }
-                return o;
+                throw new IllegalArgumentException("Unsupported argument type: " + o.getClass());
             }).toArray();
         var rval = jsCallableObject.execute(convertedArgs);
         log.atTrace().setMessage("rval={}").addArgument(rval).log();
         return rval;
+    }
+
+    private static boolean isPrimitiveOrWrapper(Object o) {
+        return o instanceof Integer || o instanceof Double || o instanceof Boolean
+            || o instanceof Character || o instanceof Byte || o instanceof Short
+            || o instanceof Float || o instanceof Long || o == null;
     }
 
     static <T> CompletableFuture<T> runScriptAsFuture(Value jsCallableObject, Object... args) {
