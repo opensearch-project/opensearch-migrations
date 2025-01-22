@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.transform.jsProxyObjects.MapProxyObject;
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.google.common.io.Resources;

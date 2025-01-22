@@ -6,11 +6,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import lombok.Getter;
+import org.opensearch.migrations.transform.jsProxyObjects.MapProxyObject;
+
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.graalvm.polyglot.Context;
@@ -18,13 +18,23 @@ import org.graalvm.polyglot.Engine;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
-import org.graalvm.polyglot.proxy.ProxyArray;
 import org.graalvm.polyglot.proxy.ProxyExecutable;
-import org.graalvm.polyglot.proxy.ProxyObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 
+/**
+ * The {@code JavascriptTransformer} class provides functionality to execute JavaScript transformations
+ * on JSON-like objects using the GraalVM Polyglot API.
+ *
+ * <p><strong>Important:</strong> This class is <b>not thread-safe</b>. Concurrent access to instances of this class
+ * may result in unpredictable behavior or errors. Each thread should use its own instance of {@code JavascriptTransformer}.
+ *
+ * <p><strong>Thread Safety:</strong>
+ * The {@code JavascriptTransformer} relies on an underlying {@code Context} and JavaScript engine
+ * that are not designed to handle concurrent operations. Ensure that instances are not shared
+ * across multiple threads or synchronize access externally if required.
+ */
 @Slf4j
 public class JavascriptTransformer implements IJsonTransformer {
     private final String JS_TRANSFORM_LOGGER_NAME = "JavascriptTransformer";
@@ -49,7 +59,6 @@ public class JavascriptTransformer implements IJsonTransformer {
                 .allowIterableAccess(true)
                 .allowBufferAccess(true) // Support replayer binary data buffer
                 .build());
-            // Consider closing the context and streams
             var jsLogger = LoggerFactory.getLogger(JS_TRANSFORM_LOGGER_NAME);
             this.infoStream = new LoggingOutputStream(jsLogger, Level.INFO);
             this.errorStream = new LoggingOutputStream(jsLogger, Level.ERROR);
@@ -103,137 +112,7 @@ public class JavascriptTransformer implements IJsonTransformer {
         }
     }
 
-    @Getter
-    public static class MapProxyObject implements ProxyObject {
-
-        private final Map<String, Object> map;
-
-        public MapProxyObject(Map<String, Object> map) {
-            this.map = map;
-        }
-
-        @Override
-        public void putMember(String key, Value value) {
-            map.put(key, value.isHostObject() ? value.asHostObject() : value);
-        }
-
-        @Override
-        public boolean hasMember(String key) {
-            return map.containsKey(key);
-        }
-
-        @Override
-        public Object getMemberKeys() {
-            return map.keySet().toArray();
-        }
-
-        @Override
-        @SuppressWarnings("unchecked")
-        public Object getMember(String key) {
-            Object v = map.get(key);
-
-            if (v instanceof Map) {
-                // Proxy nested Maps
-                return new MapProxyObject((Map<String, Object>) v);
-
-            } else if (v instanceof List) {
-                // Proxy Lists
-                return new ListProxyArray((List<Object>) v);
-
-            } else if (v != null && v.getClass().isArray()) {
-                // Proxy Arrays
-                return new ArrayProxyObject((Object[]) v);
-
-            } else {
-                return v;
-            }
-        }
-
-        @Override
-        public boolean removeMember(String key) {
-            return map.remove(key) != null;
-        }
-    }
-
-    /**
-     * Proxies a List so Graal sees it as a Java array-like object.
-     */
-    public static class ListProxyArray implements ProxyArray {
-
-        private final List<Object> list;
-
-        public ListProxyArray(List<Object> list) {
-            this.list = list;
-        }
-
-        @Override
-        public long getSize() {
-            return list.size();
-        }
-
-        @Override
-        @SuppressWarnings("unchecked")
-        public Object get(long index) {
-            Object element = list.get((int) index);
-            if (element instanceof Map) {
-                return new MapProxyObject((Map<String, Object>) element);
-            } else if (element instanceof List) {
-                return new ListProxyArray((List<Object>) element);
-            } else if (element != null && element.getClass().isArray()) {
-                return new ArrayProxyObject((Object[]) element);
-            } else {
-                return element;
-            }
-        }
-
-        @Override
-        public void set(long index, Value value) {
-            // We must handle both direct values and host objects
-            // Depending on your design, you might want to treat them differently
-            // e.g. unwrapping only if isHostObject
-            list.set((int) index, value.isHostObject() ? value.asHostObject() : value);
-        }
-    }
-
-    /**
-     * Proxies an actual Java array (T[]) so Graal sees it as an array-like object.
-     */
-    public static class ArrayProxyObject implements ProxyArray {
-
-        private final Object[] array;
-
-        public ArrayProxyObject(Object[] array) {
-            this.array = array;
-        }
-
-        @Override
-        public long getSize() {
-            return array.length;
-        }
-
-        @Override
-        @SuppressWarnings("unchecked")
-        public Object get(long index) {
-            Object element = array[(int) index];
-            if (element instanceof Map) {
-                return new MapProxyObject((Map<String, Object>) element);
-            } else if (element instanceof List) {
-                return new ListProxyArray((List<Object>) element);
-            } else if (element != null && element.getClass().isArray()) {
-                return new ArrayProxyObject((Object[]) element);
-            } else {
-                return element;
-            }
-        }
-
-        @Override
-        public void set(long index, Value value) {
-            array[(int) index] = value.isHostObject() ? value.asHostObject() : value;
-        }
-    }
-
-
-    static Value runScript(Value function, Object... args) {
+    static Value runScript(Value jsCallableObject, Object... args) {
         var convertedArgs = Arrays.stream(args)
             .map(o -> {
                 if (o instanceof Map<?,?>) {
@@ -242,13 +121,13 @@ public class JavascriptTransformer implements IJsonTransformer {
                 }
                 return o;
             }).toArray();
-        var rval = function.execute(convertedArgs);
+        var rval = jsCallableObject.execute(convertedArgs);
         log.atTrace().setMessage("rval={}").addArgument(rval).log();
         return rval;
     }
 
-    static <T> CompletableFuture<T> runScriptAsFuture(Value function, Object... args) {
-        return fromPromise(runScript(function, args));
+    static <T> CompletableFuture<T> runScriptAsFuture(Value jsCallableObject, Object... args) {
+        return fromPromise(runScript(jsCallableObject, args));
     }
 
     @SuppressWarnings("Unchecked")
