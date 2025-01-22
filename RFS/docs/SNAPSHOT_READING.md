@@ -90,7 +90,7 @@ it is unpacked into the target filesystem using the lucene library, this gives a
 6. **Live Documents**: Info about what documents are live
 7. **Segments File**: Stores information about a commit point
 
-[Docs on Lucnee file formats](https://lucene.apache.org/core/10_1_0/core/org/apache/lucene/codecs/lucene101/package-summary.html#file-names)
+[Docs on Lucene file formats](https://lucene.apache.org/core/10_1_0/core/org/apache/lucene/codecs/lucene101/package-summary.html#file-names)
 
 ### Lucene Index parsing
 
