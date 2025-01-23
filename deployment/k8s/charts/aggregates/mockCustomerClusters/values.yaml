@@ -1,3 +1,6 @@
+conditionalPackageInstalls:
+  proxy: false
+
 proxy:
   parameters:
     destinationUri:
@@ -18,8 +21,17 @@ source:
   #    elasticsearch.yml: |
   #      discovery.type: single-node
 
-  # for load-testing deployments
   minimumMasterNodes: 1
+  extraEnvs:
+    - name: path.repo
+      value: "/snapshot"
+  extraVolumes:
+    - name: snapshot-volume
+      persistentVolumeClaim:
+        claimName: snapshot-volume-pvc  # Should match existing snapshot volume PVC
+  extraVolumeMounts:
+    - name: snapshot-volume
+      mountPath: /snapshot
 
 target:
   extraEnvs:

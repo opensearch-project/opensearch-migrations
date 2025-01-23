@@ -6,6 +6,7 @@ conditionalPackageInstalls:
   prometheus: false
   proxy: true
   grafana: false
+  snapshotVolume: true
 
 
 capture-proxy:
@@ -19,23 +20,36 @@ capture-proxy:
       yamlPath: "allow_insecure"
 
 migration-console:
+  snapshotVolumeEnabled: true
+  snapshotVolumePvc: "snapshot-volume-pvc"
   parameters:
     nothingImportant:
       value: false
 
 bulk-document-loader:
+  snapshotVolumeEnabled: true
+  snapshotVolumePvc: "snapshot-volume-pvc"
   parameters:
     luceneDir:
       value: /tmp
       allowRuntimeOverride: true
     snapshotName:
-      value: rfs
+      value: rfs-snapshot
       allowRuntimeOverride: true
     targetHost:
-      value: https://opensearch-cluster-master.mcc:9200/
+      value: https://opensearch-cluster-master:9200
+      allowRuntimeOverride: true
+    targetUsername:
+      value: admin
+      allowRuntimeOverride: true
+    targetPassword:
+      value: myStrongPassword123!
       allowRuntimeOverride: true
     snapshotLocalDir:
       value: /snapshot
+      allowRuntimeOverride: true
+    targetInsecure:
+      present: true
       allowRuntimeOverride: true
 
 replayer:

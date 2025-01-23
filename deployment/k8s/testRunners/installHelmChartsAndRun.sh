@@ -3,13 +3,13 @@
 ORIGINAL_DIR=$(pwd)
 cd "$(dirname "$0")/../" || exit
 
-helm install -n mcc mcc charts/aggregates/mockCustomerClusters
+helm install -n ma mcc charts/aggregates/mockCustomerClusters
 if [ $? -eq 0 ]; then
-  echo "installed mockCustomerClusters in 'mcc' namespace"
+  echo "installed mockCustomerClusters in 'ma' namespace"
 else
   echo Rebuilding dependency
   helm dependency build charts/aggregates/mockCustomerClusters
-  helm install -n mcc mcc charts/aggregates/mockCustomerClusters
+  helm install -n ma mcc charts/aggregates/mockCustomerClusters
 fi
 
 helm install -n ma ma charts/aggregates/migrationAssistant
@@ -23,7 +23,7 @@ fi
 
 helm install -n ma ma charts/tests/testConsole
 if [ $? -eq 0 ]; then
-  echo "installed testConsole in 'mcc' namespace"
+  echo "installed testConsole in 'ma' namespace"
 else
   echo Rebuilding dependency
   helm dependency build charts/tests/testConsole
@@ -39,4 +39,4 @@ export migration_pod
 
 # Final cleanup so that future runs have a clean environment
 #helm delete -n ma ma
-#helm delete -n mcc mcc
+#helm delete -n ma mcc

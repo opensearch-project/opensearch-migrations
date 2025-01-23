@@ -18,6 +18,24 @@ Creating a local Kubernetes cluster is useful for testing and developing a given
 ### Install Minikube
 Follow instructions [here](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fmacos%2Fx86-64%2Fstable%2Fbinary+download) to install Minikube
 
+The default number of CPUs and Memory settings for Minikube can sometimes be relatively low compared to your machine's resources. The default resources allocated are printed out on minikube startup, similar to:
+```shell
+🔥  Creating docker container (CPUs=2, Memory=7788MB) ...
+```
+To increase these resources, make sure your Docker environment has enough allocated resources respectively, and execute commands similar to below:
+```shell
+minikube config set cpus 8
+minikube config set memory 12000
+```
+
+### Start/Pause/Delete
+A convenience script `minikubeLocal.sh` is located in this directory which wraps the Minikube commands to start/pause/delete Minikube. This is useful for automatically handling items such as mounting the local repo and creating a tunnel to make localhost calls to containers
+```shell
+./miniKubeLocal.sh --start
+./miniKubeLocal.sh --pause
+./miniKubeLocal.sh --delete
+```
+
 ### Loading Docker images into Minikube
 Since Minikube uses a different Docker registry than the normal host machine, the Docker images shown will differ from that on the host machine. The script `buildDockerImagesMini.sh` in this directory will configure the environment to use the Minikube Docker registry and build the Docker images into Minikube
 
@@ -30,15 +48,6 @@ Build Docker images into Minikube
 ./buildDockerImagesMini.sh
 ```
 
-### Start/Pause/Delete
-A convenience script `minikubeLocal.sh` is located in this directory which wraps the Minikube commands to start/pause/delete Minikube. This is useful for automatically handling items such as mounting the local repo and creating a tunnel to make localhost calls to containers
-```shell
-./miniKubeLocal.sh --start
-./miniKubeLocal.sh --pause
-./miniKubeLocal.sh --delete
-```
-
-
 ## Deploying
 
 ### Migration Assistant environment
@@ -49,14 +58,16 @@ The full environment helm charts consists of:
 * Target cluster
 * Migration services
 
-**Note**: For first-time deployments and deployments after changes have been made to a dependent helm package, such as the `migration-console` chart, the following command is needed to update dependent charts
+**Note**: For first-time deployments and deployments after changes have been made to a dependent helm package, such as the `migrationConsole` chart, the following command is needed to update dependent charts
 ```shell
-helm dependency update migration-assistant
+helm dependency update
 ```
 
-The full environment helm chart can be deployed with the helm command
+The full Migration Assistant environment with Mock Customer Clusters can be deployed with the following helm commands
 ```shell
-helm install ma migration-assistant
+helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
+helm install mcc -n ma charts/aggregates/mockCustomerClusters
+
 ```
 
 ### Specific services
@@ -64,7 +75,7 @@ Guide for deploying an individual Migration service helm chart
 
 A particular service could then be deployed with a command similar to the below.
 ```shell
-helm install migration-console services/migration-console
+helm install console charts/components/migrationConsole
 ```
 
 ## Uninstalling

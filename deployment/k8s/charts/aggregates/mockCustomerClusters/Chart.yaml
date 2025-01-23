@@ -7,6 +7,7 @@ dependencies:
     repository: https://helm.elastic.co
     alias: source
   - name: capture-proxy
+    condition: conditionalPackageInstalls.proxy
     version: "0.1.0"
     repository: file://../../components/captureProxy
     alias: proxy

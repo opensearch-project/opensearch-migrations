@@ -34,6 +34,15 @@ spec:
           volumeMounts:
             - name: {{ $envMountName }}
               mountPath: /shared
+            {{- if .Values.snapshotVolumeEnabled }}
+            - name: snapshot-volume
+              mountPath: /snapshot
+            {{- end }}
       volumes:
         - name: {{ $envMountName }}
           emptyDir: {}
+        {{- if .Values.snapshotVolumeEnabled }}
+        - name: snapshot-volume
+          persistentVolumeClaim:
+            claimName: {{ .Values.snapshotVolumePvc }}
+        {{- end }}

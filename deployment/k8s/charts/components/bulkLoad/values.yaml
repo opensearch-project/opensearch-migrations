@@ -1,4 +1,6 @@
 useSharedConfigs: false
+snapshotVolumeEnabled: false
+snapshotVolumePvc: ""
 parameters:
   initialLeaseDuration:
     value: PT10M

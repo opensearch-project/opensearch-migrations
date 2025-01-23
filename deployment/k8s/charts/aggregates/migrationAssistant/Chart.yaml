@@ -30,6 +30,10 @@ dependencies:
   - name: shared-configs
     version: "0.1.0"
     repository: "file://../../sharedResources/sharedConfigs"
+  - name: snapshot-volume
+    version: "0.1.0"
+    repository: "file://../../sharedResources/snapshotVolume"
+    condition: conditionalPackageInstalls.snapshotVolume
 
 #  - name: otel-collector
 #    version: 1.2.2
