@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from console_link.models.replayer_base import Replayer
 from console_link.middleware.kafka import delete_topic
 from console_link.models.kafka import Kafka
-from console_link.middleware.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
+from console_link.middleware.clusters import connection_check, clear_cluster, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 
@@ -41,9 +41,9 @@ def setup_replayer(request):
     target_con_result: ConnectionResult = connection_check(target_cluster)
     assert target_con_result.connection_established is True
 
-    # Clear any existing non-system indices
-    clear_indices(source_cluster)
-    clear_indices(target_cluster)
+    # Clear Cluster
+    clear_cluster(source_cluster)
+    clear_cluster(target_cluster)
 
     # Delete existing Kafka topic to clear records
     delete_topic(kafka=kafka, topic_name="logging-traffic-topic")
