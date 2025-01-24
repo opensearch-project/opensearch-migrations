@@ -221,26 +221,21 @@ At a high level, the primary concerns for a Reindex-from-Snapshot operation are 
 Below is the schema for the coordinating metadata records to be stored in the CMS:
 
 ```
-INDEX WORK ENTRY RECORD
-ID: <name of the index to be migrated>
+SHARD SETUP
+ID: shard_setup
 FIELDS:
-    * name (string): The index name
-    * status (string): NOT_STARTED, COMPLETED, FAILED
+    * creatorId (string): Unique id of the worker who created the task
+    * leaseHolderId (string): Unique id of the worker who has aquired the lease for the task
+    * expiration (timestamp): When the current lease expires
     * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
-    * numShards (integer): Number of shards in the index
-
-DOCUMENTS MIGRATION STATUS RECORD
-ID: docs_status
-FIELDS:
-    * status (string): SETUP, IN_PROGRESS, COMPLETED, FAILED
-    * leaseExpiry (timestamp): When the current work lease expires
-    * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
+    * completedAt (timestamp): If present, when the task was completed.
 
 SHARD COMPONENT WORK ENTRY RECORD
-ID: <name of the index to be migrated>_<shard number>_<progress cursor>
+ID: <name of the index to be migrated>__<shard number>__<progress cursor>
 FIELDS:
-    * leaseExpiry (timestamp): When the current work lease expires
+    * creatorId (string): Unique id of the worker who created the task
     * leaseHolderId (string): Unique ID of the RFS worker that currently holds the lease
+    * expiration (timestamp): When the current work lease expires
     * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
     * successorWorkItems (list of strings): Follow-up work item(s) created from this parent item
     * completedAt (timestamp): When this work item was completed
