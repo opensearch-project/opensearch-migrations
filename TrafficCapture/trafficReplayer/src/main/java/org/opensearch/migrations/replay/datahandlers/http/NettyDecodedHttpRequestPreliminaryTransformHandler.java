@@ -109,6 +109,7 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         }
     }
 
+    @SuppressWarnings("unchecked")
     public static HttpJsonRequestWithFaultingPayload transform(
         IJsonTransformer transformer,
         HttpJsonRequestWithFaultingPayload httpJsonMessage
@@ -118,18 +119,36 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         assert httpJsonMessage.containsKey("payload");
 
         Object returnedObject = transformer.transformJson(httpJsonMessage);
-        if(!(returnedObject instanceof Map)) {
-            throw new TransformationException(
-                new IllegalArgumentException("Returned object from transformation not map, instead was "
-                    + returnedObject.getClass().getName())
-            );
-        }
-        @SuppressWarnings("unchecked")
-        var returnedObjectMap = (Map<String, ?>) returnedObject;
-
-
         if (returnedObject != httpJsonMessage) {
-            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObjectMap);
+            if (returnedObject instanceof Map<?, ?>) {
+                var headersMap = ((Map<String, Object>) returnedObject).get(JsonKeysForHttpMessage.HEADERS_KEY);
+                if (headersMap instanceof ListKeyAdaptingCaseInsensitiveHeadersMap) {
+                    log.atDebug().setMessage("Transform returned headers" +
+                        "as ListKeyAdaptingCaseInsensitiveHeadersMap. No conversion needed").log();
+                }
+                if (headersMap instanceof StrictCaseInsensitiveHttpHeadersMap) {
+                    ((Map<String, Object>) returnedObject).put(JsonKeysForHttpMessage.HEADERS_KEY,
+                        new ListKeyAdaptingCaseInsensitiveHeadersMap(
+                            (StrictCaseInsensitiveHttpHeadersMap) headersMap
+                        ));
+                } else if (headersMap instanceof Map<?, ?>) {
+                    ((Map<String, Object>) returnedObject).put(JsonKeysForHttpMessage.HEADERS_KEY,
+                        new ListKeyAdaptingCaseInsensitiveHeadersMap(
+                            StrictCaseInsensitiveHttpHeadersMap.fromMap((Map<String, List<String>>) headersMap)));
+                } else {
+                    throw new TransformationException(
+                        new IllegalArgumentException("Returned headers from transformation not map, instead was "
+                            + headersMap.getClass().getName())
+                    );
+                }
+                httpJsonMessage = new HttpJsonRequestWithFaultingPayload((Map<String, ?>) returnedObject);
+            }
+            else {
+                throw new TransformationException(
+                    new IllegalArgumentException("Returned object from transformation not map, instead was "
+                        + returnedObject.getClass().getName())
+                );
+            }
         }
 
         if (originalHttpJsonMessage != httpJsonMessage) {

@@ -12,7 +12,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         git \
         glibc-devel \
         hostname \
-        java-11-amazon-corretto \
+        java-17-amazon-corretto \
         jq \
         less \
         make \
