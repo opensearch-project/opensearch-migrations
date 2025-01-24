@@ -41,7 +41,7 @@ import org.slf4j.event.Level;
 @Slf4j
 public class JavascriptTransformer implements IJsonTransformer {
     private final String JS_TRANSFORM_LOGGER_NAME = "JavascriptTransformer";
-    private Value javascriptTransform;
+    private Value mainJavascriptTransformFunction;
 
     private final Context polyglotContext;
     private final OutputStream infoStream;
@@ -69,12 +69,12 @@ public class JavascriptTransformer implements IJsonTransformer {
                 .out(infoStream)
                 .err(errorStream)
                 .build();
-            this.javascriptTransform = this.polyglotContext.eval(sourceCode).execute(context);
+            this.mainJavascriptTransformFunction = this.polyglotContext.eval(sourceCode).execute(context);
         }
 
     @Override
     public void close() throws Exception {
-        this.javascriptTransform = null;
+        this.mainJavascriptTransformFunction = null;
         this.polyglotContext.close();
         this.infoStream.close();
         this.errorStream.close();
@@ -82,7 +82,7 @@ public class JavascriptTransformer implements IJsonTransformer {
 
     @SneakyThrows
     public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
-        return runScriptAsFuture(javascriptTransform, incomingJson);
+        return runScriptAsFuture(mainJavascriptTransformFunction, incomingJson);
     }
 
     @Override

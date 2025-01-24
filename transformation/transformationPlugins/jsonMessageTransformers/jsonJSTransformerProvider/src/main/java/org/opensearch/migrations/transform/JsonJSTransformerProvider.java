@@ -16,22 +16,22 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
      *
      * @param jsonConfig The configuration object to validate and extract from.
      * @param requiredKeys The keys that must be present in the configuration map.
-     * @param optionalKeys The keys that can be optionally present in the configuration map.
      * @return The validated configuration map.
      * @throws IllegalArgumentException if the configuration is invalid or required keys are missing.
      */
     @SneakyThrows
-    protected Map<String, Object> validateAndExtractConfig(Object jsonConfig, String[] requiredKeys, String[] optionalKeys) {
+    protected Map<String, Object> validateAndExtractConfig(Object jsonConfig, String[] requiredKeys) {
         if (jsonConfig == null || (jsonConfig instanceof String && ((String) jsonConfig).isEmpty())) {
             throw new IllegalArgumentException("Configuration must not be null or empty.");
         } else if (!(jsonConfig instanceof Map)) {
-            throw new IllegalArgumentException(getConfigUsageStr(requiredKeys));
+            throw new IllegalArgumentException(getConfigUsageStr());
         }
 
         var config = (Map<String, Object>) jsonConfig;
         for (String key : requiredKeys) {
             if (!config.containsKey(key)) {
-                throw new IllegalArgumentException("Configuration missing required key: " + key);
+                throw new IllegalArgumentException("Configuration missing required key: " + key + "."
+                + getConfigUsageStr());
             }
         }
         // Optional keys are not strictly enforced
@@ -39,35 +39,40 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
     }
 
     /**
-     * Generates a usage string for configuration based on required keys.
+     * Generates a usage string for configuration.
      *
-     * @param requiredKeys The keys that should be present in the configuration.
      * @return A string describing the expected configuration format.
      */
-    protected String getConfigUsageStr(String... requiredKeys) {
+    protected String getConfigUsageStr() {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, " +
-                "with required keys: " + String.join(", ", requiredKeys) + ".";
+            "with keys: " + String.join("', '", new String[]{INITIALIZATION_SCRIPT, BINDINGS_OBJECT}) + "." +
+            INITIALIZATION_SCRIPT + " is a string consisting of Javascript which may define functions and ends in an evaluation that returns" +
+            " a main function which takes in the " + BINDINGS_OBJECT + " and returns a transform function which takes in a json object and returns the transformed object." +
+            BINDINGS_OBJECT + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array," +
+            " or primitive type/wrapper and when passed as an argument into " +
+            "the function returned by the " + INITIALIZATION_SCRIPT + " will give the transform function.";
     }
 
     @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
-        var config = validateAndExtractConfig(jsonConfig, new String[]{INITIALIZATION_SCRIPT}, new String[]{BINDINGS_OBJECT});
+        var requiredKeys = new String[]{INITIALIZATION_SCRIPT, BINDINGS_OBJECT};
+        var config = validateAndExtractConfig(jsonConfig, requiredKeys);
 
         String script = (String) config.get(INITIALIZATION_SCRIPT);
-        Object bindingsOutput;
+        Object bindingsObject;
         ObjectMapper objectMapper = new ObjectMapper();
         try {
-            String bindingsMapString = (String) config.get(BINDINGS_OBJECT);
-            bindingsOutput = objectMapper.readValue(bindingsMapString, new TypeReference<>() {});
+            String bindingsObjectString = (String) config.get(BINDINGS_OBJECT);
+            bindingsObject = objectMapper.readValue(bindingsObjectString, new TypeReference<>() {});
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse the bindings map", e);
+            throw new RuntimeException("Failed to parse the bindingsObject." + getConfigUsageStr(), e);
         }
 
         if (script == null) {
-            throw new IllegalArgumentException("'script' must be provided.");
+            throw new IllegalArgumentException(INITIALIZATION_SCRIPT + " must be provided." + getConfigUsageStr());
         }
 
-        return new JavascriptTransformer(script, bindingsOutput);
+        return new JavascriptTransformer(script, bindingsObject);
     }
 }

@@ -18,7 +18,9 @@ public class PacketToTransformingHttpHandlerFactory
     implements
         PacketConsumerFactory<TransformedOutputAndResult<ByteBufList>> {
 
+    // Using ThreadLocal to ensure thread safety with the json transformers which will be reused
     private final ThreadLocal<IJsonTransformer> localJsonTransformer;
+    // The authTransformerFactory is ThreadSafe and getAuthTransformer will be called for every request
     private final IAuthTransformerFactory authTransformerFactory;
 
     public PacketToTransformingHttpHandlerFactory(
