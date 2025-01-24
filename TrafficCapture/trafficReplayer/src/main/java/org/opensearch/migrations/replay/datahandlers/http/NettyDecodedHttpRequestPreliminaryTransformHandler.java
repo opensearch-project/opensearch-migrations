@@ -119,43 +119,14 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         assert httpJsonMessage.containsKey("payload");
 
         Object returnedObject = transformer.transformJson(httpJsonMessage);
-        if (returnedObject != httpJsonMessage) {
-            if (returnedObject instanceof Map<?, ?>) {
-                var headersMap = ((Map<String, Object>) returnedObject).get(JsonKeysForHttpMessage.HEADERS_KEY);
-                if (headersMap instanceof ListKeyAdaptingCaseInsensitiveHeadersMap) {
-                    log.atDebug().setMessage("Transform returned headers" +
-                        "as ListKeyAdaptingCaseInsensitiveHeadersMap. No conversion needed").log();
-                }
-                if (headersMap instanceof StrictCaseInsensitiveHttpHeadersMap) {
-                    ((Map<String, Object>) returnedObject).put(JsonKeysForHttpMessage.HEADERS_KEY,
-                        new ListKeyAdaptingCaseInsensitiveHeadersMap(
-                            (StrictCaseInsensitiveHttpHeadersMap) headersMap
-                        ));
-                } else if (headersMap instanceof Map<?, ?>) {
-                    ((Map<String, Object>) returnedObject).put(JsonKeysForHttpMessage.HEADERS_KEY,
-                        new ListKeyAdaptingCaseInsensitiveHeadersMap(
-                            StrictCaseInsensitiveHttpHeadersMap.fromMap((Map<String, List<String>>) headersMap)));
-                } else {
-                    throw new TransformationException(
-                        new IllegalArgumentException("Returned headers from transformation not map, instead was "
-                            + headersMap.getClass().getName())
-                    );
-                }
-                httpJsonMessage = new HttpJsonRequestWithFaultingPayload((Map<String, ?>) returnedObject);
-            }
-            else {
-                throw new TransformationException(
-                    new IllegalArgumentException("Returned object from transformation not map, instead was "
-                        + returnedObject.getClass().getName())
-                );
-            }
-        }
 
-        if (originalHttpJsonMessage != httpJsonMessage) {
+        var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
+
+        if (originalHttpJsonMessage != transformedRequest) {
             // clear originalHttpJsonMessage for faster garbage collection if not persisted along
             originalHttpJsonMessage.clear();
         }
-        return httpJsonMessage;
+        return transformedRequest;
     }
 
     private void handlePayloadNeutralTransformationOrThrow(
