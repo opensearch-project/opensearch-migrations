@@ -5,30 +5,23 @@ def call(Map config = [:]) {
     def migrationContextId = 'full-migration'
     def time = new Date().getTime()
     def testUniqueId = "integ_full_${time}_${currentBuild.number}"
+
     def rfsJsonTransformations = [
         [
-            JsonConditionalTransformerProvider: [
-                [
-                    JsonJMESPathPredicateProvider: [
-                        script: "index._index == 'test_e2e_0001_$testUniqueId'"
-                    ]
-                ],
-                [
-                    [
-                        JsonJoltTransformerProvider: [
-                            script: [
-                                operation: "modify-overwrite-beta",
-                                spec: [
-                                    index: [
-                                        '\\_index': "test_e2e_0001_${testUniqueId}_transformed"
-                                    ]
+                TypeMappingSanitizationTransformerProvider: [
+                        regexIndexMappings: [
+                                ["(test_e2e_0001_$testUniqueId)", ".*", "\$1_transformed"], // Expected Transform
+                                ["(.*)", "(.*)", "\$1"] // Type Union otherwise
+                        ],
+
+                        sourceProperties: [
+                                version: [
+                                        major: 6,
+                                        minor: 8
                                 ]
-                            ]
                         ]
-                    ]
                 ]
-            ]
-        ]
+        ],
     ]
     def rfsJsonString = JsonOutput.toJson(rfsJsonTransformations)
     def rfsTransformersArg = rfsJsonString.bytes.encodeBase64().toString()
