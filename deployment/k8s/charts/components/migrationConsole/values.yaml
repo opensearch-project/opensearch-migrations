@@ -1,0 +1,9 @@
+sharedLogsVolumeEnabled: false
+sharedLogsPvc: ""
+snapshotVolumeEnabled: false
+snapshotVolumePvc: ""
+useSharedConfigs: false
+parameters:
+  migrationApiEnabled:
+    value: false
+    allowRuntimeOverride: false

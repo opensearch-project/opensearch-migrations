@@ -85,10 +85,10 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     @Override
-    public IndexMetadata transformIndexMetadata(IndexMetadata index) {
+    public List<IndexMetadata> transformIndexMetadata(IndexMetadata index) {
         var copy = index.deepCopy();
         transformIndex(copy, IndexType.CONCRETE);
-        return new IndexMetadataData_OS_2_11(copy.getRawJson(), copy.getId(), copy.getName());
+        return List.of(new IndexMetadataData_OS_2_11(copy.getRawJson(), copy.getId(), copy.getName()));
     }
 
     private void transformIndex(Index index, IndexType type) {

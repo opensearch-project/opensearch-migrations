@@ -15,7 +15,12 @@ permissions:
   contents: read # to fetch code (actions/checkout)
 
 jobs:
+  get-require-approval:
+    uses: ./.github/workflows/require-approval.yml
+
   full-es68-e2e-aws-test:
+    needs: [get-require-approval]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-latest
     steps:
       - name: Sanitize branch and repo names

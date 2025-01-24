@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -58,11 +59,12 @@ abstract class BaseMigrationTest {
     @SneakyThrows
     protected String createSnapshot(String snapshotName) {
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+        var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(sourceCluster.getUrl())
                 .insecure(true)
                 .build()
                 .toConnectionContext());
+        var sourceClient = clientFactory.determineVersionAndCreate();
         var snapshotCreator = new org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator(
                 snapshotName,
                 sourceClient,
@@ -115,11 +117,12 @@ abstract class BaseMigrationTest {
      * @return An OpenSearch client.
      */
     protected OpenSearchClient createClient(SearchClusterContainer cluster) {
-        return new OpenSearchClient(ConnectionContextTestParams.builder()
+        var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(cluster.getUrl())
                 .insecure(true)
                 .build()
                 .toConnectionContext());
+        return clientFactory.determineVersionAndCreate();
     }
 
     protected SnapshotTestContext createSnapshotContext() {

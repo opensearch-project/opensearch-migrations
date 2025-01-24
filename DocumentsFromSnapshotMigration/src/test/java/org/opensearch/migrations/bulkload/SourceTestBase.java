@@ -26,7 +26,7 @@ import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
@@ -274,13 +274,14 @@ public class SourceTestBase {
                 UUID.randomUUID().toString(),
                 Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
             )) {
-                return RfsMigrateDocuments.run(
-                    readerFactory,
-                    new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
+                var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                         .host(targetAddress)
                         .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
+                        .toConnectionContext());
+                return RfsMigrateDocuments.run(
+                    readerFactory,
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)
