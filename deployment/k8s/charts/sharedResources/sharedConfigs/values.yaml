@@ -1,9 +1,5 @@
-weights:
-  sharedConfigMaps: 0
-  sharedConfig: 0
-
 globalParameters:
   kubernetesDeploymentVersion:
-    allowRuntimeOverride2: false
+    allowRuntimeOverride: false
     object:
       value: "0.1"

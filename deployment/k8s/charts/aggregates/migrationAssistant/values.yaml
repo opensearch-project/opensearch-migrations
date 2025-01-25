@@ -44,10 +44,6 @@ migration-console: {}
 
 bulk-document-loader:
   parameters:
-    luceneDir:
-      source: parameterConfig
-      value: /tmp
-      allowRuntimeOverride: true
     snapshotName:
       source: parameterConfig
       value: rfs
@@ -55,10 +51,6 @@ bulk-document-loader:
     targetHost:
       source: parameterConfig
       value: https://opensearch-cluster-master.mcc:9200/
-      allowRuntimeOverride: true
-    snapshotLocalDir:
-      source: parameterConfig
-      value: /snapshot
       allowRuntimeOverride: true
 
 replayer:

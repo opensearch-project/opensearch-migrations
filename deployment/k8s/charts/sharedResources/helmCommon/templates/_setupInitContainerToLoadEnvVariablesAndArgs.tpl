@@ -4,11 +4,11 @@
   image: migrations/k8s_config_map_util_scripts
   imagePullPolicy: IfNotPresent
   env:
-{{ include "generic.pullEnvVarsFromConfigMaps" (dict
-         "Parameters" .Values.parameters
-         "PackageName" (include "generic.fullname" .)
-         "include" .Template.Include
-         "Template" .Template) | indent 4 }}
+    {{- include "generic.pullEnvVarsFromConfigMaps" (dict
+             "Parameters" .Values.parameters
+             "PackageName" (include "generic.fullname" .)
+             "include" .Template.Include
+             "Template" .Template) | nindent 4 }}
 
   command:
     - /bin/sh
