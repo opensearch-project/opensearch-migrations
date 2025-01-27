@@ -4,7 +4,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -21,7 +20,7 @@ import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import shadow.lucene9.org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.IOUtils;
 
 /**
  * Simplified version of RFS for use in testing - ES 7.10 version.
@@ -79,8 +78,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
                 final var documents = new LuceneDocumentsReader(
                     unpackedShardDataDir.resolve(index.getName()).resolve("" + shardId),
                     ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
-                    ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD,
-                    Version.fromString("ES_7.10")
+                    ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD
                 ).readDocuments();
 
                 final var finalShardId = shardId;

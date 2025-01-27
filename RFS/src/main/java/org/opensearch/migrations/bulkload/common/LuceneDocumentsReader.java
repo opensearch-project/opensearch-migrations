@@ -6,21 +6,19 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import shadow.lucene9.org.apache.lucene.document.Document;
-import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
-import shadow.lucene9.org.apache.lucene.index.IndexCommit;
-import shadow.lucene9.org.apache.lucene.index.IndexReader;
-import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
-import shadow.lucene9.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
-import shadow.lucene9.org.apache.lucene.store.FSDirectory;
-import shadow.lucene9.org.apache.lucene.util.BytesRef;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexCommit;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.BytesRef;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -34,15 +32,13 @@ public class LuceneDocumentsReader {
         return path -> new LuceneDocumentsReader(
             path,
             snapshotReader.getSoftDeletesPossible(),
-            snapshotReader.getSoftDeletesFieldData(),
-            snapshotReader.getVersion()
+            snapshotReader.getSoftDeletesFieldData()
         );
     }
 
     protected final Path indexDirectoryPath;
     protected final boolean softDeletesPossible;
     protected final String softDeletesField;
-    protected final Version version;
 
     /**
      * There are a variety of states the documents in our Lucene Index can be in; this method extracts those documents
@@ -109,21 +105,16 @@ public class LuceneDocumentsReader {
         });
     }
 
-    protected DirectoryReader getReader() throws IOException {
-        if (VersionMatchers.isES_6_X.test(version)) {
-            try (var directory = shadow.lucene7.org.apache.lucene.index.Directory.open(indexDirectoryPath)) {
-                List<IndexCommit> commits = shadow.lucene7.org.apache.lucene.index.DirectoryReader.listCommits(directory);
-                IndexCommit latestCommit = commits.get(commits.size() - 1);
+    protected DirectoryReader getReader() throws IOException {// Get the list of commits and pick the latest one
+        try (FSDirectory directory = FSDirectory.open(indexDirectoryPath)) {
+            List  <IndexCommit> commits = DirectoryReader.listCommits(directory);
+            IndexCommit latestCommit = commits.get(commits.size() - 1);
 
-                return shadow.lucene7.org.apache.lucene.index.DirectoryReader.open(latestCommit);
-            }
-        } else {
-            try (var directory = shadow.lucene9.org.apache.lucene.index.Directory.open(indexDirectoryPath)) {
-                List<IndexCommit> commits = shadow.lucene9.org.apache.lucene.index.DirectoryReader.listCommits(directory);
-                IndexCommit latestCommit = commits.get(commits.size() - 1);
-
-                return shadow.lucene9.org.apache.lucene.index.DirectoryReader.open(latestCommit);
-            }
+            return DirectoryReader.open(
+                latestCommit,
+                6, // Minimum supported major version - Elastic 5/Lucene 6
+                null // No specific sorting required
+            );
         }
     }
 
