@@ -27,13 +27,20 @@ application {
   mainClass = 'myapp.Main'
 }
 
+tasks.named('shadowJar').configure {
+    enabled = false
+}
+
+
 task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    configurations = [project.configurations.lucene9]
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene7]
     archiveClassifier.set('lucene7-shadow')
     relocate 'org.apache.lucene', 'shadow.lucene7.org.apache.lucene'
 }
 
 task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
     archiveClassifier.set('lucene9-shadow')
     configurations = [project.configurations.lucene9]
     relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
@@ -63,15 +70,14 @@ dependencies {
 
     lucene7 "org.apache.lucene:lucene-core:7.7.3"
     lucene7 "org.apache.lucene:lucene-backward-codecs:7.7.3"
+    lucene7 "org.apache.lucene:lucene-backward-codecs:7.7.3"
 
     lucene9 "org.apache.lucene:lucene-core:9.11.1"
+    lucene9 "org.apache.lucene:lucene-backward-codecs:9.11.1"
     lucene9 "org.apache.lucene:lucene-backward-codecs:9.11.1"
 
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
-    // implementation group: 'org.apache.lucene', name: 'lucene-core'
-    // implementation group: 'org.apache.lucene', name: 'lucene-analysis-common'
-    // implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
 
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'

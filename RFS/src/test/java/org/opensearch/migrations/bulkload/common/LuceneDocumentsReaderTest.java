@@ -22,13 +22,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.BinaryDocValuesField;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.LeafReader;
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +33,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
+import shadow.lucene9.org.apache.lucene.document.BinaryDocValuesField;
+import shadow.lucene9.org.apache.lucene.document.Document;
+import shadow.lucene9.org.apache.lucene.document.StoredField;
+import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
+import shadow.lucene9.org.apache.lucene.index.LeafReader;
+import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -244,7 +244,7 @@ public class LuceneDocumentsReaderTest {
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
 
         // Create a custom LuceneDocumentsReader for testing
-        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), false, "dummy_field") {
+        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), false, "dummy_field", Version.fromString("ES_7.10")) {
             @Override
             protected DirectoryReader getReader() {
                 return mockReader;
