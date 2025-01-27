@@ -4,7 +4,7 @@ plugins {
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
     id 'me.champeau.jmh'
-    id 'com.gradleup.shadow'
+    id 'com.github.johnrengelman.shadow'
 
 }
 
@@ -23,9 +23,9 @@ configurations {
     lucene9
 }
 
-tasks.named('shadowJar').configure {
-    enabled = false
-}
+// tasks.named('shadowJar').configure {
+//     // enabled = false
+// }
 
 
 task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
@@ -66,14 +66,19 @@ dependencies {
 
     lucene7 "org.apache.lucene:lucene-core:7.7.3"
     lucene7 "org.apache.lucene:lucene-backward-codecs:7.7.3"
-    lucene7 "org.apache.lucene:lucene-backward-codecs:7.7.3"
 
     lucene9 "org.apache.lucene:lucene-core:9.11.1"
-    lucene9 "org.apache.lucene:lucene-backward-codecs:9.11.1"
+    lucene9 "org.apache.lucene:lucene-analysis-common:9.11.1"
     lucene9 "org.apache.lucene:lucene-backward-codecs:9.11.1"
 
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
+
+    testImplementation shadowLucene7.outputs.files
+    testImplementation shadowLucene9.outputs.files
+
+    testFixturesImplementation shadowLucene7.outputs.files
+    testFixturesImplementation shadowLucene9.outputs.files
 
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
@@ -135,6 +140,9 @@ tasks.register('prepareShadowJars') {
 }
 
 tasks.named('build') {
+    dependsOn prepareShadowJars
+}
+tasks.named('test') {
     dependsOn prepareShadowJars
 }
 

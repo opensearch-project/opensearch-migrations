@@ -15,6 +15,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
@@ -98,9 +100,9 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments()
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(0, 0)
             .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
@@ -162,9 +164,9 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments()
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(0, 0)
             .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
@@ -244,7 +246,7 @@ public class LuceneDocumentsReaderTest {
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
 
         // Create a custom LuceneDocumentsReader for testing
-        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), false, "dummy_field", Version.fromString("ES_7.10")) {
+        LuceneDocumentsReader reader = new LuceneDocumentsReader9(Paths.get("dummy"), false, "dummy_field") {
             @Override
             protected DirectoryReader getReader() {
                 return mockReader;
@@ -263,7 +265,7 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<RfsLuceneDocument> actualDocuments = reader.readDocuments()
+        List<RfsLuceneDocument> actualDocuments = reader.readDocuments(0, 0)
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));
@@ -307,7 +309,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
@@ -345,7 +347,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
 
         for (int i = 0; i < documentIds.size(); i++) {
