@@ -14,7 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import org.apache.lucene.codecs.CodecUtil;
+import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
 public interface GlobalMetadata {
     /**
