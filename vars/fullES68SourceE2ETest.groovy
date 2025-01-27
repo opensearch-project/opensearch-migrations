@@ -10,7 +10,7 @@ def call(Map config = [:]) {
         [
                 TypeMappingSanitizationTransformerProvider: [
                         regexIndexMappings: [
-                                ["(test_e2e_0001_$testUniqueId)", ".*", "\$1_transformed"], // Expected Transform
+                                ["(test_e2e_0001_.*)", ".*", "\$1_transformed"], // Expected Transform
                                 ["(.*)", "(.*)", "\$1"] // Type Union otherwise
                         ],
 

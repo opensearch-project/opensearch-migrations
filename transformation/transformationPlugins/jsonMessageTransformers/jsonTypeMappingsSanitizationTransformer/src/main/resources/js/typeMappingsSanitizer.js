@@ -103,23 +103,21 @@ function rewriteBulk(match, context) {
             doc = lines[ndi++];
         }
 
-        const { _type: typeName } = commandParameters;
+        const typeName = commandParameters._type ?? "_doc";
 
-        if (typeName) {
-            // Convert source index to target index.
-            const targetIndex = convertSourceIndexToTarget(
-                commandParameters._index,
-                typeName,
-                context.index_mappings,
-                context.regex_index_mappings
-            );
+        // Convert source index to target index.
+        const targetIndex = convertSourceIndexToTarget(
+            commandParameters._index,
+            typeName,
+            context.index_mappings,
+            context.regex_index_mappings
+        );
 
-            // If no valid target index, skip.
-            if (!targetIndex) {
-                continue;
-            }
-            retargetCommandParameters(commandParameters, targetIndex);
+        // If no valid target index, skip.
+        if (!targetIndex) {
+            continue;
         }
+        retargetCommandParameters(commandParameters, targetIndex);
         newLines.push(command);
         if (doc) newLines.push(doc);
 
@@ -252,7 +250,7 @@ function routeHttpRequest(source_document, context) {
         regex_index_mappings: context.regex_index_mappings,
         properties: context.source_properties
     };
-
+    print = false
     return route(
         documentAndContext,
         methodAndUri,
@@ -269,17 +267,17 @@ function routeHttpRequest(source_document, context) {
 
 function processBulkIndex(docBackfillPair, context) {
     const parameters = docBackfillPair.index
-    const typeName = parameters._type;
-    if (!typeName) return docBackfillPair
+    const sourceIndexName = parameters._index;
+    const typeName = parameters._type ?? "_doc";
 
     const targetIndex = convertSourceIndexToTarget(
-        parameters._index,
+        sourceIndexName,
         typeName,
         context.index_mappings,
         context.regex_index_mappings
     );
 
-    if (!targetIndex) return null;
+    if (!targetIndex) return [];
 
     docBackfillPair.index = retargetCommandParameters(parameters, targetIndex);
     return docBackfillPair;
@@ -307,6 +305,7 @@ function detectAndTransform(document, context) {
         return document;
     }
 }
+
 
 function main(context) {
     console.log("Context: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));

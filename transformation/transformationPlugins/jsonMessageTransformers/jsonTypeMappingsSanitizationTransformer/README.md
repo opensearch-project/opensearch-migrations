@@ -53,6 +53,18 @@ GET activity/post/_search
 }
 ```
 
+## Usage with Elasticsearch 6 or later
+
+After ES 6, there is no type on documents (or is forced to be the value _doc), however on ES 6, an index can be specified to 
+have a single type and requests with a different type will be rejected.
+
+This "type" is not stored on disk like it is on ES 5 and before, meaning in some circumstances we do not retrieve this type context
+(e.g. RFS on ES 6 created indices). In this case, the type mapping sanitization transformer can still be used to reroute these docs to
+a new index.
+
+The type name in this case will always be "_doc".
+
+
 ## Routing data to new indices
 
 The structure of the documents and indices need to change.  Options are to use separate indices, drop some of 

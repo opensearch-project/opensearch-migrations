@@ -11,6 +11,7 @@ import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -32,10 +33,17 @@ public class TypeMappingsSanitizationTransformerBulkTest {
             "indexc", Map.of(
                 "type2", "indexc"));
         var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-$1-$2")
-        );
+            List.of("time-(.*)", "(.*)", "time-$1-$2"),
+            List.of("(.*)", "_doc", "$1")
+            );
         var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(7, 10));
         indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
+    }
+
+    @AfterAll
+    static void tearDown() throws Exception {
+        indexTypeMappingRewriter.close();
+        indexTypeMappingRewriter = null;
     }
 
     @Test

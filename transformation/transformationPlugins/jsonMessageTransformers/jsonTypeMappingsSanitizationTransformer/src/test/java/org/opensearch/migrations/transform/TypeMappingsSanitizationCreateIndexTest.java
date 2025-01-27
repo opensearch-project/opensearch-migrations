@@ -43,70 +43,73 @@ public class TypeMappingsSanitizationCreateIndexTest {
     public void testPutSingleTypeToMissingTarget() throws Exception {
         final String index = "indexb"; // has multiple indices for its types
         var testString = TestRequestBuilder.makePutIndexRequest(index, false, true);
-        var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        var result = (Map<String, Object>)
-            indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        var expected = "{ \"method\": \"GET\", \"URI\": \"/\", \"protocol\" : \"HTTP/1.0\" }";
-        Assertions.assertEquals(JsonNormalizer.fromString(expected),
-            JsonNormalizer.fromObject(result));
+        try (var indexTypeMappingRewriter = makeIndexTypeMappingRewriter()) {
+            var result = (Map<String, Object>)
+                indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            var expected = "{ \"method\": \"GET\", \"URI\": \"/\", \"protocol\" : \"HTTP/1.0\" }";
+            Assertions.assertEquals(JsonNormalizer.fromString(expected),
+                JsonNormalizer.fromObject(result));
+        }
     }
 
     @Test
     public void testPutSingleTypeIndex() throws Exception {
         final String index = "indexa"; // has multiple indices for its types
         var testString = TestRequestBuilder.makePutIndexRequest(index, false, true);
-        var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        var result = (Map<String, Object>)
-            indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        var expectedString = "{\n" +
-            "  \"URI\" : \"/a_user\",\n" +
-            "  \"method\" : \"PUT\",\n" +
-            "  \"protocol\" : \"HTTP/1.1\",\n" +
-            "  \"payload\" : {\n" +
-            "    \"inlinedJsonBody\" : {\n" +
-            "      \"mappings\" : {\n" +
-            "        \"properties\" : {\n" +
-            "          \"email\" : {\n" +
-            "            \"type\" : \"keyword\"\n" +
-            "          },\n" +
-            "          \"name\" : {\n" +
-            "            \"type\" : \"text\"\n" +
-            "          },\n" +
-            "          \"user_name\" : {\n" +
-            "            \"type\" : \"keyword\"\n" +
-            "          }\n" +
-            "        }\n" +
-            "      },\n" +
-            "      \"settings\" : {\n" +
-            "        \"number_of_shards\" : 1\n" +
-            "      }\n" +
-            "    }\n" +
-            "  }\n" +
-            "}";
-        Assertions.assertEquals(JsonNormalizer.fromString(expectedString),
-            JsonNormalizer.fromObject(result));
+        try (var indexTypeMappingRewriter = makeIndexTypeMappingRewriter()) {
+            var result = (Map<String, Object>)
+                indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            var expectedString = "{\n" +
+                "  \"URI\" : \"/a_user\",\n" +
+                "  \"method\" : \"PUT\",\n" +
+                "  \"protocol\" : \"HTTP/1.1\",\n" +
+                "  \"payload\" : {\n" +
+                "    \"inlinedJsonBody\" : {\n" +
+                "      \"mappings\" : {\n" +
+                "        \"properties\" : {\n" +
+                "          \"email\" : {\n" +
+                "            \"type\" : \"keyword\"\n" +
+                "          },\n" +
+                "          \"name\" : {\n" +
+                "            \"type\" : \"text\"\n" +
+                "          },\n" +
+                "          \"user_name\" : {\n" +
+                "            \"type\" : \"keyword\"\n" +
+                "          }\n" +
+                "        }\n" +
+                "      },\n" +
+                "      \"settings\" : {\n" +
+                "        \"number_of_shards\" : 1\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString),
+                JsonNormalizer.fromObject(result));
+        }
     }
 
     @Test
     public void testMultiTypeIndexMerged() throws Exception {
         final String index = "socialTypes";
         var testString = makeMultiTypePutIndexRequest(index, true);
-        var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        var result = (Map<String, Object>)
-            indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        var expected = OBJECT_MAPPER.readTree(makeMultiTypePutIndexRequest(index, null));
-        var mappings = ((ObjectNode) expected.path(JsonKeysForHttpMessage.PAYLOAD_KEY)
-            .path(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY)
-            .path("mappings"));
-        mappings.remove("following");
-        var newProperties = new HashMap<String, Object>();
-        var user = mappings.remove("user");
-        user.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
-        var tweet = mappings.remove("tweet");
-        tweet.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
-        mappings.set("properties", OBJECT_MAPPER.valueToTree(newProperties));
-        ((ObjectNode)expected).put(JsonKeysForHttpMessage.URI_KEY, "/communal");
-        Assertions.assertEquals(JsonNormalizer.fromObject(expected), JsonNormalizer.fromObject(result));
+        try (var indexTypeMappingRewriter = makeIndexTypeMappingRewriter()) {
+            var result = (Map<String, Object>)
+                indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            var expected = OBJECT_MAPPER.readTree(makeMultiTypePutIndexRequest(index, null));
+            var mappings = ((ObjectNode) expected.path(JsonKeysForHttpMessage.PAYLOAD_KEY)
+                .path(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY)
+                .path("mappings"));
+            mappings.remove("following");
+            var newProperties = new HashMap<String, Object>();
+            var user = mappings.remove("user");
+            user.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
+            var tweet = mappings.remove("tweet");
+            tweet.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
+            mappings.set("properties", OBJECT_MAPPER.valueToTree(newProperties));
+            ((ObjectNode) expected).put(JsonKeysForHttpMessage.URI_KEY, "/communal");
+            Assertions.assertEquals(JsonNormalizer.fromObject(expected), JsonNormalizer.fromObject(result));
+        }
     }
 
     @Test
@@ -135,9 +138,10 @@ public class TypeMappingsSanitizationCreateIndexTest {
             "    }\n" +
             "  }\n" +
             "}";
-        var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        try (var indexTypeMappingRewriter = makeIndexTypeMappingRewriter()) {
+            Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        }
     }
 
     @Test
@@ -158,9 +162,9 @@ public class TypeMappingsSanitizationCreateIndexTest {
             "    }\n" +
             "  }\n" +
             "}";
-        var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        try (var indexTypeMappingRewriter = makeIndexTypeMappingRewriter()) {
+            Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+            Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
+        }
     }
-
 }
