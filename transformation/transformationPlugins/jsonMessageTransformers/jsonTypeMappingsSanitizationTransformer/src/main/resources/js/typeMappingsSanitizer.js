@@ -250,7 +250,6 @@ function routeHttpRequest(source_document, context) {
         regex_index_mappings: context.regex_index_mappings,
         properties: context.source_properties
     };
-    print = false
     return route(
         documentAndContext,
         methodAndUri,

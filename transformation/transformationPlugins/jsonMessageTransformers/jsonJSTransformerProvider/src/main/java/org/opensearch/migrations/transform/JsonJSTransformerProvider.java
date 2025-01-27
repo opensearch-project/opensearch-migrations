@@ -8,7 +8,7 @@ import lombok.SneakyThrows;
 
 public class JsonJSTransformerProvider implements IJsonTransformerProvider {
 
-    public static final String INITIALIZATION_SCRIPT = "initializationScript";
+    public static final String INITIALIZATION_SCRIPT_KEY = "initializationScript";
     public static final String BINDINGS_OBJECT = "bindingsObject";
 
     /**
@@ -45,21 +45,21 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
      */
     protected String getConfigUsageStr() {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, " +
-            "with keys: " + String.join("', '", new String[]{INITIALIZATION_SCRIPT, BINDINGS_OBJECT}) + "." +
-            INITIALIZATION_SCRIPT + " is a string consisting of Javascript which may define functions and ends in an evaluation that returns" +
+            "with keys: " + String.join("', '", new String[]{INITIALIZATION_SCRIPT_KEY, BINDINGS_OBJECT}) + "." +
+            INITIALIZATION_SCRIPT_KEY + " is a string consisting of Javascript which may define functions and ends in an evaluation that returns" +
             " a main function which takes in the " + BINDINGS_OBJECT + " and returns a transform function which takes in a json object and returns the transformed object." +
             BINDINGS_OBJECT + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array," +
             " or primitive type/wrapper and when passed as an argument into " +
-            "the function returned by the " + INITIALIZATION_SCRIPT + " will give the transform function.";
+            "the function returned by the " + INITIALIZATION_SCRIPT_KEY + " will give the transform function.";
     }
 
     @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
-        var requiredKeys = new String[]{INITIALIZATION_SCRIPT, BINDINGS_OBJECT};
+        var requiredKeys = new String[]{INITIALIZATION_SCRIPT_KEY, BINDINGS_OBJECT};
         var config = validateAndExtractConfig(jsonConfig, requiredKeys);
 
-        String script = (String) config.get(INITIALIZATION_SCRIPT);
+        String script = (String) config.get(INITIALIZATION_SCRIPT_KEY);
         Object bindingsObject;
         ObjectMapper objectMapper = new ObjectMapper();
         try {
@@ -70,7 +70,7 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
         }
 
         if (script == null) {
-            throw new IllegalArgumentException(INITIALIZATION_SCRIPT + " must be provided." + getConfigUsageStr());
+            throw new IllegalArgumentException(INITIALIZATION_SCRIPT_KEY + " must be provided." + getConfigUsageStr());
         }
 
         return new JavascriptTransformer(script, bindingsObject);

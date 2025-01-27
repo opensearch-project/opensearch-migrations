@@ -29,18 +29,16 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
         List<List<String>> regexIndexMappings,
         SourceProperties sourceProperties,
         Map<String, Object> featureFlags)
-        throws IOException
-    {
+        throws IOException {
         super(getScripts(),
             makeContext(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
     }
 
     private static Object
     makeContext(SourceProperties sourceProperties,
-                              Map<String, Object> featureFlagsIncoming,
-                              Map<String, Map<String, String>> indexMappingsIncoming,
-                              List<List<String>> regexIndexMappingsIncoming)
-    {
+                Map<String, Object> featureFlagsIncoming,
+                Map<String, Map<String, String>> indexMappingsIncoming,
+                List<List<String>> regexIndexMappingsIncoming) {
         var featureFlags = featureFlagsIncoming != null ? featureFlagsIncoming : Map.of();
         var indexMappings = indexMappingsIncoming != null ? indexMappingsIncoming : Map.of();
         // Regex index mappings apply if an index is not found in the index mappings
@@ -54,10 +52,11 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
             );
 
         return new MapProxyObject(Map.of(
-                "index_mappings", indexMappings,
-                "regex_index_mappings", regexIndexMappings,
-                "featureFlags", featureFlags,
-                "source_properties", sourceProperties == null ? Map.of() :
+            "index_mappings", indexMappings,
+            "regex_index_mappings", regexIndexMappings,
+            "featureFlags", featureFlags,
+            "source_properties", (sourceProperties == null) ?
+                Map.of() :
                 Map.of("version",
                     Map.of("major", sourceProperties.getVersion().getMajor(),
                         "minor", sourceProperties.getVersion().getMinor())
