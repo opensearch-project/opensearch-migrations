@@ -1,5 +1,5 @@
 plugins {
-    id 'application'
+    id 'org.opensearch.migrations.java-library-conventions'
     id 'java'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
@@ -21,10 +21,6 @@ ext {
 configurations {
     lucene7
     lucene9
-}
-
-application {
-  mainClass = 'myapp.Main'
 }
 
 tasks.named('shadowJar').configure {
@@ -140,12 +136,6 @@ tasks.register('prepareShadowJars') {
 
 tasks.named('build') {
     dependsOn prepareShadowJars
-}
-
-tasks.named('compileJava') {
-    doFirst {
-        println classpath.asPath
-    }
 }
 
 jmh {
