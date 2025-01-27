@@ -23,23 +23,21 @@ configurations {
     lucene9
 }
 
-task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    configurations = [configurations.lucene7]
-    archiveClassifier.set('lucene7-shadow')
-    relocate 'org.apache.lucene', 'shadow.lcucene7.org.apache.lucene'
-    from(configurations.lucene7.collect { it })
+application {
+  mainClass = 'myapp.Main'
+}
 
+task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    configurations = [project.configurations.lucene9]
+    archiveClassifier.set('lucene7-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene7.org.apache.lucene'
 }
 
 task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    include '*.jar'
-    configurations = [configurations.lucene9]
     archiveClassifier.set('lucene9-shadow')
-    // relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
-    // from(configurations.lucene9.collect { it })
-
+    configurations = [project.configurations.lucene9]
+    relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
 }
-
 
 dependencies {
     implementation project(':awsUtilities')
@@ -69,11 +67,11 @@ dependencies {
     lucene9 "org.apache.lucene:lucene-core:9.11.1"
     lucene9 "org.apache.lucene:lucene-backward-codecs:9.11.1"
 
-    // implementation shadowLucene7.outputs.files
-    // implementation shadowLucene9.outputs.files
-    implementation group: 'org.apache.lucene', name: 'lucene-core'
-    implementation group: 'org.apache.lucene', name: 'lucene-analysis-common'
-    implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
+    implementation shadowLucene7.outputs.files
+    implementation shadowLucene9.outputs.files
+    // implementation group: 'org.apache.lucene', name: 'lucene-core'
+    // implementation group: 'org.apache.lucene', name: 'lucene-analysis-common'
+    // implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
 
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
