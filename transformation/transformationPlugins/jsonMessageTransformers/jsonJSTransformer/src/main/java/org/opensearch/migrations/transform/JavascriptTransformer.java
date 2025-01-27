@@ -103,15 +103,18 @@ public class JavascriptTransformer implements IJsonTransformer {
 
         @Override
         public void flush() throws IOException {
+            super.flush();
             if (out instanceof ByteArrayOutputStream) {
                 // Note: We cannot replace 'baos' with pattern variable until MIGRATIONS-2344
                 var baos = (ByteArrayOutputStream) out;
-                logger.atLevel(level).setMessage("{}")
-                    .addArgument(() -> baos.toString(StandardCharsets.UTF_8))
-                    .log();
-                baos.reset();
+                out.flush();
+                if (baos.size() > 0) {
+                    logger.atLevel(level).setMessage("{}")
+                        .addArgument(() -> baos.toString(StandardCharsets.UTF_8))
+                        .log();
+                    baos.reset();
+                }
             }
-            super.flush();
         }
     }
 
