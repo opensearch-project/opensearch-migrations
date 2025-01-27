@@ -34,9 +34,14 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 @Tag("isolatedTest")
 @Slf4j
 class EndToEndTest extends BaseMigrationTest {
-
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.sources().stream()
+        Stream<Arguments> target_6_8_case = Stream.of(Arguments.of(
+                SearchClusterContainer.ES_V6_8_23,
+                SearchClusterContainer.ES_V6_8_23,
+                TransferMedium.SnapshotImage,
+                List.of(TemplateType.Legacy)
+        ));
+        Stream<Arguments> fullScenarios = SupportedClusters.sources().stream()
             .flatMap(sourceCluster -> {
                 // Determine applicable template types based on source version
                 List<TemplateType> templateTypes = Stream.concat(
@@ -55,6 +60,8 @@ class EndToEndTest extends BaseMigrationTest {
                             templateTypes)))
                     .collect(Collectors.toList()).stream();
             });
+
+        return Stream.concat(target_6_8_case, fullScenarios);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")

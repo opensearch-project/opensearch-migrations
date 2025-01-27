@@ -1,6 +1,7 @@
 package org.opensearch.migrations.cli;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.metadata.CreationResult;
@@ -94,7 +95,9 @@ public class Items {
             .append(result.getFailureType().getMessage());
 
         if (result.getFailureType().isFatal()) {
-            sb.append(": " + result.getException().getMessage());
+            sb.append(": " + Optional.ofNullable(result.getException()).map(Exception::getMessage).orElse("")
+
+            );
         }
 
         return sb.toString();
