@@ -8,9 +8,6 @@ plugins {
 
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'

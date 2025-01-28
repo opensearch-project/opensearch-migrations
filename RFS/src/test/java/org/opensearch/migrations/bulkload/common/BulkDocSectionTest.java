@@ -142,7 +142,7 @@ class BulkDocSectionTest {
     }
 
     @Test
-    @Tag("longTest") // Mark as long test to control memory usage during parallel execution
+    @Tag("isolatedTest") // Mark as isolated test to control memory usage during parallel execution
     void testLargeSourceDoc() throws JsonProcessingException {
         var writer = new ObjectMapper();
         // Generate a 25MB source document

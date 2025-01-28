@@ -55,7 +55,7 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
             context,
             serverUri,
             authTransformerFactory,
-            jsonTransformer,
+            () -> jsonTransformer,
             clientConnectionPool,
             new TrafficStreamLimiter(maxConcurrentOutstandingRequests),
             workTracker

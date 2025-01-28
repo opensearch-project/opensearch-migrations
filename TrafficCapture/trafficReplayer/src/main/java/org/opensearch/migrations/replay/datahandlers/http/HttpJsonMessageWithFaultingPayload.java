@@ -26,7 +26,11 @@ public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Ob
     }
 
     public ListKeyAdaptingCaseInsensitiveHeadersMap headers() {
-        return (ListKeyAdaptingCaseInsensitiveHeadersMap) this.get(JsonKeysForHttpMessage.HEADERS_KEY);
+        return (ListKeyAdaptingCaseInsensitiveHeadersMap) headersUnsafe();
+    }
+
+    protected Object headersUnsafe() {
+        return this.get(JsonKeysForHttpMessage.HEADERS_KEY);
     }
 
     public void setHeaders(ListKeyAdaptingCaseInsensitiveHeadersMap value) {

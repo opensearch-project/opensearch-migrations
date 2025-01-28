@@ -7,13 +7,12 @@ import org.opensearch.migrations.replay.datahandlers.http.ListKeyAdaptingCaseIns
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 import org.opensearch.migrations.transform.TransformationLoader;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 public class PayloadNotFoundTest {
     @Test
-    public void testTransformsPropagateExceptionProperly() throws JsonProcessingException {
+    public void testTransformsPropagateExceptionProperly() {
         final HttpJsonRequestWithFaultingPayload FAULTING_MAP = new HttpJsonRequestWithFaultingPayload();
         FAULTING_MAP.setMethod("PUT");
         FAULTING_MAP.setPath("/_bulk");
@@ -31,7 +30,9 @@ public class PayloadNotFoundTest {
             + "}\n";
 
         var transformer = new TransformationLoader().getTransformerFactoryLoader("newhost", null,
-            "[{\"TypeMappingSanitizationTransformerProvider\":\"\"}]");
+            "[{\"TypeMappingSanitizationTransformerProvider\":" +
+                "{\"sourceProperties\":{\"version\":{\"major\":7,\"minor\":10}}}" +
+                "}]");
         var e = Assertions.assertThrows(Exception.class,
             () -> transformer.transformJson(FAULTING_MAP));
         Assertions.assertTrue(((PayloadAccessFaultingMap)FAULTING_MAP.payload()).missingPayloadWasAccessed());

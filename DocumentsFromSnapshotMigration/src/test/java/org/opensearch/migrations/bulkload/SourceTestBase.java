@@ -282,7 +282,7 @@ public class SourceTestBase {
                         .toConnectionContext());
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> defaultDocTransformer),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)

@@ -167,13 +167,13 @@ public class LuceneDocumentsReader7 implements LuceneDocumentsReader {
                 String fieldName = field.name();
                 switch (fieldName) {
                     case "_id": {
-                        // ES 6+
+                        // Lucene >= 7 (ES 6+ created segments)
                         var idBytes = field.binaryValue();
                         id = Uid.decodeId(idBytes.bytes);
                         break;
                     }
                     case "_uid": {
-                        // ES <= 6
+                        // Lucene <= 6 (ES <= 5 created segments)
                         var combinedTypeId = field.stringValue().split("#", 2);
                         type = combinedTypeId[0];
                         id = combinedTypeId[1];
