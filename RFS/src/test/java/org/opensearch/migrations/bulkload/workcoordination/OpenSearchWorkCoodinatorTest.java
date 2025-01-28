@@ -11,6 +11,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.SupportedClusters;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator.DocumentModificationResult;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
@@ -29,10 +30,10 @@ import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 class OpenSearchWorkCoodinatorTest {
 
     public static final String THROTTLE_RESULT_VALUE = "slow your roll, dude";
-    public static final List<Version> testedVersions = SupportedClusters.targets().stream().map(ContainerVersion::getVersion).collect(Collectors.toList());
+    public static List<Version> testedVersions = SupportedClusters.targets().stream().map(ContainerVersion::getVersion).collect(Collectors.toList());
 
     static Stream<Arguments> provideTestedVersions() {
-        return testedVersions.stream().map(Arguments::of);
+        return Stream.concat(testedVersions.stream(), Stream.of(Version.fromString("ES 6.8"))).map(Arguments::of);
     }
 
     @AllArgsConstructor
