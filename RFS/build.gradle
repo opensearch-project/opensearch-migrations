@@ -20,10 +20,6 @@ configurations {
     lucene9
 }
 
-// tasks.named('shadowJar').configure {
-//     // enabled = false
-// }
-
 
 task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     mergeServiceFiles()
@@ -38,6 +34,19 @@ task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
     configurations = [project.configurations.lucene9]
     relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
 }
+
+tasks.register('prepareShadowJars') {
+    dependsOn shadowLucene7, shadowLucene9
+}
+
+tasks.named('build') {
+    dependsOn prepareShadowJars
+}
+
+tasks.named('test') {
+    dependsOn prepareShadowJars
+}
+
 
 dependencies {
     implementation project(':awsUtilities')
@@ -61,12 +70,12 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
-    lucene7 "org.apache.lucene:lucene-core:7.7.3"
-    lucene7 "org.apache.lucene:lucene-backward-codecs:7.7.3"
+    lucene7 "org.apache.lucene:lucene-core:${luceneVersion7}"
+    lucene7 "org.apache.lucene:lucene-backward-codecs:${luceneVersion7}"
 
-    lucene9 "org.apache.lucene:lucene-core:9.11.1"
-    lucene9 "org.apache.lucene:lucene-analysis-common:9.11.1"
-    lucene9 "org.apache.lucene:lucene-backward-codecs:9.11.1"
+    lucene9 "org.apache.lucene:lucene-core:${luceneVersion9}"
+    lucene9 "org.apache.lucene:lucene-analysis-common:${luceneVersion9}"
+    lucene9 "org.apache.lucene:lucene-backward-codecs:${luceneVersion9}"
 
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
@@ -130,17 +139,6 @@ dependencies {
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
-}
-
-tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene7, shadowLucene9
-}
-
-tasks.named('build') {
-    dependsOn prepareShadowJars
-}
-tasks.named('test') {
-    dependsOn prepareShadowJars
 }
 
 jmh {
