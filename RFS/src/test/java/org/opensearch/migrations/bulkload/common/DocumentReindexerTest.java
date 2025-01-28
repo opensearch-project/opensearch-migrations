@@ -239,7 +239,9 @@ class DocumentReindexerTest {
         int maxConcurrentRequests = 5;
         DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, () -> null);
 
-        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(String.valueOf(i)));
+        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
+            .map(i -> createTestDocument(String.valueOf(i)))
+            .onBackpressureBuffer(); // Enable buffering when back pressure is applied due to the delay on bulk request
 
         AtomicInteger concurrentRequests = new AtomicInteger(0);
         AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
