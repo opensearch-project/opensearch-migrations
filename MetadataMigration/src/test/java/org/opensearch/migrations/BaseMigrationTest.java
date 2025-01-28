@@ -46,8 +46,8 @@ abstract class BaseMigrationTest {
                 CompletableFuture.runAsync(targetCluster::start)
         ).join();
 
-        sourceOperations = new ClusterOperations(sourceCluster.getUrl());
-        targetOperations = new ClusterOperations(targetCluster.getUrl());
+        sourceOperations = new ClusterOperations(sourceCluster);
+        targetOperations = new ClusterOperations(targetCluster);
     }
 
     /**

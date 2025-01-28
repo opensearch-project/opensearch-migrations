@@ -44,7 +44,7 @@ public class SnapshotAndRestoreES5Test extends SourceTestBase {
             final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)
         ) {
             indexCreatedCluster.start();
-            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster.getUrl());
+            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster);
             // Create index and add documents on the source cluster
             indexCreatedOperations.createIndex(originalIndexName);
             indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
@@ -62,7 +62,7 @@ public class SnapshotAndRestoreES5Test extends SourceTestBase {
             this.targetCluster = targetCluster;
             startClusters();
             upgradedSourceCluster.putSnapshotData(localDirectoryES5.toString());
-            var upgradedSourceOperations = new ClusterOperations(upgradedSourceCluster.getUrl());
+            var upgradedSourceOperations = new ClusterOperations(upgradedSourceCluster);
             // Register snapshot repository and restore snapshot in ES 6 cluster
             upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
             upgradedSourceOperations.restoreSnapshot(es5Repo, snapshotNameEs5);
