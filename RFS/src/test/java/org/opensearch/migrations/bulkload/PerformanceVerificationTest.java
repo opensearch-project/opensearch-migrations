@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
@@ -66,7 +67,7 @@ public class PerformanceVerificationTest {
 
         // Create a custom LuceneDocumentsReader for testing
         AtomicInteger ingestedDocuments = new AtomicInteger(0);
-        var reader = new LuceneDocumentsReader9(Paths.get("dummy"), true, "dummy_field", Version.fromString("ES_7.10")) {
+        var reader = new LuceneDocumentsReader9(Paths.get("dummy"), true, "dummy_field") {
             @Override
             protected DirectoryReader getReader() {
                 return realReader;
@@ -109,7 +110,7 @@ public class PerformanceVerificationTest {
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", reader.readDocuments(), mockContext).block();
+            reindexer.reindex("test-index", reader.readDocuments(0, 0), mockContext).block();
         });
         reindexThread.start();
 
