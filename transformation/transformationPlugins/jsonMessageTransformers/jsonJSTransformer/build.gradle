@@ -1,0 +1,45 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+    id 'de.undercouch.download' version '5.4.0'  // For downloading JS packages
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+
+    implementation group: 'com.google.guava', name: 'guava'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
+
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: "org.graalvm.polyglot", name: 'polyglot'
+    implementation group: "org.graalvm.polyglot", name: 'js-community'
+
+    testImplementation project(':TrafficCapture:trafficReplayer')
+    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
+
+    testImplementation group:'org.junit.jupiter', name:'junit-jupiter-api'
+    testImplementation group:'org.junit.jupiter', name:'junit-jupiter-params'
+    testImplementation group:'org.slf4j', name: 'slf4j-api'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+}
+
+/**
+ * Task to download JS Packages
+ * This task is used to download any JS packages that the JsonJSTransformer plugin needs
+ * to run. It downloads the packages and makes them available to the plugins.
+ *
+ * Example of how to use this task to download a JS package:
+ *
+ * Note: should probably be moved to output to the build directory
+ *
+ * task downloadJSPackages(type: Download) {
+ *     src 'https://cdn.jsdelivr.net/npm/liquidjs/dist/liquid.browser.min.js'
+ *     dest new File(projectDir, 'src/main/resources/liquid.min.js')
+ *     overwrite true
+ * }
+ *
+ * processResources.dependsOn downloadJSPackages
+ */

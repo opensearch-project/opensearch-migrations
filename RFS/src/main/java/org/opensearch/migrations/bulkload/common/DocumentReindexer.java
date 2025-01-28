@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -23,13 +24,15 @@ public class DocumentReindexer {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
     private final int maxConcurrentWorkItems;
-    private final IJsonTransformer transformer;
+    private final Supplier<IJsonTransformer> transformerSupplier;
 
     public Mono<Void> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
+        // Transformers cannot be used simultaneously
+        var threadSafeTransformer = ThreadLocal.withInitial(transformerSupplier);
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var bulkDocs = documentStream
             .publishOn(scheduler, 1)
-            .map(doc -> transformDocument(doc,indexName));
+            .map(doc -> transformDocument(threadSafeTransformer, doc,indexName));
 
         return this.reindexDocsInParallelBatches(bulkDocs, indexName, context)
             .doOnSuccess(unused -> log.debug("All batches processed"))
@@ -53,7 +56,8 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    BulkDocSection transformDocument(RfsLuceneDocument doc, String indexName) {
+    BulkDocSection transformDocument(ThreadLocal<IJsonTransformer> transformerLocal, RfsLuceneDocument doc, String indexName) {
+        var transformer = transformerLocal.get();
         var original = new BulkDocSection(doc.id, indexName, doc.type, doc.source, doc.routing);
         if (transformer != null) {
             final Object transformedDoc = transformer.transformJson(original.toMap());

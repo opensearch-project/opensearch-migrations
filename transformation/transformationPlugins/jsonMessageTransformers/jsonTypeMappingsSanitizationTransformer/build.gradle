@@ -5,13 +5,14 @@ plugins {
 }
 
 dependencies {
-    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJinjavaTransformer')
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
 
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.google.guava', name: 'guava'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
 
     testFixturesImplementation project(':TrafficCapture:trafficReplayer')
     testFixturesImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')

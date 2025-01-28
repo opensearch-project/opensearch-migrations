@@ -6,7 +6,9 @@ import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
@@ -261,16 +263,11 @@ public class RfsMigrateDocuments {
         var connectionContext = arguments.targetArgs.toConnectionContext();
 
 
-        String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
-        if (docTransformerConfig != null) {
-            log.atInfo().setMessage("Doc Transformations config string: {}")
-                    .addArgument(docTransformerConfig).log();
-        } else {
-            log.atInfo().setMessage("Using default transformation config: {}")
-                    .addArgument(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG).log();
-            docTransformerConfig = DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG;
-        }
-        IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
+        var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
+            .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+        log.atInfo().setMessage("Doc Transformations config string: {}")
+                .addArgument(docTransformerConfig).log();
+        Supplier<IJsonTransformer> docTransformerSupplier = () -> new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
         try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
              var workCoordinator = new OpenSearchWorkCoordinator(
@@ -285,7 +282,7 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformer);
+                docTransformerSupplier);
 
             SourceRepo sourceRepo;
             if (snapshotLocalDirPath == null) {

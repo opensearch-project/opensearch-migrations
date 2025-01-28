@@ -13,6 +13,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -85,7 +86,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         IRootReplayerContext context,
         URI serverUri,
         IAuthTransformerFactory authTransformerFactory,
-        IJsonTransformer jsonTransformer,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
         ClientConnectionPool clientConnectionPool,
         TrafficStreamLimiter trafficStreamLimiter,
         IStreamableWorkTracker<Void> workTracker
@@ -94,7 +95,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             context,
             serverUri,
             authTransformerFactory,
-            jsonTransformer,
+            jsonTransformerSupplier,
             trafficStreamLimiter,
             workTracker,
             new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry())

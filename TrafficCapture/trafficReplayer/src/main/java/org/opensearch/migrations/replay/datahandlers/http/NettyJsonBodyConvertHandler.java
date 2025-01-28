@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import java.util.Map;
-
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
@@ -52,27 +50,16 @@ public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
         var protectionArtifacts = protectByteBufInHttpMessage(httpJsonMessage);
 
         Object returnedObject = transformer.transformJson(httpJsonMessage);
-        if(!(returnedObject instanceof Map)) {
-            throw new TransformationException(
-                new IllegalArgumentException("Returned object from transformation not map, instead was "
-                    + returnedObject.getClass().getName())
-            );
-        }
-        @SuppressWarnings("unchecked")
-        var returnedObjectMap = (Map<String, ?>) returnedObject;
 
+        var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
 
-        if (returnedObject != httpJsonMessage) {
-            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObjectMap);
-        }
+        unProtectByteBufInHttpMessage(transformedRequest, protectionArtifacts);
 
-        unProtectByteBufInHttpMessage(httpJsonMessage, protectionArtifacts);
-
-        if (originalHttpJsonMessage != httpJsonMessage) {
+        if (originalHttpJsonMessage != transformedRequest) {
             // clear originalHttpJsonMessage for faster garbage collection if not persisted along
             originalHttpJsonMessage.clear();
         }
-        return httpJsonMessage;
+        return transformedRequest;
     }
 
     @Value

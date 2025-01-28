@@ -6,7 +6,7 @@ on:
     tags:
       - "*"
 env:
-  java-version: '11'
+  java-version: '17'
   gradle-version: '8.0.2'
 
 permissions:
