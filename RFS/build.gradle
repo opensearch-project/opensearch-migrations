@@ -1,5 +1,5 @@
 plugins {
-    id 'org.opensearch.migrations.java-library-conventions'
+    id 'application'
     id 'java'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'

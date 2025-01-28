@@ -64,7 +64,7 @@ dependencies {
 }
 
 application {
-    mainClass.set('org.opensearch.migrations.RfsMigrateDocuments')
+    mainClassName = 'org.opensearch.migrations.RfsMigrateDocuments'
 }
 
 // Cleanup additional docker build directory

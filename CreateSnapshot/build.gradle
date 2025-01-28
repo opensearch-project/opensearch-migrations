@@ -22,5 +22,5 @@ dependencies {
 }
 
 application {
-    mainClass.set('org.opensearch.migrations.CreateSnapshot')
+    mainClassName = 'org.opensearch.migrations.CreateSnapshot'
 }

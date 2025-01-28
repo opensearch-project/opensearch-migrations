@@ -145,11 +145,11 @@ subprojects {
         dependsOn project.javadoc
 
         testLogging {
-            events = ["passed", "skipped", "failed"]
-            exceptionFormat = "full"
-            showExceptions = true
-            showCauses = true
-            showStackTraces = true
+            events "passed", "skipped", "failed"
+            exceptionFormat "full"
+            showExceptions true
+            showCauses true
+            showStackTraces true
         }
         maxParallelForks = gradle.startParameter.maxWorkerCount
 
@@ -283,7 +283,7 @@ subprojects {
             repositories {
                 maven { url = "${rootProject.buildDir}/repository"}
                 maven {
-                    url = "https://aws.oss.sonatype.org/content/repositories/snapshots"
+                    url "https://aws.oss.sonatype.org/content/repositories/snapshots"
                     name = 'staging'
                 }
             }
@@ -304,9 +304,9 @@ subprojects {
         classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
         reports {
             xml.required = true
-            xml.outputLocation = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
             html.required = true
-            html.outputLocation = file("${buildDir}/reports/jacoco/test/html")
+            html.destination file("${buildDir}/reports/jacoco/test/html")
         }
     }
 }
@@ -356,9 +356,9 @@ task mergeJacocoReports(type: JacocoReport) {
 
     reports {
         xml.required = true
-        xml.outputLocation = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
+        xml.destination = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
         html.required = true
-        html.outputLocation = file("${buildDir}/reports/jacoco/mergedReport/html")
+        html.destination = file("${buildDir}/reports/jacoco/mergedReport/html")
     }
 }
 

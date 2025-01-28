@@ -33,5 +33,5 @@ dependencies {
 }
 
 application {
-    mainClass.set('org.opensearch.migrations.DataGenerator')
+    mainClassName = 'org.opensearch.migrations.DataGenerator'
 }
