@@ -11,7 +11,6 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.SupportedClusters;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator.DocumentModificationResult;
 import org.opensearch.migrations.testutils.CloseableLogSetup;

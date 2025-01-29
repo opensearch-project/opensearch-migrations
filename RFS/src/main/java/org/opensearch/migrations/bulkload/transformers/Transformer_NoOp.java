@@ -1,9 +1,9 @@
 package org.opensearch.migrations.bulkload.transformers;
 
+import java.util.List;
+
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-
-import java.util.List;
 
 public class Transformer_NoOp implements Transformer {
 
