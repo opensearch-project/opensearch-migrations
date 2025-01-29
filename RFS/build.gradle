@@ -1,5 +1,5 @@
 plugins {
-    id 'application'
+    id 'org.opensearch.migrations.java-library-conventions'
     id 'java'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
@@ -12,11 +12,6 @@ ext {
     dataset = findProperty('dataset') ?: 'skip_dataset'
     luceneVersion7 = '7.7.3'
     luceneVersion9 = '9.11.1'
-}
-
-// Disable default shadow jar, we are using shadow jar for loading multiple lucene versions below
-tasks.named('shadowJar').configure {
-    enabled = false
 }
 
 configurations {
