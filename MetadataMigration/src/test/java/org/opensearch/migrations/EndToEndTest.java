@@ -36,10 +36,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        var sourceClusters = SupportedClusters.sources().stream()
-            .filter(c -> VersionMatchers.isES_5_X.negate().test(c.getVersion())) // ES5 isn't supported for metadata yet
-            .collect(Collectors.toList());
-        return sourceClusters.stream()
+        return getSupportedClusters().stream()
             .flatMap(sourceCluster -> {
                 // Determine applicable template types based on source version
                 List<TemplateType> templateTypes = Stream.concat(

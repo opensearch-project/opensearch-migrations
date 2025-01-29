@@ -96,7 +96,7 @@ public class LuceneDocumentsReader9 implements LuceneDocumentsReader {
             var commits = DirectoryReader.listCommits(directory);
             var latestCommit = commits.get(commits.size() - 1);
 
-            return DirectoryReader.open(latestCommit, 0, null);
+            return DirectoryReader.open(latestCommit);
         }
     }
 
