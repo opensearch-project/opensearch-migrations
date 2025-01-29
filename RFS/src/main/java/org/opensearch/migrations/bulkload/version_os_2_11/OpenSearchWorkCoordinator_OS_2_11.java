@@ -74,6 +74,8 @@ public class OpenSearchWorkCoordinator_OS_2_11 extends OpenSearchWorkCoordinator
             return INDEX_NAME + "/_update/" + workItemId;
         }
 
+        protected String getPathForSingleDocumentUpdateByQuery() { return INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1"; }
+
         protected String getPathForGets(String workItemId) {
             return INDEX_NAME + "/_doc/" + workItemId;
         }
