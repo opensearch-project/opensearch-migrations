@@ -23,9 +23,9 @@ import reactor.core.scheduler.Schedulers;
 import shadow.lucene9.org.apache.lucene.document.Document;
 import shadow.lucene9.org.apache.lucene.document.StoredField;
 import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
-import shadow.lucene9.org.apache.lucene.index.IndexReader;
 import shadow.lucene9.org.apache.lucene.index.IndexWriter;
 import shadow.lucene9.org.apache.lucene.index.IndexWriterConfig;
+import shadow.lucene9.org.apache.lucene.index.StoredFields;
 import shadow.lucene9.org.apache.lucene.store.ByteBuffersDirectory;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
@@ -73,9 +73,9 @@ public class PerformanceVerificationTest {
             }
 
             @Override
-            protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
+            protected RfsLuceneDocument getDocument(StoredFields fields, int docId, boolean isLive) {
                 ingestedDocuments.incrementAndGet();
-                return super.getDocument(reader, docId, isLive);
+                return super.getDocument(fields, docId, isLive);
             }
         };
 

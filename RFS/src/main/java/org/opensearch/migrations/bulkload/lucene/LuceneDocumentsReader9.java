@@ -16,9 +16,9 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import shadow.lucene9.org.apache.lucene.document.Document;
 import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
-import shadow.lucene9.org.apache.lucene.index.IndexReader;
 import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
 import shadow.lucene9.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
+import shadow.lucene9.org.apache.lucene.index.StoredFields;
 import shadow.lucene9.org.apache.lucene.store.FSDirectory;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
@@ -132,7 +132,7 @@ public class LuceneDocumentsReader9 implements LuceneDocumentsReader {
         return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
             .subscribeOn(Schedulers.parallel())
             .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                    getDocument(segmentReader.storedFields(), docIdx, true) : // Get document, returns null to skip malformed docs
                     null));
     }
 
@@ -143,10 +143,10 @@ public class LuceneDocumentsReader9 implements LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int docSegId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(StoredFields fields, int docSegId, boolean isLive) {
         Document document;
         try {
-            document = reader.document(docSegId);
+            document = fields.document(docSegId);
         } catch (IOException e) {
             log.atError()
                 .setCause(e)

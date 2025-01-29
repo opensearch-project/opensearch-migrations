@@ -16,7 +16,7 @@ public interface LuceneDocumentsReader {
     @Slf4j
     @AllArgsConstructor
     public static class Factory {
-        public ClusterSnapshotReader snapshotReader;
+        private final ClusterSnapshotReader snapshotReader;
 
         public LuceneDocumentsReader getReader(Path path) {
             if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_6_X).test(snapshotReader.getVersion())) {
