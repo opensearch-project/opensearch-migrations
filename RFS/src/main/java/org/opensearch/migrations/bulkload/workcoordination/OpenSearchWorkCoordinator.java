@@ -516,7 +516,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var totalHits = getTotalHitsFromSearchResponse(payload);
             // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
             // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
-            if (totalHits == 0 && !payload.path("hits").path("total").path("relation").textValue().equals("eq")) {
+            var relationValue = payload.path("hits").path("total").path("relation").textValue();
+            if (totalHits == 0 && relationValue != null && relationValue.equals("eq")) {
                 throw new IllegalStateException("Querying for notYetCompleted work returned 0 hits with an unexpected total relation.");
             }
             return totalHits;
@@ -600,7 +601,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
+            INDEX_NAME + "/_update_by_query?refresh=true&size=1",
             null,
             body
         );
@@ -664,7 +665,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             log.warn("Couldn't find the top level 'hits' field, returning no work item");
             throw new AssignedWorkDocumentNotFoundException(response);
         }
-        final var numDocs = resultHitsUpper.path("total").path("value").longValue();
+//        final var numDocs = resultHitsUpper.path("total").path("value").longValue();
+        final var numDocs = resultHitsUpper.path("total").longValue();
         if (numDocs == 0) {
             throw new AssignedWorkDocumentNotFoundException(response);
         } else if (numDocs != 1) {
