@@ -1,8 +1,10 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 import java.time.Clock;
 import java.util.function.Consumer;
+
 import org.opensearch.migrations.bulkload.workcoordination.AbstractedHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+
 import com.fasterxml.jackson.databind.JsonNode;
 
 public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator {    

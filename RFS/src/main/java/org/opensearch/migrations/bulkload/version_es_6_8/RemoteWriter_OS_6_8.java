@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 
-import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -13,6 +12,8 @@ import org.opensearch.migrations.cluster.ClusterWriter;
 import org.opensearch.migrations.cluster.RemoteCluster;
 import org.opensearch.migrations.metadata.GlobalMetadataCreator;
 import org.opensearch.migrations.metadata.IndexCreator;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class RemoteWriter_OS_6_8 implements RemoteCluster, ClusterWriter {
