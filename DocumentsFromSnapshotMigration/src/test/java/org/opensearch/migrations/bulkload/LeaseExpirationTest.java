@@ -29,7 +29,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.Network;
 
-@Tag("longTest")
+@Tag("isolatedTest")
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
@@ -38,15 +38,15 @@ public class LeaseExpirationTest extends SourceTestBase {
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testProcessExitsAsExpected(boolean forceMoreSegments) {
-        // Sending 5 docs per request with 4 requests concurrently with each taking 0.250 second is 80 docs/sec
-        // will process 9680 docs in 121 seconds. With 40s lease duration, expect to be finished in 4 leases.
+        // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
+        // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
         // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
         // isolated.
-        // 2 Shards, for each shard, expect three status code 2 and one status code 0 (4 leases)
+        // 2 Shards, for each shard, expect two status code 2 and one status code 0 (3 leases)
         int shards = 2;
-        int indexDocCount = 9680 * shards;
-        int migrationProcessesPerShard = 4;
+        int indexDocCount = 1640 * shards;
+        int migrationProcessesPerShard = 3;
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
@@ -144,7 +144,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
                 deleteTree(tempDirLucene);
-            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount * 2);
+            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
             // Assert doc count on the target cluster matches source
             checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
@@ -181,15 +181,15 @@ public class LeaseExpirationTest extends SourceTestBase {
     ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
-        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 250);
+        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 500);
 
         // Set to less than 2x lease time to ensure leases aren't doubling
-        int timeoutSeconds = 60;
+        int timeoutSeconds = 35;
 
         String[] additionalArgs = {
-            "--documents-per-bulk-request", "5",
-            "--max-connections", "4",
-            "--initial-lease-duration", "PT40s"
+            "--documents-per-bulk-request", "10",
+            "--max-connections", "2",
+            "--initial-lease-duration", "PT20s"
         };
 
         ProcessBuilder processBuilder = setupProcess(

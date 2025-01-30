@@ -267,7 +267,7 @@ public class LuceneDocumentsReader {
 
         // Start at
         int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
-        int numDocsToProcessInSegment = segmentReader.maxDoc() - startDocIdInSegment;
+        int numDocsToProcessInSegment = segmentReader.numDocs() - startDocIdInSegment;
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
@@ -277,7 +277,7 @@ public class LuceneDocumentsReader {
             s == null ? segmentReader.toString() : s
         );
 
-        log.atInfo().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
+        log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(readerAndBase.reader)
                 .addArgument(startDocIdInSegment)
                 .addArgument(numDocsToProcessInSegment)

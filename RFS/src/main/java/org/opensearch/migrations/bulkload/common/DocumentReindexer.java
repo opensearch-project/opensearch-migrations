@@ -66,7 +66,7 @@ public class DocumentReindexer {
      */
     Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);
-        log.atInfo().setMessage("Last doc is: Source Index " + indexName + "Shard " + " Lucene Doc Number " + lastDoc.luceneDocNumber).log();
+        log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.luceneDocNumber).log();
 
         List<BulkDocSection> bulkDocSections = docsBatch.stream()
                 .map(rfsDocument -> rfsDocument.document)
