@@ -86,24 +86,32 @@ task buildDockerImages() {
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
 
+def commonExclusions = ['**/build/**', '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**']
 spotless {
     format 'misc', {
-        target '**/*.gradle', '.gitattributes', '.gitignore'
-        targetExclude '**/build/**'
+        target fileTree('.') {
+            include '**/*.gradle', '.gitattributes', '.gitignore'
+            exclude commonExclusions
+        }
         trimTrailingWhitespace()
         indentWithSpaces()
         endWithNewline()
 
     }
     yaml {
-        target '**/*.yml'
-        targetExclude '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**'
+        target fileTree('.') {
+            include '**/*.yml'
+            exclude commonExclusions
+        }
         trimTrailingWhitespace()
         indentWithSpaces()
         endWithNewline()
     }
     json {
-        target 'deployment/cdk/opensearch-service-migration/*.json'
+        target fileTree('.') {
+            include '*.json'
+            exclude commonExclusions
+        }
         prettier()
         endWithNewline()
     }
