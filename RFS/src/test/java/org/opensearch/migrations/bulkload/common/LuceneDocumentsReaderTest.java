@@ -41,6 +41,7 @@ import shadow.lucene9.org.apache.lucene.document.StoredField;
 import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
 import shadow.lucene9.org.apache.lucene.index.LeafReader;
 import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
+import shadow.lucene9.org.apache.lucene.index.StoredFields;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -231,8 +232,10 @@ public class LuceneDocumentsReaderTest {
             when(leafReader.maxDoc()).thenReturn(docsPerSegment);
             when(leafReader.getLiveDocs()).thenReturn(null); // Assume all docs are live
 
+            var storedFields = mock(StoredFields.class);
+            when(leafReader.storedFields()).thenReturn(storedFields);
             // Wrap the document method to track concurrency
-            when(leafReader.document(anyInt())).thenAnswer(invocation -> {
+            when(storedFields.document(anyInt())).thenAnswer(invocation -> {
                 concurrentDocReads.incrementAndGet();
                 startLatch.await(); // Wait for the latch to be released before proceeding to track concurrency
                 Document doc = new Document();
