@@ -405,11 +405,12 @@ public class TrafficReplayer {
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
 
+            var transformationLoader = new TransformationLoader();
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
                 authTransformer,
-                () -> new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
+                () -> transformationLoader.getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
