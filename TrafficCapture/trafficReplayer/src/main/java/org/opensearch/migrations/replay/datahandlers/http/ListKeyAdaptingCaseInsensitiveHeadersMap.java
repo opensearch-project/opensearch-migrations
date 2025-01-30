@@ -12,7 +12,7 @@ import lombok.EqualsAndHashCode;
  * The underlying case-insensitive headers map allows for headers to be stored as a multimap,
  * with a list of values.  However, this class spares callers (and third party packages) the
  * difficulty of working with a multimap when they might just have a single value.
- *
+ * <p>
  * This is a kludge to provide that.  Note that this code doesn't do conversions such as joining
  * or splitting.  If more control is required, callers should use the multimap interfaces.
  */
@@ -67,5 +67,10 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
     @Override
     public Set<Entry<String, Object>> entrySet() {
         return (Set<Entry<String, Object>>) (Object) strictHeadersMap.entrySet();
+    }
+
+    @Override
+    public boolean containsKey(Object key) {
+        return strictHeadersMap.containsKey(key);
     }
 }
