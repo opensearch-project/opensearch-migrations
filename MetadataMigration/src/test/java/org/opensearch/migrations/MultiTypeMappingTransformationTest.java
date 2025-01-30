@@ -39,7 +39,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         ) {
             indexCreatedCluster.start();
 
-            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster.getUrl());
+            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster);
 
             // Create index and add documents on the source cluster
             indexCreatedOperations.createIndex(originalIndexName);
@@ -63,7 +63,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             upgradedSourceCluster.putSnapshotData(localDirectory.toString());
 
-            var upgradedSourceOperations = new ClusterOperations(upgradedSourceCluster.getUrl());
+            var upgradedSourceOperations = new ClusterOperations(upgradedSourceCluster);
 
             // Register snapshot repository and restore snapshot in ES 6 cluster
             upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
@@ -129,7 +129,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         ) {
             es5.start();
 
-            var clusterOperations = new ClusterOperations(es5.getUrl());
+            var clusterOperations = new ClusterOperations(es5);
 
             var originalIndexName = "test_index";
             String body = "{" +

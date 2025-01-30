@@ -66,7 +66,7 @@ public class OpenSearchClientFactory {
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
         if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
-        } else if (VersionMatchers.isES_6_X.test(version)) {
+        } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
             return OpenSearchClient_ES_6_8.class;
         } else {
             throw new IllegalArgumentException("Unsupported version: " + version);
