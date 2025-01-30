@@ -9,10 +9,10 @@ import os
 from collections import deque
 import logging
 import json
+import subprocess
 
 # Disable InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,6 +56,45 @@ def send_multi_type_request(session, index_name, type_name, payload, url_base, a
         return None, str(e), None
 
 
+def send_request_sigv4(index_suffix, no_refresh, multi_type=False, type_name=None):
+    """Send a request using console clusters command with SigV4 authentication."""
+    timestamp = datetime.now().isoformat()
+    refresh_param = "false" if no_refresh else "true"
+
+    if multi_type:
+        index_name = "multi_type_index"
+        if type_name == "type1":
+            payload = json.dumps({
+                "title": "This is title of type 1",
+                "timestamp": timestamp
+            })
+        else:
+            payload = json.dumps({
+                "content": "This is content of type 2",
+                "contents": "This is contents of type 2",
+                "timestamp": timestamp
+            })
+        url_path = f"{index_name}/{type_name}/{timestamp}"
+    else:
+        index_name = f"simple_doc_{index_suffix}"
+        payload = json.dumps({
+            "timestamp": timestamp,
+            "new_field": "apple"
+        })
+        url_path = f"{index_name}/_doc/{timestamp}"
+
+    command = (
+        f'console clusters curl -XPUT source_cluster "{url_path}?refresh={refresh_param}" '
+        f'-H "Content-Type: application/json" -d \'{payload}\''
+    )
+
+    try:
+        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        return 200, timestamp, json.loads(result.stdout)
+    except subprocess.CalledProcessError as e:
+        return None, str(e), None
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
@@ -69,6 +108,9 @@ def parse_args():
                              "Helpful for piping to a file or other utility.")
     parser.add_argument("--requests-per-sec", type=float, default=10.0, help="Target requests per second to be sent.")
     parser.add_argument("--no-refresh", action='store_true', help="Flag to disable refresh after each request.")
+    parser.add_argument("--basic-auth", action='store_true', help="Use basic authentication")
+    parser.add_argument("--no-auth", action='store_true', help="Use no authentication")
+    parser.add_argument("--sigv4-auth", action='store_true', help="Use SigV4 authentication")
     return parser.parse_args()
 
 
@@ -96,16 +138,16 @@ def calculate_throughput(request_timestamps):
 def calculate_sleep_time(request_timestamps, target_requests_per_sec):
     """
     Calculate the sleep time based on the target requests per second.
-
+    
     This function calculates the sleep time required to achieve the target requests per second.
     It takes into account average time per iteration over the last few seconds.
     The sleep time is adjusted based on the difference between the target time
     per iteration and the actual average time per iteration.
-
+    
     Args:
         request_timestamps (list): A list of datetime objects representing the timestamps of the recent requests.
         target_requests_per_sec (float): The target number of requests per second.
-
+    
     Returns:
         float: The calculated sleep time in seconds.
     """
@@ -122,10 +164,50 @@ def calculate_sleep_time(request_timestamps, target_requests_per_sec):
 
 
 def main():
+    """
+    How to Run:
+    - Basic Auth: python script.py --basic-auth --username admin --password secret
+    - No Auth: python script.py --no-auth
+    - SigV4 Auth: python script.py --sigv4-auth
+
+    Note: Running 'python script.py' without specifying an auth type will result in an error.
+
+    The script supports additional parameters:
+    --endpoint: Cluster endpoint URL
+    --enable_multi_type: Enable sending documents to a multi-type index
+    --no-clear-output: Prevent clearing the output before each run
+    --requests-per-sec: Set target requests per second (default: 10.0)
+    --no-refresh: Disable refresh after each request
+
+    Default behavior:
+    - Endpoint: Uses SOURCE_DOMAIN_ENDPOINT environment variable or 'https://capture-proxy:9200'
+    - Authentication: None (must be specified)
+    - Index Type: Simple document requests (unless --enable_multi_type is used)
+    - Output Clearing: Clears output before each run (unless --no-clear-output is specified)
+    - Request Rate: 10 requests per second
+    - Refresh: Enabled after each request (unless --no-refresh is specified)
+    """
+
     args = parse_args()
 
+    # Check if exactly one auth type is specified
+    auth_types = [args.basic_auth, args.no_auth, args.sigv4_auth]
+    if sum(auth_types) != 1:
+        logger.error(
+            "Error: You must specify exactly one authentication type (--basic-auth, --no-auth, or --sigv4-auth)"
+        )
+        sys.exit(1)
+
+    # Handle basic auth
+    if args.basic_auth:
+        if not (args.username and args.password):
+            logger.error("Error: --basic-auth requires both --username and --password")
+            sys.exit(1)
+        auth = (args.username, args.password)
+    else:
+        auth = None
+
     url_base = args.endpoint or os.environ.get('SOURCE_DOMAIN_ENDPOINT', 'https://capture-proxy:9200')
-    auth = (args.username, args.password) if args.username and args.password else None
 
     session = requests.Session()
     keep_alive_headers = {'Connection': 'keep-alive'}
@@ -136,11 +218,10 @@ def main():
     total_requests = 0
 
     while True:
-        total_requests = total_requests + 1
+        total_requests += 1
         request_timestamps.append(datetime.now())
         current_index = get_current_date_index()
 
-        # Alternate between sending multi-type requests of 'type1' and 'type2'
         if args.enable_multi_type:
             if total_requests % 2 != 0:
                 type_name = "type1"
@@ -148,14 +229,24 @@ def main():
             else:
                 type_name = "type2"
                 payload = {"content": "This is content of type 2", "contents": "This is contents of type 2"}
-            response_code, request_timestamp_or_error, response_json = send_multi_type_request(
-                session, "multi_type_index", type_name, payload, url_base, auth, keep_alive_headers, args.no_refresh
-            )
-        # Send simple document request
         else:
-            response_code, request_timestamp_or_error, response_json = send_request(
-                session, current_index, url_base, auth, keep_alive_headers, args.no_refresh
+            type_name = None
+            payload = None
+
+        if args.sigv4_auth:
+            response_code, request_timestamp_or_error, response_json = send_request_sigv4(
+                current_index, args.no_refresh, args.enable_multi_type, type_name
             )
+        else:
+            if args.enable_multi_type:
+                response_code, request_timestamp_or_error, response_json = send_multi_type_request(
+                    session, "multi_type_index", type_name, payload, url_base, auth, keep_alive_headers, args.no_refresh
+                )
+            else:
+                response_code, request_timestamp_or_error, response_json = send_request(
+                    session, current_index, url_base, auth, keep_alive_headers, args.no_refresh
+                )
+
         update_counts(response_code, total_counts)
 
         if response_code is not None:
@@ -183,10 +274,9 @@ def main():
 
         sleep_time = calculate_sleep_time(request_timestamps, args.requests_per_sec)
 
-        # Flush the stdout buffer to ensure the log messages are displayed immediately and in sync
         sys.stdout.flush()
 
-        if (sleep_time > 0):
+        if sleep_time > 0:
             time.sleep(sleep_time)
 
         if time.time() - start_time >= 5:
@@ -194,7 +284,6 @@ def main():
             session = requests.Session()
             start_time = time.time()
 
-        # Remove timestamps older than 5 seconds
         while request_timestamps and (datetime.now() - request_timestamps[0]).total_seconds() > 5:
             request_timestamps.popleft()
 
