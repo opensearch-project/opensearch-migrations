@@ -9,7 +9,6 @@ opensearch-helm-enabled: true
 
 # Define specific dependency configuration
 opensearch-helm:
-  fullnameOverride: "opensearch"
   image:
     tag: "2.17.0"
   replicas: 1
