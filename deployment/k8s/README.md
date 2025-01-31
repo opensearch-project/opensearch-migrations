@@ -9,8 +9,16 @@ Audience: This is meant to be a fairly conclusive document for developers lookin
 #### Install kubectl
 Follow instructions [here](https://kubernetes.io/docs/tasks/tools/) to install the Kubernetes command-line tool. This will be the go-to tool for interacting with the Kubernetes cluster
 
-#### Install helm
-Follow instructions [here](https://helm.sh/docs/intro/install/) to install helm. helm will be used for deploying to the Kubernetes cluster
+#### Install Helm
+Follow instructions [here](https://helm.sh/docs/intro/install/) to install Helm. Helm will be used internally by Helmfile to deploy to the Kubernetes cluster
+
+#### Install Helmfile
+Follow instructions [here](https://github.com/helmfile/helmfile?tab=readme-ov-file#installation) to install Helmfile. Helmfile allows deploying multiple helm charts in a single declarative spec file
+
+After installing be sure to do a one-time initialization with the following command to install needed plugins
+```shell
+helmfile init
+```
 
 #### Install docker
 Follow instructions [here](https://docs.docker.com/engine/install/) to set up Docker. Docker will be used to build Docker images as well as run a local Kubernetes cluster. Later versions are recommended.
@@ -19,10 +27,9 @@ Follow instructions [here](https://docs.docker.com/engine/install/) to set up Do
 
 We test our solution with minikube and are beginning to test Amazon EKS.  See below for more information to set these up.
 
-## Local Kubernetes Cluster
+## Setup local Kubernetes Cluster
 Creating a local Kubernetes cluster is useful for testing and developing a given deployment. There are a few different tools for running a Kubernetes cluster locally. This documentation focuses on using [Minikube](https://github.com/kubernetes/minikube) to run the local Kubernetes cluster.
 
-### Install Minikube
 Follow instructions [here](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fmacos%2Fx86-64%2Fstable%2Fbinary+download) to install Minikube
 
 The default number of CPUs and Memory settings for Minikube can sometimes be relatively low compared to your machine's resources. The default resources allocated are printed out on minikube startup, similar to:
@@ -56,6 +63,17 @@ Build Docker images into Minikube
 ```
 
 ## Deploying
+
+### Migration Assistant Helmfile
+To deploy or upgrade the Migration Assistant into a local Kubernetes cluster, perform the following command from the `helmfile/` directory in this current directory
+```shell
+helmfile apply
+```
+
+To clean up the deployment perform:
+```shell
+helmfile destroy
+```
 
 ### Migration Assistant environment
 Guide for deploying a complete Migration Assistant environment helm chart, with the ability to enabled/disable different Migration services and clusters as needed

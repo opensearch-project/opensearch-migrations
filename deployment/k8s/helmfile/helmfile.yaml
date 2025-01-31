@@ -1,0 +1,78 @@
+values:
+  - values-dev.yaml
+
+repositories:
+  - name: strimzi-kafka-operator
+    url: "https://strimzi.io/charts/"
+  - name: elasticsearch-repo
+    url: "https://helm.elastic.co"
+  - name: opensearch-repo
+    url: "https://opensearch-project.github.io/helm-charts/"
+
+releases:
+  - name: shared-configs
+    version: "0.1.0"
+    namespace: ma
+    chart: "../charts/sharedResources/sharedConfigs"
+  - name: snapshot-volume
+    version: "0.1.0"
+    namespace: ma
+    chart: "../charts/sharedResources/snapshotVolume"
+    condition: conditionalPackageInstalls.snapshotVolume.enabled
+  - name: captured-traffic-kafka-cluster
+    version: "0.1.0"
+    namespace: ma
+    chart: "../charts/sharedResources/baseKafkaCluster"
+    values:
+      - {{ toYaml .Values.capturedTrafficKafkaCluster | nindent 8 }}
+    condition: conditionalPackageInstalls.kafka.enabled
+
+  - name: migration-console
+    version: "0.1.0"
+    namespace: ma
+    values:
+      - {{ toYaml .Values.migrationConsole | nindent 8 }}
+    chart: "../charts/components/migrationConsole"
+    needs:
+      - snapshot-volume
+  - name: capture-proxy
+    version: "0.1.0"
+    namespace: ma
+    chart: "../charts/components/captureProxy"
+    values:
+      - {{ toYaml .Values.captureProxy | nindent 8 }}
+    condition: conditionalPackageInstalls.captureProxy.enabled
+  - name: bulk-document-loader
+    version: "0.1.0"
+    namespace: ma
+    chart: "../charts/components/bulkLoad"
+    values:
+      - {{ toYaml .Values.bulkDocumentLoader | nindent 8 }}
+    needs:
+      - snapshot-volume
+    condition: conditionalPackageInstalls.bulkLoader.enabled
+  - name: replayer
+    version: "0.1.0"
+    namespace: ma
+    chart: "../charts/components/replayer"
+    values:
+      - {{ toYaml .Values.replayer | nindent 8 }}
+    condition: conditionalPackageInstalls.replayer.enabled
+
+
+  - name: elasticsearch
+    version: "8.5.1"
+    namespace: ma
+    chart: "elasticsearch-repo/elasticsearch"
+    values:
+      - {{ toYaml .Values.source | nindent 8 }}
+    needs:
+      - snapshot-volume
+    condition: conditionalPackageInstalls.source.enabled
+  - name: opensearch
+    version: "2.23.1"
+    namespace: ma
+    chart: "opensearch-repo/opensearch"
+    values:
+      - {{ toYaml .Values.target | nindent 8 }}
+    condition: conditionalPackageInstalls.target.enabled
