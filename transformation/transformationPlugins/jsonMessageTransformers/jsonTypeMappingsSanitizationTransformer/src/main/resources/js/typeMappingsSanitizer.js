@@ -5,7 +5,7 @@ function isEnabled(features, path) {
     const keys = path.split('.');
 
     for (const key of keys) {
-        if (value && typeof value === 'object' && key in value) {
+        if (value && typeof value === 'object' && value.has(key)) {
             value = value[key];
         } else {
             value = null;
@@ -14,7 +14,7 @@ function isEnabled(features, path) {
     }
 
     if (typeof value === 'boolean') return value;
-    if (value && typeof value === 'object' && 'enabled' in value) {
+    if (value && typeof value === 'object' && value.has('enabled')) {
         return Boolean(value.enabled);
     }
     return false;
@@ -94,7 +94,7 @@ function rewriteBulk(match, context) {
 
     while (ndi < lines.length) {
         const command = lines[ndi++];
-        const commandType = Object.keys(command)[0];
+        const commandType = command.keys().next().value;
         const commandParameters = command[commandType] || {};
 
         // Next line is doc if it's not a 'delete' command.
@@ -201,7 +201,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
 
     var newProperties = {}
     for (const [sourceType, ] of targetIndicesMap) {
-        for (fieldName of Object.keys(oldMappings[sourceType].properties)) {
+        for (fieldName of oldMappings[sourceType].properties.keys()) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
                 const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];
@@ -228,7 +228,7 @@ function rewriteCreateIndex(match, inputMap) {
     }
 
     const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
-    const types = Object.keys(mappings);
+    const types = [...mappings.keys()];
     const sourceTypeToTargetIndicesMap = new Map(types
         .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_index_mappings)])
         .filter(([, targetIndex]) => targetIndex) // Keep only entries with valid target indices
@@ -296,9 +296,9 @@ function detectAndTransform(document, context) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
 
-    if ("method" in document && "URI" in document) {
+    if (document.has("method") && document.has("URI")) {
         return routeHttpRequest(document, context);
-    } else if ("index" in document && "source" in document) {
+    } else if (document.has("index") && document.has("source")) {
         return processBulkIndex(document, context);
     } else {
         return document;

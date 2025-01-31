@@ -5,6 +5,7 @@ import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -32,14 +33,13 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
 
     @Override
     public List<String> get(Object key) {
-        String keyStr = !(key instanceof String) ? key.toString() : (String) key;
-        var kvp = lowerCaseToUpperCaseAndValueMap.get(keyStr.toLowerCase());
+        var kvp = lowerCaseToUpperCaseAndValueMap.get(objectToCanonicalFormatString(key));
         return kvp == null ? null : kvp.getValue();
     }
 
     @Override
     public List<String> put(String incomingKey, List<String> value) {
-        var normalizedKey = incomingKey.toLowerCase();
+        var normalizedKey = objectToCanonicalFormatString(incomingKey);
         SimpleEntry<String, List<String>> oldEntry = lowerCaseToUpperCaseAndValueMap.get(normalizedKey);
         var newValue = new SimpleEntry<>(oldEntry == null ? incomingKey : oldEntry.getKey(), value);
         lowerCaseToUpperCaseAndValueMap.put(normalizedKey, newValue);
@@ -48,7 +48,7 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
 
     @Override
     public List<String> remove(Object key) {
-        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(((String) key).toLowerCase());
+        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(objectToCanonicalFormatString(key));
         return origKeyAndVal == null ? null : origKeyAndVal.getValue();
     }
 
@@ -57,7 +57,7 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
         return new AbstractSet<>() {
             @Override
             public Iterator<Entry<String, List<String>>> iterator() {
-                return new Iterator<Entry<String, List<String>>>() {
+                return new Iterator<>() {
                     Iterator<Entry<String, SimpleEntry<String, List<String>>>> backingIterator =
                         lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
 
@@ -79,5 +79,17 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
                 return lowerCaseToUpperCaseAndValueMap.size();
             }
         };
+    }
+
+    @Override
+    public boolean containsKey(Object key) {
+        return lowerCaseToUpperCaseAndValueMap.containsKey(objectToCanonicalFormatString(key));
+    }
+
+    private String objectToCanonicalFormatString(Object key) {
+        if (key instanceof String) {
+            return ((String) key).toLowerCase(Locale.ROOT);
+        }
+        throw new IllegalArgumentException("Invalid key type, expected String but was " + key.getClass().getName());
     }
 }
