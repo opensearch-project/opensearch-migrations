@@ -1,4 +1,5 @@
 {{ $envMountName := "env-vars" }}
+{{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,14 +35,14 @@ spec:
           volumeMounts:
             - name: {{ $envMountName }}
               mountPath: /shared
-            {{- if .Values.snapshotVolumeEnabled }}
+            {{- if $snapshotVolumeEnabled }}
             - name: snapshot-volume
               mountPath: /snapshot
             {{- end }}
       volumes:
         - name: {{ $envMountName }}
           emptyDir: {}
-        {{- if .Values.snapshotVolumeEnabled }}
+        {{- if $snapshotVolumeEnabled }}
         - name: snapshot-volume
           persistentVolumeClaim:
             claimName: {{ .Values.snapshotVolumePvc }}

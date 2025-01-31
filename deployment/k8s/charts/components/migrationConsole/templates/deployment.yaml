@@ -1,6 +1,7 @@
 {{ $mountName := "all-configs" }}
 {{ $envVarMountName := "env-vars" }}
 {{ $sharedLogsVolumeEnabled := false }}
+{{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,7 +49,7 @@ spec:
               mountPath: /shared
             - name: services-yaml
               mountPath: /etc/migration_services.yaml
-            {{- if .Values.snapshotVolumeEnabled }}
+            {{- if $snapshotVolumeEnabled }}
             - name: snapshot-volume
               mountPath: /snapshot
             {{- end }}
@@ -66,7 +67,7 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.sharedLogsPvc }}
         {{- end }}
-        {{- if .Values.snapshotVolumeEnabled }}
+        {{- if $snapshotVolumeEnabled }}
         - name: snapshot-volume
           persistentVolumeClaim:
             claimName: {{ .Values.snapshotVolumePvc }}

@@ -69,7 +69,7 @@ The full Migration Assistant (charts/aggregates/migrationAssistant) helm chart c
 
 By default, all of these components will be deployed, but if a user is certain that some components aren't necessary, users can disable their installation by setting `conditionalPackageInstalls.<<PACKAGE_NAME>>` in the values that are being passed to the helm install command.
 
-**Note**: For first-time deployments and deployments after changes have been made to a dependent helm package, such as the `migrationConsole` chart, the following command is needed to update dependent charts
+**Note**: For first-time deployments and after changes have been made to a dependent helm package, such as the `migrationConsole` chart, the following command is needed to update dependent charts
 ```shell
 helm dependency update 
 ```
