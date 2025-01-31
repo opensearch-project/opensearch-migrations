@@ -50,7 +50,7 @@ class DocumentReindexerTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, null);
+        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, () -> null);
         when(mockContext.createBulkRequest()).thenReturn(mock(IRfsContexts.IRequestContext.class));
     }
 
@@ -132,7 +132,7 @@ class DocumentReindexerTest {
 
         // Initialize DocumentReindexer with the transformer
         documentReindexer = new DocumentReindexer(
-            mockClient, numDocs, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, transformer
+            mockClient, numDocs, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, () -> transformer
         );
 
         Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
@@ -237,9 +237,11 @@ class DocumentReindexerTest {
     void reindex_shouldRespectMaxConcurrentRequests() {
         int numDocs = 100;
         int maxConcurrentRequests = 5;
-        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, null);
+        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, () -> null);
 
-        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(String.valueOf(i)));
+        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
+            .map(i -> createTestDocument(String.valueOf(i)))
+            .onBackpressureBuffer(); // Enable buffering when back pressure is applied due to the delay on bulk request
 
         AtomicInteger concurrentRequests = new AtomicInteger(0);
         AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
@@ -275,7 +277,7 @@ class DocumentReindexerTest {
         IJsonTransformer transformer = new TransformationLoader().getTransformerFactoryLoader(CONFIG);
 
         // Initialize DocumentReindexer with the transformer
-        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, transformer);
+        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, () -> transformer);
 
         // Create a stream of documents, some requiring transformation and some not
         Flux<RfsLuceneDocument> documentStream = Flux.just(

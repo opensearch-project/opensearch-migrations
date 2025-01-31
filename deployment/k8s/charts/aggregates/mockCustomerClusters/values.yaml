@@ -1,5 +1,7 @@
 conditionalPackageInstalls:
   proxy: false
+  source: true
+  target: true
 
 proxy:
   parameters:
@@ -9,7 +11,6 @@ proxy:
 source:
   imageTag: "7.10.2"
   image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
-  fullnameOverride: "elasticsearch"
   roles: [ master, data, ingest ]
   antiAffinity: "soft"
   esJavaOpts: "-Xmx128m -Xms128m"

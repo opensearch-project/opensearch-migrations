@@ -1,66 +1,73 @@
 conditionalPackageInstalls:
   bulkLoader: true
-  kafka: true
-  replayer: true
+  grafana: false
   jaeger: false
+  kafka: true
+  migrationConsole: true
   prometheus: false
   proxy: true
-  grafana: false
+  replayer: true
+  sharedConfigs: true
   snapshotVolume: true
 
 
+shared-configs:
+  globalParameters:
+    sourceCluster:
+      allowRuntimeOverride: true
+      object:
+        endpoint: "http://sourcecluster.example.com:9200"
+        allowInsecure: true
+    kafkaBrokers:
+      allowRuntimeOverride: false
+      object:
+        brokers: "captured-traffic-kafka-bootstrap.ma.svc:9092"
+
+
+
 capture-proxy:
-  enabled: true
   parameters:
     destinationUri:
-      configMapName: "source-cluster-endpoint"
-      yamlPath: "endpoint"
+      source: otherConfig
+      configMapName: "source-cluster"
+      configMapKey: "endpoint"
     insecureDestination:
-      configMapName: "source-cluster-endpoint"
-      yamlPath: "allow_insecure"
+      source: otherConfig
+      configMapName: "source-cluster"
+      configMapKey: "allowInsecure"
+    kafkaConnection:
+      source: otherConfig
+      configMapName: "kafka-brokers"
+      configMapKey: "brokers"
+
 
 migration-console:
   snapshotVolumeEnabled: true
   snapshotVolumePvc: "snapshot-volume-pvc"
-  parameters:
-    nothingImportant:
-      value: false
 
 bulk-document-loader:
   snapshotVolumeEnabled: true
   snapshotVolumePvc: "snapshot-volume-pvc"
   parameters:
-    luceneDir:
-      value: /tmp
-      allowRuntimeOverride: true
     snapshotName:
+      source: parameterConfig
       value: rfs-snapshot
       allowRuntimeOverride: true
     targetHost:
+      source: parameterConfig
       value: https://opensearch-cluster-master:9200
-      allowRuntimeOverride: true
-    targetUsername:
-      value: admin
-      allowRuntimeOverride: true
-    targetPassword:
-      value: myStrongPassword123!
-      allowRuntimeOverride: true
-    snapshotLocalDir:
-      value: /snapshot
-      allowRuntimeOverride: true
-    targetInsecure:
-      present: true
       allowRuntimeOverride: true
 
 replayer:
   parameters:
     targetUri:
+      source: parameterConfig
       value: https://opensearch-cluster-master.mcc:9200/
       allowRuntimeOverride: true
     kafkaTrafficBrokers:
-      value: captured-traffic-kafka-bootstrap.ma.svc:9092
-      allowRuntimeOverride: true
-
+      source: otherConfig  # eventually this will become a list from a shared config
+      configMapName: "kafka-brokers"
+      configMapKey: "brokers"
 
 captured-traffic-kafka-cluster:
   environment: test

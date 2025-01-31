@@ -1,45 +1,35 @@
-package org.opensearch.migrations.bulkload.common;
+package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.function.Function;
 
-import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.Uid;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexCommit;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.BytesRef;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import shadow.lucene9.org.apache.lucene.document.Document;
+import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
+import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
+import shadow.lucene9.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
+import shadow.lucene9.org.apache.lucene.index.StoredFields;
+import shadow.lucene9.org.apache.lucene.store.FSDirectory;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 @RequiredArgsConstructor
 @Slf4j
-public class LuceneDocumentsReader {
-
-    public static Function<Path, LuceneDocumentsReader> getFactory(ClusterSnapshotReader snapshotReader) {
-        return path -> new LuceneDocumentsReader(
-            path,
-            snapshotReader.getSoftDeletesPossible(),
-            snapshotReader.getSoftDeletesFieldData()
-        );
-    }
+public class LuceneDocumentsReader9 implements LuceneDocumentsReader {
 
     protected final Path indexDirectoryPath;
     protected final boolean softDeletesPossible;
     protected final String softDeletesField;
-
+ 
     /**
      * There are a variety of states the documents in our Lucene Index can be in; this method extracts those documents
      * that would be considered "live" from the ElasticSearch/OpenSearch perspective.  The most important thing to know is
@@ -87,10 +77,6 @@ public class LuceneDocumentsReader {
      *    Lucene Index.
 
      */
-    public Flux<RfsLuceneDocument> readDocuments() {
-        return readDocuments(0, 0);
-    }
-
     public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
@@ -105,16 +91,12 @@ public class LuceneDocumentsReader {
         });
     }
 
-    protected DirectoryReader getReader() throws IOException {// Get the list of commits and pick the latest one
-        try (FSDirectory directory = FSDirectory.open(indexDirectoryPath)) {
-            List  <IndexCommit> commits = DirectoryReader.listCommits(directory);
-            IndexCommit latestCommit = commits.get(commits.size() - 1);
+    protected DirectoryReader getReader() throws IOException {
+        try (var directory = FSDirectory.open(indexDirectoryPath)) {
+            var commits = DirectoryReader.listCommits(directory);
+            var latestCommit = commits.get(commits.size() - 1);
 
-            return DirectoryReader.open(
-                latestCommit,
-                6, // Minimum supported major version - Elastic 5/Lucene 6
-                null // No specific sorting required
-            );
+            return DirectoryReader.open(latestCommit);
         }
     }
 
@@ -150,7 +132,7 @@ public class LuceneDocumentsReader {
         return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
             .subscribeOn(Schedulers.parallel())
             .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                    getDocument(segmentReader.storedFields(), docIdx, true) : // Get document, returns null to skip malformed docs
                     null));
     }
 
@@ -161,10 +143,10 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int docSegId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(StoredFields fields, int docSegId, boolean isLive) {
         Document document;
         try {
-            document = reader.document(docSegId);
+            document = fields.document(docSegId);
         } catch (IOException e) {
             log.atError()
                 .setCause(e)

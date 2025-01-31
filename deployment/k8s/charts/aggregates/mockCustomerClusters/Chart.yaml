@@ -2,16 +2,18 @@ apiVersion: v2
 name: mock-customer-clusters
 version: 0.1.0
 dependencies:
-  - name: elasticsearch
-    version: "8.5.1"
-    repository: https://helm.elastic.co
-    alias: source
   - name: capture-proxy
+    alias: proxy
     condition: conditionalPackageInstalls.proxy
     version: "0.1.0"
     repository: file://../../components/captureProxy
-    alias: proxy
+  - name: elasticsearch
+    alias: source
+    condition: conditionalPackageInstalls.source
+    version: "8.5.1"
+    repository: https://helm.elastic.co
   - name: opensearch
+    alias: target
+    condition: conditionalPackageInstalls.target
     version: "2.23.1"
     repository: "https://opensearch-project.github.io/helm-charts/"
-    alias: target

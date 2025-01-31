@@ -13,7 +13,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import org.apache.lucene.codecs.CodecUtil;
+import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
 /**
  * Defines the behavior expected of an object that will surface the metadata of an shard stored in a snapshot

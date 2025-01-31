@@ -1,17 +1,16 @@
 package org.opensearch.migrations;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
-import java.util.function.Function;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
@@ -19,6 +18,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -261,16 +261,11 @@ public class RfsMigrateDocuments {
         var connectionContext = arguments.targetArgs.toConnectionContext();
 
 
-        String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
-        if (docTransformerConfig != null) {
-            log.atInfo().setMessage("Doc Transformations config string: {}")
-                    .addArgument(docTransformerConfig).log();
-        } else {
-            log.atInfo().setMessage("Using default transformation config: {}")
-                    .addArgument(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG).log();
-            docTransformerConfig = DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG;
-        }
-        IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
+        var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
+            .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+        log.atInfo().setMessage("Doc Transformations config string: {}")
+                .addArgument(docTransformerConfig).log();
+        Supplier<IJsonTransformer> docTransformerSupplier = () -> new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
         try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
              var workCoordinator = new OpenSearchWorkCoordinator(
@@ -285,7 +280,7 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformer);
+                docTransformerSupplier);
 
             SourceRepo sourceRepo;
             if (snapshotLocalDirPath == null) {
@@ -308,7 +303,7 @@ public class RfsMigrateDocuments {
             );
 
             run(
-                LuceneDocumentsReader.getFactory(sourceResourceProvider),
+                new LuceneDocumentsReader.Factory(sourceResourceProvider),
                 reindexer,
                 workCoordinator,
                 arguments.initialLeaseDuration,
@@ -347,7 +342,7 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(Function<Path, LuceneDocumentsReader> readerFactory,
+    public static DocumentsRunner.CompletionStatus run(LuceneDocumentsReader.Factory readerFactory,
                                                        DocumentReindexer reindexer,
                                                        IWorkCoordinator workCoordinator,
                                                        Duration maxInitialLeaseDuration,

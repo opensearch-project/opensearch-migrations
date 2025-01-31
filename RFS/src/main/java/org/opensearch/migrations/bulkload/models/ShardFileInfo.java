@@ -1,6 +1,6 @@
 package org.opensearch.migrations.bulkload.models;
 
-import org.apache.lucene.util.BytesRef;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 /**
  * Defines the behavior expected of an object that will surface the metadata of an file stored in a snapshot

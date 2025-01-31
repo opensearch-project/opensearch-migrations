@@ -17,7 +17,6 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
@@ -25,7 +24,6 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
@@ -34,6 +32,7 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
@@ -205,17 +204,15 @@ public class SourceTestBase {
         }
     }
 
-    public static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
-        private final UnaryOperator<RfsLuceneDocument> docTransformer;
+    @AllArgsConstructor
+    public static class FilteredLuceneDocumentsReader implements LuceneDocumentsReader {
 
-        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<RfsLuceneDocument> docTransformer) {
-            super(luceneFilesBasePath, softDeletesPossible, softDeletesField);
-            this.docTransformer = docTransformer;
-        }
+        private final LuceneDocumentsReader wrappedReader;
+        private final UnaryOperator<RfsLuceneDocument> docTransformer;
 
         @Override
         public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
-            return super.readDocuments(startSegmentIndex, startDoc).map(docTransformer::apply);
+            return wrappedReader.readDocuments(startSegmentIndex, startDoc).map(docTransformer::apply);
         }
     }
 
@@ -260,8 +257,12 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-            Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
-                sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
+            var readerFactory = new LuceneDocumentsReader.Factory(sourceResourceProvider) {
+                @Override
+                public LuceneDocumentsReader getReader(Path path) {
+                    return new FilteredLuceneDocumentsReader(super.getReader(path), terminatingDocumentFilter);
+                }
+            };
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
@@ -281,7 +282,7 @@ public class SourceTestBase {
                         .toConnectionContext());
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> defaultDocTransformer),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)
