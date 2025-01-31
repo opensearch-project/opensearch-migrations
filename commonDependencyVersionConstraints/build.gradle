@@ -9,7 +9,7 @@ ext {
 dependencies {
 
   constraints {
-    def netty = '4.1.108.Final'
+    def netty = '4.1.115.Final'
     api group: 'io.netty', name: 'netty-buffer', version: netty
     api group: 'io.netty', name: 'netty-codec-http', version: netty
     api group: 'io.netty', name: 'netty-handler', version: netty
