@@ -56,7 +56,7 @@ def call(Map config = [:]) {
         "domainRemovalPolicy": "DESTROY",
         "artifactBucketRemovalPolicy": "DESTROY",
         "trafficReplayerServiceEnabled": true,
-        "trafficReplayerExtraArgs": "--speedup-factor 10.0 --transformer-config-base64 $transformersConfigArg",
+        "trafficReplayerExtraArgs": "--speedup-factor 10.0 --transformer-config-encoded $transformersConfigArg",
         "reindexFromSnapshotServiceEnabled": true,
         "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
         "migrationConsoleEnableOSI": true,
