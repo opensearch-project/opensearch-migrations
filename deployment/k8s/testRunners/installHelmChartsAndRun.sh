@@ -35,6 +35,9 @@ cd $ORIGINAL_DIR || exit
 migration_pod=$(kubectl get pods -n ma -l app=migration-console --field-selector status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 export migration_pod
 
+test_pod=$(kubectl get pods -n ma -l app=test-test-console --field-selector status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+export test_pod
+
 "$@"
 
 # Final cleanup so that future runs have a clean environment

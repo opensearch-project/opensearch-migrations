@@ -1,17 +1,15 @@
 package org.opensearch.migrations.bulkload.worker;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
@@ -30,7 +28,7 @@ public class DocumentsRunner {
     private final Duration maxInitialLeaseDuration;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
-    private final Function<Path, LuceneDocumentsReader> readerFactory;
+    private final LuceneDocumentsReader.Factory readerFactory;
     private final DocumentReindexer reindexer;
 
     public enum CompletionStatus {
@@ -95,7 +93,7 @@ public class DocumentsRunner {
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShardCursor.indexName, indexAndShardCursor.shard);
 
         var unpacker = unpackerFactory.create(shardMetadata);
-        var reader = readerFactory.apply(unpacker.unpack());
+        var reader = readerFactory.getReader(unpacker.unpack());
         Flux<RfsLuceneDocument> documents = reader.readDocuments(indexAndShardCursor.startingSegmentIndex, indexAndShardCursor.startingDocId);
 
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)

@@ -14,7 +14,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import org.apache.lucene.codecs.CodecUtil;
+import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
 // All subclasses need to be annotated with this
 @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
