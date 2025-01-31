@@ -1,3 +1,5 @@
+snapshotVolumeEnabled: false
+snapshotVolumePvc: ""
 parameters:
   initialLeaseDuration:
     source: parameterConfig

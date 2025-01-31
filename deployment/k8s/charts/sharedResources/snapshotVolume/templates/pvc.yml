@@ -1,6 +1,3 @@
-# Only create PVC, if PVC with same name does not already exist
-{{- $pvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace .Values.volume.pvcClaimName -}}
-{{- if not $pvc }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -14,4 +11,3 @@ spec:
   {{- if .Values.volume.storageClass }}
   storageClassName: {{ .Values.volume.storageClass }}
   {{- end }}
-{{- end }}

@@ -6,7 +6,6 @@ if [ -z "$MINIKUBE_ACTIVE_DOCKERD" ]; then
   ../../cdk/opensearch-service-migration/buildDockerImages.sh
 
   kubectl create namespace ma
-  kubectl create namespace mcc
 fi
 
 "$@"

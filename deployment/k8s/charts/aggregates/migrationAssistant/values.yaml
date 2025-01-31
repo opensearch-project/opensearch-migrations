@@ -8,6 +8,7 @@ conditionalPackageInstalls:
   proxy: true
   replayer: true
   sharedConfigs: true
+  snapshotVolume: true
 
 
 shared-configs:
@@ -40,17 +41,21 @@ capture-proxy:
       configMapKey: "brokers"
 
 
-migration-console: {}
+migration-console:
+  snapshotVolumeEnabled: true
+  snapshotVolumePvc: "snapshot-volume-pvc"
 
 bulk-document-loader:
+  snapshotVolumeEnabled: true
+  snapshotVolumePvc: "snapshot-volume-pvc"
   parameters:
     snapshotName:
       source: parameterConfig
-      value: rfs
+      value: rfs-snapshot
       allowRuntimeOverride: true
     targetHost:
       source: parameterConfig
-      value: https://opensearch-cluster-master.mcc:9200/
+      value: https://opensearch-cluster-master:9200
       allowRuntimeOverride: true
 
 replayer:
