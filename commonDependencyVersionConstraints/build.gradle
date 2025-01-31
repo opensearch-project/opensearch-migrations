@@ -37,7 +37,7 @@ dependencies {
 
     api group: 'org.projectlombok', name:'lombok', version:'1.18.26'
 
-    api group: 'org.apache.kafka', name:'kafka-clients', version:'3.6.0'
+    api group: 'org.apache.kafka', name:'kafka-clients', version:'3.7.2'
 
     api group: 'com.google.protobuf', name: 'protoc', version: protobufVersion
 
