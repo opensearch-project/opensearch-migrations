@@ -104,7 +104,7 @@ public class CustomRfsTransformationTest extends SourceTestBase {
                 CompletableFuture.runAsync(osTargetContainer::start)
             ).join();
 
-            var sourceClusterOperations = new ClusterOperations(esSourceContainer.getUrl());
+            var sourceClusterOperations = new ClusterOperations(esSourceContainer);
             preloadDataOperations.accept(sourceClusterOperations);
 
             // Create the snapshot from the source cluster

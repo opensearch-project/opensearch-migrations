@@ -1,20 +1,29 @@
 {{- define "generic.pullEnvVarsFromConfigMaps" }}
 {{- $packageName := .PackageName -}}
+{{- $lines := list -}}
 {{- range $sourceKey, $param := .Parameters -}}
-{{- $configMapKey := printf "%s-%s" $packageName (kebabcase $sourceKey) }}
-{{- $envName := ( snakecase $sourceKey | upper) }}
-- name: {{ $envName }}_DEFAULT
-  valueFrom:
-    configMapKeyRef:
-      name: {{ $configMapKey }}-default
-      key: {{ if hasKey $param "value" }}value{{ else if hasKey $param "list" }}list{{ else }}present{{ end }} {{/*TODO be explicit*/}}
-{{- if hasKey $param "allowRuntimeOverride" | ternary $param.allowRuntimeOverride true }}
-- name: {{ $envName }}
-  valueFrom:
-    configMapKeyRef:
-      name: {{ $configMapKey }}
-      key: {{ if hasKey $param "value" }}value{{ else if hasKey $param "list" }}list{{ else }}present{{ end }}
-      optional: true
-{{- end }}
-{{- end }}
+
+    {{- $configMapKey := (eq $param.source "otherConfig") | ternary
+        $param.configMapName
+        (printf "%s-%s" $packageName (kebabcase $sourceKey)) -}}
+    {{- $keyFromConfigMap := (eq $param.source "otherConfig") | ternary
+            $param.configMapKey
+            "value" -}}
+
+    {{- $envName := ( snakecase $sourceKey | upper) }}
+
+    {{- $lines = append $lines (printf "- name: %s_DEFAULT" $envName) -}}
+    {{- $lines = append $lines         "  valueFrom:" -}}
+    {{- $lines = append $lines         "    configMapKeyRef:" -}}
+    {{- $lines = append $lines (printf "      name: %s-default" $configMapKey) -}}
+    {{- $lines = append $lines (printf "      key: %s" $keyFromConfigMap) -}}
+
+    {{- $lines = append $lines (printf "- name: %s" $envName) -}}
+    {{- $lines = append $lines         "  valueFrom:" -}}
+    {{- $lines = append $lines         "    configMapKeyRef:" -}}
+    {{- $lines = append $lines (printf "      name: %s" $configMapKey) -}}
+    {{- $lines = append $lines (printf "      key: %s" $keyFromConfigMap) -}}
+    {{- $lines = append $lines (printf "      optional: true") -}}
+{{- end -}}
+{{- join "\n" $lines -}}
 {{- end }}

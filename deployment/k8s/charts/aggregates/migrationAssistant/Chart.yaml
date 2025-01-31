@@ -3,8 +3,15 @@ name: migration-assistant
 version: 0.1.0
 type: application
 appVersion: "1.16.0"
+
 dependencies:
+  - name: shared-configs
+    condition: conditionalPackageInstalls.sharedConfigs
+    version: "0.1.0"
+    repository: "file://../../sharedResources/sharedConfigs"
+
   - name: migration-console
+    condition: conditionalPackageInstalls.migrationConsole
     version: "0.1.0"
     repository: "file://../../components/migrationConsole"
 
@@ -26,10 +33,6 @@ dependencies:
     condition: conditionalPackageInstalls.replayer
     version: "0.1.0"
     repository: "file://../../components/replayer"
-
-  - name: shared-configs
-    version: "0.1.0"
-    repository: "file://../../sharedResources/sharedConfigs"
 
 #  - name: otel-collector
 #    version: 1.2.2
