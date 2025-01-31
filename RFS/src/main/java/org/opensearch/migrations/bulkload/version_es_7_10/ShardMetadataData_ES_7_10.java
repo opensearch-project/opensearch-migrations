@@ -16,7 +16,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
-import org.apache.lucene.util.BytesRef;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 @Getter
 public class ShardMetadataData_ES_7_10 implements ShardMetadata {

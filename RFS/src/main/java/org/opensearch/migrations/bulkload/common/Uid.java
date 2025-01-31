@@ -3,7 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.util.Arrays;
 import java.util.Base64;
 
-import org.apache.lucene.util.BytesRef;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 /**
  * This class is a cut-down copy of the org.elasticsearch.index.mapper.Uid class from the Elasticsearch project.

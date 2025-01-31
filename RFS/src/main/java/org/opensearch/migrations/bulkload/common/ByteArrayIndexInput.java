@@ -3,7 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.EOFException;
 import java.io.IOException;
 
-import org.apache.lucene.store.IndexInput;
+import shadow.lucene9.org.apache.lucene.store.IndexInput;
 
 /**
  * This class was originally in the Lucene project, but was removed in version 8.0.0.  The Elastic codebase has its own
