@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+
 // Note: This integ test exists to verify that Capture and Replay can be ran independently of other migrations
 
 def call(Map config = [:]) {
