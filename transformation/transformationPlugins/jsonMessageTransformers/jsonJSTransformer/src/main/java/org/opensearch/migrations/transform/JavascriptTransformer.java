@@ -40,7 +40,7 @@ import org.slf4j.event.Level;
  */
 @Slf4j
 public class JavascriptTransformer implements IJsonTransformer {
-    private final String JS_TRANSFORM_LOGGER_NAME = "JavascriptTransformer";
+    private static final String JS_TRANSFORM_LOGGER_NAME = "JavascriptTransformer";
     private Value mainJavascriptTransformFunction;
 
     private final Context polyglotContext;
