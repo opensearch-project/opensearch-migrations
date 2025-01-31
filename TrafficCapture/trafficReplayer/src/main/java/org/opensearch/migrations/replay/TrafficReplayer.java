@@ -244,8 +244,8 @@ public class TrafficReplayer {
         public String getTransformerConfigParameterArgPrefix() {
             return REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX;
         }
-        private final static String REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX = "";
-        private final static String REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX = "";
+        private static final String REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX = "";
+        private static final String REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX = "";
 
         @Parameter(
             required = false,
@@ -282,8 +282,8 @@ public class TrafficReplayer {
         public String getTransformerConfigParameterArgPrefix() {
             return TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX;
         }
-        final static String TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX = "tuple-";
-        final static String TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX = "tuple";
+        static final String TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX = "tuple-";
+        static final String TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX = "tuple";
 
         @Parameter(
             required = false,

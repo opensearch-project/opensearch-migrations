@@ -2,6 +2,7 @@ package org.opensearch.migrations.transform;
 
 import java.util.Map;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
@@ -65,8 +66,8 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
         try {
             String bindingsObjectString = (String) config.get(BINDINGS_OBJECT);
             bindingsObject = objectMapper.readValue(bindingsObjectString, new TypeReference<>() {});
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to parse the bindingsObject." + getConfigUsageStr(), e);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Failed to parse the bindingsObject." + getConfigUsageStr(), e);
         }
 
         if (script == null) {

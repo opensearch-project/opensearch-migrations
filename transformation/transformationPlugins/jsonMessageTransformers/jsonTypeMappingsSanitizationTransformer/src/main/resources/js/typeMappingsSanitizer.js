@@ -132,7 +132,7 @@ function includesTypeNames(inputMap) {
     if (flagMatch) {
         return JSON.parse(flagMatch[1]);
     }
-    var majorVersion = inputMap.properties?.version?.major;
+    const majorVersion = inputMap.properties?.version?.major;
     if (majorVersion >= 7) {
         return false;
     } else if (majorVersion <= 6) {
@@ -199,9 +199,9 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
     const targetIndex = targetIndices.at(0);
     request.URI = "/" + targetIndex;
 
-    var newProperties = {}
+    const newProperties = {}
     for (const [sourceType, ] of targetIndicesMap) {
-        for (fieldName of Object.keys(oldMappings[sourceType].properties)) {
+        for (const fieldName of Object.keys(oldMappings[sourceType].properties)) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
                 const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];

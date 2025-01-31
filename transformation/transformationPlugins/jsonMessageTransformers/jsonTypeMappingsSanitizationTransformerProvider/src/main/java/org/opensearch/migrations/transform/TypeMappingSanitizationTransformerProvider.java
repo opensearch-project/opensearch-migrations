@@ -45,11 +45,13 @@ public class TypeMappingSanitizationTransformerProvider extends JsonJSTransforme
     protected String getConfigUsageStr() {
         return this.getClass().getName() + " " +
             "expects the incoming configuration to be a Map<String, Object>, " +
-            "with values (some optional) '" + String.join("', '", new String[]{STATIC_MAPPINGS,REGEX_INDEX_MAPPINGS,FEATURE_FLAGS,SOURCE_PROPERTIES_KEY}) + "'.  " +
+            "with values (some optional) '" +
+            String.join("', '", STATIC_MAPPINGS,REGEX_INDEX_MAPPINGS,FEATURE_FLAGS,SOURCE_PROPERTIES_KEY) + "'.  " +
             "The value of " + STATIC_MAPPINGS + " should be a two-level map where the top-level key is the name " +
             "of a source index and that key's dictionary maps each sub-type to a specific target index.  " +
             REGEX_INDEX_MAPPINGS + " (List<[List<String>>]) matches index names and sub-types to a target pattern.  " +
             FEATURE_FLAGS + " is a map of feature flags that may alter the behavior of the transformation." +
-            SOURCE_PROPERTIES_KEY + " (required) is a nested map of the source cluster version e.g. {\"version\":{\"major\":7,\"minor\":10}}.";
+            SOURCE_PROPERTIES_KEY + " (required) is a nested map of the source cluster version e.g. " +
+            "{\"version\":{\"major\":7,\"minor\":10}}.";
     }
 }
