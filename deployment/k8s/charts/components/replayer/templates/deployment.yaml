@@ -10,8 +10,6 @@ spec:
       app: {{ include "generic.fullname" . }}
   template:
     metadata:
-      annotations:
-        rollme: {{ randAlphaNum 5 | quote }}
       labels:
         app: {{ include "generic.fullname" . }}
         env: v1
