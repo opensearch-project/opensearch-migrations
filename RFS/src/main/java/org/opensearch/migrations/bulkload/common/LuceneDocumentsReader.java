@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -193,45 +194,37 @@ public class LuceneDocumentsReader {
      *         wrapped in {@link ReaderAndBase}.
      */
     public static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<LeafReaderContext> originalLeaves, int startDocId) {
+        // Step 1: Sort the segments by name
         var sortedLeaves = originalLeaves.stream()
             .map(LeafReaderContext::reader)
             .sorted(SegmentNameSorter.INSTANCE)
             .collect(Collectors.toList());
 
+        // Step 2: Build the list of ReaderAndBase objects with cumulative doc base
         var sortedReaderAndBase = new ArrayList<ReaderAndBase>();
         int cumulativeDocBase = 0;
         for (var segment : sortedLeaves) {
-            sortedReaderAndBase.add(
-                new ReaderAndBase(segment, cumulativeDocBase)
-            );
+            sortedReaderAndBase.add(new ReaderAndBase(segment, cumulativeDocBase));
             cumulativeDocBase += segment.numDocs();
         }
 
+        // Step 3: Use binary search to find the first segment where maxDocIdInSegment >= startDocId
+        int index = Collections.binarySearch(sortedReaderAndBase, new ReaderAndBase(null, startDocId),
+            (segment, searchKey) -> Integer.compare(
+                segment.docBaseInParent + segment.reader.numDocs() - 1,
+                searchKey.docBaseInParent // Using `docBaseInParent` as a proxy for startDocId
+            )
+        );
 
-        if (startDocId == 0) {
-            log.info("Skipping segment binary search since startDocId is 0.");
-            return Flux.fromIterable(sortedReaderAndBase);
+        // Step 4: If an exact match is not found, binarySearch returns `-(insertion_point) - 1`
+        //         where `insertion_point` is the first position where maxDocIdInSegment >= startDocId.
+        //         To get the correct starting segment, we convert it back using `-(index + 1)`.
+        if (index < 0) {
+            index = -(index + 1); // First valid segment
         }
 
-        int left = 0;
-        int right = sortedReaderAndBase.size() - 1;
-
-        // Perform binary search to find the starting segment
-        while (left <= right) {
-            int mid = left + (right - left) / 2;
-            ReaderAndBase midSegment = sortedReaderAndBase.get(mid);
-
-            int maxDocIdInSegment = midSegment.docBaseInParent + midSegment.reader.maxDoc() - 1;
-
-            if (maxDocIdInSegment < startDocId) {
-                left = mid + 1;
-            } else {
-                right = mid - 1;
-            }
-        }
-
-        // `left` now points to the first segment where maxDocIdInSegment >= startDocId
-        return Flux.fromIterable(sortedReaderAndBase.subList(left, sortedReaderAndBase.size()));
+        // Step 5: Return the sublist starting from the first valid segment
+        return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
 
