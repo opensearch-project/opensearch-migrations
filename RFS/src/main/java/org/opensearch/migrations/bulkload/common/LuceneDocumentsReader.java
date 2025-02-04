@@ -150,12 +150,8 @@ public class LuceneDocumentsReader {
             // If both LeafReaders are SegmentReaders, sort on segment info name.
             // Name is the "Unique segment name in the directory" which is always present on a SegmentInfo
             if (leafReader1 instanceof SegmentReader && leafReader2 instanceof SegmentReader) {
-                SegmentCommitInfo segmentInfo1 = ((SegmentReader) leafReader1).getSegmentInfo();
-                SegmentCommitInfo segmentInfo2 = ((SegmentReader) leafReader2).getSegmentInfo();
-
-                var segmentName1 = segmentInfo1.info.name;
-                var segmentName2 = segmentInfo2.info.name;
-
+                var segmentName1 = ((SegmentReader) leafReader1).getSegmentName();
+                var segmentName2 = ((SegmentReader) leafReader2).getSegmentName();
                 return segmentName1.compareTo(segmentName2);
             }
             // Otherwise, keep initial sort

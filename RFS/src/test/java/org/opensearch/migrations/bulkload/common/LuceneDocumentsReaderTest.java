@@ -8,8 +8,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -26,8 +28,8 @@ import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -215,20 +217,23 @@ public class LuceneDocumentsReaderTest {
 
         CountDownLatch startLatch = new CountDownLatch(1);
         AtomicInteger concurrentDocReads = new AtomicInteger(0);
+        var segmentReadTracker = new ConcurrentHashMap<String, AtomicBoolean>();
         AtomicInteger concurrentSegmentReads = new AtomicInteger(0);
 
         for (int i = 0; i < numSegments; i++) {
             LeafReaderContext context = mock(LeafReaderContext.class);
-            LeafReader leafReader = mock(LeafReader.class);
-            when(context.reader()).thenAnswer(invocation -> {
-                concurrentSegmentReads.incrementAndGet();
-                return leafReader;
-            });
+            SegmentReader leafReader = mock(SegmentReader.class);
+            when(context.reader()).thenAnswer(invocation -> leafReader);
+            var segmentName = "__" + i;
+            when(leafReader.getSegmentName()).thenReturn(segmentName);
+            segmentReadTracker.put(segmentName, new AtomicBoolean(false));
             when(leafReader.maxDoc()).thenReturn(docsPerSegment);
             when(leafReader.getLiveDocs()).thenReturn(null); // Assume all docs are live
-
             // Wrap the document method to track concurrency
             when(leafReader.document(anyInt())).thenAnswer(invocation -> {
+                if (segmentReadTracker.get(segmentName).compareAndSet(false, true)) {
+                    concurrentSegmentReads.incrementAndGet(); // Increment only on first read per segment
+                }
                 concurrentDocReads.incrementAndGet();
                 startLatch.await(); // Wait for the latch to be released before proceeding to track concurrency
                 Document doc = new Document();
