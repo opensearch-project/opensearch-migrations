@@ -48,7 +48,7 @@ public class LeaseExpirationTest extends SourceTestBase {
 
     @ParameterizedTest(name = "forceMoreSegments={0}, sourceClusterVersion={1}")
     @MethodSource("testParameters")
-    public void testProcessExitsAsExpected(boolean forceMoreSegments) {
+    public void testProcessExitsAsExpected(boolean forceMoreSegments, SearchClusterContainer.ContainerVersion sourceClusterVersion) {
         // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
         // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
