@@ -1,18 +1,21 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
+import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
@@ -117,6 +120,7 @@ public class LuceneDocumentsReader {
      * To do this, we sort the segments by their ID or name.
      */
     static class SegmentNameSorter implements Comparator<LeafReader> {
+        static final SegmentNameSorter INSTANCE = new SegmentNameSorter();
         @Override
         public int compare(LeafReader leafReader1, LeafReader leafReader2) {
             var compareResponse = compareIfSegmentReader(leafReader1, leafReader2);
@@ -128,7 +132,6 @@ public class LuceneDocumentsReader {
                     if (leafReader instanceof SegmentReader) {
                         SegmentCommitInfo segmentInfo = ((SegmentReader) leafReader).getSegmentInfo();
                         leafDetails.append("SegmentInfo: ").append(segmentInfo).append("\n");
-                        leafDetails.append("SegmentInfoId: ").append(new String(segmentInfo.getId(), StandardCharsets.UTF_8)).append("\n");
                     }
                     return leafDetails.toString();
                 };
@@ -147,12 +150,8 @@ public class LuceneDocumentsReader {
             // If both LeafReaders are SegmentReaders, sort on segment info name.
             // Name is the "Unique segment name in the directory" which is always present on a SegmentInfo
             if (leafReader1 instanceof SegmentReader && leafReader2 instanceof SegmentReader) {
-                SegmentCommitInfo segmentInfo1 = ((SegmentReader) leafReader1).getSegmentInfo();
-                SegmentCommitInfo segmentInfo2 = ((SegmentReader) leafReader2).getSegmentInfo();
-
-                var segmentName1 = segmentInfo1.info.name;
-                var segmentName2 = segmentInfo2.info.name;
-
+                var segmentName1 = ((SegmentReader) leafReader1).getSegmentName();
+                var segmentName2 = ((SegmentReader) leafReader2).getSegmentName();
                 return segmentName1.compareTo(segmentName2);
             }
             // Otherwise, keep initial sort
@@ -168,45 +167,63 @@ public class LuceneDocumentsReader {
             return DirectoryReader.open(
                 latestCommit,
                 6, // Minimum supported major version - Elastic 5/Lucene 6
-                new SegmentNameSorter()
+                null // ignore sorting here for easier compatibility with older lucene versions
             );
         }
     }
 
+    @Value
+    public static class ReaderAndBase {
+        LeafReader reader;
+        int docBaseInParent;
+    }
+
     /**
-     * Finds the starting segment using a binary search where the maximum document ID in the segment
-     * is greater than or equal to the specified start document ID. The method returns a Flux
-     * containing the list of segments starting from the identified segment.
+     * Retrieves, sorts, and processes document segments, returning a {@link Flux} of segments
+     * starting from the first segment where the cumulative document base is less than or equal
+     * to the specified start document ID.
      *
-     * @param leaves    the list of LeafReaderContext representing segments
-     * @param startDocId the document ID from which to start processing
-     * @return a Flux containing the segments starting from the identified segment
+     * @param originalLeaves A list of {@link LeafReaderContext} representing the document segments.
+     * @param startDocId The document ID from which to begin processing.
+     * @return A {@link Flux} emitting the sorted segments starting from the identified segment,
+     *         wrapped in {@link ReaderAndBase}.
      */
-    public static Flux<LeafReaderContext> getSegmentsFromStartingSegment(List<LeafReaderContext> leaves, int startDocId) {
-        if (startDocId == 0) {
-            log.info("Skipping segment binary search since startDocId is 0.");
-            return Flux.fromIterable(leaves);
+    public static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<LeafReaderContext> originalLeaves, int startDocId) {
+        if (originalLeaves.isEmpty()) {
+            return Flux.empty();
         }
 
-        int left = 0;
-        int right = leaves.size() - 1;
+        // Step 1: Sort the segments by name
+        var sortedLeaves = originalLeaves.stream()
+            .map(LeafReaderContext::reader)
+            .sorted(SegmentNameSorter.INSTANCE)
+            .collect(Collectors.toList());
 
-        // Perform binary search to find the starting segment
-        while (left <= right) {
-            int mid = left + (right - left) / 2;
-            LeafReaderContext midSegment = leaves.get(mid);
-
-            int maxDocIdInSegment = midSegment.docBaseInParent + midSegment.reader().maxDoc() - 1;
-
-            if (maxDocIdInSegment < startDocId) {
-                left = mid + 1;
-            } else {
-                right = mid - 1;
-            }
+        // Step 2: Build the list of ReaderAndBase objects with cumulative doc base
+        var sortedReaderAndBase = new ArrayList<ReaderAndBase>();
+        int cumulativeDocBase = 0;
+        for (var segment : sortedLeaves) {
+            sortedReaderAndBase.add(new ReaderAndBase(segment, cumulativeDocBase));
+            cumulativeDocBase += segment.maxDoc();
         }
 
-        // `left` now points to the first segment where maxDocIdInSegment >= startDocId
-        return Flux.fromIterable(leaves.subList(left, leaves.size()));
+        // Step 3: Use binary search to find the insertion point of startDocId in list of docBaseInParent
+        var segmentStartingDocIds = sortedReaderAndBase.stream().map(ReaderAndBase::getDocBaseInParent).toArray();
+        int index = Arrays.binarySearch(segmentStartingDocIds, startDocId);
+
+        // Step 4: If an exact match is found (binarySearch returns non-negative value)
+        //         then use this index to start on.
+        //         If an exact match is not found, binarySearch returns `-(insertionPoint) - 1`
+        //         where `insertion_point` is the first position where docBaseInParent > startDocId.
+        if (index < 0) {
+            var insertionPoint = -(index + 1);
+            // index = Last segment index with docBaseInParent < startDocId
+            index = insertionPoint - 1;
+            assert index >= 0;
+        }
+
+        // Step 5: Return the sublist starting from the first valid segment
+        return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
 
@@ -233,12 +250,12 @@ public class LuceneDocumentsReader {
             .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }
 
-    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int docStartingId, Scheduler scheduler,
+    Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
                                                 int concurrency) {
-        var segmentReader = leafReaderContext.reader();
+        var segmentReader = readerAndBase.reader;
         var liveDocs = segmentReader.getLiveDocs();
 
-        int segmentDocBase = leafReaderContext.docBaseInParent;
+        int segmentDocBase = readerAndBase.docBaseInParent;
 
         // Start at
         int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
@@ -252,8 +269,8 @@ public class LuceneDocumentsReader {
             s == null ? segmentReader.toString() : s
         );
 
-        log.atInfo().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
-                .addArgument(leafReaderContext)
+        log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
+                .addArgument(readerAndBase.reader)
                 .addArgument(startDocIdInSegment)
                 .addArgument(numDocsToProcessInSegment)
                 .log();
