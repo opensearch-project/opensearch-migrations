@@ -265,7 +265,8 @@ public class RfsMigrateDocuments {
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
         log.atInfo().setMessage("Doc Transformations config string: {}")
                 .addArgument(docTransformerConfig).log();
-        Supplier<IJsonTransformer> docTransformerSupplier = () -> new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
+        var transformationLoader = new TransformationLoader();
+        Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
         try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
              var workCoordinator = new OpenSearchWorkCoordinator(
