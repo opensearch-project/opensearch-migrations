@@ -3,7 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -183,10 +183,9 @@ public class LuceneDocumentsReader {
     }
 
     /**
-     * Retrieves and sorts segments, then identifies the starting segment using a binary search.
-     * The starting segment is determined as the first segment where the maximum document ID
-     * is greater than or equal to the specified start document ID. The method returns a {@link Flux}
-     * containing the list of segments starting from the identified segment.
+     * Retrieves, sorts, and processes document segments, returning a {@link Flux} of segments
+     * starting from the first segment where the cumulative document base is less than or equal
+     * to the specified start document ID.
      *
      * @param originalLeaves A list of {@link LeafReaderContext} representing the document segments.
      * @param startDocId The document ID from which to begin processing.
@@ -194,6 +193,10 @@ public class LuceneDocumentsReader {
      *         wrapped in {@link ReaderAndBase}.
      */
     public static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<LeafReaderContext> originalLeaves, int startDocId) {
+        if (originalLeaves.isEmpty()) {
+            return Flux.empty();
+        }
+
         // Step 1: Sort the segments by name
         var sortedLeaves = originalLeaves.stream()
             .map(LeafReaderContext::reader)
@@ -205,22 +208,22 @@ public class LuceneDocumentsReader {
         int cumulativeDocBase = 0;
         for (var segment : sortedLeaves) {
             sortedReaderAndBase.add(new ReaderAndBase(segment, cumulativeDocBase));
-            cumulativeDocBase += segment.numDocs();
+            cumulativeDocBase += segment.maxDoc();
         }
 
-        // Step 3: Use binary search to find the first segment where maxDocIdInSegment >= startDocId
-        int index = Collections.binarySearch(sortedReaderAndBase, new ReaderAndBase(null, startDocId),
-            (segment, searchKey) -> Integer.compare(
-                segment.docBaseInParent + segment.reader.numDocs() - 1,
-                searchKey.docBaseInParent // Using `docBaseInParent` as a proxy for startDocId
-            )
-        );
+        // Step 3: Use binary search to find the insertion point of startDocId in list of docBaseInParent
+        var segmentStartingDocIds = sortedReaderAndBase.stream().map(ReaderAndBase::getDocBaseInParent).toArray();
+        int index = Arrays.binarySearch(segmentStartingDocIds, startDocId);
 
-        // Step 4: If an exact match is not found, binarySearch returns `-(insertion_point) - 1`
-        //         where `insertion_point` is the first position where maxDocIdInSegment >= startDocId.
-        //         To get the correct starting segment, we convert it back using `-(index + 1)`.
+        // Step 4: If an exact match is found (binarySearch returns non-negative value)
+        //         then use this index to start on.
+        //         If an exact match is not found, binarySearch returns `-(insertionPoint) - 1`
+        //         where `insertion_point` is the first position where docBaseInParent > startDocId.
         if (index < 0) {
-            index = -(index + 1); // First valid segment
+            var insertionPoint = -(index + 1);
+            // index = Last segment index with docBaseInParent < startDocId
+            index = insertionPoint - 1;
+            assert index >= 0;
         }
 
         // Step 5: Return the sublist starting from the first valid segment
@@ -260,7 +263,7 @@ public class LuceneDocumentsReader {
 
         // Start at
         int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
-        int numDocsToProcessInSegment = segmentReader.numDocs() - startDocIdInSegment;
+        int numDocsToProcessInSegment = segmentReader.maxDoc() - startDocIdInSegment;
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
