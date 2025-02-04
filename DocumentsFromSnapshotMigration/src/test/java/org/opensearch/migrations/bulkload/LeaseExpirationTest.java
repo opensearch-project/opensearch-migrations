@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -26,7 +27,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.containers.Network;
 
 @Tag("isolatedTest")
@@ -35,8 +37,17 @@ public class LeaseExpirationTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
+    private static Stream<Arguments> testParameters() {
+        List<Boolean> forceMoreSegmentsValues = List.of(false, true);
+        List<SearchClusterContainer.ContainerVersion> sourceClusterVersions = List.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2);
+
+        return forceMoreSegmentsValues.stream()
+            .flatMap(force -> sourceClusterVersions.stream()
+                .map(version -> Arguments.of(force, version)));
+    }
+
+    @ParameterizedTest(name = "forceMoreSegments={0}, sourceClusterVersion={1}")
+    @MethodSource("testParameters")
     public void testProcessExitsAsExpected(boolean forceMoreSegments) {
         // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
         // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
@@ -50,8 +61,8 @@ public class LeaseExpirationTest extends SourceTestBase {
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
-            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer
+                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments, sourceClusterVersion,
+            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, sourceClusterVersion
             ));
     }
 
@@ -59,7 +70,7 @@ public class LeaseExpirationTest extends SourceTestBase {
     private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
                                               int shards, int indexDocCount,
-                                              boolean forceMoreSegments,
+                                              boolean forceMoreSegments, SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                               Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
@@ -67,7 +78,7 @@ public class LeaseExpirationTest extends SourceTestBase {
         var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
 
         try (
-            var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+            var esSourceContainer = new SearchClusterContainer(sourceClusterVersion)
                     .withAccessToHost(true);
             var network = Network.newNetwork();
             var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
@@ -84,13 +95,14 @@ public class LeaseExpirationTest extends SourceTestBase {
             proxyContainer.start("target", 9200);
 
             // Populate the source cluster with data
-            var client = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
-                .host(esSourceContainer.getUrl())
-                .build()
-                .toConnectionContext()
-            ).determineVersionAndCreate();
+            var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext());
+            var client = clientFactory.determineVersionAndCreate();
             var generator = new WorkloadGenerator(client);
             var workloadOptions = new WorkloadOptions();
+
 
             var sourceClusterOperations = new ClusterOperations(esSourceContainer.getUrl());
 
@@ -177,7 +189,8 @@ public class LeaseExpirationTest extends SourceTestBase {
     private static int runProcessAgainstToxicTarget(
         Path tempDirSnapshot,
         Path tempDirLucene,
-        ToxiProxyWrapper proxyContainer
+        ToxiProxyWrapper proxyContainer,
+        SearchClusterContainer.ContainerVersion sourceClusterVersion
     ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
@@ -189,7 +202,8 @@ public class LeaseExpirationTest extends SourceTestBase {
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
             "--max-connections", "2",
-            "--initial-lease-duration", "PT20s"
+            "--initial-lease-duration", "PT20s",
+            "--source-version", sourceClusterVersion.getVersion().toString()
         };
 
         ProcessBuilder processBuilder = setupProcess(
