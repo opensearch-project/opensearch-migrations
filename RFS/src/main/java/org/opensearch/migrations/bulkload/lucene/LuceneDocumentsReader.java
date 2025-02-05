@@ -11,11 +11,15 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
 public interface LuceneDocumentsReader {
-    Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc);
+    default Flux<RfsLuceneDocument> readDocuments() {
+        return readDocuments(0);
+    }
+
+    Flux<RfsLuceneDocument> readDocuments(int startDocIdx);
 
     @Slf4j
     @AllArgsConstructor
-    public static class Factory {
+    class Factory {
         private final ClusterSnapshotReader snapshotReader;
 
         public LuceneDocumentsReader getReader(Path path) {

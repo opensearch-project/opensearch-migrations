@@ -59,7 +59,7 @@ class DataGeneratorEndToEnd {
         assertThat(refreshResponse.body, refreshResponse.statusCode, equalTo(200));
 
         // Confirm all indexes have the expected number of docs
-        var defaultCount = arguments.workloadOptions.totalDocs;
+        var defaultCount = arguments.workloadOptions.getTotalDocs();
         var expectedIndexes = Map.of(
             "geonames", defaultCount,
             "logs-181998", defaultCount,
