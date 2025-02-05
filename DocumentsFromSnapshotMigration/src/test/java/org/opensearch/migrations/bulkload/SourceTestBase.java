@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -348,7 +349,7 @@ public class SourceTestBase {
     ) {
         String classpath = System.getProperty("java.class.path");
         String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+        var javaExecutable = Paths.get(javaHome, "bin", "java").toString();
 
         List<String> argsList = new ArrayList<>(Arrays.asList(
             "--snapshot-name",
