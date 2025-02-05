@@ -121,7 +121,7 @@ def delete_repo(cluster: Cluster, repository: str) -> None:
     try:
         delete_path = f"/_snapshot/{repository}"
         call_api(cluster, delete_path, method=HttpMethod.DELETE, raise_error=True)
-        logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
+        logger.info(f"Deleted repository: {repository}.")
     except Exception as e:
         # Handle 404 errors specifically for missing repository
         if isinstance(e, HTTPError) and e.response.status_code == 404:
