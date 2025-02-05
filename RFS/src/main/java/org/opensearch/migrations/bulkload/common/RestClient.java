@@ -98,6 +98,7 @@ public class RestClient {
         this.client = httpClient
             .secure(sslProvider)
             .baseUrl(connectionContext.getUri().toString())
+            .disableRetry(false) // Enable one retry on connection reset with no delay
             .keepAlive(true);
     }
 
