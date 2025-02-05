@@ -1,7 +1,7 @@
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "2.1.1"
-    id "com.diffplug.spotless" version '6.25.0'
+    id "com.diffplug.spotless" version '7.0.2'
     id 'io.freefair.lombok' version '8.12' apply false
     id 'jacoco'
     id 'me.champeau.jmh' version '0.7.2' apply false
@@ -94,7 +94,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
 
     }
@@ -104,7 +104,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
     }
     json {
@@ -142,7 +142,7 @@ subprojects {
                     'org.opensearch',
                     '',
                     '\\#')
-            indentWithSpaces()
+            leadingTabsToSpaces()
             endWithNewline()
             removeUnusedImports()
         }
