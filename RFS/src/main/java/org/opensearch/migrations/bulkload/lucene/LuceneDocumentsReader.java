@@ -13,7 +13,7 @@ import reactor.core.publisher.Flux;
 public interface LuceneDocumentsReader {
     default Flux<RfsLuceneDocument> readDocuments() {
         return readDocuments(0);
-    };
+    }
 
     Flux<RfsLuceneDocument> readDocuments(int startDocIdx);
 

@@ -522,7 +522,7 @@ public class RfsMigrateDocuments {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
         BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, ((String) name), (Integer) shard);
+            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
             log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
             if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
                 throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);

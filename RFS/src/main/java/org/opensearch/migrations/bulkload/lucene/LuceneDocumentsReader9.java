@@ -113,7 +113,7 @@ public class LuceneDocumentsReader9 implements LuceneDocumentsReader {
         public int compare(LeafReader leafReader1, LeafReader leafReader2) {
             var compareResponse = compareIfSegmentReader(leafReader1, leafReader2);
             if (compareResponse == 0) {
-                Function<LeafReader, String> getLeafReaderDebugInfo = (leafReader) -> {
+                Function<LeafReader, String> getLeafReaderDebugInfo = leafReader -> {
                     var leafDetails = new StringBuilder();
                     leafDetails.append("Class: ").append(leafReader.getClass().getName()).append("\n");
                     leafDetails.append("Context: ").append(leafReader.getContext()).append("\n");

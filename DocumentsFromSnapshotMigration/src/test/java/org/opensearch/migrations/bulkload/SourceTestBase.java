@@ -118,7 +118,6 @@ public class SourceTestBase {
         return process.exitValue();
     }
 
-
     @NotNull
     protected static ProcessBuilder setupProcess(String[] processArgs) {
         String classpath = System.getProperty("java.class.path");
@@ -140,7 +139,6 @@ public class SourceTestBase {
         processBuilder.redirectOutput();
         return processBuilder;
     }
-
 
     @AllArgsConstructor
     public static class ExpectedMigrationWorkTerminationException extends RuntimeException {

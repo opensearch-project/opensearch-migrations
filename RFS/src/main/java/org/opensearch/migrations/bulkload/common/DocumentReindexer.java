@@ -34,7 +34,7 @@ public class DocumentReindexer {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
-            .concatMapIterable(doc -> transformDocument(threadSafeTransformer, doc,indexName));
+            .concatMapIterable(doc -> transformDocument(threadSafeTransformer, doc, indexName));
 
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
             .doFinally(s -> scheduler.dispose());
