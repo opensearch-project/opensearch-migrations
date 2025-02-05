@@ -105,8 +105,6 @@ def call(Map config = [:]) {
                             if (config.buildStep) {
                                 config.buildStep()
                             } else {
-                                // Needed due to https://github.com/diffplug/spotless/issues/987
-                                sh 'sudo --preserve-env rm -rf .gradle/configuration-cache'
                                 sh 'sudo --preserve-env ./gradlew clean build --no-daemon'
                             }
                         }
