@@ -11,12 +11,12 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
 import io.netty.handler.codec.http.HttpMethod;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
