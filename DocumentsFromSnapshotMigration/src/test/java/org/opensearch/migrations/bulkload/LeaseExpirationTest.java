@@ -31,6 +31,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.containers.Network;
 
+import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
+
 @Tag("isolatedTest")
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
@@ -104,7 +106,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             var workloadOptions = new WorkloadOptions();
 
 
-            var sourceClusterOperations = new ClusterOperations(esSourceContainer.getUrl());
+            var sourceClusterOperations = new ClusterOperations(esSourceContainer);
 
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.

@@ -72,8 +72,8 @@ class BulkDocSectionTest {
 
     @Test
     void testConvertToBulkRequestBody() {
-        BulkDocSection section1 = new BulkDocSection("id1", "index1", "_doc", "{\"field\":\"value1\"}", null);
-        BulkDocSection section2 = new BulkDocSection("id2", "index2", "_doc", "{\"field\":\"value2\"}", null);
+        BulkDocSection section1 = new BulkDocSection("id1", "index1", "_doc", "{\"field\":\"value1\"}");
+        BulkDocSection section2 = new BulkDocSection("id2", "index2", "_doc", "{\"field\":\"value2\"}");
         BulkDocSection section3 = new BulkDocSection("id3", "index3", "_doc", "{\"field\":\"value3\"}", "routing1");
 
         Collection<BulkDocSection> bulkSections = Arrays.asList(section1, section2, section3);
@@ -101,7 +101,7 @@ class BulkDocSectionTest {
         BulkDocSection bulkDocSection = BulkDocSection.fromMap(indexMap);
 
         assertNotNull(bulkDocSection);
-        assertEquals("test-id", bulkDocSection.getId());
+        assertEquals("test-id", bulkDocSection.getDocId());
         assertEquals(metadata, bulkDocSection.toMap().get("index"));
         assertEquals(sourceDoc, bulkDocSection.toMap().get("source"));
     }
@@ -135,40 +135,27 @@ class BulkDocSectionTest {
     void testDeserializationException() {
         // Create a BulkDocSection with invalid data to cause deserialization failure
         Exception exception = assertThrows(BulkDocSection.DeserializationException.class, () -> {
-            new BulkDocSection(null, null, null, "{\"field_value", null);
+            new BulkDocSection(null, null, null, "{\"field_value");
         });
 
         assertTrue(exception.getMessage().contains("Failed to parse source doc"));
     }
 
     @Test
-    @Tag("longTest") // Mark as long test to control memory usage during parallel execution
+    @Tag("isolatedTest") // Mark as isolated test to control memory usage during parallel execution
     void testLargeSourceDoc() throws JsonProcessingException {
         var writer = new ObjectMapper();
-        // Generate a 25MB source document
-        int targetSize = 25 * 1024 * 1024;
-        StringBuilder docBuilder = new StringBuilder(targetSize);
-        String key = "field_";
-        String value = "value_";
-
-        int i = 0;
-        while (docBuilder.length() < targetSize) {
-            docBuilder.append("\"").append(key).append(i).append("\":\"").append(value).append(i).append("\",");
-            i++;
-        }
-
-        // Remove the trailing comma and wrap in braces
-        docBuilder.setLength(docBuilder.length() - 1);
-        String docBody = "{" + docBuilder + "}";
+        int _10MBSize = 10 * 1024 * 1024;
+        var docBody = createDocOfSize(_10MBSize);
 
         String id = "test-large-doc-id";
         String indexName = "test-large-index";
         String type = "_doc";
 
-        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody, null);
+        var bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
 
         // Test asString
-        String asString = bulkDocSection.asBulkIndexString();
+        var asString = bulkDocSection.asBulkIndexString();
         assertNotNull(asString);
         assertTrue(asString.contains(id));
         assertTrue(asString.contains(indexName));
@@ -177,21 +164,40 @@ class BulkDocSectionTest {
         assertEquals(docBody.length() + 81, asString.length()); // add length of index command
 
         // Test toMap
-        Map<String, Object> map = bulkDocSection.toMap();
+        var map = bulkDocSection.toMap();
         assertNotNull(map);
         assertTrue(map.containsKey("index"));
         assertTrue(map.containsKey("source"));
         assertEquals(docBody, writer.writeValueAsString(map.get("source")));
 
         // Test fromMap
-        BulkDocSection fromMapSection = BulkDocSection.fromMap(map);
+        var fromMapSection = BulkDocSection.fromMap(map);
         assertNotNull(fromMapSection);
+        var convertedToMap = fromMapSection.toMap();
         @SuppressWarnings("unchecked")
-        Map<String, Object> indexCommand = (Map<String, Object>) fromMapSection.toMap().get("index");
-        assertEquals(id, fromMapSection.getId());
+        var indexCommand = (Map<String, Object>) convertedToMap.get("index");
+        assertEquals(id, fromMapSection.getDocId());
         assertEquals(indexName, indexCommand.get("_index"));
         assertEquals(type, indexCommand.get("_type"));
         assertEquals(id, indexCommand.get("_id"));
-        assertEquals(docBody, writer.writeValueAsString(fromMapSection.toMap().get("source")));
+        assertEquals(docBody, writer.writeValueAsString(convertedToMap.get("source")));
+    }
+
+    private String createDocOfSize(int targetSize) {
+        StringBuilder docBuilder = new StringBuilder(targetSize);
+        String key = "field_";
+        String value = "value_";
+
+        int i = 0;
+        docBuilder.append("{");
+        while (docBuilder.length() < targetSize) {
+            docBuilder.append("\"").append(key).append(i).append("\":\"").append(value).append(i).append("\"");
+            i++;
+            if (docBuilder.length() < targetSize) {
+                docBuilder.append(",");
+            }
+        }
+        docBuilder.append("}");
+        return docBuilder.toString();
     }
 }

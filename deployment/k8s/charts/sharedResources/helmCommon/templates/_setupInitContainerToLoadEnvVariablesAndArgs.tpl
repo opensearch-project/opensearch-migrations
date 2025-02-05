@@ -5,10 +5,10 @@
   imagePullPolicy: IfNotPresent
   env:
     {{- include "generic.pullEnvVarsFromConfigMaps" (dict
-         "Parameters" .Values.parameters
-         "PackageName" (include "generic.fullname" .)
-         "include" .Template.Include
-         "Template" .Template) | indent 4 }}
+             "Parameters" .Values.parameters
+             "PackageName" (include "generic.fullname" .)
+             "include" .Template.Include
+             "Template" .Template) | nindent 4 }}
 
   command:
     - /bin/sh

@@ -79,8 +79,8 @@ public class EndToEndTest extends SourceTestBase {
 
             var indexName = "blog_2023";
             var numberOfShards = 3;
-            var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
-            var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
+            var sourceClusterOperations = new ClusterOperations(sourceCluster);
+            var targetClusterOperations = new ClusterOperations(targetCluster);
 
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.

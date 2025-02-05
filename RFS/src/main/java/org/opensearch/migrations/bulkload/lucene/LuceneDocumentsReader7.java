@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.common;
+package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -11,40 +11,32 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.Uid;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexCommit;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.LeafReader;
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.SegmentCommitInfo;
-import org.apache.lucene.index.SegmentReader;
-import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.BytesRef;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
+import shadow.lucene7.org.apache.lucene.document.Document;
+import shadow.lucene7.org.apache.lucene.index.DirectoryReader;
+import shadow.lucene7.org.apache.lucene.index.IndexReader;
+import shadow.lucene7.org.apache.lucene.index.LeafReader;
+import shadow.lucene7.org.apache.lucene.index.LeafReaderContext;
+import shadow.lucene7.org.apache.lucene.index.SegmentCommitInfo;
+import shadow.lucene7.org.apache.lucene.index.SegmentReader;
+import shadow.lucene7.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
+import shadow.lucene7.org.apache.lucene.store.FSDirectory;
+import shadow.lucene7.org.apache.lucene.util.BytesRef;
 
 @RequiredArgsConstructor
 @Slf4j
-public class LuceneDocumentsReader {
-
-    public static Function<Path, LuceneDocumentsReader> getFactory(ClusterSnapshotReader snapshotReader) {
-        return path -> new LuceneDocumentsReader(
-            path,
-            snapshotReader.getSoftDeletesPossible(),
-            snapshotReader.getSoftDeletesFieldData()
-        );
-    }
+public class LuceneDocumentsReader7 implements LuceneDocumentsReader {
 
     protected final Path indexDirectoryPath;
     protected final boolean softDeletesPossible;
@@ -97,14 +89,10 @@ public class LuceneDocumentsReader {
      *    Lucene Index.
 
      */
-    public Flux<RfsLuceneDocument> readDocuments() {
-        return readDocuments(0);
-    }
-
-    public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
+    public Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDoc),
+            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
                 try {
                     reader.close();
@@ -160,15 +148,11 @@ public class LuceneDocumentsReader {
     }
 
     protected DirectoryReader getReader() throws IOException {
-        // Get the list of commits and pick the latest one
-        try (FSDirectory directory = FSDirectory.open(indexDirectoryPath)) {
-            List  <IndexCommit> commits = DirectoryReader.listCommits(directory);
-            IndexCommit latestCommit = commits.get(commits.size() - 1);
-            return DirectoryReader.open(
-                latestCommit,
-                6, // Minimum supported major version - Elastic 5/Lucene 6
-                null // ignore sorting here for easier compatibility with older lucene versions
-            );
+        try (var directory = FSDirectory.open(indexDirectoryPath)) {
+            var commits = DirectoryReader.listCommits(directory);
+            var latestCommit = commits.get(commits.size() - 1);
+
+            return DirectoryReader.open(latestCommit);
         }
     }
 
@@ -265,7 +249,7 @@ public class LuceneDocumentsReader {
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
         // every time if requested multiple times.
         var segmentReaderDebugInfoCache = new AtomicReference<String>();
-        final Supplier<String> getSegmentReaderDebugInfo = () -> segmentReaderDebugInfoCache.updateAndGet(s -> 
+        final Supplier<String> getSegmentReaderDebugInfo = () -> segmentReaderDebugInfoCache.updateAndGet(s ->
             s == null ? segmentReader.toString() : s
         );
 
@@ -292,7 +276,7 @@ public class LuceneDocumentsReader {
                             .addArgument(docIdx)
                             .setCause(e)
                             .log();
-                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx 
+                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
                 }).subscribeOn(scheduler),
@@ -326,13 +310,13 @@ public class LuceneDocumentsReader {
                 String fieldName = field.name();
                 switch (fieldName) {
                     case "_id": {
-                        // ES 6+
+                        // Lucene >= 7 (ES 6+ created segments)
                         var idBytes = field.binaryValue();
                         openSearchDocId = Uid.decodeId(idBytes.bytes);
                         break;
                     }
                     case "_uid": {
-                        // ES <= 6
+                        // Lucene <= 6 (ES <= 5 created segments)
                         var combinedTypeId = field.stringValue().split("#", 2);
                         type = combinedTypeId[0];
                         openSearchDocId = combinedTypeId[1];

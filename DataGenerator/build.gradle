@@ -4,9 +4,6 @@ plugins {
     id 'io.freefair.lombok'
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 dependencies {
     implementation project(":coreUtilities")
     implementation project(":RFS")
@@ -36,5 +33,5 @@ dependencies {
 }
 
 application {
-    mainClassName = 'org.opensearch.migrations.DataGenerator'
+    mainClass.set('org.opensearch.migrations.DataGenerator')
 }

@@ -28,6 +28,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
+import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
+
 @Slf4j
 @Tag("longTest")
 public class ProcessLifecycleTest extends SourceTestBase {

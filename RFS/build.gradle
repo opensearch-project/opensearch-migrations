@@ -1,18 +1,50 @@
 plugins {
-    id 'application'
+    id 'org.opensearch.migrations.java-library-conventions'
     id 'java'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
     id 'me.champeau.jmh'
+    id 'com.gradleup.shadow'
 }
-
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
 
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'
+    luceneVersion7 = '7.7.3'
+    luceneVersion9 = '9.11.1'
 }
+
+configurations {
+    lucene7
+    lucene9
+}
+
+task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene7]
+    archiveClassifier.set('lucene7-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene7.org.apache.lucene'
+}
+
+task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    archiveClassifier.set('lucene9-shadow')
+    configurations = [project.configurations.lucene9]
+    relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
+}
+
+tasks.register('prepareShadowJars') {
+    dependsOn shadowLucene7, shadowLucene9
+}
+
+tasks.named('build') {
+    dependsOn prepareShadowJars
+}
+
+tasks.named('test') {
+    dependsOn prepareShadowJars
+}
+
 
 dependencies {
     implementation project(':awsUtilities')
@@ -35,9 +67,23 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    implementation group: 'org.apache.lucene', name: 'lucene-core'
-    implementation group: 'org.apache.lucene', name: 'lucene-analysis-common'
-    implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
+
+    lucene7 "org.apache.lucene:lucene-core:${luceneVersion7}"
+    lucene7 "org.apache.lucene:lucene-backward-codecs:${luceneVersion7}"
+
+    lucene9 "org.apache.lucene:lucene-core:${luceneVersion9}"
+    lucene9 "org.apache.lucene:lucene-analysis-common:${luceneVersion9}"
+    lucene9 "org.apache.lucene:lucene-backward-codecs:${luceneVersion9}"
+
+    implementation shadowLucene7.outputs.files
+    implementation shadowLucene9.outputs.files
+
+    testImplementation shadowLucene7.outputs.files
+    testImplementation shadowLucene9.outputs.files
+
+    testFixturesImplementation shadowLucene7.outputs.files
+    testFixturesImplementation shadowLucene9.outputs.files
+
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
     implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'

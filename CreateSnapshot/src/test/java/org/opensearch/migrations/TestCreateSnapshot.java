@@ -64,7 +64,7 @@ public class TestCreateSnapshot {
                 fl -> {
                     if (Objects.equals(fl.uri(), "/")) {
                         return new SimpleHttpResponse(ROOT_RESPONSE_HEADERS, ROOT_RESPONSE_ES_7_10_2, "OK", 200);
-                    } else if (Objects.equals(fl.uri(), "/_cluster/settings")) {
+                    } else if (Objects.equals(fl.uri(), "/_cluster/settings?include_defaults=true")) {
                         return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
                                 "OK", 200);
                     }
@@ -136,7 +136,7 @@ public class TestCreateSnapshot {
                 fl -> {
                     if (Objects.equals(fl.uri(), "/")) {
                         return new SimpleHttpResponse(ROOT_RESPONSE_HEADERS, ROOT_RESPONSE_ES_7_10_2, "OK", 200);
-                    } else if (Objects.equals(fl.uri(), "/_cluster/settings")) {
+                    } else if (Objects.equals(fl.uri(), "/_cluster/settings?include_defaults=true")) {
                         return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
                                 "OK", 200);
                     } else if (fl.uri().equals("/_snapshot/migration_assistant_repo/" + snapshotName)) {

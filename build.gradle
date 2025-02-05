@@ -1,17 +1,47 @@
 plugins {
-    id "com.dorongold.task-tree" version "2.1.1"
-    id 'io.freefair.lombok' version '8.6' apply false
+//    Observing higher memory usage with task-tree plugin. Disabling except if needed
+//    id "com.dorongold.task-tree" version "2.1.1"
     id "com.diffplug.spotless" version '6.25.0'
-    id 'me.champeau.jmh' version '0.7.2' apply false
+    id 'io.freefair.lombok' version '8.12' apply false
     id 'jacoco'
+    id 'me.champeau.jmh' version '0.7.2' apply false
+    id 'com.gradleup.shadow' version '8.3.5' apply false
+    id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
+    id 'com.google.protobuf' version "0.9.4" apply false
 }
 
 allprojects {
-    apply plugin: 'jacoco'
     repositories {
         mavenCentral()
     }
 }
+
+
+// Ensure Capture Proxy and Dependencies are built with JDK 11 for On Node Install
+
+// Cache dependencies during the configuration phase
+ext.captureProxyDependencies = []
+gradle.projectsEvaluated {
+    def captureProxyProject = rootProject.project(":TrafficCapture:trafficCaptureProxyServer")
+    captureProxyDependencies = captureProxyProject.configurations.collectMany { configuration ->
+        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.path }
+    }
+    // Add the TrafficCaptureProxyServer project itself
+    captureProxyDependencies << captureProxyProject.path
+}
+
+// Modify sourceCompatibility during the execution phase
+gradle.taskGraph.whenReady {
+    allprojects {
+        tasks.withType(JavaCompile).configureEach {
+            def jvmVersion = (project.path in rootProject.captureProxyDependencies) ? JavaVersion.VERSION_11 : JavaVersion.VERSION_17
+            sourceCompatibility = jvmVersion
+            targetCompatibility = jvmVersion
+        }
+    }
+}
+
+
 
 // Define version properties
 ext {
@@ -56,34 +86,49 @@ task buildDockerImages() {
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
 
+def commonExclusions = ['**/build/**', '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**']
 spotless {
     format 'misc', {
-        target '**/*.gradle', '.gitattributes', '.gitignore'
-        targetExclude '**/build/**'
+        target fileTree('.') {
+            include '**/*.gradle', '.gitattributes', '.gitignore'
+            exclude commonExclusions
+        }
         trimTrailingWhitespace()
         indentWithSpaces()
         endWithNewline()
 
     }
     yaml {
-        target '**/*.yml'
-        targetExclude '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**'
+        target fileTree('.') {
+            include '**/*.yml'
+            exclude commonExclusions
+        }
         trimTrailingWhitespace()
         indentWithSpaces()
         endWithNewline()
     }
     json {
-        target 'deployment/cdk/opensearch-service-migration/*.json'
+        target fileTree('.') {
+            include '*.json'
+            exclude commonExclusions
+        }
         prettier()
         endWithNewline()
     }
 }
 
 subprojects {
+    apply plugin: "com.diffplug.spotless"
     apply plugin: 'jacoco'
     apply plugin: 'java'
     apply plugin: 'maven-publish'
-    apply plugin: "com.diffplug.spotless"
+
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(17))
+            vendor.set(JvmVendorSpec.AMAZON)
+        }
+    }
 
     // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
     // though what '#' does is still undocumented from what I can tell
@@ -108,11 +153,11 @@ subprojects {
         dependsOn project.javadoc
 
         testLogging {
-            events "passed", "skipped", "failed"
-            exceptionFormat "full"
-            showExceptions true
-            showCauses true
-            showStackTraces true
+            events = ["passed", "skipped", "failed"]
+            exceptionFormat = "full"
+            showExceptions = true
+            showCauses = true
+            showStackTraces = true
         }
         maxParallelForks = gradle.startParameter.maxWorkerCount
 
@@ -246,7 +291,7 @@ subprojects {
             repositories {
                 maven { url = "${rootProject.buildDir}/repository"}
                 maven {
-                    url "https://aws.oss.sonatype.org/content/repositories/snapshots"
+                    url = "https://aws.oss.sonatype.org/content/repositories/snapshots"
                     name = 'staging'
                 }
             }
@@ -267,9 +312,9 @@ subprojects {
         classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
         reports {
             xml.required = true
-            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+            xml.outputLocation = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
             html.required = true
-            html.destination file("${buildDir}/reports/jacoco/test/html")
+            html.outputLocation = file("${buildDir}/reports/jacoco/test/html")
         }
     }
 }
@@ -319,9 +364,9 @@ task mergeJacocoReports(type: JacocoReport) {
 
     reports {
         xml.required = true
-        xml.destination = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
+        xml.outputLocation = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
         html.required = true
-        html.destination = file("${buildDir}/reports/jacoco/mergedReport/html")
+        html.outputLocation = file("${buildDir}/reports/jacoco/mergedReport/html")
     }
 }
 

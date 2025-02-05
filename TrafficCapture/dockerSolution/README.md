@@ -91,7 +91,8 @@ within the final yaml configuration that is being output.
 
 ## Compatibility
 
-The tools in this directory can only be built if you have Java version 11 installed.
+The tools in this directory can only be built if you have Java version 11-17
+installed.
 
 The version is specified in `TrafficCapture/build.gradle` using a Java toolchain, which allows us
 to decouple the Java version used by Gradle itself from Java version used by the tools here.

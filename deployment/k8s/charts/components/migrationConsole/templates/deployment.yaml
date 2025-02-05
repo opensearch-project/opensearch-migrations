@@ -1,7 +1,7 @@
 {{ $mountName := "all-configs" }}
 {{ $envVarMountName := "env-vars" }}
 {{ $sharedLogsVolumeEnabled := false }}
-{{ $snapshotVolumeEnabled := false }}
+{{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,31 +41,34 @@ spec:
               migrationEnabled=$(echo "$@" | grep -o -- "--migrationApiEnabled" | wc -l); if [ "$migrationEnabled" -gt 0 ]; then $START_API_COMMAND; else $WAIT_AND_DO_NOTHING_COMMAND; fi > run.sh
               exec migrationEnabled $ARGS
           volumeMounts:
-            {{- if $sharedLogsVolumeEnabled -}}
+            {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
             {{- end }}
             - name: {{ $envVarMountName }}
               mountPath: /shared
-            - name: merged-config
-              mountPath: /etc/
-              subPath: migration_services.yaml
-            {{- if $snapshotVolumeEnabled -}}
+            - name: services-yaml
+              mountPath: /etc/migration_services.yaml
+            {{- if $snapshotVolumeEnabled }}
             - name: snapshot-volume
-              mountPath: /storage
+              mountPath: /snapshot
             {{- end }}
       volumes:
         - name: {{ $envVarMountName }}
           emptyDir: { }
         - name: merged-config
           emptyDir: { }
-        {{- if $sharedLogsVolumeEnabled  -}}
+        - name: services-yaml
+          hostPath:
+            path: /opensearch-migrations/deployment/k8s/charts/components/migrationConsole/migration_services.yaml
+            type: File
+        {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:
             claimName: {{ .Values.sharedLogsPvc }}
-        {{- end -}}
-        {{- if $snapshotVolumeEnabled -}}
+        {{- end }}
+        {{- if $snapshotVolumeEnabled }}
         - name: snapshot-volume
           persistentVolumeClaim:
-            claimName: {{ .Values.snapshotVolumePvc -}}
+            claimName: {{ .Values.snapshotVolumePvc }}
         {{- end }}

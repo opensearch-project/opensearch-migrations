@@ -8,27 +8,27 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.store.ByteBuffersDirectory;
-import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import shadow.lucene9.org.apache.lucene.document.Document;
+import shadow.lucene9.org.apache.lucene.document.StoredField;
+import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
+import shadow.lucene9.org.apache.lucene.index.IndexReader;
+import shadow.lucene9.org.apache.lucene.index.IndexWriter;
+import shadow.lucene9.org.apache.lucene.index.IndexWriterConfig;
+import shadow.lucene9.org.apache.lucene.store.ByteBuffersDirectory;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -67,7 +67,7 @@ public class PerformanceVerificationTest {
 
         // Create a custom LuceneDocumentsReader for testing
         AtomicInteger ingestedDocuments = new AtomicInteger(0);
-        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), true, "dummy_field") {
+        var reader = new LuceneDocumentsReader9(Paths.get("dummy"), true, "dummy_field") {
             @Override
             protected DirectoryReader getReader() {
                 return realReader;
@@ -102,7 +102,7 @@ public class PerformanceVerificationTest {
         int maxDocsPerBulkRequest = 1000;
         long maxBytesPerBulkRequest = Long.MAX_VALUE; // No Limit on Size
         int maxConcurrentWorkItems = 10;
-        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, null);
+        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, () -> null);
 
         // Create a mock IDocumentReindexContext
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);
@@ -126,7 +126,7 @@ public class PerformanceVerificationTest {
             if (System.currentTimeMillis() - startTime > 30000) {
                 throw new AssertionError("Test timed out after 30 seconds");
             }
-            Thread.sleep(500);
+            Thread.sleep(1000);
             ingestedDocs = ingestedDocuments.get();
             sentDocs = sentDocuments.get();
 

@@ -39,16 +39,20 @@ public class BulkDocSection {
 
     @EqualsAndHashCode.Include
     @Getter
-    private final String id;
+    private final String docId;
     private final BulkIndex bulkIndex;
 
+    public BulkDocSection(String id, String indexName, String type, String docBody) {
+        this(id, indexName, type, docBody, null);
+    }
+
     public BulkDocSection(String id, String indexName, String type, String docBody, String routing) {
-        this.id = id;
+        this.docId = id;
         this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(id, type, indexName, routing), parseSource(docBody));
     }
 
     private BulkDocSection(BulkIndex bulkIndex) {
-        this.id = bulkIndex.metadata.id;
+        this.docId = bulkIndex.metadata.id;
         this.bulkIndex = bulkIndex;
     }
 

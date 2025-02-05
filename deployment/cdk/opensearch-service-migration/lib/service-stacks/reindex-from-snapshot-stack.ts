@@ -125,7 +125,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${maxShardSizeBytes}`)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${Math.ceil(maxShardSizeBytes)}`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-connections", props.reindexFromSnapshotWorkerSize === "maximum" ? "100" : "10")
         if (props.reindexFromSnapshotWorkerSize === "maximum") {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-compression")

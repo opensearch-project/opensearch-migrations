@@ -1,8 +1,27 @@
+import groovy.json.JsonOutput
+
 // Note: This integ test exists to verify that Capture and Replay can be ran independently of other migrations
 
 def call(Map config = [:]) {
     def sourceContextId = 'source-single-node-ec2'
     def migrationContextId = 'migration-default'
+
+    def jsonTransformationConfig = [
+            [
+                    TypeMappingSanitizationTransformerProvider: [
+                            sourceProperties: [
+                                    version: [
+                                            major: 7,
+                                            minor: 10
+                                    ]
+                            ]
+                    ]
+            ],
+    ]
+    def transformationConfigString = JsonOutput.toJson(jsonTransformationConfig)
+    def transformersConfigArg = transformationConfigString.bytes.encodeBase64().toString()
+
+
     def source_cdk_context = """
     {
       "source-single-node-ec2": {
@@ -37,7 +56,7 @@ def call(Map config = [:]) {
         "domainRemovalPolicy": "DESTROY",
         "artifactBucketRemovalPolicy": "DESTROY",
         "trafficReplayerServiceEnabled": true,
-        "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+        "trafficReplayerExtraArgs": "--speedup-factor 10.0 --transformer-config-encoded $transformersConfigArg",
         "reindexFromSnapshotServiceEnabled": true,
         "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
         "migrationConsoleEnableOSI": true,

@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -25,13 +26,15 @@ public class DocumentReindexer {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
     private final int maxConcurrentWorkItems;
-    private final IJsonTransformer transformer;
+    private final Supplier<IJsonTransformer> transformerSupplier;
 
     public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
+        // Transformers cannot be used simultaneously
+        var threadSafeTransformer = ThreadLocal.withInitial(transformerSupplier);
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
-            .concatMapIterable(doc -> transformDocument(doc, indexName));
+            .concatMapIterable(doc -> transformDocument(threadSafeTransformer, doc,indexName));
 
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
             .doFinally(s -> scheduler.dispose());
@@ -52,7 +55,8 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    List<RfsDocument> transformDocument(RfsLuceneDocument doc, String indexName) {
+    List<RfsDocument> transformDocument(ThreadLocal<IJsonTransformer> transformerLocal, RfsLuceneDocument doc, String indexName) {
+        var transformer = transformerLocal.get();
         var originalDoc = RfsDocument.fromLuceneDocument(doc, indexName);
         if (transformer != null) {
             return RfsDocument.transform(transformer, originalDoc);
@@ -61,7 +65,7 @@ public class DocumentReindexer {
     }
 
     /*
-     * TODO: Update the reindexing code to rely on _index field embedded in each doc section rather than requiring it in the 
+     * TODO: Update the reindexing code to rely on _index field embedded in each doc section rather than requiring it in the
      * REST path.  See: https://opensearch.atlassian.net/browse/MIGRATIONS-2232
      */
     Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
@@ -101,11 +105,11 @@ public class DocumentReindexer {
                 currentItemCount++;
 
                 if (currentItemCount > maxDocsPerBulkRequest || currentSize > maxBytesPerBulkRequest) {
-                // Reset and return true to signal to stop buffering.
-                // Current item is included in the current buffer
-                currentItemCount = 1;
-                currentSize = nextSize;
-                return true;
+                    // Reset and return true to signal to stop buffering.
+                    // Current item is included in the current buffer
+                    currentItemCount = 1;
+                    currentSize = nextSize;
+                    return true;
                 }
                 return false;
             }

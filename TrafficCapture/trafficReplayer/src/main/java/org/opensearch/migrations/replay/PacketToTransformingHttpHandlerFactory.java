@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import java.util.function.Supplier;
+
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
@@ -16,14 +18,16 @@ public class PacketToTransformingHttpHandlerFactory
     implements
         PacketConsumerFactory<TransformedOutputAndResult<ByteBufList>> {
 
-    private final IJsonTransformer jsonTransformer;
+    // Using ThreadLocal to ensure thread safety with the json transformers which will be reused
+    private final ThreadLocal<IJsonTransformer> localJsonTransformer;
+    // The authTransformerFactory is ThreadSafe and getAuthTransformer will be called for every request
     private final IAuthTransformerFactory authTransformerFactory;
 
     public PacketToTransformingHttpHandlerFactory(
-        IJsonTransformer jsonTransformer,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
         IAuthTransformerFactory authTransformerFactory
     ) {
-        this.jsonTransformer = jsonTransformer;
+        this.localJsonTransformer = ThreadLocal.withInitial(jsonTransformerSupplier);
         this.authTransformerFactory = authTransformerFactory;
     }
 
@@ -33,7 +37,7 @@ public class PacketToTransformingHttpHandlerFactory
     ) {
         log.trace("creating HttpJsonTransformingConsumer");
         return new HttpJsonTransformingConsumer<>(
-            jsonTransformer,
+            localJsonTransformer.get(),
             authTransformerFactory,
             new TransformedPacketReceiver(),
             httpTransactionContext

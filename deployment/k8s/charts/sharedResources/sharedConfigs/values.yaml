@@ -1,4 +1,5 @@
-parameters:
-  sourceCluster:
-#    value: foo
-    allowRuntimeOverride: true
+globalParameters:
+  kubernetesDeploymentVersion:
+    allowRuntimeOverride: false
+    object:
+      value: "0.1"

@@ -1,7 +1,6 @@
 package org.opensearch.migrations;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
@@ -10,13 +9,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
@@ -24,6 +22,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -276,16 +275,11 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
 
-        String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
-        if (docTransformerConfig != null) {
-            log.atInfo().setMessage("Doc Transformations config string: {}")
-                    .addArgument(docTransformerConfig).log();
-        } else {
-            log.atInfo().setMessage("Using default transformation config: {}")
-                    .addArgument(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG).log();
-            docTransformerConfig = DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG;
-        }
-        IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
+        var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
+            .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+        log.atInfo().setMessage("Doc Transformations config string: {}")
+                .addArgument(docTransformerConfig).log();
+        Supplier<IJsonTransformer> docTransformerSupplier = () -> new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -316,7 +310,7 @@ public class RfsMigrateDocuments {
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
-                docTransformer);
+                docTransformerSupplier);
 
             SourceRepo sourceRepo;
             if (snapshotLocalDirPath == null) {
@@ -339,7 +333,7 @@ public class RfsMigrateDocuments {
             );
 
             run(
-                LuceneDocumentsReader.getFactory(sourceResourceProvider),
+                new LuceneDocumentsReader.Factory(sourceResourceProvider),
                 reindexer,
                 progressCursor,
                 workCoordinator,
@@ -367,7 +361,7 @@ public class RfsMigrateDocuments {
     private static void exitOnLeaseTimeout(
             AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
             IWorkCoordinator coordinator,
-            String workItemId, 
+            String workItemId,
             AtomicReference<WorkItemCursor> progressCursorRef,
             WorkItemTimeProvider workItemTimeProvider,
             Duration initialLeaseDuration,
@@ -470,7 +464,7 @@ public class RfsMigrateDocuments {
         return successorShardNextAcquisitionLeaseExponent;
     }
 
-    private static ArrayList<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
         if (workItemAndDuration == null) {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
@@ -498,7 +492,7 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(Function<Path, LuceneDocumentsReader> readerFactory,
+    public static DocumentsRunner.CompletionStatus run(LuceneDocumentsReader.Factory readerFactory,
                                                        DocumentReindexer reindexer,
                                                        AtomicReference<WorkItemCursor> progressCursor,
                                                        IWorkCoordinator workCoordinator,
@@ -527,18 +521,20 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
+        BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
+            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, ((String) name), (Integer) shard);
+            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+            if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
+                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
+            }
+            return shardMetadata;
+        };
+
         var runner = new DocumentsRunner(scopedWorkCoordinator,
             maxInitialLeaseDuration,
             reindexer,
             unpackerFactory,
-            (name, shard) -> {
-                var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-                log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
-                if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
-                    throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
-                }
-                return shardMetadata;
-            },
+            shardMetadataSupplier,
             readerFactory,
             progressCursor::set,
             cancellationRunnable::set,

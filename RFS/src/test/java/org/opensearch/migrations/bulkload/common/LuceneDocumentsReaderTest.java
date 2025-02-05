@@ -17,6 +17,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
@@ -24,13 +26,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.BinaryDocValuesField;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.SegmentReader;
-import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +37,14 @@ import org.junit.jupiter.params.provider.MethodSource;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
+import shadow.lucene9.org.apache.lucene.document.BinaryDocValuesField;
+import shadow.lucene9.org.apache.lucene.document.Document;
+import shadow.lucene9.org.apache.lucene.document.StoredField;
+import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
+import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
+import shadow.lucene9.org.apache.lucene.index.SegmentReader;
+import shadow.lucene9.org.apache.lucene.index.StoredFields;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -100,7 +103,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
@@ -163,7 +166,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
@@ -229,8 +232,11 @@ public class LuceneDocumentsReaderTest {
             segmentReadTracker.put(segmentName, new AtomicBoolean(false));
             when(leafReader.maxDoc()).thenReturn(docsPerSegment);
             when(leafReader.getLiveDocs()).thenReturn(null); // Assume all docs are live
+
+            var storedFields = mock(StoredFields.class);
+            when(leafReader.storedFields()).thenReturn(storedFields);
             // Wrap the document method to track concurrency
-            when(leafReader.document(anyInt())).thenAnswer(invocation -> {
+            when(storedFields.document(anyInt())).thenAnswer(invocation -> {
                 if (segmentReadTracker.get(segmentName).compareAndSet(false, true)) {
                     concurrentSegmentReads.incrementAndGet(); // Increment only on first read per segment
                 }
@@ -247,7 +253,7 @@ public class LuceneDocumentsReaderTest {
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
 
         // Create a custom LuceneDocumentsReader for testing
-        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), false, "dummy_field") {
+        LuceneDocumentsReader reader = new LuceneDocumentsReader9(Paths.get("dummy"), false, "dummy_field") {
             @Override
             protected DirectoryReader getReader() {
                 return mockReader;
@@ -266,7 +272,7 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<RfsLuceneDocument> actualDocuments = reader.readDocuments()
+        List<RfsLuceneDocument> actualDocuments = reader.readDocuments(0)
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));
@@ -308,7 +314,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
@@ -345,7 +351,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
 
         for (int startingDocIndex = 0; startingDocIndex < documentIds.size(); startingDocIndex++) {

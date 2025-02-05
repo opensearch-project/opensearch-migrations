@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.CreateSnapshot;
@@ -28,7 +27,6 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
@@ -37,6 +35,7 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
@@ -60,13 +59,13 @@ import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
+import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Slf4j
 public class SourceTestBase {
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
-    public static final String SNAPSHOT_NAME = "test_snapshot";
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
@@ -119,6 +118,7 @@ public class SourceTestBase {
         return process.exitValue();
     }
 
+
     @NotNull
     protected static ProcessBuilder setupProcess(String[] processArgs) {
         String classpath = System.getProperty("java.class.path");
@@ -140,6 +140,7 @@ public class SourceTestBase {
         processBuilder.redirectOutput();
         return processBuilder;
     }
+
 
     @AllArgsConstructor
     public static class ExpectedMigrationWorkTerminationException extends RuntimeException {
@@ -215,17 +216,15 @@ public class SourceTestBase {
         }
     }
 
-    public static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
-        private final UnaryOperator<RfsLuceneDocument> docTransformer;
+    @AllArgsConstructor
+    public static class FilteredLuceneDocumentsReader implements LuceneDocumentsReader {
 
-        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<RfsLuceneDocument> docTransformer) {
-            super(luceneFilesBasePath, softDeletesPossible, softDeletesField);
-            this.docTransformer = docTransformer;
-        }
+        private final LuceneDocumentsReader wrappedReader;
+        private final UnaryOperator<RfsLuceneDocument> docTransformer;
 
         @Override
         public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
-            return super.readDocuments(startDoc).map(docTransformer);
+            return wrappedReader.readDocuments(startDoc).map(docTransformer);
         }
     }
 
@@ -271,8 +270,12 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-            Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
-                sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
+            var readerFactory = new LuceneDocumentsReader.Factory(sourceResourceProvider) {
+                @Override
+                public LuceneDocumentsReader getReader(Path path) {
+                    return new FilteredLuceneDocumentsReader(super.getReader(path), terminatingDocumentFilter);
+                }
+            };
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
@@ -280,6 +283,7 @@ public class SourceTestBase {
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
             var connectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
+                    .compressionEnabled(compressionEnabled)
                     .build()
                     .toConnectionContext();
             try (var workCoordinator = coordinatorFactory.get(
@@ -290,21 +294,21 @@ public class SourceTestBase {
             )) {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
-                        readerFactory,
-                        new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
-                        progressCursor,
-                        workCoordinator,
-                        Duration.ofMinutes(10),
-                        processManager,
-                        sourceResourceProvider.getIndexMetadata(),
-                        snapshotName,
-                        indexAllowlist,
-                        sourceResourceProvider.getShardMetadata(),
-                        unpackerFactory,
-                        MAX_SHARD_SIZE_BYTES,
-                        context,
-                        new AtomicReference<>(),
-                        new WorkItemTimeProvider());
+                    readerFactory,
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> defaultDocTransformer),
+                    progressCursor,
+                    workCoordinator,
+                    Duration.ofMinutes(10),
+                    processManager,
+                    sourceResourceProvider.getIndexMetadata(),
+                    snapshotName,
+                    indexAllowlist,
+                    sourceResourceProvider.getShardMetadata(),
+                    unpackerFactory,
+                    MAX_SHARD_SIZE_BYTES,
+                    context,
+                    new AtomicReference<>(),
+                    new WorkItemTimeProvider());
             }
         } finally {
             deleteTree(tempDir);

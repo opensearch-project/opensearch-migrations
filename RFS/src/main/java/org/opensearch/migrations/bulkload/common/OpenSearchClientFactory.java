@@ -46,7 +46,7 @@ public class OpenSearchClientFactory {
             return clientClass.getConstructor(ConnectionContext.class, Version.class)
                     .newInstance(connectionContext, version);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException("Failed to instantiate OpenSearchClient", e);
+            throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }
     }
 
@@ -59,14 +59,14 @@ public class OpenSearchClientFactory {
             return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class)
                     .newInstance(restClient, failedRequestsLogger, version);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException("Failed to instantiate OpenSearchClient", e);
+            throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }
     }
 
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
         if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
-        } else if (VersionMatchers.isES_6_X.test(version)) {
+        } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
             return OpenSearchClient_ES_6_8.class;
         } else {
             throw new IllegalArgumentException("Unsupported version: " + version);
@@ -100,7 +100,7 @@ public class OpenSearchClientFactory {
         if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
             return versionFromRootApi;
         }
-        return client.getAsync("_cluster/settings", null)
+        return client.getAsync("_cluster/settings?include_defaults=true", null)
                 .flatMap(this::checkCompatibilityModeFromResponse)
                 .doOnError(e -> log.error(e.getMessage()))
                 .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
@@ -191,9 +191,7 @@ public class OpenSearchClientFactory {
 
             if (foundVersions.isEmpty()) {
                 return Mono.error(new OpenSearchClient.OperationFailed("Unable to find any version numbers", resp));
-            }
-
-            if (foundVersions.size() == 1) {
+            } else if (foundVersions.size() == 1) {
                 return Mono.just(foundVersions.stream().findFirst().get());
             }
 
@@ -209,5 +207,10 @@ public class OpenSearchClientFactory {
         return client.getConnectionContext().isAwsSpecificAuthentication() ? Flavor.AMAZON_MANAGED_OPENSEARCH : Flavor.OPENSEARCH;
     }
 
+    public static class ClientInstantiationException extends RuntimeException {
+        public ClientInstantiationException(String message, Exception cause) {
+            super(message, cause);
+        }
+    }
 
 }
