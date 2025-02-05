@@ -35,7 +35,7 @@ class BulkDocSectionTest {
     static final Map<String, Object> SOURCE_DOC_1 = Map.of("field", "value");
 
     static final BulkDocSection BULK_DOC_SECTION_1 = new BulkDocSection("test-id", "test-index", "_doc",
-            "{\"field\":\"value\"}");
+            "{\"field\":\"value\"}", null);
 
     static final BulkDocSection BULK_DOC_SECTION_2 = new BulkDocSection("test-id", "test-index", "_doc",
             "{\"field\":\"value\"}", "routing1");

@@ -4,8 +4,12 @@ import java.io.IOException;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
@@ -21,13 +25,16 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
-import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -46,6 +53,7 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.Getter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -55,6 +63,11 @@ public class RfsMigrateDocuments {
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
+
+    // Decrease successor nextAcquisitionLeaseExponent if shard setup takes less than 2.5% of total lease time
+    // Increase successor nextAcquisitionLeaseExponent if shard setup takes more than 10% of lease total time
+    private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
+    private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
 
     public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
             "  {" +
@@ -259,7 +272,8 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var connectionContext = arguments.targetArgs.toConnectionContext();
-
+        OpenSearchClient targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+        var targetVersion = targetClient.getClusterVersion();
 
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -267,15 +281,31 @@ public class RfsMigrateDocuments {
                 .addArgument(docTransformerConfig).log();
         Supplier<IJsonTransformer> docTransformerSupplier = () -> new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
-        try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
-             var workCoordinator = new OpenSearchWorkCoordinator(
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        var progressCursor = new AtomicReference<WorkItemCursor>();
+        var cancellationRunnableRef = new AtomicReference<Runnable>();
+        var workItemTimeProvider = new WorkItemTimeProvider();
+        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+        try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId)
+                 workerId,
+                Clock.systemUTC(),
+                workItemRef::set);
+             var processManager = new LeaseExpireTrigger(
+                w -> exitOnLeaseTimeout(
+                        workItemRef,
+                        workCoordinator,
+                        w,
+                        progressCursor,
+                        workItemTimeProvider,
+                        arguments.initialLeaseDuration,
+                        () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                        context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                Clock.systemUTC()
+            );
         ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            var clientFactory = new OpenSearchClientFactory(connectionContext);
-            OpenSearchClient targetClient = clientFactory.determineVersionAndCreate();
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
@@ -305,6 +335,7 @@ public class RfsMigrateDocuments {
             run(
                 new LuceneDocumentsReader.Factory(sourceResourceProvider),
                 reindexer,
+                progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
                 processManager,
@@ -314,7 +345,9 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getShardMetadata(),
                 unpackerFactory,
                 arguments.maxShardSizeBytes,
-                context);
+                context,
+                cancellationRunnableRef,
+                workItemTimeProvider);
         } catch (NoWorkLeftException e) {
             log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             System.exit(NO_WORK_LEFT_EXIT_CODE);
@@ -324,9 +357,126 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private static void exitOnLeaseTimeout(String workItemId) {
-        log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
+    @SneakyThrows
+    private static void exitOnLeaseTimeout(
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
+            IWorkCoordinator coordinator,
+            String workItemId,
+            AtomicReference<WorkItemCursor> progressCursorRef,
+            WorkItemTimeProvider workItemTimeProvider,
+            Duration initialLeaseDuration,
+            Runnable cancellationRunnable,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) {
+        log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
+                .addArgument(workItemId)
+                .log();
+        if (progressCursorRef.get() != null) {
+            log.atWarn().setMessage("Progress cursor set, cancelling active doc migration").log();
+            cancellationRunnable.run();
+            // Get a new progressCursor after cancellation for most up-to-date checkpoint
+            var progressCursor = progressCursorRef.get();
+            log.atWarn().setMessage("Progress cursor: {}")
+                    .addArgument(progressCursor).log();
+            var workItemAndDuration = workItemRef.get();
+            if (workItemAndDuration == null) {
+                throw new IllegalStateException("Unexpected state with progressCursor set without a" +
+                        "work item");
+            }
+            log.atWarn().setMessage("Work Item and Duration: {}").addArgument(workItemAndDuration)
+                    .log();
+            log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
+                    .log();
+            var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
+            log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
+                    .log();
+            var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
+            coordinator.createSuccessorWorkItemsAndMarkComplete(
+                workItemId,
+                successorWorkItemIds,
+                successorNextAcquisitionLeaseExponent,
+                contextSupplier
+            );
+        } else {
+            log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
+                    "downloading and unpacking shard takes longer than the lease").log();
+            log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
+                    .log();
+        }
+
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+    }
+
+    public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
+                                       Instant leaseExpirationTime) {
+        if (workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null ||
+            workItemTimeProvider.getDocumentMigraionStartTimeRef().get() == null) {
+            throw new IllegalStateException("Unexpected state with either leaseAquisitionTime or" +
+                    "documentMigrationStartTime as null while creating successor work item");
+        }
+        var leaseAcquisitionTime = workItemTimeProvider.getLeaseAcquisitionTimeRef().get();
+        var documentMigrationStartTime = workItemTimeProvider.getDocumentMigraionStartTimeRef().get();
+        var leaseDuration = Duration.between(leaseAcquisitionTime, leaseExpirationTime);
+        var leaseDurationFactor = (double) leaseDuration.toMillis() / initialLeaseDuration.toMillis();
+        // 2 ^ n = leaseDurationFactor <==> log2(leaseDurationFactor) = n, n >= 0
+        var existingNextAcquisitionLeaseExponent = Math.max(Math.round(Math.log(leaseDurationFactor) / Math.log(2)), 0);
+        var shardSetupDuration = Duration.between(leaseAcquisitionTime, documentMigrationStartTime);
+
+        var shardSetupDurationFactor = (double) shardSetupDuration.toMillis() / leaseDuration.toMillis();
+        int successorShardNextAcquisitionLeaseExponent = (int) existingNextAcquisitionLeaseExponent;
+        if (shardSetupDurationFactor < DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD && successorShardNextAcquisitionLeaseExponent > 0) {
+            // This can happen after a period of slow shard downloads e.g. S3 throttling/slow workers
+            // that caused leases to grow larger than desired
+            log.atInfo().setMessage("Shard setup took {}% of lease time which is less than target lower threshold of {}%." +
+                    "Decreasing successor lease duration exponent.")
+                    .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
+                    .addArgument(String.format("%.2f", DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
+                    .log();
+            successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent - 1;
+        } else if (shardSetupDurationFactor > INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD) {
+            log.atInfo().setMessage("Shard setup took {}% of lease time which is more than target upper threshold of {}%." +
+                            "Increasing successor lease duration exponent.")
+                    .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
+                    .addArgument(String.format("%.2f", INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
+                    .log();
+            successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent + 1;
+        }
+
+        log.atDebug().setMessage("SuccessorNextAcquisitionLeaseExponent calculated values:" +
+                        "\nleaseAcquisitionTime:{}" +
+                        "\ndocumentMigrationStartTime:{}" +
+                        "\nleaseDuration:{}" +
+                        "\nleaseDurationFactor:{}" +
+                        "\nexistingNextAcquisitionLeaseExponent:{}" +
+                        "\nshardSetupDuration:{}" +
+                        "\nshardSetupDurationFactor:{}" +
+                        "\nsuccessorShardNextAcquisitionLeaseExponent:{}")
+                .addArgument(leaseAcquisitionTime)
+                .addArgument(documentMigrationStartTime)
+                .addArgument(leaseDuration)
+                .addArgument(leaseDurationFactor)
+                .addArgument(existingNextAcquisitionLeaseExponent)
+                .addArgument(shardSetupDuration)
+                .addArgument(shardSetupDurationFactor)
+                .addArgument(successorShardNextAcquisitionLeaseExponent)
+                .log();
+
+        return successorShardNextAcquisitionLeaseExponent;
+    }
+
+    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+        if (workItemAndDuration == null) {
+            throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
+        }
+        var workItem = workItemAndDuration.getWorkItem();
+        // Set successor as same last docId, this will ensure we process every document fully in cases where there is a 1:many doc split
+        var successorStartingDocId = progressCursor.getDocId();
+        var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
+                .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
+            successorStartingDocId);
+        ArrayList<String> successorWorkItemIds = new ArrayList<>();
+        successorWorkItemIds.add(successorWorkItem.toString());
+        return successorWorkItemIds;
     }
 
     private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {
@@ -344,6 +494,7 @@ public class RfsMigrateDocuments {
 
     public static DocumentsRunner.CompletionStatus run(LuceneDocumentsReader.Factory readerFactory,
                                                        DocumentReindexer reindexer,
+                                                       AtomicReference<WorkItemCursor> progressCursor,
                                                        IWorkCoordinator workCoordinator,
                                                        Duration maxInitialLeaseDuration,
                                                        LeaseExpireTrigger leaseExpireTrigger,
@@ -353,7 +504,9 @@ public class RfsMigrateDocuments {
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes,
-                                                       RootDocumentMigrationContext rootDocumentContext)
+                                                       RootDocumentMigrationContext rootDocumentContext,
+                                                       AtomicReference<Runnable> cancellationRunnable,
+                                                       WorkItemTimeProvider timeProvider)
         throws IOException, InterruptedException, NoWorkLeftException
     {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
@@ -368,14 +521,24 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        var runner = new DocumentsRunner(scopedWorkCoordinator, maxInitialLeaseDuration, (name, shard) -> {
+        BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
             var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
             log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
             if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
                 throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
             }
             return shardMetadata;
-        }, unpackerFactory, readerFactory, reindexer);
+        };
+
+        var runner = new DocumentsRunner(scopedWorkCoordinator,
+            maxInitialLeaseDuration,
+            reindexer,
+            unpackerFactory,
+            shardMetadataSupplier,
+            readerFactory,
+            progressCursor::set,
+            cancellationRunnable::set,
+            timeProvider);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 

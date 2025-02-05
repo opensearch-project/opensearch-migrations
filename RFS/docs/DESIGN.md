@@ -41,39 +41,7 @@ The ultimate goal of RFS is to enable the movement of the data in a large (multi
 
 Elasticsearch Snapshots are a directory tree containing both data and metadata.  Each Elasticsearch Index has its own sub-directory, and each Elasticsearch Shard has its own sub-directory under the directory of its parent Elasticsearch Index.  The raw data for a given Elasticsearch Shard is store in its corresponding Shard sub-directory as a collection of Lucene files, which Elasticsearch obfuscates.  Metadata files exist in the snapshot to provide details about the snapshot as a whole, the source cluster’s global metadata and settings, each index in the snapshot, and each shard in the snapshot.
 
-Below is an example for the structure of an Elasticsearch 7.10 snapshot, along with a breakdown of its contents
-
-```
-/filesystem/path/repo/snapshots/
-├── index-0 <-------------------------------------------- [1]
-├── index.latest
-├── indices
-│   ├── DG4Ys006RDGOkr3_8lfU7Q <------------------------- [2]
-│   │   ├── 0 <------------------------------------------ [3]
-│   │   │   ├── __iU-NaYifSrGoeo_12o_WaQ <--------------- [4]
-│   │   │   ├── __mqHOLQUtToG23W5r2ZWaKA <--------------- [4]
-│   │   │   ├── index-gvxJ-ifiRbGfhuZxmVj9Hg 
-│   │   │   └── snap-eBHv508cS4aRon3VuqIzWg.dat <-------- [5]
-│   │   └── meta-tDcs8Y0BelM_jrnfY7OE.dat <-------------- [6]
-│   └── _iayRgRXQaaRNvtfVfRdvg
-│       ├── 0
-│       │   ├── __DNRvbH6tSxekhRUifs35CA
-│       │   ├── __NRek2UuKTKSBOGczcwftng
-│       │   ├── index-VvqHYPQaRcuz0T_vy_bMyw
-│       │   └── snap-eBHv508cS4aRon3VuqIzWg.dat
-│       └── meta-tTcs8Y0BelM_jrnfY7OE.dat
-├── meta-eBHv508cS4aRon3VuqIzWg.dat <-------------------- [7]
-└── snap-eBHv508cS4aRon3VuqIzWg.dat <-------------------- [8]
-```
-
-1. **Repository Metadata File**: JSON encoded; contains a mapping between the snapshots within the repo and the Elasticsearch Indices/Shards stored within it
-2. **Index Directory**: Contains all the data/metadata for a specific Elasticsearch Index
-3. **Shard Directory**: Contains all the data/metadata for a specific Shard of an Elasticsearch Index
-4. **Lucene Files**: Lucene Index files, lightly-obfuscated by the snapshotting process; large files from the source filesystem are split in multiple parts
-5. **Shard Metadata File**: SMILE encoded; contains details about all the Lucene files in the shard and a mapping between their in-Snapshot representation and their original representation on the source machine they were pulled from (e.g. original file name, etc)
-6. **Index Metadata File**: SMILE encoded; contains things like the index aliases, settings, mappings, number of shards, etc
-7. **Global Metadata File**: SMILE encoded; contains things like the legacy, index, and component templates
-8. **Snapshot Metadata File**: SMILE encoded; contains things like whether the snapshot succeeded, the number of shards, how many shards succeeded, the ES/OS version, the indices in the snapshot, etc
+Read more about [Snapshot Reading](./SNAPSHOT_READING.md)
 
 ## Ultra-High Level Design
 The responsibility of performing an RFS operation is performed by a group of one or more RFS Workers (see Figure 1, below).
@@ -86,7 +54,8 @@ RFS Workers perform the work of migrating the data from a source cluster to a ta
 
 1. Create the coordinating metadata index on the target
 2. Create work items to track the migration of each Shard on the Source
-3. Migrate the documents by retrieving each Elasticsearch Shard, unpacking it into a Lucene Index locally, and re-indexing its contents against the target cluster
+3. Migrate the documents by retrieving each Elasticsearch Shard, unpacking it into a Lucene Index locally, performing any required transformations, and re-indexing its contents against the target cluster
+4. Indicate progress completed by creating successor work items
 
 ## Key RFS Worker concepts
 
@@ -104,33 +73,54 @@ Important CMS features in use:
 
 ### Work leases
 
-An RFS Worker “acquires” a work item by either winning an atomic creation or an optimistic update on the CMS.  When it does so, it sets a maximum duration for it to complete work on the item as a part of the create/update operation. Ideally, it will use the CMS’s clock to do this.  The RFS Worker is assumed to have a lease on that work item until that duration expires.  If the work is not completed in that time, the RFS Worker will relinquish the work item and it or another RFS Worker will try again later.
+An RFS Worker “acquires” a work item by either winning an atomic creation or an optimistic update on the CMS. When it does so, it sets a maximum duration for it to complete work on the item as a part of the create/update operation. Ideally, it will use the CMS’s clock to do this.  The RFS Worker is assumed to have a lease on that work item until that duration expires. If the work is not completed in that time, the RFS Worker will create a successor work item that defines the remaining work and mark the current work item as finished.
 
-As a specific example, an RFS Worker queries the CMS to find an Elasticsearch Shard to migrate to the target cluster.  The CMS returns a record corresponding to a specific Elasticsearch Shard’s progress that either has not been started or has an expired work lease, and the RFS Worker performs an optimistic update of its timestamp field, setting it (hypothetically) for 5 hours from the current time (according to the CMS’s clock).
+As a specific example, an RFS Worker queries the CMS to find a work item corresponding to a starting point in an Elasticsearch shard to migrate to the target cluster.  The CMS returns a record corresponding to a specific Elasticsearch shard’s progress that either has not been started or has an expired work lease, and the RFS Worker performs an optimistic update of its leaseholder id (with the worker's unique id) & lease expiration field, setting it (hypothetically) for 5 hours from the current time (according to the CMS’s clock).
 
-RFS Workers regularly polls the CMS to see if their current work item’s lease has expired (according to the CMS’s clock); if they find it has expired, they kill themselves and allow an outside system to spin up a replacement RFS Worker.  Similarly, the RFS Scaler will check for expired work items and ensure that any RFS Workers associated with them have been reaped.
+Lease timing is deterministic as a function of 1/ the "initial lease time" parameter to the RFS worker (the default is 10 minutes) and the number of times a given work item has been attempted. Each time a work item is claimed, the worker increments the number of attempts and then uses that number as an exponent to double the lease time. For example, if the initial lease time is 10 minutes, and this is the first attempt, the lease will be 10 minutes long. If this is the third attempt, the lease will be 80 minutes (10*2^3).
 
-The process of finding the optimal initial work lease duration will be data driven based on actual usage statistics.  The CMS will contain the duration of each work item after a RFS operation finishes, which can be used to iteratively improve the initial “guess”.  Each RFS Worker is responsible for setting the duration for work items it attempts to acquire a lease for.
+Claiming a lease involves a clock-check (rejecting the lease if the worker's clock is too far off from the CMS's clock), after which the RFS workers monitor the time remaining until the lease expires. When it expires without the work being completed, they (in most cases) create a successor work item including a progress cursor of the current progress through the shard, mark the original work item as completed, and kill the worker process. If shard setup (downloading, unpacking, and beginning to read the shard) takes too little (<2.5%) or too much (>10%) of the lease time, the lease time is considered wrong-sized and is adjusted for the successor item. This adjustment is done by setting the number of attempt field when creating the successor item. If the lease was too short (setup took too large a percent of the time), the number of attempts on the successor item will be the number of attempts on the original item plus one. In the opposite case, it will be initialized as the attempts on the original item minus one. And if the lease was "right-sized", the successor item will get the same number of attempts value as the original currently has.
 
 ### One work lease at a time
 
-An RFS Worker retains no more than a single work lease at a time.  If the work item associated with that lease has multiple steps or components, the work lease covers the completion of all of them as a combined unit.  As a specific example, the RFS Worker that wins the lease to migrate an Elasticsearch Shard is responsible for migrating every Document in that Shard.
+An RFS Worker retains no more than a single work lease at a time.  If the work item associated with that lease has multiple steps or components, the work lease covers the completion of all of them as a combined unit.  As a specific example, the RFS Worker that wins the lease to migrate an Elasticsearch shard is responsible for migrating every document in that shard starting at the given doc num (or at the beginning if not specified). After completing a lease, the worker process exits.
 
 ### Work lease backoff
 
-When an RFS Worker acquires a work item, it increments the number of attempts that have been made to finish it.  The RFS Worker increases its requested work lease duration based on the number of attempts.  If the number of attempts passes a specified threshold, the RFS Worker instead marks the work item as problematic so it won’t be picked up again.
+When an RFS Worker acquires a work item, it increments the lease time exponent that will be used on the subsequent attempt. The RFS Worker increases its requested work lease duration based on this exponent.
+
+When some work is completed and a successor item is created, the successor lease time exponent is increased / decreased to maintain a subsequent worker using up 90%-97.5% of the lease time sending docs versus setting up work (e.g. downloading/extracting shard).
 
 The algorithm for backoff based on number of attempts and the maximum number of attempts to allow will both be data driven and expected to improve with experience.
 
-### Don’t touch existing templates or indices
+### Idempotent Successor Item Creation
 
-While performing its work, RFS Workers will not modify any Templates or Index Settings on the target cluster.  They instead assume that another, separate process has pre-configured those entries in order to correctly receive the documents being reindexed into the target cluster.  This approach allows separation of concerns between the RFS Workers and the metadata migration process.  It also provides space for users to customize/configure the target cluster differently than the source cluster.
+A successor item is created when a worker does not complete the shard referenced in the work item. Because OpenSearch does not have a concept of transactions, the RFS Worker executes a series of actions against the CMS that allow it to remain in a safe state throughout, if the original worker dies or a new worker picks up the original work item.
 
-### Overwrite documents by ID
+1. Generate the successor work item id. This is deterministic and just a combination of the shard name and progress cursor, which is the offset within the shard representing how far the worker was able to progress.
+2. Update the `successorWorkItems` field of the original work item with the successor work item id, with a server-side check to ensure that the original work item is still owned by the current worker (validating the `leaseHolderId` matches the one supplied by the worker).
+3. Create the new work item with ID that was previously determined, as long as it does not currently exist.
+4. Mark the original work item as completed, again validating that the current worker still owns the lease for the work item.
 
-While performing its work, if an RFS Worker is tasked to create an Elasticsearch Document on the target cluster, it will do so by using the same ID as on the source cluster, clobbering any existing Elasticsearch Document on the target cluster with that ID.  The reasoning for this policy is as follows.
+If this process fails at any point before step 4 is successful, another worker will acquire the lease for the original work item. However, before beginning work, the worker checks whether the `successorWorkItems` field was set. If so, it knows that a previous worker completed up to the point indicated by the successor work item id, and it picks up the work of steps 3 and 4 (creating the successor work item, if it doesn't exist, and marking the original as complete).
 
-The unit of work for an RFS Worker migrating Elasticsearch Documents is an Elasticsearch Shard, not an Elasticsearch Document.  If an RFS Worker dies unexpectedly while moving the Elasticsearch Documents in an Elasticsearch Shard, it would be hard to reliably track exactly which had been successfully moved such that another RFS Worker could resume at the correct position.  We will instead simplify the design by just starting the Elasticsearch Shard over from the beginning and overwriting any partial work.
+If this process fails before the `successorWorkItems` field is updated, a new worker will acquire the lease, but it won't be clear to that worker that this work was already started, so it will begin from the progress cursor in the original work item. While this means that excess document processing and reindexing work is being done, it does not put the CMS in an inconsistent state. Additionally, as detailed below, reindexing documents is idempotent by ID, so re-writing a document does not cause duplicate copies on the target cluster.
+
+```mermaid
+sequenceDiagram
+    participant Snapshot Store
+    RFS Worker->>+CMS: Claim work item
+    CMS->>+RFS Worker: Return work item
+    Snapshot Store-->>RFS Worker: Retrieve shard from snapshot
+    loop For lease duration
+        RFS Worker-->>Target: PUT `_bulk` documents
+    end
+    RFS Worker->>+CMS: Update work item with successor id
+    RFS Worker->>+CMS: Create successor work item
+    RFS Worker->>+CMS: Mark work item as completed
+    Note over RFS Worker: Worker process terminates
+
+```
 
 ## How the RFS Worker works
 
@@ -214,6 +204,18 @@ If no Entry is returned, we know that this sub-phase is complete and attempt to 
 
 The work lease for this sub-phase is on the Shard (ensuring every Elasticsearch Document in that Shard has been processed).  We log/emit metrics to indicate how many Documents are successfully and unsuccessfully migrated but we don’t consider the Shard Work Entry to have failed if some (or even all) of the Documents in it are unsuccessfully migrated.  We only retry the Shard Work Entry when an RFS Worker fails to process every Document within the lease window.  These retries are relatively time consuming, but safe because we overwrite any partial work performed by a previous RFS Worker. 
 
+### Notes on Reindexing Behavior
+
+#### Don’t touch existing templates or indices
+
+While performing its work, RFS Workers will not modify any Templates or Index Settings on the target cluster.  We expect that users have migrated metadata before they documents. This approach allows separation of concerns between the RFS Workers and the metadata migration process.  It also provides space for users to customize/configure the target cluster differently than the source cluster.
+
+#### Overwrite documents by ID
+
+While performing its work, if an RFS Worker is tasked to create an Elasticsearch Document on the target cluster, it will do so by using the same ID as on the source cluster, clobbering any existing Elasticsearch Document on the target cluster with that ID.  The reasoning for this policy is as follows.
+
+The pending work items are the remaining docs for each Elasticsearch Shard. The RFS Workers have a consistent view of the position of a document within the entire shard. If a lease is about to expire and a shard has not been fully migrated, the RFS Workers use the latest continuous migrated doc number to reduce the duplicate work a successor work item has. On the target cluster, overwritten documents appear as deleted documents, so the amount of duplicative work can be assessed from the deleted items metric (assuming there is not other activity on the cluster creating deleted documents).
+
 ## Appendix: Assumptions
 
 We start with the following high-level assumptions about the structure of the solution.  Changes to these assumptions would likely have a substantial impact on the design.  
@@ -236,27 +238,22 @@ At a high level, the primary concerns for a Reindex-from-Snapshot operation are 
 Below is the schema for the coordinating metadata records to be stored in the CMS:
 
 ```
-INDEX WORK ENTRY RECORD
-ID: <name of the index to be migrated>
+SHARD SETUP
+ID: shard_setup
 FIELDS:
-    * name (string): The index name
-    * status (string): NOT_STARTED, COMPLETED, FAILED
-    * numAttempts (integer): Times the task has been attempted
-    * numShards (integer): Number of shards in the index
+    * creatorId (string): Unique id of the worker who created the task
+    * leaseHolderId (string): Unique id of the worker who has aquired the lease for the task
+    * expiration (timestamp): When the current lease expires
+    * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
+    * completedAt (timestamp): If present, when the task was completed.
 
-DOCUMENTS MIGRATION STATUS RECORD
-ID: docs_status
+SHARD COMPONENT WORK ENTRY RECORD
+ID: <name of the index to be migrated>__<shard number>__<progress cursor>
 FIELDS:
-    * status (string): SETUP, IN_PROGRESS, COMPLETED, FAILED
-    * leaseExpiry (timestamp): When the current work lease expires
-    * numAttempts (integer): Times the task has been attempted
-
-SHARD WORK ENTRY RECORD
-ID: <name of the index to be migrated>_<shard number>
-FIELDS:
-    * indexName (string): The index name
-    * shardId (integer): The shard number
-    * status (string): NOT_STARTED, COMPLETED, FAILED
-    * leaseExpiry (timestamp): When the current work lease expires
-    * numAttempts (integer): Times the task has been attempted
+    * creatorId (string): Unique id of the worker who created the task
+    * leaseHolderId (string): Unique ID of the RFS worker that currently holds the lease
+    * expiration (timestamp): When the current work lease expires
+    * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
+    * successorWorkItems (list of strings): Follow-up work item(s) created from this parent item
+    * completedAt (timestamp): When this work item was completed
 ```

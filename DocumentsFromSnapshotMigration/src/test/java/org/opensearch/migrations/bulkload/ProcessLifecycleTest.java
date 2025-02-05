@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -29,17 +28,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
-/**
- * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
- * Some of the functionality and code are shared between the two and should be refactored.
- */
+import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
+
 @Slf4j
 @Tag("longTest")
 public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
-    public static final String SNAPSHOT_NAME = "test_snapshot";
-    public static final List<String> INDEX_ALLOWLIST = List.of();
     public static final int OPENSEARCH_PORT = 9200;
 
     enum FailHow {
@@ -164,8 +159,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer,
-        FailHow failHow)
-    {
+        FailHow failHow
+    ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
         if (failHow == FailHow.AT_STARTUP) {
@@ -175,26 +170,20 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         int timeoutSeconds = 90;
-        String[] processArgs = {
-            "--snapshot-name",
-            SNAPSHOT_NAME,
-            "--snapshot-local-dir",
-            tempDirSnapshot.toString(),
-            "--lucene-dir",
-            tempDirLucene.toString(),
-            "--target-host",
+        String initialLeaseDuration = failHow == FailHow.NEVER ? "PT10M" : "PT1S";
+
+        String[] additionalArgs = {
+            "--documents-per-bulk-request", "10",
+            "--max-connections", "1",
+            "--initial-lease-duration", initialLeaseDuration,
+        };
+
+        ProcessBuilder processBuilder = setupProcess(
+            tempDirSnapshot,
+            tempDirLucene,
             targetAddress,
-            "--index-allowlist",
-            "geonames",
-            "--documents-per-bulk-request",
-            "10",
-            "--max-connections",
-            "1",
-            "--source-version",
-            "ES_7_10",
-            "--initial-lease-duration",
-            failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
-        ProcessBuilder processBuilder = setupProcess(processArgs);
+            additionalArgs
+        );
 
         var process = runAndMonitorProcess(processBuilder);
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -210,5 +199,4 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
         return process.exitValue();
     }
-
 }
