@@ -191,7 +191,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         long numItemsAssigned = getMetricValueOrZero(workMetrics, "nextWorkAssignedCount");
         Assertions.assertEquals(numItemsAssigned, shardCount);
         long numCompleted = getMetricValueOrZero(workMetrics, "completeWorkCount");
-        Assertions.assertEquals(numCompleted, shardCount + 1);
+        Assertions.assertEquals(shardCount + 1, numCompleted);
     }
 
 }
