@@ -430,6 +430,18 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public void completeWorkItem(
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws InterruptedException {
+            retryWithExponentialBackoff(
+                () -> completeWorkItemWithoutRetry(workItemId, contextSupplier),
+                MAX_MARK_AS_COMPLETED_RETRIES,
+                CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                ignored -> {}
+            );
+    }
+
+    private void completeWorkItemWithoutRetry(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException {
         try (var ctx = contextSupplier.get()) {
             final var markWorkAsCompleteBodyTemplate = "{\n"
@@ -879,7 +891,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> completeWorkItem(workItemId, ctx::getCompleteWorkItemContext),
+                    () -> completeWorkItemWithoutRetry(workItemId, ctx::getCompleteWorkItemContext),
                     MAX_MARK_AS_COMPLETED_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     e -> ctx.addTraceException(e, true)
@@ -955,27 +967,53 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         try (var context = contextSupplier.get()) {
             for (var attempt = 1; ; ++attempt) {
-                var suppliedVal = supplier.get();
-                var transformedVal = transformer.apply(suppliedVal);
-                if (test.test(suppliedVal, transformedVal)) {
-                    return transformedVal;
-                } else {
-                    log.atWarn().setMessage("Retrying {} because the predicate failed for: ({},{})")
-                        .addArgument(labelThatShouldBeAContext)
-                        .addArgument(suppliedVal)
-                        .addArgument(transformedVal)
-                        .log();
-                    if (attempt >= maxTries) {
-                        context.recordFailure();
-                        throw new MaxTriesExceededException(suppliedVal, transformedVal);
-                    } else {
-                        context.recordRetry();
+                T suppliedVal = null;
+                U transformedVal = null;
+                Exception exception = null;
+                try {
+                    suppliedVal = supplier.get();
+                    transformedVal = transformer.apply(suppliedVal);
+                    if (test.test(suppliedVal, transformedVal)) {
+                        return transformedVal;
                     }
-                    Thread.sleep(sleepMillis);
-                    sleepMillis *= 2;
+                } catch (Exception e) {
+                    exception = e;
                 }
+
+                if (attempt >= maxTries) {
+                    logFailure(labelThatShouldBeAContext, attempt, suppliedVal, transformedVal, exception);
+                    context.recordFailure();
+                    throw new MaxTriesExceededException(suppliedVal, transformedVal);
+                } else {
+                    context.recordRetry();
+                    logRetry(labelThatShouldBeAContext, attempt, suppliedVal, transformedVal, exception);
+                }
+                Thread.sleep(sleepMillis);
+                sleepMillis *= 2;
             }
         }
+    }
+
+    private static <T, U> void logRetry(String contextLabel, int attempt, T suppliedVal, U transformedVal, Exception e) {
+        log.atWarn()
+            .setMessage("Retrying {} (Attempt {}) for: ({}, {})")
+            .addArgument(contextLabel)
+            .addArgument(attempt)
+            .addArgument(suppliedVal)
+            .addArgument(transformedVal)
+            .setCause(e)
+            .log();
+    }
+
+    private static <T, U> void logFailure(String contextLabel, int attempt, T suppliedVal, U transformedVal, Exception e) {
+        log.atError()
+            .setMessage("Failing {}. Ran out of retries after attempt {} for ({}, {})")
+            .addArgument(contextLabel)
+            .addArgument(attempt)
+            .addArgument(suppliedVal)
+            .addArgument(transformedVal)
+            .setCause(e)
+            .log();
     }
 
     private void refresh(Supplier<IWorkCoordinationContexts.IRefreshContext> contextSupplier) throws IOException,
