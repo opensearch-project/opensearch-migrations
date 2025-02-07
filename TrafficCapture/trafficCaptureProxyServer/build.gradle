@@ -66,108 +66,89 @@ application {
     mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy'
 }
 
-import org.gradle.api.DefaultTask
-import org.gradle.api.tasks.InputFiles
-import org.gradle.api.tasks.TaskAction
-import groovy.io.FileType
-import java.util.zip.ZipInputStream
+tasks.register("verifyCompatibilityWithJDK11") {
+    group = "verification"
+    description = "Verify Java major versions of compiled classes and dependencies for compatibility with JDK 11."
 
-// Custom task type
-class VerifyCompatibilityWithJDK11Task extends DefaultTask {
-    @InputFiles
-    File compiledClassesDir = new File("${project.buildDir}/classes/java/main")
+    // Declare task inputs
+    inputs.files(fileTree("${buildDir}/classes/java/main")).withPropertyName("compiledClasses")
+    inputs.files(configurations.compileClasspath).withPropertyName("compileClasspath")
+    inputs.files(configurations.runtimeClasspath).withPropertyName("runtimeClasspath")
 
-    @InputFiles
-    FileTree compileClasspath = project.configurations.compileClasspath.asFileTree
+    // Declare outputs (optional if no files are written, just up-to-date checking)
+    outputs.upToDateWhen { true }
 
-    @InputFiles
-    FileTree runtimeClasspath = project.configurations.runtimeClasspath.asFileTree
+    doLast {
+        // Task implementation logic
+        def isCompatible = true
+        def analyzedFiles = [] // To avoid duplicate processing
 
-    @Internal
-    boolean isCompatible = true
-
-    @Internal
-    HashSet analyzedFiles = new HashSet<File>()
-
-    int getMajorVersion(InputStream inputStream) {
-        // Skip first 6 bytes (magic and minor version)
-        inputStream.skip(6)
-        int majorVersion = (inputStream.read() << 8) | inputStream.read()
-        inputStream.close()
-        return majorVersion
-    }
-
-    void processClassFile(InputStream inputStream, String name, String source) {
-        int majorVersion = getMajorVersion(inputStream)
-        if (majorVersion > 55) {
-            isCompatible = false
-            println "Incompatible class file in ${source}: ${name} (Java major version ${majorVersion})"
+        def getMajorVersion = { InputStream inputStream ->
+            inputStream.skip(6)
+            def majorVersion = inputStream.read() << 8 | inputStream.read()
+            inputStream.close()
+            return majorVersion
         }
-    }
 
-    void analyzeCompiledClasses() {
-        if (compiledClassesDir.exists()) {
-            println "Analyzing compiled classes in ${compiledClassesDir}..."
-            compiledClassesDir.eachFileRecurse(FileType.FILES) { File file ->
-                if (file.name.endsWith('.class')) {
-                    file.withInputStream { InputStream inputStream ->
-                        processClassFile(inputStream, file.name, compiledClassesDir.toString())
+        def processClassFile = { InputStream inputStream, String name, String source ->
+            def majorVersion = getMajorVersion(inputStream)
+            if (majorVersion > 55) {
+                isCompatible = false
+                println "Incompatible class file in ${source}: ${name} (Java major version ${majorVersion})"
+            }
+        }
+
+        def analyzeCompiledClasses = {
+            def outputDir = file("${buildDir}/classes/java/main")
+            if (outputDir.exists()) {
+                println "Analyzing compiled classes in ${outputDir}..."
+                fileTree(dir: outputDir, include: '**/*.class').forEach { classFile ->
+                    classFile.withInputStream { inputStream ->
+                        processClassFile(inputStream, classFile.name, outputDir.toString())
                     }
                 }
+            } else {
+                println "No compiled classes found in ${outputDir}."
             }
-        } else {
-            println "No compiled classes found in ${compiledClassesDir}."
         }
-    }
 
-    void analyzeDependencies(FileTree classpathFiles) {
-        println "\nAnalyzing dependencies..."
-        classpathFiles.files.each { File dependency ->
-            if (dependency.name.endsWith(".jar") && !analyzedFiles.contains(dependency)) {
-                analyzedFiles.add(dependency)
-                def zipStream = new ZipInputStream(new FileInputStream(dependency))
-                def entry
-                while ((entry = zipStream.nextEntry) != null) {
-                    if (entry.name.endsWith(".class")) {
-                        // If this is a multi-release jar entry and its version is above 11, skip it.
-                        if (entry.name.startsWith("META-INF/versions/")) {
-                            def parts = entry.name.split("/")
-                            if (parts.size() >= 3 && parts[2].isInteger()) {
-                                def versionNumber = parts[2].toInteger()
+        def analyzeDependencies = { configuration ->
+            println "\nAnalyzing ${configuration.name} dependencies..."
+            configuration.files.each { dependency ->
+                if (dependency.name.endsWith(".jar") && !analyzedFiles.contains(dependency)) {
+                    analyzedFiles.add(dependency)
+                    def zipStream = new java.util.zip.ZipInputStream(new FileInputStream(dependency))
+                    def entry
+                    while ((entry = zipStream.nextEntry) != null) {
+                        if (entry.name.endsWith(".class")) {
+                            if (entry.name.startsWith("META-INF/versions/")) {
+                                def versionDir = entry.name.split("/")[2]
+                                def versionNumber = versionDir.isInteger() ? versionDir.toInteger() : 0
                                 if (versionNumber > 11) {
                                     continue
                                 }
                             }
-                        }
-                        // Copy the entry contents to a temporary file and process it.
-                        File tempFile = File.createTempFile("class", ".tmp")
-                        tempFile.deleteOnExit()
-                        tempFile.withOutputStream { os -> os << zipStream }
-                        tempFile.withInputStream { InputStream inputStream ->
-                            processClassFile(inputStream, entry.name, dependency.name)
+                            def tempFile = File.createTempFile("class", ".tmp")
+                            tempFile.deleteOnExit()
+                            tempFile.withOutputStream { it << zipStream }
+                            tempFile.withInputStream { inputStream ->
+                                processClassFile(inputStream, entry.name, dependency.name)
+                            }
                         }
                     }
+                    zipStream.close()
                 }
-                zipStream.close()
             }
         }
-    }
 
-    @TaskAction
-    void verify() {
         analyzeCompiledClasses()
-        analyzeDependencies(compileClasspath)
-        analyzeDependencies(runtimeClasspath)
+        analyzeDependencies(configurations.compileClasspath)
+        analyzeDependencies(configurations.runtimeClasspath)
 
         if (!isCompatible) {
             throw new GradleException("Incompatible class files detected! Ensure all classes are compatible with JDK 11 (major version ≤ 55).")
         }
     }
-}
-
-tasks.register("verifyCompatibilityWithJDK11", VerifyCompatibilityWithJDK11Task) {
-    group = "verification"
-    description = "Verify Java major versions of compiled classes and dependencies for compatibility with JDK 11."
     dependsOn tasks.named("assemble")
 }
 

@@ -30,5 +30,5 @@ dependencies {
 }
 
 application {
-    mainClass.set('org.opensearch.migrations.MetadataMigration')
+    mainClassName = 'org.opensearch.migrations.MetadataMigration'
 }

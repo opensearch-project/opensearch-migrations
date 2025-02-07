@@ -1,8 +1,8 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok'
-    id 'com.avast.gradle.docker-compose'
+    id 'io.freefair.lombok' version '8.6'
+    id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
 }
 
@@ -65,13 +65,12 @@ dependencies {
 }
 
 application {
-    mainClass.set('org.opensearch.migrations.RfsMigrateDocuments')
+    mainClassName = 'org.opensearch.migrations.RfsMigrateDocuments'
 }
 
 // Cleanup additional docker build directory
-def dockerBuildDir = file("./docker/build")
 clean.doFirst {
-    delete dockerBuildDir
+    delete project.file("./docker/build")
 }
 
 task copyDockerRuntimeJars (type: Sync) {
@@ -116,9 +115,9 @@ for (dockerService in dockerServices) {
         inputDir = project.file(dockerService.inputDir)
         // platform.set("linux/amd64")
         buildArgs = dockerService.buildArgs
-        images.add("migrations/${dockerService.dockerImageName}:${hash}".toString())
-        images.add("migrations/${dockerService.dockerImageName}:${version}".toString())
-        images.add("migrations/${dockerService.dockerImageName}:latest".toString())
+        images.add("migrations/${dockerService.dockerImageName}:${hash}")
+        images.add("migrations/${dockerService.dockerImageName}:${version}")
+        images.add("migrations/${dockerService.dockerImageName}:latest")
     }
 }
 

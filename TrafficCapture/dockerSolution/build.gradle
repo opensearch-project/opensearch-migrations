@@ -1,6 +1,6 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id "com.avast.gradle.docker-compose"
+    id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
 }
 
@@ -43,8 +43,8 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
             inputDir = project.file("src/main/docker/${escapedProjectName}")
         }
         def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
-        images.add("migrations/${dockerImageName}:${hashNonce}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
+        images.add("migrations/${dockerImageName}:$hashNonce")
+        images.add("migrations/${dockerImageName}:latest")
     }
 }
 
@@ -58,14 +58,10 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         // Applications and Standalone Libraries both have libraries, sync them
         (libraries + applications).each { lib ->
             def applicationDestDir = "staging/${lib.name}/"
-
-            // Ensure dependencies are resolved within the correct project context
-            project.evaluationDependsOn(lib.path)
-
-            from (lib.files { lib.configurations.runtimeClasspath }) {
+            from (lib.configurations.findByName("runtimeClasspath").files) {
                 into "${applicationDestDir}/lib"
             }
-            from (lib.tasks.named('jar')) {
+            from (lib.tasks.getByName('jar')) {
                 into "${applicationDestDir}/lib"
             }
         }
@@ -73,7 +69,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         // Sync application start scripts
         applications.each { app ->
             def applicationDestDir = "staging/${app.name}/"
-            from (app.tasks.named('startScripts').get().outputs.files) {
+            from (app.tasks.getByName('startScripts').outputs.files) {
                 into "${applicationDestDir}/bin"
             }
         }
@@ -113,8 +109,8 @@ javaContainerServices.forEach { dockerImageName, projectName ->
     task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")
-        images.add("migrations/${dockerImageName}:${version}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
+        images.add("migrations/${dockerImageName}:${version}")
+        images.add("migrations/${dockerImageName}:latest")
     }
 }
 
