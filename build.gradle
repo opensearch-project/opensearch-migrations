@@ -2,12 +2,10 @@ plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "2.1.1"
     id "com.diffplug.spotless" version '7.0.2'
-    id 'io.freefair.lombok' version '8.12' apply false
+    id 'io.freefair.lombok' version '8.6' apply false
     id 'jacoco'
+    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
     id 'me.champeau.jmh' version '0.7.2' apply false
-    id 'com.gradleup.shadow' version '8.3.5' apply false
-    id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
-    id 'com.google.protobuf' version "0.9.4" apply false
 }
 
 allprojects {
@@ -24,24 +22,26 @@ ext.captureProxyDependencies = []
 gradle.projectsEvaluated {
     def captureProxyProject = rootProject.project(":TrafficCapture:trafficCaptureProxyServer")
     captureProxyDependencies = captureProxyProject.configurations.collectMany { configuration ->
-        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.path }
+        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.dependencyProject.path }
     }
     // Add the TrafficCaptureProxyServer project itself
     captureProxyDependencies << captureProxyProject.path
 }
 
 // Modify sourceCompatibility during the execution phase
-gradle.taskGraph.whenReady {
+gradle.taskGraph.whenReady { taskGraph ->
     allprojects {
         tasks.withType(JavaCompile).configureEach {
-            def jvmVersion = (project.path in rootProject.captureProxyDependencies) ? JavaVersion.VERSION_11 : JavaVersion.VERSION_17
-            sourceCompatibility = jvmVersion
-            targetCompatibility = jvmVersion
+            if (project.path in rootProject.captureProxyDependencies) {
+                sourceCompatibility = JavaVersion.VERSION_11
+                targetCompatibility = JavaVersion.VERSION_11
+            } else {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
         }
     }
 }
-
-
 
 // Define version properties
 ext {
@@ -153,11 +153,11 @@ subprojects {
         dependsOn project.javadoc
 
         testLogging {
-            events = ["passed", "skipped", "failed"]
-            exceptionFormat = "full"
-            showExceptions = true
-            showCauses = true
-            showStackTraces = true
+            events "passed", "skipped", "failed"
+            exceptionFormat "full"
+            showExceptions true
+            showCauses true
+            showStackTraces true
         }
         maxParallelForks = gradle.startParameter.maxWorkerCount
 
@@ -291,7 +291,7 @@ subprojects {
             repositories {
                 maven { url = "${rootProject.buildDir}/repository"}
                 maven {
-                    url = "https://aws.oss.sonatype.org/content/repositories/snapshots"
+                    url "https://aws.oss.sonatype.org/content/repositories/snapshots"
                     name = 'staging'
                 }
             }
@@ -312,9 +312,9 @@ subprojects {
         classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
         reports {
             xml.required = true
-            xml.outputLocation = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
             html.required = true
-            html.outputLocation = file("${buildDir}/reports/jacoco/test/html")
+            html.destination file("${buildDir}/reports/jacoco/test/html")
         }
     }
 }
@@ -364,9 +364,9 @@ task mergeJacocoReports(type: JacocoReport) {
 
     reports {
         xml.required = true
-        xml.outputLocation = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
+        xml.destination = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
         html.required = true
-        html.outputLocation = file("${buildDir}/reports/jacoco/mergedReport/html")
+        html.destination = file("${buildDir}/reports/jacoco/mergedReport/html")
     }
 }
 

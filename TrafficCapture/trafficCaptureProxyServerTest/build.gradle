@@ -1,6 +1,6 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id "com.avast.gradle.docker-compose"
+    id "com.avast.gradle.docker-compose" version "0.17.4"
     //The 'com.bmushcko.docker-remote-api' line IS required (due to the remaining DockerBuildImage tasks) but W/O
     // a specified version. The version is managed within the buildSrc/build.gradle file.
     id 'com.bmuschko.docker-remote-api'
@@ -50,8 +50,8 @@ def dockerFilesForExternalServices = [
 dockerFilesForExternalServices.each { dockerImageName, projectName ->
     task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         def hash = calculateDockerHash(projectName)
-        images.add("migrations/${dockerImageName}:${hash}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
+        images.add("migrations/${dockerImageName}:$hash")
+        images.add("migrations/${dockerImageName}:latest")
         inputDir = project.file("src/main/docker/${projectName}")
     }
 }
@@ -77,8 +77,8 @@ javaContainerServices.each(createContainerTasks)
     task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")
-        images.add("migrations/${dockerImageName}:${version}".toString())
-        images.add("migrations/${dockerImageName}:latest".toString())
+        images.add("migrations/${dockerImageName}:${version}")
+        images.add("migrations/${dockerImageName}:latest")
     }
 }
 
