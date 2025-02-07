@@ -15,7 +15,11 @@ jobs:
 
     services:
       sonarqube:
-        image: sonarqube:community
+        # sonarqube disabled the `password` option in 25.2.0. This is the last release of the
+        # `community` tag that supports this option, which we're using as a short-term solution
+        # while we support the `token` parameter.credentials:
+        # https://opensearch.atlassian.net/browse/MIGRATIONS-2389
+        image: sonarqube@sha256:47e573f85879254dafd7be9845f750155f33de8a6f33542015c31ce050917059
         ports:
           - 9000:9000
         options: >-
