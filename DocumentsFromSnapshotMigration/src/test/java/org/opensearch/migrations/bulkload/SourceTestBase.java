@@ -38,6 +38,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
@@ -285,11 +286,14 @@ public class SourceTestBase {
                     .compressionEnabled(compressionEnabled)
                     .build()
                     .toConnectionContext();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+
             try (var workCoordinator = coordinatorFactory.get(
                     new CoordinateWorkHttpClient(connectionContext),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
-                    Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
+                    Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift)),
+                    workItemRef::set
             )) {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(

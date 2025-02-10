@@ -137,16 +137,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     public OpenSearchWorkCoordinator(
-            AbstractedHttpClient httpClient,
-            long tolerableClientServerClockDifferenceSeconds,
-            String workerId,
-            Clock clock
-    ) {
-        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, w -> {});
-    }
-
-
-    public OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId,

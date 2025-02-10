@@ -15,14 +15,6 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
         ) {
             super(httpClient, tolerableClientServerClockDifferenceSeconds, workerId);
         }
-        public OpenSearchWorkCoordinator_ES_6_8(
-                AbstractedHttpClient httpClient,
-                long tolerableClientServerClockDifferenceSeconds,
-                String workerId,
-                Clock clock
-        ) {
-            super(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock);
-        }
 
         public OpenSearchWorkCoordinator_ES_6_8(
             AbstractedHttpClient httpClient,

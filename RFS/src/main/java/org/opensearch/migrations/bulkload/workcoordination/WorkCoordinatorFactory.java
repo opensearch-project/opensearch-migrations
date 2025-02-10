@@ -30,21 +30,6 @@ public class WorkCoordinatorFactory {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
     }
-
-    public OpenSearchWorkCoordinator get(
-            AbstractedHttpClient httpClient,
-            long tolerableClientServerClockDifferenceSeconds,
-            String workerId,
-            Clock clock
-        ) {
-        if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
-            return new OpenSearchWorkCoordinator_OS_2_11(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock);
-        } else if (VersionMatchers.isES_6_X.test(version)) {
-            return new OpenSearchWorkCoordinator_ES_6_8(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock);
-        } else {
-            throw new IllegalArgumentException("Unsupported version: " + version);
-        }
-    }
     
     public OpenSearchWorkCoordinator get(
             AbstractedHttpClient httpClient,
