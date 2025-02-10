@@ -34,34 +34,27 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 @Tag("isolatedTest")
 @Slf4j
 class EndToEndTest extends BaseMigrationTest {
-    private static Stream<Arguments> scenarios() {
-        Stream<Arguments> target_6_8_case = Stream.of(Arguments.of(
-                SearchClusterContainer.ES_V6_8_23,
-                SearchClusterContainer.ES_V6_8_23,
-                TransferMedium.SnapshotImage,
-                List.of(TemplateType.Legacy)
-        ));
 
-        Stream<Arguments> fullScenarios = getSupportedClusters().stream().flatMap(sourceCluster -> {
+    private static Stream<Arguments> scenarios() {
+        return getSupportedClusters().stream()
+            .flatMap(sourceCluster -> {
                 // Determine applicable template types based on source version
                 List<TemplateType> templateTypes = Stream.concat(
-                        Stream.of(TemplateType.Legacy),
-                        (sourceCluster.getVersion().getMajor() >= 7
-                            ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
-                            : Stream.empty()))
-                    .collect(Collectors.toList());
+                                Stream.of(TemplateType.Legacy),
+                                (sourceCluster.getVersion().getMajor() >= 7
+                                        ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
+                                        : Stream.empty()))
+                        .collect(Collectors.toList());
 
                 return SupportedClusters.targets().stream()
-                    .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
-                        .map(transferMedium -> Arguments.of(
-                            sourceCluster,
-                            targetCluster,
-                            transferMedium,
-                            templateTypes)))
-                    .toList().stream();
+                        .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
+                                .map(transferMedium -> Arguments.of(
+                                        sourceCluster,
+                                        targetCluster,
+                                        transferMedium,
+                                        templateTypes)))
+                        .collect(Collectors.toList()).stream();
             });
-
-        return Stream.concat(target_6_8_case, fullScenarios);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
