@@ -518,9 +518,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             }
             var payload = objectMapper.readTree(response.getPayloadBytes());
             var totalHits = getTotalHitsFromSearchResponse(payload);
-            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
-            // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
-            // ES 6.8 does not include the `relation` field, so we assume it's `eq`.
+            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. If a `relation`
+            // for the total is present, it must be `eq` or we need to throw an error because it's not safe to rely on this data.
             var relationValue = payload.path("hits").path("total").path("relation").textValue();
             if (totalHits == 0 && relationValue != null && !relationValue.equals("eq")) {
                 throw new IllegalStateException("Querying for notYetCompleted work returned 0 hits with an unexpected total relation.");
