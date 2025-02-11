@@ -30,6 +30,8 @@ dependencies {
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', withoutBom
     implementation group: 'org.jcommander', name: 'jcommander'
+
+    implementation group: 'com.thoughtworks.xstream', name: 'xstream', version: '1.4.21'
 }
 
 CommonConfigurations.applyCommonConfigurations(project)
