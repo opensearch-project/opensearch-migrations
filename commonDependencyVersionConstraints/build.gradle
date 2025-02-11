@@ -128,7 +128,7 @@ dependencies {
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************
-    implementation group: 'net.minidev', name: 'json-smart', version: '2.4.9'
+    implementation group: 'net.minidev', name: 'json-smart', version: '2.5.1'
     implementation group: 'xalan', name: 'xalan', version: '2.7.3'
     implementation group: 'com.thoughtworks.xstream', name: 'xstream', version: '1.4.21'
     implementation group: 'commons-net', name: 'commons-net', version: '3.9.0'
