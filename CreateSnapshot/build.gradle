@@ -1,7 +1,7 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok' version '8.6'
+    id 'io.freefair.lombok'
     id 'org.opensearch.migrations.java-application-conventions'
 }
 
@@ -22,5 +22,5 @@ dependencies {
 }
 
 application {
-    mainClassName = 'org.opensearch.migrations.CreateSnapshot'
+    mainClass.set('org.opensearch.migrations.CreateSnapshot')
 }

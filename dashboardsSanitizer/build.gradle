@@ -27,5 +27,5 @@ dependencies {
 }
 
 application {
-    mainClassName = 'org.opensearch.migrations.dashboards.SanitizerCli'
+    mainClass.set('org.opensearch.migrations.dashboards.SanitizerCli')
 }
