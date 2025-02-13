@@ -15,11 +15,11 @@ WORKDIR /root/kafka-tools
 #RUN curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz -o /tmp/kafka.tgz \
 #    && tar -xzf /tmp/kafka.tgz -C /root/kafka-tools --strip-components=1 \
 #    && rm -f /tmp/kafka.tgz
-ADD https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz /root/kafka-tools/
-RUN tar --transform='s!^[^/]*!kafka!' -xzf kafka_2.13-3.6.0.tgz && \
-    rm kafka_2.13-3.6.0.tgz
+#ADD https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz /root/kafka-tools/
+#RUN tar --transform='s!^[^/]*!kafka!' -xzf kafka_2.13-3.6.0.tgz && \
+#    rm kafka_2.13-3.6.0.tgz
 
-ADD https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar kafka/libs/msk-iam-auth.jar
+#ADD https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar kafka/libs/msk-iam-auth.jar
 
 # Add kubectl and Helm distributions
 RUN mkdir -p /tmp/k8s
