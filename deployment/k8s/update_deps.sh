@@ -2,6 +2,7 @@
 
 START_TIME=$(date +%s)
 
+helm dependency update charts/sharedResources/baseKafkaCluster
 helm dependency update charts/components/bulkLoad
 helm dependency update charts/components/captureProxy
 helm dependency update charts/components/migrationConsole
