@@ -26,3 +26,14 @@ def delete(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     except Exception as e:
         logger.error(f"Failure running delete snapshot: {e}")
         return CommandResult(success=False, value=f"Failure running delete snapshot: {e}")
+
+
+def delete_snapshot_repo(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
+    logger.info(f"Deleting snapshot repo with {args=} and {kwargs=}")
+    try:
+        return CommandResult(success=True, value=snapshot.delete_snapshot_repo(*args, **kwargs))
+    except Exception as e:
+        logger.error(f"Failure running delete snapshot repo: {e}")
+        return CommandResult(success=False, value=f"Failure running delete snapshot repo: {e}")
+
+

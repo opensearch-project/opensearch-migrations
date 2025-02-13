@@ -5,18 +5,35 @@ ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
+ARG HELM_VERSION="3.14.0"
+ARG KUBECTL_VERSION="1.32.1"
 
 RUN mkdir -p /root/kafka-tools/aws
 
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
+#RUN curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz -o /tmp/kafka.tgz \
+#    && tar -xzf /tmp/kafka.tgz -C /root/kafka-tools --strip-components=1 \
+#    && rm -f /tmp/kafka.tgz
 ADD https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz /root/kafka-tools/
 RUN tar --transform='s!^[^/]*!kafka!' -xzf kafka_2.13-3.6.0.tgz && \
     rm kafka_2.13-3.6.0.tgz
 
 ADD https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar kafka/libs/msk-iam-auth.jar
-WORKDIR /root
 
+# Add kubectl and Helm distributions
+RUN mkdir -p /tmp/k8s
+WORKDIR /tmp/k8s
+ADD https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/arm64/kubectl .
+RUN install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    kubectl completion bash > /etc/bash_completion.d/kubectl
+ADD https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz .
+RUN tar -zxvf helm-v${HELM_VERSION}-linux-amd64.tar.gz && \
+    mv linux-amd64/helm /usr/local/bin/ &&  \
+    helm completion bash > /etc/bash_completion.d/helm && \
+    rm -rf /tmp/k8s
+
+WORKDIR /root
 # Add Traffic Replayer jars for running KafkaPrinter from this container
 COPY staging/kafkaCommandLineFormatter/lib /root/kafka-tools/
 ENV CLASSPATH=/root/kafka-tools/kafkaCommandLineFormatter.jar

@@ -250,6 +250,24 @@ def delete_snapshot_cmd(ctx, acknowledge_risk: bool):
     result = snapshot_.delete(ctx.env.snapshot)
     click.echo(result.value)
 
+
+@snapshot_group.command(name="delete-repo")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.pass_obj
+def delete_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
+    """Delete the snapshot repository"""
+    if not acknowledge_risk:
+        confirmed = click.confirm('If you proceed with deleting the snapshot repository, the cluster will delete all '
+                                  'underlying local and remote files associated with the snapshot repository and its '
+                                  'underlying snapshots. Are you sure you want to continue?')
+        if not confirmed:
+            click.echo("Aborting the command to delete snapshot repository.")
+            return
+    logger.info("Deleting snapshot repository")
+    result = snapshot_.delete_snapshot_repo(ctx.env.snapshot)
+    click.echo(result.value)
+
 # ##################### BACKFILL ###################
 
 # As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of

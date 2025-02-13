@@ -18,6 +18,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         make \
         openssl-devel \
         pkg-config \
+        procps-ng \
         python3.11 \
         python3.11-devel \
         python3.11-pip \
@@ -27,7 +28,6 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         vim \
         wget \
         zlib-devel \
-        procps-ng \
         && \
     dnf clean all && \
     rm -rf /var/cache/dnf

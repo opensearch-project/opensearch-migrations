@@ -36,7 +36,8 @@
         {{- else -}}
             {{- if not (eq "" $formattedKeyFlagName) -}}
                 {{- $lines = append $lines (printf "if [ -n \"$%s\" ]; then" $envVarName) -}}
-                {{- $lines = append $lines (printf "  export %s=\"$%s %s $%s\"" $argsName $argsName $formattedKeyFlagName $envVarName) -}}
+                {{- $lines = append $lines (printf "  cleanString=$(echo \"$%s\" | sed 's/ /|/g')" $envVarName) -}}
+                {{- $lines = append $lines (printf "  export %s=\"$%s %s $cleanString\"" $argsName $argsName $formattedKeyFlagName) -}}
                 {{- $lines = append $lines (printf "fi") -}}
             {{- end -}}
         {{- end -}}

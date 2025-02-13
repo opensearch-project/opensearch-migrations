@@ -13,10 +13,11 @@ from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
-from console_link.models.ecs_service import ECSService, InstanceStatuses
+from console_link.models.ecs_service import ECSService
 from console_link.models.kafka import StandardKafka
 from console_link.models.metrics_source import Component
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.utils import DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 VALID_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
@@ -527,7 +528,7 @@ def test_cli_backfill_scale_with_no_units_fails(runner, mocker):
 
 
 def test_get_backfill_status_no_deep_check(runner, mocker):
-    mocked_running_status = InstanceStatuses(
+    mocked_running_status = DeploymentStatus(
         desired=1,
         running=3,
         pending=1
@@ -547,7 +548,7 @@ def test_get_backfill_status_no_deep_check(runner, mocker):
 
 
 def test_get_backfill_status_with_deep_check(runner, mocker):
-    mocked_running_status = InstanceStatuses(
+    mocked_running_status = DeploymentStatus(
         desired=1,
         running=3,
         pending=1

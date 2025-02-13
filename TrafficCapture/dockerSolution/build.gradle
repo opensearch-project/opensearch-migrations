@@ -15,6 +15,53 @@ dependencies {
     }
 }
 
+static def isMinikubeRunning() {
+    try {
+        def status = "minikube status".execute().text
+        return status.contains("Running")
+    } catch (Exception ignored) {
+        return false
+    }
+}
+def syncToMinikube = isMinikubeRunning()
+def buildImageInMinikube(String imageName, String dockerBuildDir) {
+    println "Building image inside Minikube Docker environment"
+
+    // Set the Docker environment to Minikube's
+    def minikubeCommand = "eval \$(minikube docker-env) && docker build -t ${imageName} ${dockerBuildDir}"
+    try {
+        //def process = minikubeCommand.execute()
+        def process = ["bash", "-c", minikubeCommand].execute()
+        process.in.eachLine { println it }
+        process.err.eachLine { System.err.println it }
+        process.waitFor()
+
+        if (process.exitValue() != 0) {
+            throw new GradleException("Failed to build Docker image inside Minikube")
+        }
+    } catch (Exception e) {
+        println("Error executing command ${minikubeCommand} with error: ${e.message}")
+    }
+
+    // Optionally, you can output the result of the build to confirm the success
+    println "Image ${imageName} built in Minikube"
+}
+//def loadImageToMinikube(String imageName, String dockerBuildDir) {
+//    def error = ""
+//    def minikubeCommand = ""
+//    try {
+//        minikubeCommand = "eval $(minikube docker-env) && docker build -t ${imageName} ${dockerBuildDir}"
+//        def process = minikubeCommand.execute()
+//        process.waitFor()
+//        error = process.errorStream.text  // capture stderr
+//        if (error) {
+//            println("Error with command '${minikubeCommand}': ${error}")
+//        }
+//    } catch (Exception e) {
+//        println("Error executing command ${minikubeCommand} with error: ${e.message}")
+//    }
+//}
+
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
         "capture_proxy_base": "captureProxyBase",
@@ -108,9 +155,12 @@ javaContainerServices.forEach { dockerImageName, projectName ->
     def dockerBuildDir = "build/docker/${dockerImageName}_${escapedProjectName}"
     task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
-        inputDir = project.file("${dockerBuildDir}")
+        def dockerDir = project.file("${dockerBuildDir}")
+        inputDir = dockerDir
+        def latestImage = "migrations/${dockerImageName}:latest"
         images.add("migrations/${dockerImageName}:${version}")
         images.add("migrations/${dockerImageName}:latest")
+        //buildImageInMinikube(latestImage, dockerDir.absolutePath)
     }
 }
 

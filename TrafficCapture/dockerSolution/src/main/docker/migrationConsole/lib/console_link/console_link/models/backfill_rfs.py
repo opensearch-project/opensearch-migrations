@@ -11,6 +11,7 @@ from console_link.models.client_options import ClientOptions
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
+from console_link.models.kubectl_runner import DeploymentStatus, KubectlRunner
 from console_link.models.ecs_service import ECSService
 
 from cerberus import Validator
@@ -39,17 +40,26 @@ ECS_RFS_SCHEMA = {
     }
 }
 
+K8S_RFS_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "namespace": {"type": "string", "required": True},
+        "deployment_name": {"type": "string", "required": True}
+    }
+}
+
 RFS_BACKFILL_SCHEMA = {
     "reindex_from_snapshot": {
         "type": "dict",
         "schema": {
             "docker": DOCKER_RFS_SCHEMA,
             "ecs": ECS_RFS_SCHEMA,
+            "k8s": K8S_RFS_SCHEMA,
             "snapshot_name": {"type": "string", "required": False},
             "snapshot_repo": {"type": "string", "required": False},
             "scale": {"type": "integer", "required": False, "min": 1}
         },
-        "check_with": contains_one_of({'docker', 'ecs'}),
+        "check_with": contains_one_of({'docker', 'ecs', 'k8s'}),
     }
 }
 
@@ -107,6 +117,55 @@ class WorkingIndexDoesntExist(Exception):
         super().__init__(f"The working state index '{index_name}' does not exist")
 
 
+class K8sRFSBackfill(RFSBackfill):
+    def __init__(self, config: Dict, target_cluster: Cluster, client_options: Optional[ClientOptions] = None) -> None:
+        super().__init__(config)
+        self.client_options = client_options
+        self.target_cluster = target_cluster
+        self.default_scale = self.config["reindex_from_snapshot"].get("scale", 5)
+
+        self.k8s_config = self.config["reindex_from_snapshot"]["k8s"]
+        self.namespace = self.k8s_config["namespace"]
+        self.deployment_name = self.k8s_config["deployment_name"]
+        self.kubectl_runner = KubectlRunner(namespace=self.namespace, deployment_name=self.deployment_name)
+
+    def start(self, *args, **kwargs) -> CommandResult:
+        logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
+        return self.kubectl_runner.perform_scale_command(replicas=self.default_scale)
+
+    def pause(self, *args, **kwargs) -> CommandResult:
+        logger.info("Pausing RFS backfill by setting desired count to 0 instances")
+        return self.kubectl_runner.perform_scale_command(replicas=0)
+
+    def stop(self, *args, **kwargs) -> CommandResult:
+        logger.info("Stopping RFS backfill by setting desired count to 0 instances")
+        return self.kubectl_runner.perform_scale_command(replicas=0)
+
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
+        return self.kubectl_runner.perform_scale_command(replicas=units)
+
+    def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
+        logger.info("Confirming there are no currently in-progress workers")
+        deployment_status = self.kubectl_runner.retrieve_deployment_status()
+        return perform_archive(target_cluster=self.target_cluster,
+                               deployment_status=deployment_status,
+                               archive_dir_path=archive_dir_path,
+                               archive_file_name=archive_file_name)
+
+    def get_status(self, *args, **kwargs) -> CommandResult:
+        logger.info(f"Getting status of RFS backfill")
+        deployment_status = self.kubectl_runner.retrieve_deployment_status()
+        if not deployment_status:
+            return CommandResult(False, "Failed to get deployment status for RFS backfill")
+        status_str = str(deployment_status)
+        if deployment_status.running > 0:
+            return CommandResult(True, (BackfillStatus.RUNNING, status_str))
+        if deployment_status.desired > 0:
+            return CommandResult(True, (BackfillStatus.STARTING, status_str))
+        return CommandResult(True, (BackfillStatus.STOPPED, status_str))
+
+
 class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
@@ -139,27 +198,10 @@ class ECSRFSBackfill(RFSBackfill):
     def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
         logger.info("Confirming there are no currently in-progress workers")
         status = self.ecs_client.get_instance_statuses()
-        if status.running > 0 or status.pending > 0 or status.desired > 0:
-            return CommandResult(False, RfsWorkersInProgress())
-        
-        try:
-            backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
-            logger.info(f"Backing up working state index to {backup_path}")
-            backup_working_state_index(self.target_cluster, WORKING_STATE_INDEX, backup_path)
-            logger.info("Working state index backed up successful")
-
-            logger.info("Cleaning up working state index on target cluster")
-            self.target_cluster.call_api(
-                f"/{WORKING_STATE_INDEX}",
-                method=HttpMethod.DELETE,
-                params={"ignore_unavailable": "true"}
-            )
-            logger.info("Working state index cleaned up successful")
-            return CommandResult(True, backup_path)
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
-                return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
-            return CommandResult(False, e)
+        return perform_archive(target_cluster=self.target_cluster,
+                               deployment_status=status,
+                               archive_dir_path=archive_dir_path,
+                               archive_file_name=archive_file_name)
 
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
@@ -233,6 +275,31 @@ class ECSRFSBackfill(RFSBackfill):
                            f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
 
         return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
+
+
+def perform_archive(target_cluster: Cluster, deployment_status: DeploymentStatus, archive_dir_path: str = None, archive_file_name: str = None) -> CommandResult:
+    logger.info("Confirming there are no currently in-progress workers")
+    if deployment_status.running > 0 or deployment_status.pending > 0 or deployment_status.desired > 0:
+        return CommandResult(False, RfsWorkersInProgress())
+
+    try:
+        backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
+        logger.info(f"Backing up working state index to {backup_path}")
+        backup_working_state_index(target_cluster, WORKING_STATE_INDEX, backup_path)
+        logger.info("Working state index backed up successful")
+
+        logger.info("Cleaning up working state index on target cluster")
+        target_cluster.call_api(
+            f"/{WORKING_STATE_INDEX}",
+            method=HttpMethod.DELETE,
+            params={"ignore_unavailable": "true"}
+        )
+        logger.info("Working state index cleaned up successful")
+        return CommandResult(True, backup_path)
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
+        return CommandResult(False, e)
 
 
 def get_working_state_index_backup_path(archive_dir_path: str = None, archive_file_name: str = None) -> str:

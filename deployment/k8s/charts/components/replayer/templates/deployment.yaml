@@ -4,14 +4,12 @@ kind: Deployment
 metadata:
   name: {{ include "generic.fullname" . }}
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: {{ include "generic.fullname" . }}
   template:
     metadata:
-      annotations:
-        rollme: {{ randAlphaNum 5 | quote }}
       labels:
         app: {{ include "generic.fullname" . }}
         env: v1
@@ -36,7 +34,12 @@ spec:
               echo cat /shared/vars.sh...
               cat /shared/vars.sh
               source /shared/vars.sh
-              exec /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer $ARGS
+              args_array=($ARGS)
+              {{/* Loop through the array and replace '|' with a space */}}
+              for i in "${!args_array[@]}"; do
+                args_array[$i]="${args_array[$i]//|/ }"
+              done
+              exec /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer "${args_array[@]}"
           volumeMounts:
             - name: {{ $envMountName }}
               mountPath: /shared
