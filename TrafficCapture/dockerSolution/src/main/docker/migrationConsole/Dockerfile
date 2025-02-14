@@ -1,3 +1,34 @@
+FROM migrations/elasticsearch_client_test_console:latest AS migration-console-base
+
+RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
+    if [ "$ARCH" != "amd64" ] && [ "$ARCH" != "arm64" ]; then \
+        echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi && \
+    echo "Using architecture: $ARCH" && \
+    echo $ARCH > /arch.env
+
+ARG HELM_VERSION="3.14.0"
+ARG KUBECTL_VERSION="1.32.1"
+
+# Get kafka distribution and unpack to 'kafka'
+RUN mkdir -p /root/kafka-tools/kafka && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz -o /tmp/kafka.tgz && \
+    tar -xzf /tmp/kafka.tgz -C /root/kafka-tools/kafka --strip-components=1 && \
+    rm -f /tmp/kafka.tgz
+RUN mkdir -p /root/kafka-tools/aws && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar -o /root/kafka-tools/kafka/libs/msk-iam-auth.jar
+
+# Get kubectl and Helm distributions
+RUN ARCH=$(cat /arch.env) && \
+    mkdir -p /k8s/bin && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" -o /k8s/bin/kubectl && \
+    chmod +x /k8s/bin/kubectl
+
+RUN ARCH=$(cat /arch.env) && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" | tar -xz && \
+    mv linux-${ARCH}/helm /k8s/bin/
+
+
 FROM migrations/elasticsearch_client_test_console:latest
 
 # Define the virtual environment path
@@ -5,33 +36,12 @@ ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
-ARG HELM_VERSION="3.14.0"
-ARG KUBECTL_VERSION="1.32.1"
 
-RUN mkdir -p /root/kafka-tools/aws
+COPY --from=migration-console-base /root/kafka-tools /root/kafka-tools
+COPY --from=migration-console-base /k8s/bin/ /usr/local/bin
 
-WORKDIR /root/kafka-tools
-# Get kafka distribution and unpack to 'kafka'
-#RUN curl --retry 5 --retry-delay 5 --retry-connrefused -fSL https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz -o /tmp/kafka.tgz \
-#    && tar -xzf /tmp/kafka.tgz -C /root/kafka-tools --strip-components=1 \
-#    && rm -f /tmp/kafka.tgz
-#ADD https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz /root/kafka-tools/
-#RUN tar --transform='s!^[^/]*!kafka!' -xzf kafka_2.13-3.6.0.tgz && \
-#    rm kafka_2.13-3.6.0.tgz
-
-#ADD https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar kafka/libs/msk-iam-auth.jar
-
-# Add kubectl and Helm distributions
-RUN mkdir -p /tmp/k8s
-WORKDIR /tmp/k8s
-ADD https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/arm64/kubectl .
-RUN install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
-    kubectl completion bash > /etc/bash_completion.d/kubectl
-ADD https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz .
-RUN tar -zxvf helm-v${HELM_VERSION}-linux-amd64.tar.gz && \
-    mv linux-amd64/helm /usr/local/bin/ &&  \
-    helm completion bash > /etc/bash_completion.d/helm && \
-    rm -rf /tmp/k8s
+RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
+    helm completion bash > /etc/bash_completion.d/helm
 
 WORKDIR /root
 # Add Traffic Replayer jars for running KafkaPrinter from this container

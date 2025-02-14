@@ -153,12 +153,20 @@ class K8sRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for RFS backfill")
         status_str = str(deployment_status)
+        if deep_check:
+            try:
+                shard_status = get_detailed_status(target_cluster=self.target_cluster)
+            except Exception as e:
+                logger.error(f"Failed to get detailed status: {e}")
+                shard_status = None
+            if shard_status:
+                status_str += f"\n{shard_status}"
         if deployment_status.running > 0:
             return CommandResult(True, (BackfillStatus.RUNNING, status_str))
         if deployment_status.desired > 0:
@@ -212,7 +220,7 @@ class ECSRFSBackfill(RFSBackfill):
         status_string = str(instance_statuses)
         if deep_check:
             try:
-                shard_status = self._get_detailed_status()
+                shard_status = get_detailed_status(target_cluster=self.target_cluster)
             except Exception as e:
                 logger.error(f"Failed to get detailed status: {e}")
                 shard_status = None
@@ -225,56 +233,57 @@ class ECSRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
-    def _get_detailed_status(self) -> Optional[str]:
-        # Check whether the working state index exists. If not, we can't run queries.
-        try:
-            self.target_cluster.call_api("/.migrations_working_state")
-        except requests.exceptions.RequestException:
-            logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
-            return None
 
-        current_epoch_seconds = int(datetime.now().timestamp())
-        incomplete_query = {"query": {
-            "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}
-        }}
-        completed_query = {"query": {
-            "bool": {"must": [{"exists": {"field": "completedAt"}}]}
-        }}
-        total_query = {"query": {"match_all": {}}}
-        in_progress_query = {"query": {
-            "bool": {"must": [
-                {"range": {"expiration": {"gte": current_epoch_seconds}}},
-                {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-            ]}
-        }}
-        unclaimed_query = {"query": {
-            "bool": {"must": [
-                {"range": {"expiration": {"lt": current_epoch_seconds}}},
-                {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-            ]}
-        }}
-        queries = {
-            "total": total_query,
-            "completed": completed_query,
-            "incomplete": incomplete_query,
-            "in progress": in_progress_query,
-            "unclaimed": unclaimed_query
-        }
-        values = {key: parse_query_response(queries[key], self.target_cluster, key) for key in queries.keys()}
-        logger.info(f"Values: {values}")
-        if None in values.values():
-            logger.warning(f"Failed to get values for some queries: {values}")
-        disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" +\
-            " with the queries or the working state index"
-        # Check the various sums to make sure things add up correctly.
-        if values["incomplete"] + values["completed"] != values["total"]:
-            logger.warning(f"Incomplete ({values['incomplete']}) and completed ({values['completed']}) shards do not "
-                           f"sum to the total ({values['total']}) shards." + disclaimer)
-        if values["unclaimed"] + values["in progress"] != values["incomplete"]:
-            logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
-                           f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
+def get_detailed_status(target_cluster: Cluster) -> Optional[str]:
+    # Check whether the working state index exists. If not, we can't run queries.
+    try:
+        target_cluster.call_api("/.migrations_working_state")
+    except requests.exceptions.RequestException:
+        logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
+        return None
 
-        return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
+    current_epoch_seconds = int(datetime.now().timestamp())
+    incomplete_query = {"query": {
+        "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}
+    }}
+    completed_query = {"query": {
+        "bool": {"must": [{"exists": {"field": "completedAt"}}]}
+    }}
+    total_query = {"query": {"match_all": {}}}
+    in_progress_query = {"query": {
+        "bool": {"must": [
+            {"range": {"expiration": {"gte": current_epoch_seconds}}},
+            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
+        ]}
+    }}
+    unclaimed_query = {"query": {
+        "bool": {"must": [
+            {"range": {"expiration": {"lt": current_epoch_seconds}}},
+            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
+        ]}
+    }}
+    queries = {
+        "total": total_query,
+        "completed": completed_query,
+        "incomplete": incomplete_query,
+        "in progress": in_progress_query,
+        "unclaimed": unclaimed_query
+    }
+    values = {key: parse_query_response(queries[key], target_cluster, key) for key in queries.keys()}
+    logger.info(f"Values: {values}")
+    if None in values.values():
+        logger.warning(f"Failed to get values for some queries: {values}")
+    disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" + \
+                 " with the queries or the working state index"
+    # Check the various sums to make sure things add up correctly.
+    if values["incomplete"] + values["completed"] != values["total"]:
+        logger.warning(f"Incomplete ({values['incomplete']}) and completed ({values['completed']}) shards do not "
+                       f"sum to the total ({values['total']}) shards." + disclaimer)
+    if values["unclaimed"] + values["in progress"] != values["incomplete"]:
+        logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
+                       f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
+
+    return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
 
 
 def perform_archive(target_cluster: Cluster, deployment_status: DeploymentStatus, archive_dir_path: str = None, archive_file_name: str = None) -> CommandResult:

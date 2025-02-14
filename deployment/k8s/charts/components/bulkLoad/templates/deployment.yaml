@@ -29,11 +29,7 @@ spec:
             - |
               echo `cat /shared/vars.sh`
               source /shared/vars.sh
-              {{/* Replace '|' with a space. This replacing only gets us back to our original state, it would only allow
-              strings with spaces as arguments if we were to provide the args directrly to the java app in an array
-              like in other services  */}}
-              clean_args=$(echo "$ARGS" | sed 's/|/ /g')
-              export RFS_COMMAND="/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $clean_args"
+              export RFS_COMMAND="/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $ARGS"
               exec /rfs-app/entrypoint.sh
           volumeMounts:
             - name: {{ $envMountName }}
