@@ -21,15 +21,15 @@ def calculateDockerHash = { projectName ->
 
 dependencies {
     implementation project(':TrafficCapture:trafficCaptureProxyServer')
-    compileOnly 'org.projectlombok:lombok:1.18.28'
-    annotationProcessor 'org.projectlombok:lombok:1.18.28'
+    compileOnly libs.lombok
+    annotationProcessor libs.lombok
 
-    testCompileOnly 'org.projectlombok:lombok:1.18.28'
-    testAnnotationProcessor 'org.projectlombok:lombok:1.18.28'
+    testCompileOnly libs.lombok
+    testAnnotationProcessor libs.lombok
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', withoutBom
-    implementation group: 'org.jcommander', name: 'jcommander'
+    implementation libs.jcommander
 
     implementation group: 'com.thoughtworks.xstream', name: 'xstream', version: '1.4.21'
 }

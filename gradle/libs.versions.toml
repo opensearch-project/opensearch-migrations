@@ -1,0 +1,131 @@
+[versions]
+netty = "4.1.108.Final"
+slf4j = "2.0.13"
+dockerapi = "3.3.6"
+guava = "32.0.1-jre"
+protobuf = "3.25.5"
+httpclient5 = "5.2.1"
+aws-msk-iam-auth = "2.0.3"
+log4j = "2.23.1"
+lombok = "1.18.28"
+kafka-clients = "3.6.0"
+jmeter = "5.6.3"
+jcommander = "1.85"
+jackson = "2.16.2"
+jupiter = "5.10.2"
+jmespath-core = "0.6.0"
+commons-compress = "1.26.0"
+awssdk = "2.25.19"
+awscrt = "0.29.18"
+jolt-core = "0.1.7"
+opentelemetry = "1.34.1"
+opentelemetry-semconv = "1.23.1-alpha"
+disruptor = "4.0.0"
+bouncycastle = "1.78"
+testcontainers = "1.19.7"
+opensearch-testcontainers = "2.0.1"
+mockito = "5.11.0"
+toxiproxy = "2.1.7"
+lucene = "9.11.1"
+hamcrest = "2.2"
+jmh-core = "1.36"
+semver4j = "5.3.0"
+json = "20240303"
+graalvm = "24.1.1"
+reactor-netty = "1.1.18"
+
+
+[libraries]
+netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
+netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "netty" }
+netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
+netty-all = { module = "io.netty:netty-all", version.ref = "netty" }
+
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+
+docker-java = { module = "com.github.docker-java:docker-java", version.ref = "dockerapi" }
+docker-java-core = { module = "com.github.docker-java:docker-java-core", version.ref = "dockerapi" }
+docker-java-transport-httpclient5 = { module = "com.github.docker-java:docker-java-transport-httpclient5", version.ref = "dockerapi" }
+
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
+
+httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpclient5" }
+aws-msk-iam-auth = { module = "software.amazon.msk:aws-msk-iam-auth", version.ref = "aws-msk-iam-auth" }
+
+log4j-api = { module = "org.apache.logging.log4j:log4j-api", version.ref = "log4j" }
+log4j-core = { module = "org.apache.logging.log4j:log4j-core", version.ref = "log4j" }
+log4j-slf4j2-impl = { module = "org.apache.logging.log4j:log4j-slf4j2-impl", version.ref = "log4j" }
+
+lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
+
+kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka-clients" }
+
+jmeter-core = { module = "org.apache.jmeter:ApacheJMeter_core", version.ref = "jmeter" }
+jmeter-http = { module = "org.apache.jmeter:ApacheJMeter_http", version.ref = "jmeter" }
+jmeter-config = { module = "org.apache.jmeter:ApacheJMeter_config", version.ref = "jmeter" }
+
+jcommander = { module = "org.jcommander:jcommander", version.ref = "jcommander" }
+
+jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
+jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml", version.ref = "jackson" }
+jackson-dataformat-smile = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-smile", version.ref = "jackson" }
+
+junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "jupiter" }
+junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "jupiter" }
+junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "jupiter" }
+
+jmespath-core = { module = "io.burt:jmespath-core", version.ref = "jmespath-core" }
+
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
+
+arns = { module = "software.amazon.awssdk:arns", version.ref = "awssdk" }
+auth = { module = "software.amazon.awssdk:auth", version.ref = "awssdk" }
+sdk-core = { module = "software.amazon.awssdk:sdk-core", version.ref = "awssdk" }
+secretsmanager = { module = "software.amazon.awssdk:secretsmanager", version.ref = "awssdk" }
+s3 = { module = "software.amazon.awssdk:s3", version.ref = "awssdk" }
+s3-transfer-manager = { module = "software.amazon.awssdk:s3-transfer-manager", version.ref = "awssdk" }
+
+aws-crt = { module = "software.amazon.awssdk.crt:aws-crt", version.ref = "awscrt" }
+
+jolt-core = { module = "com.bazaarvoice.jolt:jolt-core", version.ref = "jolt-core" }
+
+opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
+opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
+opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetry" }
+opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }
+opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semconv", version.ref = "opentelemetry-semconv" }
+
+disruptor = { module = "com.lmax:disruptor", version.ref = "disruptor" }
+
+bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
+
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
+
+lucene-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene" }
+lucene-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene" }
+
+hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
+
+jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh-core" }
+
+semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
+
+json = { module = "org.json:json", version.ref = "json" }
+
+polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
+js-community = { module = "org.graalvm.polyglot:js-community", version.ref = "graalvm" }
+
+toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
+
+testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
+
+reactor-netty-core = {module = "io.projectreactor.netty:reactor-netty-core", version.ref = "reactor-netty" }
+reactor-netty-http = {module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactor-netty" }

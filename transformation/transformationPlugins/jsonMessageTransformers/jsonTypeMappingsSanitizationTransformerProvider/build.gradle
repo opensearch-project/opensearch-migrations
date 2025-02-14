@@ -13,9 +13,9 @@ dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.jackson.core
+    implementation libs.jackson.databind
+    implementation libs.slf4j.api
 
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
     testImplementation testFixtures(project(path:':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer'))
@@ -24,11 +24,11 @@ dependencies {
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    testImplementation group: 'io.netty', name: 'netty-all'
+    testImplementation libs.jackson.databind
+    testImplementation libs.netty.all
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-params'
-    testImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testImplementation libs.slf4j.api
     testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
 }
 

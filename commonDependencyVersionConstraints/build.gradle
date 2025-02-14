@@ -13,29 +13,10 @@ dependencies {
     api group: 'io.netty', name: 'netty-buffer', version: netty
     api group: 'io.netty', name: 'netty-codec-http', version: netty
     api group: 'io.netty', name: 'netty-handler', version: netty
-    api group: 'io.netty', name: 'netty-all', version: netty
 
-    api group: 'org.slf4j', name: 'slf4j-api', version: '2.0.13'
 
-    def dockerapi = '3.3.6'
-    api group: 'com.github.docker-java', name: 'docker-java', version: dockerapi
-    api group: 'com.github.docker-java', name: 'docker-java-core', version: dockerapi
-    // docker-java-transport-zerodep is also an option if this apache http client is a lot to maintain
-    api group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5', version: dockerapi
-
-    api group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
-
-    api group: 'com.google.protobuf', name: 'protobuf-java', version: protobufVersion
-
-    api group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
+    // api libs.protobuf.java, version: protobufVersion
     api group: 'software.amazon.msk', name:'aws-msk-iam-auth', version: '2.0.3'
-
-    def log4j = '2.23.1'
-    api group: 'org.apache.logging.log4j', name: 'log4j-api', version: log4j
-    api group: 'org.apache.logging.log4j', name: 'log4j-core', version: log4j
-    api group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: log4j
-
-    api group: 'org.projectlombok', name:'lombok', version:'1.18.26'
 
     api group: 'org.apache.kafka', name:'kafka-clients', version:'3.7.2'
 
@@ -48,13 +29,9 @@ dependencies {
 
     api group: 'org.jcommander', name: 'jcommander', version: '1.85'
 
-    api group: 'org.projectlombok', name: 'lombok', version: '1.18.28'
-
     def jackson = '2.16.2'
-    api group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jackson
     api group: 'com.fasterxml.jackson.core', name: 'jackson-dataformat-yaml', version: jackson
     api group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-yaml', version: jackson
-    api group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile', version: jackson
 
     def jupiter = '5.10.2'
     api group: 'org.junit.jupiter', name:'junit-jupiter-api', version: jupiter
@@ -70,11 +47,6 @@ dependencies {
     api group: 'software.amazon.awssdk', name: 'auth', version: awssdk
     api group: 'software.amazon.awssdk', name: 'sdk-core', version: awssdk
     api group: 'software.amazon.awssdk', name: 'secretsmanager', version: awssdk
-    api group: 'software.amazon.awssdk', name: 's3', version: awssdk
-    api group: 'software.amazon.awssdk', name: 's3-transfer-manager', version: awssdk
-
-    def awscrt = '0.29.18'
-    api group: 'software.amazon.awssdk.crt', name: 'aws-crt', version: awscrt
 
     api group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
 
@@ -88,15 +60,9 @@ dependencies {
 
     api group: 'com.lmax', name: 'disruptor', version: '4.0.0'
 
-    def bouncycastle = '1.78'
-    api group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: bouncycastle
-    api group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: bouncycastle
-
     def testcontainers = '1.19.7'
     api group: 'org.testcontainers', name: 'junit-jupiter', version: testcontainers
     api group: 'org.testcontainers', name: 'kafka', version: testcontainers
-    api group: 'org.testcontainers', name: 'testcontainers', version: testcontainers
-    api group: 'org.testcontainers', name: 'toxiproxy', version: testcontainers
 
     // make sure that this is compatible with the testcontainers version
     api group: 'org.opensearch', name: 'opensearch-testcontainers', version: '2.0.1'
@@ -105,16 +71,10 @@ dependencies {
     api group: 'org.mockito', name:'mockito-core', version: mockito
     api group: 'org.mockito', name:'mockito-junit-jupiter', version: mockito
 
-    api group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
-
     def lucene = '9.11.1';
     api group: 'org.apache.lucene', name: 'lucene-core', version: lucene
     api group: 'org.apache.lucene', name: 'lucene-analysis-common', version: lucene
     api group: 'org.apache.lucene', name: 'lucene-backward-codecs', version: lucene
-
-    api group: 'org.hamcrest', name: 'hamcrest', version: '2.2'
-
-    api group: 'org.openjdk.jmh', name: 'jmh-core', version: '1.36'
 
     api group: 'org.semver4j', name: 'semver4j', version: '5.3.0'
 

@@ -27,13 +27,13 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'auth'
     implementation group: 'software.amazon.awssdk', name: 'sdk-core'
 
-    testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
+    testImplementation libs.hamcrest
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
 
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
 }
 
 tasks.named('test') {

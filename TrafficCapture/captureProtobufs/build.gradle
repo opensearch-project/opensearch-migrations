@@ -8,7 +8,7 @@ plugins {
 }
 
 dependencies {
-    api group: 'com.google.protobuf', name: 'protobuf-java'
+    api libs.protobuf.java
 }
 
 protobuf {

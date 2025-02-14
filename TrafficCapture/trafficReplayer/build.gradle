@@ -26,16 +26,16 @@ dependencies {
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
-    implementation group: 'org.jcommander', name: 'jcommander'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.google.guava', name: 'guava'
-    implementation group: 'com.google.protobuf', name: 'protobuf-java'
-    implementation group: 'io.netty', name: 'netty-all'
+    implementation libs.jcommander
+    implementation libs.jackson.databind
+    implementation libs.guava
+    implementation libs.protobuf.java
+    implementation libs.netty.all
     implementation group: 'org.apache.kafka', name: 'kafka-clients'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
+    implementation libs.slf4j.api
     implementation group: 'com.lmax', name: 'disruptor'
     implementation group: 'software.amazon.awssdk', name: 'arns'
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager'
@@ -51,9 +51,9 @@ dependencies {
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
 
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
-    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all'
+    testFixturesImplementation libs.slf4j.api
+    testFixturesImplementation libs.jackson.databind
+    testFixturesImplementation libs.netty.all
     testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
@@ -62,11 +62,11 @@ dependencies {
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    testImplementation libs.httpclient5
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
     testImplementation group: 'org.testcontainers', name: 'kafka'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation libs.testcontainers
 
     testImplementation group: 'org.mockito', name:'mockito-core'
     testImplementation group: 'org.mockito', name:'mockito-junit-jupiter'
