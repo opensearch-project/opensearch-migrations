@@ -45,16 +45,16 @@ dependencies {
     testImplementation project(":DataGenerator")
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")
-    testImplementation group: 'org.apache.lucene', name: 'lucene-core'
+    testImplementation libs.lucene.v9.core
     testImplementation libs.hamcrest
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
-    testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
+    testImplementation libs.testcontainers.opensearch
     testImplementation libs.testcontainers
     testImplementation libs.testcontainers.toxiproxy
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
-    testImplementation group: 'org.json', name: 'json'
+    testImplementation libs.json
 
     testRuntimeOnly libs.junit.jupiter.engine
 

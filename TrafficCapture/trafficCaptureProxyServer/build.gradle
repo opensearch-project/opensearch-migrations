@@ -33,7 +33,7 @@ dependencies {
     implementation libs.protobuf.java
     implementation libs.jackson.core
     implementation libs.jackson.databind
-    implementation group: 'com.lmax', name: 'disruptor'
+    implementation libs.disruptor
     implementation libs.netty.all
     implementation libs.log4j.api
     implementation libs.log4j.core
@@ -47,8 +47,8 @@ dependencies {
     testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation libs.toxiproxy
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
-    testImplementation group: 'org.testcontainers', name: 'kafka'
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.kafka
     testImplementation libs.testcontainers
     testImplementation libs.testcontainers.toxiproxy
 }

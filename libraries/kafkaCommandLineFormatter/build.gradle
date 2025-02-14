@@ -5,5 +5,5 @@ plugins {
 }
 
 dependencies {
-    implementation group: 'org.apache.kafka', name:'kafka-clients', version:'3.8.0'
+    implementation libs.kafka.clients
 }

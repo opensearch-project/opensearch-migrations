@@ -10,8 +10,6 @@ plugins {
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'
-    luceneVersion7 = '7.7.3'
-    luceneVersion9 = '9.11.1'
 }
 
 configurations {
@@ -62,18 +60,18 @@ dependencies {
     implementation libs.jackson.annotations
     implementation libs.jackson.core
     implementation libs.jackson.dataformat.smile
-    implementation group: 'io.netty', name: 'netty-codec-http'
+    implementation libs.netty.codec.http
     implementation libs.httpclient5
     implementation libs.log4j.api
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
 
-    lucene7 "org.apache.lucene:lucene-core:${luceneVersion7}"
-    lucene7 "org.apache.lucene:lucene-backward-codecs:${luceneVersion7}"
+    lucene7 libs.lucene.v7.core
+    lucene7 libs.lucene.v7.backward.codecs
 
-    lucene9 "org.apache.lucene:lucene-core:${luceneVersion9}"
-    lucene9 "org.apache.lucene:lucene-analysis-common:${luceneVersion9}"
-    lucene9 "org.apache.lucene:lucene-backward-codecs:${luceneVersion9}"
+    lucene9 libs.lucene.v9.core
+    lucene9 libs.lucene.v9.analysis.common
+    lucene9 libs.lucene.v9.backward.codecs
 
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
@@ -84,23 +82,23 @@ dependencies {
     testFixturesImplementation shadowLucene7.outputs.files
     testFixturesImplementation shadowLucene9.outputs.files
 
-    implementation libs.s3
-    implementation libs.s3.transfer.manager
     implementation libs.aws.crt
+    implementation libs.aws.s3
+    implementation libs.aws.s3.transfer.manager
 
     implementation libs.reactor.netty.core
     implementation libs.reactor.netty.http
 
-    implementation libs.s3
-    implementation libs.s3.transfer.manager
     implementation libs.aws.crt
+    implementation libs.aws.s3
+    implementation libs.aws.s3.transfer.manager
 
     testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
     testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
 
     testImplementation testFixtures(project(path: ':RFS'))
-    testImplementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
-    testImplementation group: 'io.projectreactor', name: 'reactor-test'
+    testImplementation libs.lucene.v9.backward.codecs
+    testImplementation libs.reactor.test
     testImplementation libs.log4j.core
     testImplementation libs.log4j.slf4j2.impl
     testImplementation libs.junit.jupiter.api

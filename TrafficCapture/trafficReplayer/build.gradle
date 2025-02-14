@@ -31,17 +31,17 @@ dependencies {
     implementation libs.guava
     implementation libs.protobuf.java
     implementation libs.netty.all
-    implementation group: 'org.apache.kafka', name: 'kafka-clients'
+    implementation libs.kafka.clients
     implementation libs.log4j.api
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
     implementation libs.slf4j.api
-    implementation group: 'com.lmax', name: 'disruptor'
-    implementation group: 'software.amazon.awssdk', name: 'arns'
-    implementation group: 'software.amazon.awssdk', name: 'secretsmanager'
-    implementation group: 'software.amazon.awssdk', name: 'sdk-core'
-    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth'
-    implementation 'org.apache.commons:commons-compress'
+    implementation libs.disruptor
+    implementation libs.aws.arns
+    implementation libs.aws.secretsmanager
+    implementation libs.aws.sdk.core
+    implementation libs.aws.msk.iam.auth
+    implementation libs.commons.compress
 
     testFixturesImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation project(':TrafficCapture:captureOffloader')
@@ -54,7 +54,7 @@ dependencies {
     testFixturesImplementation libs.slf4j.api
     testFixturesImplementation libs.jackson.databind
     testFixturesImplementation libs.netty.all
-    testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
+    testFixturesImplementation libs.junit.jupiter.api
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
@@ -63,14 +63,14 @@ dependencies {
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
     testImplementation libs.httpclient5
-    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
-    testImplementation group: 'org.testcontainers', name: 'kafka'
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.kafka
     testImplementation libs.testcontainers
 
-    testImplementation group: 'org.mockito', name:'mockito-core'
-    testImplementation group: 'org.mockito', name:'mockito-junit-jupiter'
-    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
+    testRuntimeOnly libs.junit.jupiter.engine
 }
 
 application {

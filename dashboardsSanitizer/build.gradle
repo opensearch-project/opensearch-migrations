@@ -21,7 +21,7 @@ dependencies {
     implementation libs.log4j.slf4j2.impl
 
     implementation libs.jcommander
-    implementation group: 'org.semver4j', name: 'semver4j'
+    implementation libs.semver4j
 
     testImplementation libs.mockito.core
 }

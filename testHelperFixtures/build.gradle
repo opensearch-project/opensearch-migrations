@@ -30,8 +30,8 @@ dependencies {
     testFixturesImplementation libs.toxiproxy
     testFixturesImplementation libs.netty.all
     testFixturesImplementation libs.httpclient5
-    testFixturesImplementation libs.bcprov
-    testFixturesImplementation libs.bcpkix
+    testFixturesImplementation libs.bouncycastle.provider
+    testFixturesImplementation libs.bouncycastle.certs
     testFixturesImplementation libs.junit.jupiter.api
     testFixturesImplementation libs.hamcrest
     testFixturesImplementation libs.slf4j.api
