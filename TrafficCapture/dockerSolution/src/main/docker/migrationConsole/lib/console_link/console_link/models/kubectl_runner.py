@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from console_link.models.command_result import CommandResult
-from console_link.models.command_runner import CommandRunner,CommandRunnerError,FlagOnlyArgument
+from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.utils import DeploymentStatus
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,8 @@ class KubectlRunner:
         command_runner = CommandRunner(command_root=command, command_args=args)
         try:
             command_runner.run(print_to_console=False)
-            return CommandResult(True, f"The {self.deployment_name} deployment has been set to {replicas} desired count.")
+            return CommandResult(True, f"The {self.deployment_name} deployment has been set "
+                                       f"to {replicas} desired count.")
         except CommandRunnerError as e:
             logger.error(f"Performing kubectl command to set replica count failed: {e}")
             return CommandResult(success=False, value=f"Kubernetes command failed: {e}")
@@ -55,4 +56,3 @@ class KubectlRunner:
         except Exception as e:
             logger.error(f"Performing kubectl command to get deployment status failed: {e}")
             return None
-

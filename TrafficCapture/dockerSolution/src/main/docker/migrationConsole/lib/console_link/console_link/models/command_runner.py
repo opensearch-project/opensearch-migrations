@@ -46,10 +46,11 @@ class CommandRunner:
 
     def _run_as_synchronous_process(self, print_to_console: bool) -> CommandResult:
         try:
-            # Pass None to stdout and stderr to not capture output and show in terminal
-            # output = subprocess.run(self.command, stdout=None, stderr=None, capture_output=True, text=True, check=True)
-            # return CommandResult(success=True, value="Command executed successfully", output=output)
-            cmd_output = subprocess.run(self.command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            cmd_output = subprocess.run(self.command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True,
+                                        check=True)
             if print_to_console:
                 sys.stdout.write(cmd_output.stdout)
                 sys.stderr.write(cmd_output.stderr)

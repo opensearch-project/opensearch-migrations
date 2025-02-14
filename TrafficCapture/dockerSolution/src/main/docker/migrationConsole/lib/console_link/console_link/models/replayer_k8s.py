@@ -1,10 +1,9 @@
 from typing import Dict, Optional
 from console_link.models.client_options import ClientOptions
 from console_link.models.command_result import CommandResult
-from console_link.models.kubectl_runner import DeploymentStatus, KubectlRunner
+from console_link.models.kubectl_runner import KubectlRunner
 from console_link.models.replayer_base import Replayer, ReplayStatus
 
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,7 +37,6 @@ class K8sReplayer(Replayer):
         if deployment_status.desired > 0:
             return CommandResult(True, (ReplayStatus.STARTING, status_str))
         return CommandResult(True, (ReplayStatus.STOPPED, status_str))
-
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling K8s replayer by setting desired count to {units} instances")

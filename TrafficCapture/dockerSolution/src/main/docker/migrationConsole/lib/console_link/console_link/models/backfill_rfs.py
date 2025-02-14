@@ -154,7 +154,7 @@ class K8sRFSBackfill(RFSBackfill):
                                archive_file_name=archive_file_name)
 
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
-        logger.info(f"Getting status of RFS backfill")
+        logger.info("Getting status of RFS backfill")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for RFS backfill")
@@ -286,7 +286,10 @@ def get_detailed_status(target_cluster: Cluster) -> Optional[str]:
     return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
 
 
-def perform_archive(target_cluster: Cluster, deployment_status: DeploymentStatus, archive_dir_path: str = None, archive_file_name: str = None) -> CommandResult:
+def perform_archive(target_cluster: Cluster,
+                    deployment_status: DeploymentStatus,
+                    archive_dir_path: str = None,
+                    archive_file_name: str = None) -> CommandResult:
     logger.info("Confirming there are no currently in-progress workers")
     if deployment_status.running > 0 or deployment_status.pending > 0 or deployment_status.desired > 0:
         return CommandResult(False, RfsWorkersInProgress())

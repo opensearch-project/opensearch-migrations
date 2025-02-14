@@ -259,8 +259,8 @@ def delete_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
     """Remove the snapshot repository"""
     if not acknowledge_risk:
         confirmed = click.confirm('If you proceed with unregistering the snapshot repository, the cluster will '
-                                  'deregister the existing snapshot repository but will not perform cleanup of existing '
-                                  'snapshot files that may exist. To remove the existing snapshot files '
+                                  'deregister the existing snapshot repository but will not perform cleanup of '
+                                  'existing snapshot files that may exist. To remove the existing snapshot files '
                                   '"console snapshot delete" must be used while this repository still exists. '
                                   'Are you sure you want to continue?')
         if not confirmed:
