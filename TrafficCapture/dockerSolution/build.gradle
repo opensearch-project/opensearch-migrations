@@ -7,14 +7,6 @@ plugins {
 import org.opensearch.migrations.common.CommonUtils
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
-dependencies {
-    constraints {
-        implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
-            because 'mend security issue'
-        }
-    }
-}
-
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
         "capture_proxy_base": "captureProxyBase",

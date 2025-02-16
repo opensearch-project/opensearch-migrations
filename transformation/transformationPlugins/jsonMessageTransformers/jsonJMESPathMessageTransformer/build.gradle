@@ -11,7 +11,7 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    implementation group: 'io.burt', name: 'jmespath-core'
+    implementation libs.jmespath.core
     implementation libs.slf4j.api
 
     testImplementation project(':TrafficCapture:trafficReplayer')

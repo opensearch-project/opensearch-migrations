@@ -12,7 +12,7 @@ dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
 
-    implementation group: 'io.burt', name: 'jmespath-core'
+    implementation libs.jmespath.core
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))

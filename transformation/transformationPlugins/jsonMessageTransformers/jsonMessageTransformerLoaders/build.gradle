@@ -36,5 +36,5 @@ dependencies {
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
 
     testRuntimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    testImplementation group: 'io.burt', name: 'jmespath-core'
+    testImplementation libs.jmespath.core
 }
