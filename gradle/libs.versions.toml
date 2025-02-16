@@ -7,7 +7,7 @@ protobuf = "3.25.5"
 httpclient5 = "5.2.1"
 aws-msk-iam-auth = "2.0.3"
 log4j = "2.23.1"
-lombok = "1.18.28"
+lombok = "1.18.30"
 kafka-clients = "3.6.0"
 jmeter = "5.6.3"
 jcommander = "1.85"
@@ -31,6 +31,7 @@ jmh-core = "1.36"
 semver4j = "5.3.0"
 json = "20240303"
 graalvm = "24.1.1"
+reactor-test = "3.7.3"
 reactor-netty = "1.1.18"
 lucene7 = '7.7.3'
 lucene9 = "9.11.1"
@@ -127,7 +128,7 @@ testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", ver
 testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
 
-reactor-test = {module = "io.projectreactor:reactor-test", version.ref = "reactor-netty" }
+reactor-test = {module = "io.projectreactor:reactor-test", version.ref = "reactor-test" }
 reactor-netty-core = {module = "io.projectreactor.netty:reactor-netty-core", version.ref = "reactor-netty" }
 reactor-netty-http = {module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactor-netty" }
 

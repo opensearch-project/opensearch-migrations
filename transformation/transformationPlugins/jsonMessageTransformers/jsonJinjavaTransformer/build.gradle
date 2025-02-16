@@ -16,7 +16,7 @@ dependencies {
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
     testImplementation libs.junit.jupiter.api
-    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-params'
-    testImplementation libs.slf4j.api
+    testImplementation libs.junit.jupiter.params
+    implementation libs.slf4j.api
     testRuntimeOnly libs.junit.jupiter.engine
 }

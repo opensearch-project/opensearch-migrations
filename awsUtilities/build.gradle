@@ -23,6 +23,7 @@ plugins {
 }
 
 dependencies {
+    annotationProcessor libs.lombok
     implementation group: 'software.amazon.awssdk', name: 'arns'
     implementation group: 'software.amazon.awssdk', name: 'auth'
     implementation group: 'software.amazon.awssdk', name: 'sdk-core'

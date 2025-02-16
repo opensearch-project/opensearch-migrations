@@ -31,8 +31,6 @@ dependencies {
     api group: 'software.amazon.awssdk', name: 'sdk-core', version: awssdk
     api group: 'software.amazon.awssdk', name: 'secretsmanager', version: awssdk
 
-    api libs.jolt.core
-
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************
