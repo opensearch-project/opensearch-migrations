@@ -9,7 +9,7 @@ subprojects {
     // TODO: Expand to do more static checking in more projects
     if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
         dependencies {
-            annotationProcessor group: 'com.google.errorprone', name: 'error_prone_core', version: '2.32.0'
+            annotationProcessor libs.errorprone
         }
         tasks.named('compileJava', JavaCompile) {
             if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {

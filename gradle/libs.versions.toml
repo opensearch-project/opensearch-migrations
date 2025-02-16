@@ -36,7 +36,8 @@ reactor-netty = "1.1.18"
 lucene7 = '7.7.3'
 lucene9 = "9.11.1"
 jni-java = "2.7.3"
-
+errorprone = "2.32.0"
+commons-collections = "4.4"
 
 [libraries]
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
@@ -142,3 +143,7 @@ lucene-v9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common
 lucene-v9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
 
 jni-java = { module = "com.hubspot.jinjava:jinjava", version.ref = "jni-java" }
+
+errorprone = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+
+commons-collections = { module = "org.apache.commons:commons-collections4", version.ref = "commons-collections" }
