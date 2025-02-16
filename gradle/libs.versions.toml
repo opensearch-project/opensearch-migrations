@@ -35,6 +35,8 @@ reactor-test = "3.7.3"
 reactor-netty = "1.1.18"
 lucene7 = '7.7.3'
 lucene9 = "9.11.1"
+jni-java = "2.7.3"
+
 
 [libraries]
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
@@ -138,3 +140,5 @@ lucene-v7-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs
 lucene-v9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
 lucene-v9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene9" }
 lucene-v9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
+
+jni-java = { module = "com.hubspot.jinjava:jinjava", version.ref = "jni-java" }

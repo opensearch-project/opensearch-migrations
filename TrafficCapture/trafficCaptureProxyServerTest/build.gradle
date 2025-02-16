@@ -10,11 +10,6 @@ import org.opensearch.migrations.common.CommonConfigurations
 import java.security.MessageDigest
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
-// see https://github.com/apache/jmeter/issues/5322
-def withoutBom = {
-    exclude group: 'org.apache.jmeter', module: 'bom'
-}
-
 def calculateDockerHash = { projectName ->
     CommonUtils.calculateDockerHash(project.fileTree("src/main/docker/${projectName}"))
 }

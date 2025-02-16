@@ -6,7 +6,7 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    api group: 'com.hubspot.jinjava', name: 'jinjava', version: "2.7.3"
+    api libs.jni.java
 
     implementation libs.guava
 
