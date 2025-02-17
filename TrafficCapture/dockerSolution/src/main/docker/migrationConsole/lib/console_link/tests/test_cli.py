@@ -6,6 +6,7 @@ import time
 import pytest
 import requests_mock
 from click.testing import CliRunner
+from types import SimpleNamespace
 
 import console_link.middleware as middleware
 from console_link.cli import cli
@@ -556,14 +557,12 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
     mocked_detailed_status = "Remaining shards: 43"
     mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
                                                 return_value=mocked_running_status)
-    mock_detailed_status_call = mocker.patch.object(ECSRFSBackfill, '_get_detailed_status', autspec=True,
-                                                    return_value=mocked_detailed_status)
+    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autspec=True,
+                                             return_value=mocked_detailed_status)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status', '--deep-check'],
                            catch_exceptions=True)
-    print(result)
-    print(result.output)
     assert result.exit_code == 0
     assert "RUNNING" in result.output
     assert str(mocked_running_status) in result.output
@@ -636,7 +635,8 @@ def test_cli_metadata_when_not_defined(runner, source_cluster_only_yaml_path):
 
 
 def test_cli_metadata_migrate(runner, mocker):
-    mock = mocker.patch("subprocess.run")
+    mock_subprocess_result = SimpleNamespace(stdout="Command successful", stderr=None)
+    mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'migrate'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -644,7 +644,8 @@ def test_cli_metadata_migrate(runner, mocker):
 
 
 def test_cli_metadata_evaluate(runner, mocker):
-    mock = mocker.patch("subprocess.run")
+    mock_subprocess_result = SimpleNamespace(stdout="Command successful", stderr=None)
+    mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'evaluate'],
                            catch_exceptions=True)
     mock.assert_called_once()

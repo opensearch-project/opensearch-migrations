@@ -52,8 +52,10 @@ class CommandRunner:
                                         text=True,
                                         check=True)
             if print_to_console:
-                sys.stdout.write(cmd_output.stdout)
-                sys.stderr.write(cmd_output.stderr)
+                if cmd_output.stdout:
+                    sys.stdout.write(cmd_output.stdout)
+                if cmd_output.stderr:
+                    sys.stderr.write(cmd_output.stderr)
             return CommandResult(success=True, value="Command executed successfully", output=cmd_output)
         except subprocess.CalledProcessError as e:
             raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stderr, self)
