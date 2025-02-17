@@ -255,7 +255,7 @@ def delete_snapshot_cmd(ctx, acknowledge_risk: bool):
 @click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
               help="Flag to acknowledge risk and skip confirmation")
 @click.pass_obj
-def delete_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
+def unregister_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
     """Remove the snapshot repository"""
     if not acknowledge_risk:
         confirmed = click.confirm('If you proceed with unregistering the snapshot repository, the cluster will '

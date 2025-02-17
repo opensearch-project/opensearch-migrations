@@ -35,17 +35,18 @@ def s3_snapshot(mock_cluster):
 @pytest.fixture
 def fs_snapshot(mock_cluster):
     config = {
-        "snapshot": {
-            "snapshot_name": "reindex_from_snapshot",
-            "fs": {
-                "repo_path": "/path/for/snapshot/repo"
-            },
+        "snapshot_name": "reindex_from_snapshot",
+        "fs": {
+            "repo_path": "/path/for/snapshot/repo"
         }
     }
-    return FileSystemSnapshot(config["snapshot"], mock_cluster)
+    return FileSystemSnapshot(config, mock_cluster)
 
 
-def test_s3_snapshot_status(s3_snapshot, mock_cluster):
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_status(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
     mock_response = mock.Mock()
     mock_response.json.return_value = {
         "snapshots": [
@@ -55,18 +56,21 @@ def test_s3_snapshot_status(s3_snapshot, mock_cluster):
             }
         ]
     }
-    mock_cluster.call_api.return_value = mock_response
+    source_cluster.call_api.return_value = mock_response
 
-    result = s3_snapshot.status()
+    result = snapshot.status()
 
     assert isinstance(result, CommandResult)
     assert result.success
     assert result.value == "SUCCESS"
-    mock_cluster.call_api.assert_called_once_with("/_snapshot/migration_assistant_repo/test_snapshot",
-                                                  HttpMethod.GET)
+    source_cluster.call_api.assert_called_once_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}",
+                                                    HttpMethod.GET)
 
 
-def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_status_full(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
     mock_response = mock.Mock()
     mock_response.json.return_value = {
         "snapshots": [
@@ -99,9 +103,9 @@ def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
             }
         ]
     }
-    mock_cluster.call_api.return_value = mock_response
+    source_cluster.call_api.return_value = mock_response
 
-    result = snapshot_.status(snapshot=s3_snapshot, deep_check=True)
+    result = snapshot_.status(snapshot=snapshot, deep_check=True)
 
     assert isinstance(result, CommandResult)
     assert result.success
@@ -117,8 +121,8 @@ def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
 
     assert "N/A" not in result.value
 
-    mock_cluster.call_api.assert_called_with("/_snapshot/migration_assistant_repo/test_snapshot/_status",
-                                             HttpMethod.GET)
+    source_cluster.call_api.assert_called_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}/_status",
+                                               HttpMethod.GET)
 
 
 def test_s3_snapshot_init_succeeds():
@@ -385,9 +389,21 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_delete(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
     snapshot.delete()
-    snapshot.source_cluster.call_api.assert_called_once()
-    assert snapshot.source_cluster.call_api.call_args.args[1] == HttpMethod.DELETE
+    source_cluster.call_api.assert_called_once()
+    source_cluster.call_api.assert_called_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}",
+                                               HttpMethod.DELETE)
+
+
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_delete_repo(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
+    snapshot.delete_snapshot_repo()
+    source_cluster.call_api.assert_called_once()
+    source_cluster.call_api.assert_called_with("/_snapshot/migration_assistant_repo",
+                                               HttpMethod.DELETE)
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])

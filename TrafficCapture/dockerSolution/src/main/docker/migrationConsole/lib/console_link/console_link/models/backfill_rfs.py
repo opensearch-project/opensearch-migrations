@@ -169,7 +169,7 @@ class K8sRFSBackfill(RFSBackfill):
                 status_str += f"\n{shard_status}"
         if deployment_status.running > 0:
             return CommandResult(True, (BackfillStatus.RUNNING, status_str))
-        if deployment_status.desired > 0:
+        if deployment_status.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_str))
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
 
