@@ -134,6 +134,8 @@ dependencies {
     testFixturesImplementation libs.testcontainers
 
     testFixturesImplementation libs.hamcrest
+    testFixturesImplementation libs.guava
+    testFixturesImplementation libs.slf4j.api
 }
 
 jmh {
