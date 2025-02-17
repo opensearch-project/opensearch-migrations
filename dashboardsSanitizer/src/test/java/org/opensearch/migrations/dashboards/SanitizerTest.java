@@ -21,11 +21,11 @@ class SanitizerTest {
         final Sanitizer sanitizer = Sanitizer.getInstance();
         
         // When calling sanitize
-        final String sanitizedString = sanitizer.sanitize(jsonString);
+        final var sanitized = objectMapper.readTree(sanitizer.sanitize(jsonString));
         
-        // Then the sanitized string should be the same as the input string - but it needs to be a one line string
-        final String expectedString = objectMapper.writeValueAsString(objectMapper.readTree(jsonString));
-        assertEquals(expectedString, sanitizedString);
+        // Then the sanitized string should be the same as the input
+        final var expected = objectMapper.readTree(jsonString);
+        assertEquals(expected, sanitized);
     }
 
     @Test
