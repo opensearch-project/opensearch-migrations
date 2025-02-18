@@ -30,8 +30,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class CustomTransformationTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        // Define scenarios with different source and target cluster versions
-        return SupportedClusters.sources().stream()
+        return getSupportedClusters().stream()
                 .flatMap(sourceCluster ->
                         SupportedClusters.targets().stream()
                                 .map(targetCluster -> Arguments.of(sourceCluster, targetCluster))

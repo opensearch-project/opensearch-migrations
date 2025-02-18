@@ -1,0 +1,57 @@
+plugins {
+    id 'groovy'
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://repo.jenkins-ci.org/releases/' }
+}
+
+sourceSets {
+    test {
+        groovy {
+            srcDirs = ['src/test/groovy']
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.codehaus.groovy:groovy-all:3.0.23'
+    testImplementation 'com.lesfurets:jenkins-pipeline-unit:1.23'
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+test {
+    useJUnitPlatform()
+
+    // Force tests to always run
+    outputs.upToDateWhen { false }
+
+    // Show standard out/err
+    testLogging {
+        showStandardStreams = true
+        events "started", "passed", "skipped", "failed", "standardOut", "standardError"
+        exceptionFormat = 'full'
+    }
+
+    // System properties
+    systemProperty 'projectDir', rootProject.projectDir.absolutePath
+
+    doFirst {
+        println "Test classes directory: ${testClassesDirs.files}"
+        println "\nLooking for compiled test classes..."
+        testClassesDirs.each { dir ->
+            if (dir.exists()) {
+                dir.eachFileRecurse { file ->
+                    if (file.name.endsWith('.class')) {
+                        println "Found compiled test class: ${file}"
+                    }
+                }
+            } else {
+                println "Directory does not exist: ${dir}"
+            }
+        }
+    }
+}

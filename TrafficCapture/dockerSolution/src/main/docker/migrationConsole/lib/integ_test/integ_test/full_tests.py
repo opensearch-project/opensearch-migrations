@@ -5,7 +5,7 @@ import pytest
 import unittest
 from http import HTTPStatus
 
-from console_link.middleware.clusters import connection_check, clear_indices, ConnectionResult
+from console_link.middleware.clusters import connection_check, clear_cluster, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.models.replayer_base import Replayer
@@ -55,9 +55,9 @@ def initialize(request):
     target_con_result: ConnectionResult = connection_check(target_cluster)
     assert target_con_result.connection_established is True
 
-    # Clear any existing non-system indices
-    clear_indices(source_cluster)
-    clear_indices(target_cluster)
+    # Clear Cluster
+    clear_cluster(source_cluster)
+    clear_cluster(target_cluster)
 
     # Delete existing Kafka topic to clear records
     delete_topic(kafka=kafka, topic_name="logging-traffic-topic")
@@ -85,6 +85,7 @@ class E2ETests(unittest.TestCase):
     def test_e2e_0001_default(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster
+
         backfill: Backfill = pytest.console_env.backfill
         metadata: Metadata = pytest.console_env.metadata
         replayer: Replayer = pytest.console_env.replay
@@ -106,11 +107,7 @@ class E2ETests(unittest.TestCase):
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         backfill.create()
-        # Delete existing snapshot if present and create a new snapshot
         snapshot: Snapshot = pytest.console_env.snapshot
-        status_result: CommandResult = snapshot.status()
-        if status_result.success:
-            snapshot.delete()
         snapshot_result: CommandResult = snapshot.create(wait=True)
         assert snapshot_result.success
 

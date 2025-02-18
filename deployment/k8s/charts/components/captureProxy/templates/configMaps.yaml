@@ -3,4 +3,4 @@
     "PackageName" (include "generic.fullname" .)
     "include" .Template.Include
     "Template" .Template
-) | indent 0 }}
+) | indent 0 -}}

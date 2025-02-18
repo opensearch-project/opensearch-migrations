@@ -27,10 +27,13 @@ import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.ToString;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@Slf4j
-public class OpenSearchWorkCoordinator implements IWorkCoordinator {
+public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
+    // Create a stable logger that descendants can use, and we can predictably read from in tests
+    protected static final Logger log = LoggerFactory.getLogger(OpenSearchWorkCoordinator.class);
+
     public static final String INDEX_NAME = ".migrations_working_state";
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
@@ -114,7 +117,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     static class WorkItemWithPotentialSuccessors {
         final String workItemId;
         final Instant leaseExpirationTime;
-        final ArrayList<String> successorWorkItemIds;
+        final List<String> successorWorkItemIds;
     }
 
     private final long tolerableClientServerClockDifferenceSeconds;
@@ -123,26 +126,29 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private final ObjectMapper objectMapper;
     @Getter
     private final Clock clock;
+    private final Consumer<WorkItemAndDuration> workItemConsumer;
 
     public OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId
     ) {
-        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC());
+        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC(), w -> {});
     }
 
     public OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId,
-        Clock clock
+        Clock clock,
+        Consumer<WorkItemAndDuration> workItemConsumer
     ) {
         this.tolerableClientServerClockDifferenceSeconds = tolerableClientServerClockDifferenceSeconds;
         this.httpClient = httpClient;
         this.workerId = workerId;
         this.clock = clock;
         this.objectMapper = new ObjectMapper();
+        this.workItemConsumer = workItemConsumer;
     }
 
     @FunctionalInterface
@@ -158,6 +164,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 action.execute();
                 break; // Exit if action succeeds
             } catch (NonRetryableException e) {
+                log.atError().setCause(e)
+                        .setMessage("Received NonRetryableException error.")
+                        .log();
                 Exception underlyingException = (Exception) e.getCause();
                 exceptionConsumer.accept(underlyingException);
                 throw new IllegalStateException(underlyingException);
@@ -178,38 +187,25 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    public String getLoggerName() {
+        return log.getName();
+    }
+
+    protected abstract String getCoordinationIndexSettingsBody();
+
+    protected abstract String getPathForUpdates(String workItemId);
+
+    protected abstract String getPathForSingleDocumentUpdateByQuery();
+
+    protected abstract String getPathForGets(String workItemId);
+
+    protected abstract String getPathForSearches();
+
+    protected abstract int getTotalHitsFromSearchResponse(JsonNode searchResponse);
+
     public void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)
         throws IOException, InterruptedException {
-        var body = "{\n"
-            + "  \"settings\": {\n"
-            + "   \"index\": {"
-            + "    \"number_of_shards\": 1,\n"
-            + "    \"number_of_replicas\": 1\n"
-            + "   }\n"
-            + "  },\n"
-            + "  \"mappings\": {\n"
-            + "    \"properties\": {\n"
-            + "      \"" + EXPIRATION_FIELD_NAME + "\": {\n"
-            + "        \"type\": \"long\"\n"
-            + "      },\n"
-            + "      \"" + COMPLETED_AT_FIELD_NAME + "\": {\n"
-            + "        \"type\": \"long\"\n"
-            + "      },\n"
-            + "      \"leaseHolderId\": {\n"
-            + "        \"type\": \"keyword\",\n"
-            + "        \"norms\": false\n"
-            + "      },\n"
-            + "      \"status\": {\n"
-            + "        \"type\": \"keyword\",\n"
-            + "        \"norms\": false\n"
-            + "      },\n"
-            + "     \"" + SUCCESSOR_ITEMS_FIELD_NAME + "\": {\n"
-            + "       \"type\": \"keyword\",\n"
-            + "        \"norms\": false\n"
-            + "      }\n"
-            + "    }\n"
-            + "  }\n"
-            + "}\n";
+        var body = getCoordinationIndexSettingsBody();
 
         try {
             doUntil("setup-" + INDEX_NAME, 100, MAX_SETUP_RETRIES, contextSupplier::get, () -> {
@@ -278,7 +274,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "    \"scriptVersion\": \"" + SCRIPT_VERSION_TEMPLATE + "\",\n"
             + "    \"" + EXPIRATION_FIELD_NAME + "\": 0,\n"
             + "    \"creatorId\": \"" + WORKER_ID_TEMPLATE + "\",\n"
-            + "    \"numAttempts\": 0\n"
+            + "    \"nextAcquisitionLeaseExponent\": 0\n"
             + "  },\n"
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
@@ -295,7 +291,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
-            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
+            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow);"
             + "      if (params.expirationWindow > 0 && ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
             +          // work item is not completed, but may be assigned to this or a different worker (or unassigned)
             "          if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
@@ -306,7 +302,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
             "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "          ctx._source.numAttempts += 1;"
+            + "          ctx._source.nextAcquisitionLeaseExponent += 1;"
             + "        } else {"
             + "          ctx.op = \\\"noop\\\";"
             + "        }"
@@ -318,7 +314,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + // close script
             "}"; // close top-level
 
-        var body = upsertLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+        var body = upsertLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
             .replace(WORKER_ID_TEMPLATE, workerId)
             .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
             .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
@@ -329,7 +325,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         return httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_update/" + workItemId,
+            getPathForUpdates(workItemId),
             null,
             body
         );
@@ -378,11 +374,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private ArrayList<String> getSuccessorItemsIfPresent(JsonNode responseDoc) {
+    private List<String> getSuccessorItemsIfPresent(JsonNode responseDoc) {
         if (responseDoc.has(SUCCESSOR_ITEMS_FIELD_NAME)) {
             return new ArrayList<>(Arrays.asList(responseDoc.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(SUCCESSOR_ITEM_DELIMITER)));
         }
-        return null;
+        return List.of();
     }
 
     @Override
@@ -398,18 +394,20 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var resultFromUpdate = getResult(updateResponse);
 
             if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
+                return new WorkItemAndDuration(startTime.plus(leaseDuration),
+                        WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
-                    INDEX_NAME + "/_doc/" + workItemId,
+                    getPathForGets(workItemId),
                     null,
                     null
                 );
                 final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
                 if (resultFromUpdate == DocumentModificationResult.UPDATED) {
                     var leaseExpirationTime = Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
-                    return new WorkItemAndDuration(workItemId, leaseExpirationTime);
+                    return new WorkItemAndDuration(leaseExpirationTime,
+                            WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
                 } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                     return new AlreadyCompleted();
                 } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
@@ -422,6 +420,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     public void completeWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws InterruptedException {
+            retryWithExponentialBackoff(
+                () -> completeWorkItemWithoutRetry(workItemId, contextSupplier),
+                MAX_MARK_AS_COMPLETED_RETRIES,
+                CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                ignored -> {}
+            );
+    }
+
+    private void completeWorkItemWithoutRetry(
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException {
@@ -447,13 +457,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "  }\n"
                 + "}";
 
-            var body = markWorkAsCompleteBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+            var body = markWorkAsCompleteBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000));
 
             var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
-                INDEX_NAME + "/_update/" + workItemId,
+                getPathForUpdates(workItemId),
                 null,
                 body
             );
@@ -495,7 +505,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "\"size\": 0" // This sets the number of items to include in the `hits.hits` array, but doesn't affect
                 + "}";          // the integer value in `hits.total.value`
 
-            var path = INDEX_NAME + "/_search";
+            var path = getPathForSearches();
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
             var statusCode = response.getStatusCode();
             if (statusCode != 200) {
@@ -507,10 +517,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 );
             }
             var payload = objectMapper.readTree(response.getPayloadBytes());
-            var totalHits = payload.path("hits").path("total").path("value").asInt();
-            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
-            // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
-            if (totalHits == 0 && !payload.path("hits").path("total").path("relation").textValue().equals("eq")) {
+            var totalHits = getTotalHitsFromSearchResponse(payload);
+            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. If a `relation`
+            // for the total is present, it must be `eq` or we need to throw an error because it's not safe to rely on this data.
+            var relationValue = payload.path("hits").path("total").path("relation").textValue();
+            if (totalHits == 0 && relationValue != null && !relationValue.equals("eq")) {
                 throw new IllegalStateException("Querying for notYetCompleted work returned 0 hits with an unexpected total relation.");
             }
             return totalHits;
@@ -566,12 +577,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
-            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
+            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow);"
             + "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
             "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +        // sanity check
             "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "        ctx._source.numAttempts += 1;"
+            + "        ctx._source.nextAcquisitionLeaseExponent += 1;"
             + "      } else {"
             + "        ctx.op = \\\"noop\\\";"
             + "      }"
@@ -582,7 +593,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "}";
 
         final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
-        final var body = queryUpdateTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+        final var body = queryUpdateTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
             .replace(WORKER_ID_TEMPLATE, workerId)
             .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(timestampEpochSeconds))
             .replace(OLD_EXPIRATION_THRESHOLD_TEMPLATE, Long.toString(timestampEpochSeconds))
@@ -594,7 +605,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
+            getPathForSingleDocumentUpdateByQuery(),
             null,
             body
         );
@@ -644,7 +655,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         final var body = queryWorkersAssignedItemsTemplate.replace(WORKER_ID_TEMPLATE, workerId);
         var response = httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_search",
+            getPathForSearches(),
             null,
             body
         );
@@ -653,18 +664,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new AssignedWorkDocumentNotFoundException(response);
         }
 
-        final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
-        if (resultHitsUpper.isMissingNode()) {
-            log.warn("Couldn't find the top level 'hits' field, returning null");
-            return null;
+        final var results = objectMapper.readTree(response.getPayloadBytes());
+        if (results.path("hits").isMissingNode()) {
+            log.warn("Couldn't find the top level 'hits' field, returning no work item");
+            throw new AssignedWorkDocumentNotFoundException(response);
         }
-        final var numDocs = resultHitsUpper.path("total").path("value").longValue();
+        final var numDocs = getTotalHitsFromSearchResponse(results);
         if (numDocs == 0) {
             throw new AssignedWorkDocumentNotFoundException(response);
         } else if (numDocs != 1) {
             throw new MalformedAssignedWorkDocumentException(response);
         }
-        var resultHitInner = resultHitsUpper.path("hits").path(0);
+        var resultHitInner = results.path("hits").path("hits").path(0);
         var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();
         if (expiration == 0) {
             log.atWarn().setMessage("Expiration wasn't found or wasn't set to > 0 for response: {}")
@@ -719,7 +730,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void updateWorkItemWithSuccessors(String workItemId, ArrayList<String> successorWorkItemIds) throws IOException, NonRetryableException {
+    private void updateWorkItemWithSuccessors(String workItemId, List<String> successorWorkItemIds) throws IOException, NonRetryableException {
         final var updateSuccessorWorkItemsTemplate = "{\n"
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
@@ -744,14 +755,15 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "  }\n"
                 + "}";
 
-        var body = updateSuccessorWorkItemsTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+        var body = updateSuccessorWorkItemsTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
                 .replace(SUCCESSOR_WORK_ITEM_IDS_TEMPLATE, String.join(SUCCESSOR_ITEM_DELIMITER, successorWorkItemIds));
-
+        log.atInfo().setMessage("Making update for successor work item for id {}")
+                .addArgument(workItemId).log();
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
-                INDEX_NAME + "/_update/" + workItemId,
+                getPathForUpdates(workItemId),
                 null,
                 body
         );
@@ -766,6 +778,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 );
             }
         } catch (IllegalArgumentException e) {
+            log.atError().setCause(e).setMessage("Encountered error during update work item with successors").log();
             var resultTree = objectMapper.readTree(response.getPayloadBytes());
             if (resultTree.has("error") &&
                     resultTree.get("error").has("type") &&
@@ -785,16 +798,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // API which creates a document only if the specified ID doesn't yet exist. It is distinct from createUnassignedWorkItem
     // because it is an expected outcome of this function that sometimes the work item is already created. That function
     // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
-    private void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds) throws IOException, IllegalStateException {
-        String workItemBodyTemplate = "{\"numAttempts\":0, \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
+    private void createUnassignedWorkItemsIfNonexistent(List<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
+        String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
-        String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc").replace(WORKER_ID_TEMPLATE, workerId);
+        String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0").replace(WORKER_ID_TEMPLATE, workerId);
 
         StringBuilder body = new StringBuilder();
         for (var workItemId : workItemIds) {
             body.append("{\"create\":{\"_id\":\"").append(workItemId).append("\"}}\n");
             body.append(workItemBody).append("\n");
         }
+        log.atInfo().setMessage("Calling createUnassignedWorkItemsIfNonexistent with workItemIds {}")
+                .addArgument(String.join(", ", workItemIds)).log();
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
                 INDEX_NAME + "/_bulk",
@@ -841,7 +856,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Override
     public void createSuccessorWorkItemsAndMarkComplete(
             String workItemId,
-            ArrayList<String> successorWorkItemIds,
+            List<String> successorWorkItemIds,
+            int successorNextAcquisitionLeaseExponent,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
@@ -862,13 +878,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds),
+                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds, successorNextAcquisitionLeaseExponent),
                     MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> completeWorkItem(workItemId, ctx::getCompleteWorkItemContext),
+                    () -> completeWorkItemWithoutRetry(workItemId, ctx::getCompleteWorkItemContext),
                     MAX_MARK_AS_COMPLETED_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     e -> ctx.addTraceException(e, true)
@@ -944,27 +960,53 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         try (var context = contextSupplier.get()) {
             for (var attempt = 1; ; ++attempt) {
-                var suppliedVal = supplier.get();
-                var transformedVal = transformer.apply(suppliedVal);
-                if (test.test(suppliedVal, transformedVal)) {
-                    return transformedVal;
-                } else {
-                    log.atWarn().setMessage("Retrying {} because the predicate failed for: ({},{})")
-                        .addArgument(labelThatShouldBeAContext)
-                        .addArgument(suppliedVal)
-                        .addArgument(transformedVal)
-                        .log();
-                    if (attempt >= maxTries) {
-                        context.recordFailure();
-                        throw new MaxTriesExceededException(suppliedVal, transformedVal);
-                    } else {
-                        context.recordRetry();
+                T suppliedVal = null;
+                U transformedVal = null;
+                Exception exception = null;
+                try {
+                    suppliedVal = supplier.get();
+                    transformedVal = transformer.apply(suppliedVal);
+                    if (test.test(suppliedVal, transformedVal)) {
+                        return transformedVal;
                     }
-                    Thread.sleep(sleepMillis);
-                    sleepMillis *= 2;
+                } catch (Exception e) {
+                    exception = e;
                 }
+
+                if (attempt >= maxTries) {
+                    logFailure(labelThatShouldBeAContext, attempt, suppliedVal, transformedVal, exception);
+                    context.recordFailure();
+                    throw new MaxTriesExceededException(suppliedVal, transformedVal);
+                } else {
+                    context.recordRetry();
+                    logRetry(labelThatShouldBeAContext, attempt, suppliedVal, transformedVal, exception);
+                }
+                Thread.sleep(sleepMillis);
+                sleepMillis *= 2;
             }
         }
+    }
+
+    private static <T, U> void logRetry(String contextLabel, int attempt, T suppliedVal, U transformedVal, Exception e) {
+        log.atWarn()
+            .setMessage("Retrying {} (Attempt {}) for: ({}, {})")
+            .addArgument(contextLabel)
+            .addArgument(attempt)
+            .addArgument(suppliedVal)
+            .addArgument(transformedVal)
+            .setCause(e)
+            .log();
+    }
+
+    private static <T, U> void logFailure(String contextLabel, int attempt, T suppliedVal, U transformedVal, Exception e) {
+        log.atError()
+            .setMessage("Failing {}. Ran out of retries after attempt {} for ({}, {})")
+            .addArgument(contextLabel)
+            .addArgument(attempt)
+            .addArgument(suppliedVal)
+            .addArgument(transformedVal)
+            .setCause(e)
+            .log();
     }
 
     private void refresh(Supplier<IWorkCoordinationContexts.IRefreshContext> contextSupplier) throws IOException,
@@ -1015,13 +1057,20 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         case SUCCESSFUL_ACQUISITION:
                             ctx.recordAssigned();
                             var workItem = getAssignedWorkItem(leaseChecker, ctx);
-                            if (workItem.successorWorkItemIds != null) {
+                            if (!workItem.successorWorkItemIds.isEmpty()) {
                                 // continue the previous work of creating the successors and marking this item as completed.
-                                createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds, ctx::getCreateSuccessorWorkItemsContext);
+                                createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds,
+                                        // in cases of partial successor creation, create with 0 nextAcquisitionLeaseExponent to use default
+                                        // lease duration
+                                        0,
+                                        ctx::getCreateSuccessorWorkItemsContext);
                                 // this item is not acquirable, so repeat the loop to find a new item.
                                 continue;
                             }
-                            return new WorkItemAndDuration(workItem.workItemId, workItem.leaseExpirationTime);
+                            var workItemAndDuration = new WorkItemAndDuration(workItem.getLeaseExpirationTime(),
+                                    WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItem.getWorkItemId()));
+                            workItemConsumer.accept(workItemAndDuration);
+                            return workItemAndDuration;
                         case NOTHING_TO_ACQUIRE:
                             ctx.recordNothingAvailable();
                             return new NoAvailableWorkToBeDone();

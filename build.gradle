@@ -1,15 +1,45 @@
 plugins {
-    id "com.dorongold.task-tree" version "2.1.1"
+//    Observing higher memory usage with task-tree plugin. Disabling except if needed
+//    id "com.dorongold.task-tree" version "2.1.1"
+    id "com.diffplug.spotless" version '7.0.2'
     id 'io.freefair.lombok' version '8.6' apply false
-    id "com.diffplug.spotless" version '6.25.0'
-    id 'me.champeau.jmh' version '0.7.2' apply false
     id 'jacoco'
+    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
+    id 'me.champeau.jmh' version '0.7.2' apply false
 }
 
 allprojects {
-    apply plugin: 'jacoco'
     repositories {
         mavenCentral()
+    }
+}
+
+
+// Ensure Capture Proxy and Dependencies are built with JDK 11 for On Node Install
+
+// Cache dependencies during the configuration phase
+ext.captureProxyDependencies = []
+gradle.projectsEvaluated {
+    def captureProxyProject = rootProject.project(":TrafficCapture:trafficCaptureProxyServer")
+    captureProxyDependencies = captureProxyProject.configurations.collectMany { configuration ->
+        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.dependencyProject.path }
+    }
+    // Add the TrafficCaptureProxyServer project itself
+    captureProxyDependencies << captureProxyProject.path
+}
+
+// Modify sourceCompatibility during the execution phase
+gradle.taskGraph.whenReady { taskGraph ->
+    allprojects {
+        tasks.withType(JavaCompile).configureEach {
+            if (project.path in rootProject.captureProxyDependencies) {
+                sourceCompatibility = JavaVersion.VERSION_11
+                targetCompatibility = JavaVersion.VERSION_11
+            } else {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
     }
 }
 
@@ -56,34 +86,49 @@ task buildDockerImages() {
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
 
+def commonExclusions = ['**/build/**', '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**']
 spotless {
     format 'misc', {
-        target '**/*.gradle', '.gitattributes', '.gitignore'
-        targetExclude '**/build/**'
+        target fileTree('.') {
+            include '**/*.gradle', '.gitattributes', '.gitignore'
+            exclude commonExclusions
+        }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
 
     }
     yaml {
-        target '**/*.yml'
-        targetExclude '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**'
+        target fileTree('.') {
+            include '**/*.yml'
+            exclude commonExclusions
+        }
         trimTrailingWhitespace()
-        indentWithSpaces()
+        leadingTabsToSpaces()
         endWithNewline()
     }
     json {
-        target 'deployment/cdk/opensearch-service-migration/*.json'
+        target fileTree('.') {
+            include '*.json'
+            exclude commonExclusions
+        }
         prettier()
         endWithNewline()
     }
 }
 
 subprojects {
+    apply plugin: "com.diffplug.spotless"
     apply plugin: 'jacoco'
     apply plugin: 'java'
     apply plugin: 'maven-publish'
-    apply plugin: "com.diffplug.spotless"
+
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(17))
+            vendor.set(JvmVendorSpec.AMAZON)
+        }
+    }
 
     // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
     // though what '#' does is still undocumented from what I can tell
@@ -97,7 +142,7 @@ subprojects {
                     'org.opensearch',
                     '',
                     '\\#')
-            indentWithSpaces()
+            leadingTabsToSpaces()
             endWithNewline()
             removeUnusedImports()
         }

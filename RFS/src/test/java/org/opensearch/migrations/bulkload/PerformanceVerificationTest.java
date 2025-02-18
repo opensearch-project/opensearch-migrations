@@ -4,30 +4,31 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.store.ByteBuffersDirectory;
-import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import shadow.lucene9.org.apache.lucene.document.Document;
+import shadow.lucene9.org.apache.lucene.document.StoredField;
+import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
+import shadow.lucene9.org.apache.lucene.index.IndexReader;
+import shadow.lucene9.org.apache.lucene.index.IndexWriter;
+import shadow.lucene9.org.apache.lucene.index.IndexWriterConfig;
+import shadow.lucene9.org.apache.lucene.store.ByteBuffersDirectory;
+import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,16 +67,16 @@ public class PerformanceVerificationTest {
 
         // Create a custom LuceneDocumentsReader for testing
         AtomicInteger ingestedDocuments = new AtomicInteger(0);
-        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), true, "dummy_field") {
+        var reader = new LuceneDocumentsReader9(Paths.get("dummy"), true, "dummy_field") {
             @Override
             protected DirectoryReader getReader() {
                 return realReader;
             }
 
             @Override
-            protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
+            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase, Supplier<String> getSegmentReaderDebugInfo) {
                 ingestedDocuments.incrementAndGet();
-                return super.getDocument(reader, docId, isLive);
+                return super.getDocument(reader, luceneDocId, isLive, segmentDocBase, () -> "TestReaderWrapper(" + getSegmentReaderDebugInfo.get() + ")");
             }
         };
 
@@ -94,14 +95,14 @@ public class PerformanceVerificationTest {
                     return null;
                 }).subscribeOn(blockingScheduler)
                 .then(Mono.just(response))
-                .doOnTerminate(blockingScheduler::dispose);
+                .doFinally(s -> blockingScheduler.dispose());
         });
 
         // Create DocumentReindexer
         int maxDocsPerBulkRequest = 1000;
         long maxBytesPerBulkRequest = Long.MAX_VALUE; // No Limit on Size
         int maxConcurrentWorkItems = 10;
-        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, null);
+        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, () -> null);
 
         // Create a mock IDocumentReindexContext
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);
@@ -109,7 +110,7 @@ public class PerformanceVerificationTest {
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", reader.readDocuments(), mockContext).block();
+            reindexer.reindex("test-index", reader.readDocuments(), mockContext).then().block();
         });
         reindexThread.start();
 
@@ -125,7 +126,7 @@ public class PerformanceVerificationTest {
             if (System.currentTimeMillis() - startTime > 30000) {
                 throw new AssertionError("Test timed out after 30 seconds");
             }
-            Thread.sleep(500);
+            Thread.sleep(1000);
             ingestedDocs = ingestedDocuments.get();
             sentDocs = sentDocuments.get();
 

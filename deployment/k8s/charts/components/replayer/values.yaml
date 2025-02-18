@@ -1,12 +1,13 @@
-useSharedConfigs: false
 parameters:
-#  positionalParameters:
-#    - https://opensearchtarget:9200
+  targetUri:
+    postionalArgumentIndex: 0
+    value: "https://opensearchtarget.example.com:9200"
   speedupFactor:
     value: 2
     allowRuntimeOverride: true
   insecure:
-    present: true
+    parameterType: booleanFlag
+    value: true
     allowRuntimeOverride: true
   kafkaTrafficBrokers:
     value: kafka:9092

@@ -24,7 +24,7 @@ public class HasLineCount extends TypeSafeMatcher<String> {
     }
 
     private int newlineCount(String item) {
-        return item == null ? 0 : item.split("\n").length;
+        return item == null ? 0 : item.split(System.lineSeparator()).length;
     }
 
     public static HasLineCount hasLineCount(int n) {

@@ -6,7 +6,7 @@ on:
 
 env:
   python-version: '3.11'
-  java-version: '11'
+  java-version: '17'
   gradle-version: '8.0.2'
   node-version: '18.x'
 
@@ -112,12 +112,12 @@ jobs:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
       - name: Run Gradle Build
-        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build -x spotlessCheck --stacktrace
+        run: ./gradlew build :TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console -x test -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew mergeJacocoReports -x TrafficCapture:dockerSolution:build -x spotlessCheck --stacktrace
+        run: ./gradlew mergeJacocoReports -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -185,7 +185,6 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Run E2E test script
-        working-directory: TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
       - name: Collect Docker, OpenSearch Benchmark, and Shared Logs

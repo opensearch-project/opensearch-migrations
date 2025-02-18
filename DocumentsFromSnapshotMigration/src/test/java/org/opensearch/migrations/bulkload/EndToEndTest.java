@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -42,6 +43,7 @@ public class EndToEndTest extends SourceTestBase {
                 scenarios.add(Arguments.of(sourceCluster, targetCluster));
             }
         }
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V6_8_23));
 
         return scenarios.build();
     }
@@ -78,8 +80,8 @@ public class EndToEndTest extends SourceTestBase {
 
             var indexName = "blog_2023";
             var numberOfShards = 3;
-            var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
-            var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
+            var sourceClusterOperations = new ClusterOperations(sourceCluster);
+            var targetClusterOperations = new ClusterOperations(targetCluster);
 
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
@@ -127,18 +129,22 @@ public class EndToEndTest extends SourceTestBase {
             final var clockJitter = new Random(1);
 
             // ExpectedMigrationWorkTerminationException is thrown on completion.
-            var expectedTerminationException = Assertions.assertThrows(
-                ExpectedMigrationWorkTerminationException.class,
-                () -> migrateDocumentsSequentially(
-                    sourceRepo,
-                    snapshotName,
-                    List.of(),
-                    targetCluster.getUrl(),
-                    runCounter,
-                    clockJitter,
-                    testDocMigrationContext,
-                    sourceCluster.getContainerVersion().getVersion(),
-                    false
+            var expectedTerminationException = Assertions.assertTimeout(
+                Duration.ofSeconds(30),
+                () -> Assertions.assertThrows(
+                    ExpectedMigrationWorkTerminationException.class,
+                    () -> migrateDocumentsSequentially(
+                        sourceRepo,
+                        snapshotName,
+                        List.of(),
+                        targetCluster.getUrl(),
+                        runCounter,
+                        clockJitter,
+                        testDocMigrationContext,
+                        sourceCluster.getContainerVersion().getVersion(),
+                        targetCluster.getContainerVersion().getVersion(),
+                        false
+                    )
                 )
             );
 
@@ -175,5 +181,5 @@ public class EndToEndTest extends SourceTestBase {
             Assertions.assertEquals("1", routing);
         }
     }
-
+    
 }

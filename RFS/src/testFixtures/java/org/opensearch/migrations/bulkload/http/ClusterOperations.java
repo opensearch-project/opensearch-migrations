@@ -5,6 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+
 import lombok.SneakyThrows;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
@@ -25,10 +29,12 @@ import static org.hamcrest.MatcherAssert.assertThat;
 public class ClusterOperations {
 
     private final String clusterUrl;
+    private final Version clusterVersion;
     private final CloseableHttpClient httpClient;
 
-    public ClusterOperations(final String clusterUrl) {
-        this.clusterUrl = clusterUrl;
+    public ClusterOperations(final SearchClusterContainer cluster) {
+        this.clusterUrl = cluster.getUrl();
+        this.clusterVersion = cluster.getContainerVersion().getVersion();
         httpClient = HttpClients.createDefault();
     }
 
@@ -65,22 +71,17 @@ public class ClusterOperations {
     }
 
     public void createDocument(final String index, final String docId, final String body) {
-        createDocument(index, docId, body, null, "_doc");
+        createDocument(index, docId, body, null, defaultDocType());
     }
 
     @SneakyThrows
     public void createDocument(final String index, final String docId, final String body, String routing, String type) {
-        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/" + Optional.ofNullable(type).orElse("_doc") + "/" + docId + "?routing=" + routing);
-        indexDocumentRequest.setEntity(new StringEntity(body));
-        indexDocumentRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(indexDocumentRequest)) {
-            assertThat(response.getCode(), anyOf(equalTo(201), equalTo(200)));
-        }
+        var response = put("/" + index + "/" + Optional.ofNullable(type).orElse(defaultDocType()) + "/" + docId + "?routing=" + routing, body);
+        assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
     public void deleteDocument(final String index, final String docId) throws IOException {
-        var deleteDocumentRequest = new HttpDelete(clusterUrl + "/" + index + "/_doc/" + docId);
+        var deleteDocumentRequest = new HttpDelete(clusterUrl + "/" + index + "/" + defaultDocType() + "/" + docId);
 
         try (var response = httpClient.execute(deleteDocumentRequest)) {
             assertThat(response.getCode(), equalTo(200));
@@ -183,7 +184,7 @@ public class ClusterOperations {
             "    \"alias_legacy\": {}\r\n" + //
             "  },\r\n" + //
             "  \"mappings\": {\r\n" + //
-            "    \"_doc\": {\r\n" + //
+            "    \"" + defaultDocType() + "\": {\r\n" + //
             "      \"_source\": {\r\n" + //
             "        \"enabled\": true\r\n" + //
             "      },\r\n" + //
@@ -358,6 +359,14 @@ public class ClusterOperations {
                 response.getCode(),
                 equalTo(200)
             );
+        }
+    }
+
+    private String defaultDocType() {
+        if (VersionMatchers.isES_5_X.test(clusterVersion)) {
+            return "doc";
+        } else {
+            return "_doc";
         }
     }
 }

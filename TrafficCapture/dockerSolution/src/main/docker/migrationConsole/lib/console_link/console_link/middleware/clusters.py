@@ -66,6 +66,7 @@ def clear_indices(cluster: Cluster):
 def clear_cluster(cluster: Cluster):
     clear_indices(cluster)
     clear_snapshots(cluster, 'migration_assistant_repo')
+    delete_repo(cluster, 'migration_assistant_repo')
 
 
 def clear_snapshots(cluster: Cluster, repository: str) -> None:
@@ -105,4 +106,29 @@ def clear_snapshots(cluster: Cluster, repository: str) -> None:
                 return
         # Re-raise other errors
         logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
+        raise e
+
+
+def delete_repo(cluster: Cluster, repository: str) -> None:
+    logger.info(f"Deleting repository '{repository}'")
+    """
+    Delete repository. Should be empty before execution.
+
+    :param cluster: Cluster object to interact with the Elasticsearch cluster.
+    :param repository: Name of the snapshot repository to delete.
+    :raises Exception: For general errors during repository deleting, except when the repository is missing.
+    """
+    try:
+        delete_path = f"/_snapshot/{repository}"
+        call_api(cluster, delete_path, method=HttpMethod.DELETE, raise_error=True)
+        logger.info(f"Deleted repository: {repository}.")
+    except Exception as e:
+        # Handle 404 errors specifically for missing repository
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            error_details = e.response.json().get('error', {})
+            if error_details.get('type') == 'repository_missing_exception':
+                logger.info(f"Repository '{repository}' is missing. Skipping delete.")
+                return
+        # Re-raise other errors
+        logger.error(f"Error deleting repository '{repository}': {e}")
         raise e
