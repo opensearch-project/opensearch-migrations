@@ -135,6 +135,11 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
+      - name: Sanitize subproject name
+        id: sanitize-name
+        run: |
+          sanitized_name=$(echo "${{ matrix.subproject }}" | sed 's/[^a-zA-Z0-9]/_/g')
+          echo "::set-output name=sanitized_name::$sanitized_name"
       - name: Run tests for ${{ matrix.subproject }}
         run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
         env:
@@ -155,7 +160,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: ignore
-          name: memory-dumps-gradle-tests-${{ matrix.subproject }}
+          name: memory-dumps-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: ./**/*.hprof
 
       - name: Upload test reports for ${{ matrix.subproject }}
@@ -163,14 +168,14 @@ jobs:
         if: always()
         with:
           if-no-files-found: error
-          name: test-reports-gradle-tests-${{ matrix.subproject }}
+          name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
       - name: Upload Coverage Reports
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: coverage-reports-gradle-tests-${{ matrix.subproject }}
+          name: coverage-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
 
@@ -179,7 +184,7 @@ jobs:
         if: always()
         with:
           if-no-files-found: error
-          name: coverage-reports-gradle-tests-${{ matrix.subproject | replace(':', '-') }}
+          name: coverage-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/jacoco/test/jacocoTestReport.xml
 
