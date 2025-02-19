@@ -167,15 +167,15 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          if-no-files-found: error
+          if-no-files-found: ignore # Needed for subprojects that don't have tests
           name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
-      - name: Upload Coverage Reports
+      - name: Upload Test Reports
         uses: actions/upload-artifact@v4
         with:
-          if-no-files-found: error
-          name: coverage-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
+          if-no-files-found:  ignore # Needed for subprojects that don't have tests
+          name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
 
@@ -183,7 +183,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          if-no-files-found: error
+          if-no-files-found: ignore # Needed for subprojects that don't have tests
           name: coverage-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/jacoco/test/jacocoTestReport.xml
