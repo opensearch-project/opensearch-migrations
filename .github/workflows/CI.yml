@@ -98,9 +98,33 @@ jobs:
           name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
           path: ${{ env.WORKING_DIR }}/coverage.xml
 
+  generate-jacoco-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: "corretto"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.gradle-version }}
+      - name: Generate matrix for jacocoTestReport jobs
+        id: set-matrix
+        run: |
+          reports=$(./gradlew tasks --all | grep jacocoTestReport | awk -F' - ' '{print $1}' | sed 's/:jacocoTestReport//' | sort -u)
+          matrix=$(echo "$reports" | grep . | jq -R -s -c 'split("\n")[:-1] | {include: map({subproject: .})}')
+          echo "Matrix is: $matrix"
+          echo "::set-output name=matrix::$matrix"
 
   gradle-tests:
+    needs:
+      - generate-jacoco-matrix
     runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-jacoco-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -111,13 +135,8 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
-      - name: Run Gradle Build
-        run: ./gradlew build :TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console -x test -x spotlessCheck --stacktrace
-        env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-
-      - name: Run Tests with Coverage
-        run: ./gradlew mergeJacocoReports -x spotlessCheck --stacktrace
+      - name: Run tests for ${{ matrix.subproject }}
+        run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -136,22 +155,33 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: ignore
-          name: memory-dumps
+          name: memory-dumps-gradle-tests-${{ matrix.subproject }}
           path: ./**/*.hprof
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload test reports for ${{ matrix.subproject }}
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports-gradle-tests
+          if-no-files-found: error
+          name: test-reports-gradle-tests-${{ matrix.subproject }}
           path: |
             **/build/reports/tests/
-            **/reports/jacoco/mergedReport/
       - name: Upload Coverage Reports
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: coverage-reports-gradle-tests
-          path: ./**/jacocoMergedReport.xml
+          name: coverage-reports-gradle-tests-${{ matrix.subproject }}
+          path: |
+            **/build/reports/tests/
+
+      - name: Publish jacoco report artifact for ${{ matrix.subproject }}
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          if-no-files-found: error
+          name: coverage-reports-gradle-tests-${{ matrix.subproject | replace(':', '-') }}
+          path: |
+            **/build/reports/jacoco/test/jacocoTestReport.xml
 
 
   python-e2e-tests:
