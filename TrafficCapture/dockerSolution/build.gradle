@@ -1,19 +1,11 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id "com.avast.gradle.docker-compose" version "0.17.4"
+    id "com.avast.gradle.docker-compose"
     id 'com.bmuschko.docker-remote-api'
 }
 
 import org.opensearch.migrations.common.CommonUtils
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-
-dependencies {
-    constraints {
-        implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
-            because 'mend security issue'
-        }
-    }
-}
 
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
@@ -43,8 +35,8 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
             inputDir = project.file("src/main/docker/${escapedProjectName}")
         }
         def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
-        images.add("migrations/${dockerImageName}:$hashNonce")
-        images.add("migrations/${dockerImageName}:latest")
+        images.add("migrations/${dockerImageName}:${hashNonce}".toString())
+        images.add("migrations/${dockerImageName}:latest".toString())
     }
 }
 
@@ -58,10 +50,14 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         // Applications and Standalone Libraries both have libraries, sync them
         (libraries + applications).each { lib ->
             def applicationDestDir = "staging/${lib.name}/"
-            from (lib.configurations.findByName("runtimeClasspath").files) {
+
+            // Ensure dependencies are resolved within the correct project context
+            project.evaluationDependsOn(lib.path)
+
+            from (lib.files { lib.configurations.runtimeClasspath }) {
                 into "${applicationDestDir}/lib"
             }
-            from (lib.tasks.getByName('jar')) {
+            from (lib.tasks.named('jar')) {
                 into "${applicationDestDir}/lib"
             }
         }
@@ -69,7 +65,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         // Sync application start scripts
         applications.each { app ->
             def applicationDestDir = "staging/${app.name}/"
-            from (app.tasks.getByName('startScripts').outputs.files) {
+            from (app.tasks.named('startScripts').get().outputs.files) {
                 into "${applicationDestDir}/bin"
             }
         }
@@ -109,8 +105,8 @@ javaContainerServices.forEach { dockerImageName, projectName ->
     task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")
-        images.add("migrations/${dockerImageName}:${version}")
-        images.add("migrations/${dockerImageName}:latest")
+        images.add("migrations/${dockerImageName}:${version}".toString())
+        images.add("migrations/${dockerImageName}:latest".toString())
     }
 }
 
