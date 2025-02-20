@@ -156,7 +156,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
-    @Tag("longTest")
+    @Tag("isolatedTest")
     public void testHttpResponseIsSuccessfullyCaptured(boolean useTls, boolean largeResponse) throws Exception {
         try (var testServer = createTestServer(useTls, largeResponse)) {
             for (int i = 0; i < 1; ++i) {
@@ -192,7 +192,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
-    @Tag("longTest")
+    @Tag("isolatedTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout)
         throws Exception {
@@ -207,7 +207,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = { true, false })
-    @Tag("longTest")
+    @Tag("isolatedTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatWithBigResponseReadTimeoutResponseWouldHang(boolean useTls) throws Exception {
         testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofSeconds(5));
