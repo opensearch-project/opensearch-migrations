@@ -1,4 +1,5 @@
 import pytest
+import subprocess
 
 from console_link.models.cluster import AuthMethod
 from console_link.models.metadata import Metadata
@@ -157,6 +158,8 @@ def test_full_config_with_version_includes_version_string_in_subprocess(s3_snaps
     metadata = Metadata(config, create_valid_cluster(), s3_snapshot)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once()
@@ -181,6 +184,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
     metadata = Metadata(config, target, None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once_with([
@@ -194,7 +199,7 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-insecure",
-    ], stdout=None, stderr=None, text=True, check=True
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )
 
 
@@ -212,6 +217,8 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
     metadata = Metadata(config, target, None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once_with([
@@ -223,7 +230,7 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
         "--min-replicas", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
-    ], stdout=None, stderr=None, text=True, check=True)
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
@@ -240,6 +247,8 @@ def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
     metadata = Metadata(config, target, None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once_with([
@@ -250,7 +259,7 @@ def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
         "--min-replicas", '2',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         '--target-insecure'
-    ], stdout=None, stderr=None, text=True, check=True
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )
 
 
@@ -271,6 +280,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
     metadata = Metadata(config, target, None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once_with([
@@ -285,7 +296,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
         "--component-template-allowlist", "component_template1,component_template2",
-    ], stdout=None, stderr=None, text=True, check=True
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )
 
 
@@ -304,6 +315,8 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
     metadata = Metadata(config, target, None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once_with([
@@ -318,7 +331,7 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
         "--target-username", target.auth_details.get("username"),
         "--target-password", target.get_basic_auth_password(),
         "--target-insecure",
-    ], stdout=None, stderr=None, text=True, check=True
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )
 
 
@@ -340,6 +353,8 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
     metadata = Metadata(config, target, None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.migrate()
 
     mock.assert_called_once_with([
@@ -354,7 +369,7 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
         "--target-aws-service-signing-name", service_name,
         "--target-aws-region", signing_region,
         "--target-insecure",
-    ], stdout=None, stderr=None, text=True, check=True
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )
 
 
@@ -371,6 +386,8 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
     metadata = Metadata(config, create_valid_cluster(), None)
 
     mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     metadata.evaluate(extra_args=[
         "--foo", "bar",  # Pair of command and value
         "--flag",  # Flag with no value afterward
@@ -395,4 +412,4 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         '--foo', 'bar',
         '--flag',
         '--bar', 'baz'
-    ], stdout=None, stderr=None, text=True, check=True)
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)

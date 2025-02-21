@@ -2,10 +2,10 @@ import json
 import pathlib
 import os
 import time
-
 import pytest
 import requests_mock
 from click.testing import CliRunner
+from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
 from console_link.cli import cli
@@ -13,10 +13,11 @@ from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
-from console_link.models.ecs_service import ECSService, InstanceStatuses
+from console_link.models.ecs_service import ECSService
 from console_link.models.kafka import StandardKafka
 from console_link.models.metrics_source import Component
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.utils import DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 VALID_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
@@ -432,6 +433,36 @@ def test_cli_snapshot_delete_without_acknowledgement_doesnt_run(runner, mocker):
     mock.assert_not_called()
 
 
+def test_cli_snapshot_unregister_repo_with_acknowledgement(runner, mocker):
+    mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    mock.return_value.text = "Successfully deleted"
+
+    # Test snapshot status
+    result = runner.invoke(cli, ['--config-file',
+                                 str(VALID_SERVICES_YAML),
+                                 'snapshot',
+                                 'unregister-repo',
+                                 '--acknowledge-risk'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+
+    # Ensure the mocks were called
+    mock.assert_called_once()
+
+
+def test_cli_snapshot_unregister_repo_without_acknowledgement_doesnt_run(runner, mocker):
+    mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    mock.return_value.text = "Successfully deleted"
+
+    # Test snapshot status
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'unregister-repo'], input="n",
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+
+    # Ensure the mocks were not called
+    mock.assert_not_called()
+
+
 def test_cli_with_backfill_describe(runner, mocker):
     mock = mocker.patch('console_link.middleware.backfill.describe')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'describe'],
@@ -527,7 +558,7 @@ def test_cli_backfill_scale_with_no_units_fails(runner, mocker):
 
 
 def test_get_backfill_status_no_deep_check(runner, mocker):
-    mocked_running_status = InstanceStatuses(
+    mocked_running_status = DeploymentStatus(
         desired=1,
         running=3,
         pending=1
@@ -547,7 +578,7 @@ def test_get_backfill_status_no_deep_check(runner, mocker):
 
 
 def test_get_backfill_status_with_deep_check(runner, mocker):
-    mocked_running_status = InstanceStatuses(
+    mocked_running_status = DeploymentStatus(
         desired=1,
         running=3,
         pending=1
@@ -555,14 +586,12 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
     mocked_detailed_status = "Remaining shards: 43"
     mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
                                                 return_value=mocked_running_status)
-    mock_detailed_status_call = mocker.patch.object(ECSRFSBackfill, '_get_detailed_status', autspec=True,
-                                                    return_value=mocked_detailed_status)
+    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autspec=True,
+                                             return_value=mocked_detailed_status)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status', '--deep-check'],
                            catch_exceptions=True)
-    print(result)
-    print(result.output)
     assert result.exit_code == 0
     assert "RUNNING" in result.output
     assert str(mocked_running_status) in result.output
@@ -635,7 +664,8 @@ def test_cli_metadata_when_not_defined(runner, source_cluster_only_yaml_path):
 
 
 def test_cli_metadata_migrate(runner, mocker):
-    mock = mocker.patch("subprocess.run")
+    mock_subprocess_result = CompletedProcess(args=[], returncode=0, stdout="Command successful", stderr=None)
+    mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'migrate'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -643,7 +673,8 @@ def test_cli_metadata_migrate(runner, mocker):
 
 
 def test_cli_metadata_evaluate(runner, mocker):
-    mock = mocker.patch("subprocess.run")
+    mock_subprocess_result = CompletedProcess(args=[], returncode=0, stdout="Command successful", stderr=None)
+    mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'evaluate'],
                            catch_exceptions=True)
     mock.assert_called_once()

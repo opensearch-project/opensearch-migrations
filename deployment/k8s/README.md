@@ -19,7 +19,7 @@ Follow instructions [here](https://docs.docker.com/engine/install/) to set up Do
 
 We test our solution with minikube and are beginning to test Amazon EKS.  See below for more information to set these up.
 
-## Local Kubernetes Cluster
+## Setup local Kubernetes Cluster
 Creating a local Kubernetes cluster is useful for testing and developing a given deployment. There are a few different tools for running a Kubernetes cluster locally. This documentation focuses on using [Minikube](https://github.com/kubernetes/minikube) to run the local Kubernetes cluster.
 
 ### Install Minikube

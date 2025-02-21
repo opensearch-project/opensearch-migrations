@@ -1,0 +1,274 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "annotations": {
+      "deployment.kubernetes.io/revision": "1",
+      "meta.helm.sh/release-name": "ma",
+      "meta.helm.sh/release-namespace": "ma"
+    },
+    "creationTimestamp": "2025-02-17T21:27:22Z",
+    "generation": 2,
+    "labels": {
+      "app.kubernetes.io/managed-by": "Helm"
+    },
+    "name": "ma-replayer",
+    "namespace": "ma",
+    "resourceVersion": "160936",
+    "uid": "c1ee2ce4-9245-4380-bc67-317d3d1d12b3"
+  },
+  "spec": {
+    "progressDeadlineSeconds": 600,
+    "replicas": 1,
+    "revisionHistoryLimit": 10,
+    "selector": {
+      "matchLabels": {
+        "app": "ma-replayer"
+      }
+    },
+    "strategy": {
+      "rollingUpdate": {
+        "maxSurge": "25%",
+        "maxUnavailable": "25%"
+      },
+      "type": "RollingUpdate"
+    },
+    "template": {
+      "metadata": {
+        "creationTimestamp": null,
+        "labels": {
+          "app": "ma-replayer",
+          "env": "v1"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "command": [
+              "/bin/sh",
+              "-c",
+              "echo cat /shared/vars.sh...\ncat /shared/vars.sh\nsource /shared/vars.sh\n# Remove leading or trailing space in args file\nsed -i 's/^[ \\t]*//;s/[ \\t]*$//' /shared/args.txt\nreadarray -t arg_array \u003c /shared/args.txt\necho \"Using args from file: ${arg_array[@]}\"\nexec /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer \"${arg_array[@]}\"\n"
+            ],
+            "image": "migrations/traffic_replayer:latest",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "replayer",
+            "resources": {},
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/shared",
+                "name": "env-vars"
+              }
+            ]
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "initContainers": [
+          {
+            "command": [
+              "/bin/sh",
+              "-c",
+              "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nset -e\nif [ -z \"$AUTH_HEADER_VALUE\" ]; then\n  export AUTH_HEADER_VALUE=\"$AUTH_HEADER_VALUE_DEFAULT\"\nfi\nif [ -z \"$INSECURE\" ]; then\n  export INSECURE=\"$INSECURE_DEFAULT\"\nfi\nif [ -z \"$KAFKA_TRAFFIC_BROKERS\" ]; then\n  export KAFKA_TRAFFIC_BROKERS=\"$KAFKA_TRAFFIC_BROKERS_DEFAULT\"\nfi\nif [ -z \"$KAFKA_TRAFFIC_GROUP_ID\" ]; then\n  export KAFKA_TRAFFIC_GROUP_ID=\"$KAFKA_TRAFFIC_GROUP_ID_DEFAULT\"\nfi\nif [ -z \"$KAFKA_TRAFFIC_TOPIC\" ]; then\n  export KAFKA_TRAFFIC_TOPIC=\"$KAFKA_TRAFFIC_TOPIC_DEFAULT\"\nfi\nif [ -z \"$SPEEDUP_FACTOR\" ]; then\n  export SPEEDUP_FACTOR=\"$SPEEDUP_FACTOR_DEFAULT\"\nfi\nif [ -z \"$TARGET_URI\" ]; then\n  export TARGET_URI=\"$TARGET_URI_DEFAULT\"\nfi\nif [ -n \"$AUTH_HEADER_VALUE\" ]; then\n  export ARGS=\"$ARGS  --authHeaderValue  $AUTH_HEADER_VALUE\"\n  echo \" --authHeaderValue \n$AUTH_HEADER_VALUE\" \u003e\u003e /shared/args.txt\nfi\nif [ \"$INSECURE\" = \"true\" ] || [ \"$INSECURE\" = \"1\" ]; then\n  export ARGS=\"$ARGS  --insecure \"\n  echo \" --insecure \" \u003e\u003e /shared/args.txt\nfi\nif [ -n \"$KAFKA_TRAFFIC_BROKERS\" ]; then\n  export ARGS=\"$ARGS  --kafkaTrafficBrokers  $KAFKA_TRAFFIC_BROKERS\"\n  echo \" --kafkaTrafficBrokers \n$KAFKA_TRAFFIC_BROKERS\" \u003e\u003e /shared/args.txt\nfi\nif [ -n \"$KAFKA_TRAFFIC_GROUP_ID\" ]; then\n  export ARGS=\"$ARGS  --kafkaTrafficGroupId  $KAFKA_TRAFFIC_GROUP_ID\"\n  echo \" --kafkaTrafficGroupId \n$KAFKA_TRAFFIC_GROUP_ID\" \u003e\u003e /shared/args.txt\nfi\nif [ -n \"$KAFKA_TRAFFIC_TOPIC\" ]; then\n  export ARGS=\"$ARGS  --kafkaTrafficTopic  $KAFKA_TRAFFIC_TOPIC\"\n  echo \" --kafkaTrafficTopic \n$KAFKA_TRAFFIC_TOPIC\" \u003e\u003e /shared/args.txt\nfi\nif [ -n \"$SPEEDUP_FACTOR\" ]; then\n  export ARGS=\"$ARGS  --speedupFactor  $SPEEDUP_FACTOR\"\n  echo \" --speedupFactor \n$SPEEDUP_FACTOR\" \u003e\u003e /shared/args.txt\nfi\nprintf \"$TARGET_URI\n$(cat /shared/args.txt)\" \u003e \"/shared/args.txt\"\nexport ARGS=\" $TARGET_URI $ARGS\"\n/.venv/bin/python print_env_vars_as_exports.py \u003e /shared/vars.sh\n"
+            ],
+            "env": [
+              {
+                "name": "AUTH_HEADER_VALUE_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "basicAuthHeader",
+                    "name": "target-cluster-default"
+                  }
+                }
+              },
+              {
+                "name": "AUTH_HEADER_VALUE",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "basicAuthHeader",
+                    "name": "target-cluster",
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "name": "INSECURE_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "allowInsecure",
+                    "name": "target-cluster-default"
+                  }
+                }
+              },
+              {
+                "name": "INSECURE",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "allowInsecure",
+                    "name": "target-cluster",
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "name": "KAFKA_TRAFFIC_BROKERS_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "brokers",
+                    "name": "kafka-brokers-default"
+                  }
+                }
+              },
+              {
+                "name": "KAFKA_TRAFFIC_BROKERS",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "brokers",
+                    "name": "kafka-brokers",
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "name": "KAFKA_TRAFFIC_GROUP_ID_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "value",
+                    "name": "ma-replayer-kafka-traffic-group-id-default"
+                  }
+                }
+              },
+              {
+                "name": "KAFKA_TRAFFIC_GROUP_ID",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "value",
+                    "name": "ma-replayer-kafka-traffic-group-id",
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "name": "KAFKA_TRAFFIC_TOPIC_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "value",
+                    "name": "ma-replayer-kafka-traffic-topic-default"
+                  }
+                }
+              },
+              {
+                "name": "KAFKA_TRAFFIC_TOPIC",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "value",
+                    "name": "ma-replayer-kafka-traffic-topic",
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "name": "SPEEDUP_FACTOR_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "value",
+                    "name": "ma-replayer-speedup-factor-default"
+                  }
+                }
+              },
+              {
+                "name": "SPEEDUP_FACTOR",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "value",
+                    "name": "ma-replayer-speedup-factor",
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "name": "TARGET_URI_DEFAULT",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "endpoint",
+                    "name": "target-cluster-default"
+                  }
+                }
+              },
+              {
+                "name": "TARGET_URI",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "key": "endpoint",
+                    "name": "target-cluster",
+                    "optional": true
+                  }
+                }
+              }
+            ],
+            "image": "migrations/k8s_config_map_util_scripts",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "arg-prep",
+            "resources": {},
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/shared",
+                "name": "env-vars"
+              }
+            ]
+          },
+          {
+            "command": [
+              "sh",
+              "-c",
+              "until kubectl wait --for=condition=Ready kafka/captured-traffic -n ma --timeout=10s; do echo waiting for kafka cluster is ready; sleep 1; done"
+            ],
+            "image": "bitnami/kubectl:latest",
+            "imagePullPolicy": "Always",
+            "name": "wait-for-kafka",
+            "resources": {},
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File"
+          }
+        ],
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {},
+        "terminationGracePeriodSeconds": 30,
+        "volumes": [
+          {
+            "emptyDir": {},
+            "name": "env-vars"
+          }
+        ]
+      }
+    }
+  },
+  "status": {
+    "availableReplicas": 1,
+    "conditions": [
+      {
+        "lastTransitionTime": "2025-02-17T21:27:22Z",
+        "lastUpdateTime": "2025-02-17T21:27:22Z",
+        "message": "ReplicaSet \"ma-replayer-68f4c8475b\" has successfully progressed.",
+        "reason": "NewReplicaSetAvailable",
+        "status": "True",
+        "type": "Progressing"
+      },
+      {
+        "lastTransitionTime": "2025-02-17T21:30:13Z",
+        "lastUpdateTime": "2025-02-17T21:30:13Z",
+        "message": "Deployment has minimum availability.",
+        "reason": "MinimumReplicasAvailable",
+        "status": "True",
+        "type": "Available"
+      }
+    ],
+    "observedGeneration": 2,
+    "readyReplicas": 1,
+    "replicas": 1,
+    "updatedReplicas": 1
+  }
+}

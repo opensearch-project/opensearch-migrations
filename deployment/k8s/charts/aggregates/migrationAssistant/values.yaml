@@ -16,8 +16,17 @@ shared-configs:
     sourceCluster:
       allowRuntimeOverride: true
       object:
-        endpoint: "http://sourcecluster.example.com:9200"
+        endpoint: "http://elasticsearch-master:9200"
         allowInsecure: true
+    targetCluster:
+      allowRuntimeOverride: true
+      object:
+        endpoint: "https://opensearch-cluster-master:9200"
+        allowInsecure: true
+        basicAuthUsername: "admin"
+        basicAuthPassword: "myStrongPassword123!"
+        # Should be in sync with above username/password
+        basicAuthHeader: "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
     kafkaBrokers:
       allowRuntimeOverride: false
       object:
@@ -54,20 +63,42 @@ bulk-document-loader:
       value: rfs-snapshot
       allowRuntimeOverride: true
     targetHost:
-      source: parameterConfig
-      value: https://opensearch-cluster-master:9200
-      allowRuntimeOverride: true
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "endpoint"
+    targetInsecure:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "allowInsecure"
+      parameterType: booleanFlag
+    targetUsername:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "basicAuthUsername"
+    targetPassword:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "basicAuthPassword"
 
 replayer:
   parameters:
-    targetUri:
-      source: parameterConfig
-      value: https://opensearch-cluster-master.mcc:9200/
-      allowRuntimeOverride: true
     kafkaTrafficBrokers:
       source: otherConfig  # eventually this will become a list from a shared config
       configMapName: "kafka-brokers"
       configMapKey: "brokers"
+    targetUri:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "endpoint"
+    insecure:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "allowInsecure"
+      parameterType: booleanFlag
+    authHeaderValue:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "basicAuthHeader"
 
 captured-traffic-kafka-cluster:
   environment: test

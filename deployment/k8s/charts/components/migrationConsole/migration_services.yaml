@@ -1,5 +1,5 @@
 source_cluster:
-  endpoint: "http://elasticsearch:9200"
+  endpoint: "http://elasticsearch-master:9200"
   allow_insecure: true
   version: "7.10.2"
   no_auth:
@@ -14,9 +14,13 @@ metrics_source:
     endpoint: "http://prometheus:9090"
 backfill:
   reindex_from_snapshot:
-    docker:
+    k8s:
+      namespace: "ma"
+      deployment_name: "ma-bulk-document-loader"
 replay:
-  docker:
+  k8s:
+    namespace: "ma"
+    deployment_name: "ma-replayer"
 snapshot:
   snapshot_name: "rfs-snapshot"
   fs:

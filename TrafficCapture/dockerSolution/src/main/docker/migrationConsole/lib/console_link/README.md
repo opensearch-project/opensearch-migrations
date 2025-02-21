@@ -130,8 +130,12 @@ OpenSearch Ingestion Pipeline (OSI).
 
 #### Reindex From Snapshot
 
-Depending on the purpose/deployment strategy, RFS can be used in Docker or on AWS in an Elastic Container Service (ECS) deployment.
-Most of the parameters for these two are the same, with some additional ones specific to the deployment.
+Depending on the purpose/deployment strategy, RFS can be used in various environments, including:
+1. Docker container environment, e.g. Docker compose setup
+2. AWS in an Elastic Container Service (ECS) deployment
+3. Kubernetes environment, e.g. Minikube environment
+
+Most of the parameters for these options are the same, with some additional ones specific to the deployment.
 
 - `reindex_from_snapshot`
     - `snapshot_repo`: optional, path to the snapshot repo. If not provided, ???
@@ -147,8 +151,11 @@ There is also a block that specifies the deployment type. Exactly one of the fol
     - `cluster_name`: required, name of the ECS cluster containing the RFS service
     - `service_name`: required, name of the ECS service for RFS
     - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+- `k8s`:
+  - `namespace`: required, name of the Kubernetes namespace the RFS deployment is in
+  - `deployment_name`: required, name of the RFS deployment within the Kubernetes cluster
 
-Both of the following are valid RFS backfill specifications:
+All the following are valid RFS backfill specifications:
 
 ```yaml
 backfill:
@@ -166,6 +173,14 @@ backfill:
             cluster_name: migration-aws-integ-ecs-cluster
             service_name: migration-aws-integ-reindex-from-snapshot
             aws-region: us-east-1
+```
+
+```yaml
+backfill:
+  reindex_from_snapshot:
+    k8s:
+      namespace: "ma"
+      deployment_name: "ma-backfill"
 ```
 
 #### OpenSearch Ingestion
@@ -225,6 +240,10 @@ Exactly one of the following blocks must be present:
     - `cluster_name`: required, name of the ECS cluster containing the replayer service
     - `service_name`: required, name of the ECS replayer service
     - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+  
+- `k8s`:
+  - `namespace`: required, name of the Kubernetes namespace the Replayer deployment is in
+  - `deployment_name`: required, name of the Replayer deployment within the Kubernetes cluster
 
 ### Kafka
 

@@ -24,15 +24,24 @@ ECS_REPLAY_SCHEMA = {
     }
 }
 
+K8S_REPLAY_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "namespace": {"type": "string", "required": True},
+        "deployment_name": {"type": "string", "required": True}
+    }
+}
+
 SCHEMA = {
     "replay": {
         "type": "dict",
         "schema": {
             "docker": DOCKER_REPLAY_SCHEMA,
             "ecs": ECS_REPLAY_SCHEMA,
+            "k8s": K8S_REPLAY_SCHEMA,
             "scale": {"type": "integer", "required": False, "min": 1}
         },
-        "check_with": contains_one_of({"docker", "ecs"})
+        "check_with": contains_one_of({"docker", "ecs", "k8s"})
     }
 }
 

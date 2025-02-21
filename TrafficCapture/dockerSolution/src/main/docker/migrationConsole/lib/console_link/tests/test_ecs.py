@@ -5,8 +5,8 @@ import botocore.session
 import pytest
 from botocore.stub import Stubber
 
-from console_link.models.ecs_service import ECSService, InstanceStatuses
-from console_link.models.utils import AWSAPIError
+from console_link.models.ecs_service import ECSService
+from console_link.models.utils import AWSAPIError, DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
@@ -64,7 +64,7 @@ def test_ecs_get_instance_statues(ecs_stubber, ecs_service):
         ecs_stubber.add_response("describe_services", service_response=data)
     ecs_stubber.activate()
 
-    expected = InstanceStatuses(desired=5, pending=2, running=1)
+    expected = DeploymentStatus(desired=5, pending=2, running=1)
 
     ecs_service.client = ecs_stubber.client
     result = ecs_service.get_instance_statuses()

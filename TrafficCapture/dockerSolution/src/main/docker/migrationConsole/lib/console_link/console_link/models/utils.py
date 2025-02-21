@@ -1,6 +1,6 @@
 from botocore import config
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, NamedTuple, Optional
 from datetime import datetime
 import boto3
 import requests.utils
@@ -10,6 +10,15 @@ from requests.models import PreparedRequest
 
 
 from console_link.models.client_options import ClientOptions
+
+
+class DeploymentStatus(NamedTuple):
+    running: int = 0
+    pending: int = 0
+    desired: int = 0
+
+    def __str__(self):
+        return f"Running={self.running}\nPending={self.pending}\nDesired={self.desired}"
 
 
 class AWSAPIError(Exception):
