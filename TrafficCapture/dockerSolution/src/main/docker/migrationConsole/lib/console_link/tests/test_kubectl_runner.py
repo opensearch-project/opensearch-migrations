@@ -1,8 +1,6 @@
 import pathlib
 import subprocess
 
-from types import SimpleNamespace
-
 from console_link.models.command_result import CommandResult
 from console_link.models.kubectl_runner import KubectlRunner
 from console_link.models.utils import DeploymentStatus
@@ -57,7 +55,7 @@ def test_kubectl_retrieve_deployment_status(mocker):
     kubectl_runner = KubectlRunner(TEST_NAMESPACE, TEST_DEPLOYMENT_NAME)
     with open(TEST_DATA_DIRECTORY / "kubectl_describe_deployment_output.json") as f:
         json_output = f.read()
-    mock_subprocess_result = SimpleNamespace(stdout=json_output, stderr=None)
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=json_output, stderr=None)
     mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
 
     deployment_status = kubectl_runner.retrieve_deployment_status()
@@ -77,7 +75,7 @@ def test_kubectl_retrieve_deployment_status(mocker):
 def test_kubectl_retrieve_deployment_status_improper_json(mocker):
     kubectl_runner = KubectlRunner(TEST_NAMESPACE, TEST_DEPLOYMENT_NAME)
     json_output = "{\"spec\": []}"
-    mock_subprocess_result = SimpleNamespace(stdout=json_output, stderr=None)
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=json_output, stderr=None)
     mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
 
     deployment_status = kubectl_runner.retrieve_deployment_status()

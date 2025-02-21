@@ -1,8 +1,6 @@
 import pytest
 import subprocess
 
-from types import SimpleNamespace
-
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 
 
@@ -65,7 +63,7 @@ def test_command_runner_sanitizing_a_flag_field_is_a_noop():
 def test_command_runner_prints_output_as_run_default(capsys, mocker):
     mock_stdout = "Found 5 directories"
     mock_stderr = "Unknown file path"
-    mock_subprocess_result = SimpleNamespace(stdout=mock_stdout, stderr=mock_stderr)
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=mock_stdout, stderr=mock_stderr)
     runner = CommandRunner("ls", {})
     mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     runner.run()
@@ -78,7 +76,7 @@ def test_command_runner_prints_output_as_run_default(capsys, mocker):
 def test_command_runner_prints_nothing_when_output_disabled(capsys, mocker):
     mock_stdout = "Found 5 directories"
     mock_stderr = "Unknown file path"
-    mock_subprocess_result = SimpleNamespace(stdout=mock_stdout, stderr=mock_stderr)
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=mock_stdout, stderr=mock_stderr)
     runner = CommandRunner("ls", {})
     mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     runner.run(print_to_console=False)
@@ -89,7 +87,7 @@ def test_command_runner_prints_nothing_when_output_disabled(capsys, mocker):
 
 
 def test_command_runner_handles_no_output(capsys, mocker):
-    mock_subprocess_result = SimpleNamespace(stdout=None, stderr=None)
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=None, stderr=None)
     runner = CommandRunner("ls", {})
     mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     runner.run()

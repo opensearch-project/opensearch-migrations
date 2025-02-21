@@ -2,11 +2,10 @@ import json
 import pathlib
 import os
 import time
-
 import pytest
 import requests_mock
 from click.testing import CliRunner
-from types import SimpleNamespace
+from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
 from console_link.cli import cli
@@ -460,7 +459,7 @@ def test_cli_snapshot_unregister_repo_without_acknowledgement_doesnt_run(runner,
                            catch_exceptions=True)
     assert result.exit_code == 0
 
-    # Ensure the mocks were called
+    # Ensure the mocks were not called
     mock.assert_not_called()
 
 
@@ -665,7 +664,7 @@ def test_cli_metadata_when_not_defined(runner, source_cluster_only_yaml_path):
 
 
 def test_cli_metadata_migrate(runner, mocker):
-    mock_subprocess_result = SimpleNamespace(stdout="Command successful", stderr=None)
+    mock_subprocess_result = CompletedProcess(args=[], returncode=0, stdout="Command successful", stderr=None)
     mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'migrate'],
                            catch_exceptions=True)
@@ -674,7 +673,7 @@ def test_cli_metadata_migrate(runner, mocker):
 
 
 def test_cli_metadata_evaluate(runner, mocker):
-    mock_subprocess_result = SimpleNamespace(stdout="Command successful", stderr=None)
+    mock_subprocess_result = CompletedProcess(args=[], returncode=0, stdout="Command successful", stderr=None)
     mock = mocker.patch("subprocess.run", return_value=mock_subprocess_result)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'evaluate'],
                            catch_exceptions=True)
