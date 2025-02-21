@@ -308,7 +308,9 @@ subprojects {
 
     jacocoTestReport {
         dependsOn = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
-        executionData.from = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }.collect { it.jacoco.destinationFile }
+        executionData.setFrom(fileTree(dir: "$buildDir", includes: [
+                "jacoco/*.exec"
+        ]))
         classDirectories.setFrom(files(allprojects.collect { project ->
             project.sourceSets.main.output.classesDirs.filter { dir ->
                 !dir.path.contains('captureProtobufs') && !dir.path.contains('trafficCaptureProxyServerTest')
