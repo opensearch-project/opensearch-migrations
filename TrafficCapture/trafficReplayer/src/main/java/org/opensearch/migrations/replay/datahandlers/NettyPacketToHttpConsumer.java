@@ -105,12 +105,12 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         Duration readTimeoutDuration
     ) {
         this.replaySession = replaySession;
+        this.readTimeoutDuration = readTimeoutDuration;
+        this.responseBuilder = AggregatedRawResponse.builder(Instant.now());
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
-        responseBuilder = AggregatedRawResponse.builder(Instant.now());
         log.atDebug().setMessage("C'tor: incoming session={}").addArgument(replaySession).log();
         this.activeChannelFuture = activateLiveChannel();
-        this.readTimeoutDuration = readTimeoutDuration;
     }
 
     private TrackedFuture<String, Void> activateLiveChannel() {
@@ -382,6 +382,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     .setMessage("{} outbound channel was not set up successfully, NOT writing bytes hash={}")
                     .addArgument(() -> httpContext().getReplayerRequestKey())
                     .addArgument(() -> System.identityHashCode(packetData))
+                    .setCause(channelException)
                     .log();
                 if (channel != null) {
                     channel.close();

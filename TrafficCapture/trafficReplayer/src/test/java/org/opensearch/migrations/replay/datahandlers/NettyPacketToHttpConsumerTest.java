@@ -201,7 +201,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             useTls,
             withServerReadTimeout,
             RESPONSE_TIMEOUT_FOR_HUNG_TEST,
-            RESPONSE_TIMEOUT_FOR_HUNG_TEST.plus(Duration.ofMillis(250))
+            RESPONSE_TIMEOUT_FOR_HUNG_TEST.plus(Duration.ofMillis(1000))
         );
     }
 
