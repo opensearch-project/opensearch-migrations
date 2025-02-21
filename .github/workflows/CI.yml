@@ -141,7 +141,7 @@ jobs:
           sanitized_name=$(echo "${{ matrix.subproject }}" | sed 's/[^a-zA-Z0-9]/_/g')
           echo "::set-output name=sanitized_name::$sanitized_name"
       - name: Run tests for ${{ matrix.subproject }}
-        run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace --rerun-tasks
+        run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
