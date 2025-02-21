@@ -43,10 +43,10 @@ spec:
             - name: shared-logs
               mountPath: /shared-logs-output
             {{- end }}
+            - name: merged-config
+              mountPath: /config
             - name: {{ $envVarMountName }}
               mountPath: /shared
-            - name: services-yaml
-              mountPath: /etc/migration_services.yaml
 {{/*              Enable if developing the console library */}}
 {{/*            - name: local-console-link*/}}
 {{/*              mountPath: /root/lib/console_link*/}}
@@ -59,10 +59,6 @@ spec:
           emptyDir: { }
         - name: merged-config
           emptyDir: { }
-        - name: services-yaml
-          hostPath:
-            path: /opensearch-migrations/deployment/k8s/charts/components/migrationConsole/migration_services.yaml
-            type: File
 {{/*        - name: local-console-link*/}}
 {{/*          hostPath:*/}}
 {{/*            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link*/}}

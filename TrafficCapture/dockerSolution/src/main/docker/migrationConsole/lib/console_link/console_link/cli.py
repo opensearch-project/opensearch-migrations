@@ -38,7 +38,7 @@ class Context(object):
 
 
 @click.group()
-@click.option("--config-file", default="/etc/migration_services.yaml", help="Path to config file")
+@click.option("--config-file", default="/config/migration_services.yaml", help="Path to config file")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.pass_context
@@ -165,7 +165,7 @@ def parse_headers(header: str) -> Dict:
 @click.pass_obj
 def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
-    By default the cluster definition is configured to use the `/etc/migration-services.yaml` file that is pre-prepared
+    By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is pre-prepared
     on the migration console, but `--config-file` can point to any YAML file that defines a `source_cluster` or
     target_cluster` based on the schema of the `services.yaml` file.
     
@@ -568,7 +568,7 @@ def describe_topic_records_cmd(ctx, topic_name):
 
 @cli.command()
 @click.option(
-    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+    "--config-file", default="/config/migration_services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
 @click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))

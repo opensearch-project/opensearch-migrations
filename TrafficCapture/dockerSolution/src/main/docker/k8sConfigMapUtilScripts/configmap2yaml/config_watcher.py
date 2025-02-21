@@ -11,7 +11,7 @@ import sys
 import yaml
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +21,7 @@ class ConfigMapWatcher:
         self.namespace = namespace
         self.output_file = output_file
         self.current_data: Dict[str, Any] = {}
-        self.formatter = YAMLTemplateConverter()
+        self.formatter = YAMLTemplateConverter(namespace=namespace)
 
         # Validate output file path
         output_dir = os.path.dirname(output_file)
@@ -44,7 +44,7 @@ class ConfigMapWatcher:
             # Create a temporary file in the same directory as the target file
             output_dir = os.path.dirname(self.output_file)
             with tempfile.NamedTemporaryFile(mode='w', dir=output_dir, delete=False) as temp_file:
-                YAMLTemplateConverter().convert(StringIO(yaml.safe_dump(self.current_data)), temp_file)
+                YAMLTemplateConverter(namespace=self.namespace).convert(StringIO(yaml.safe_dump(self.current_data)), temp_file)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())  # Ensure all data is written to disk
 
@@ -66,14 +66,15 @@ class ConfigMapWatcher:
         w = watch.Watch()
 
         # First, get existing ConfigMaps
-        logger.info(f"Loading existing ConfigMaps for {self.namespace} and {self.label_selector}")
+        logger.info(f"Loading existing ConfigMaps for '{self.namespace}' namespace and "
+                    f"{self.label_selector if self.label_selector else 'no'} label selector")
         existing_configmaps = self.v1.list_namespaced_config_map(
             namespace=self.namespace,
             label_selector=self.label_selector
         )
-        logger.info(f"Got configmaps: {existing_configmaps}")
+        logger.debug(f"Got configmaps: {existing_configmaps}")
         for configmap in existing_configmaps.items:
-            logger.info(f"configmap={configmap}")
+            logger.debug(f"configmap={configmap}")
             self.current_data[configmap.metadata.name] = configmap.data if configmap.data else {}
 
         self.update_yaml_file()

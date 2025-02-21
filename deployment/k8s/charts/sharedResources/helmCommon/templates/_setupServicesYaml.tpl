@@ -7,7 +7,6 @@
   volumeMounts:
     - name: {{ $mountName }}
       mountPath: /config
-      subPath: migration_services.yaml
   command:
     - /.venv/bin/python
     - config_watcher.py
