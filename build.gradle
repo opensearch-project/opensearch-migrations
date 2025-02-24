@@ -109,6 +109,25 @@ subprojects {
     apply plugin: 'java'
     apply plugin: 'maven-publish'
 
+    configurations.all {
+        resolutionStrategy {
+            // Force specific versions of transitive dependencies to handle CVEs
+            force 'net.minidev:json-smart:2.5.1'
+            force 'xalan:xalan:2.7.3'
+            force 'com.thoughtworks.xstream:xstream:1.4.21'
+            force 'commons-net:commons-net:3.9.0'
+            force 'org.jsoup:jsoup:1.15.3'
+            force 'org.apache.tika:tika-core:1.28.4'
+            force 'com.jayway.jsonpath:json-path:2.9.0'
+            force 'dnsjava:dnsjava:3.6.0'
+            force 'org.xerial.snappy:snappy-java:1.1.10.6'
+            force 'org.glassfish.jersey.core:jersey-common:2.34'
+            force 'org.apache.httpcomponents:httpclient:4.5.13'
+
+            preferProjectModules()
+        }
+    }
+
     java {
         toolchain {
             languageVersion.set(JavaLanguageVersion.of(17))
