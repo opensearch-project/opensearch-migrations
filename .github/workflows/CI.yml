@@ -63,17 +63,18 @@ jobs:
        run: |
         flake8 $(git ls-files '*.py')
 
-  console-python-tests:
+  python-tests:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         py-project:
-          - lib/console_link
-          - cluster_tools
-          - console_api
+          - migrationConsole/lib/console_link
+          - migrationConsole/cluster_tools
+          - migrationConsole/console_api
+          - k8sConfigMapUtilScripts
     env:
-      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/${{ matrix.py-project }}
+      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}

@@ -3,10 +3,15 @@ import logging
 import sys
 import os
 import yaml
+from enum import Enum
 from jinja2 import Environment, FileSystemLoader
+from pathlib import Path
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+FieldType = Enum("FieldType", ["INTEGER", "BOOLEAN"])
+
 
 def to_yaml_filter(value):
     """Ensures None values are empty in generated YAML"""
@@ -31,17 +36,26 @@ def pop_value(dictionary, key, default=None):
     # Pop the final key
     return current.pop(keys[-1], default)
 
+
 def reconcile_dicts(default_dict, override_dict):
     return (default_dict | override_dict) if default_dict and override_dict else default_dict or override_dict or None
+
 
 def add_to_dict_if_present(dict1, key_name, value, impose_type=None):
     if value:
         if impose_type:
-            if impose_type == "integer":
-                value = int(value)
-            elif impose_type == "boolean":
-                value = False if value.casefold() == "false" else True
+            try:
+                if impose_type == FieldType.INTEGER:
+                    value = int(value)
+                elif impose_type == FieldType.BOOLEAN:
+                    value = False if value.casefold() == "false" else True
+                else:
+                    logger.error(f"Unknown type '{impose_type}' provided for key '{key_name}', "
+                                 f"skipping type casting for key.")
+            except Exception as e:
+                logger.error(f"Unexpected error processing key '{key_name}' with provided type '{impose_type}': {e}")
         dict1[key_name] = value
+
 
 def add_to_dict(new_dict, new_key, old_dict, old_key, impose_type=None):
     existing_value = old_dict.get(old_key, None)
@@ -54,7 +68,7 @@ def generate_formatted_cluster_dict(default_dict, override_dict):
         return cluster_dict
     formatted_dict = {}
     add_to_dict(formatted_dict, "endpoint", cluster_dict, "endpoint")
-    add_to_dict(formatted_dict, "allow_insecure", cluster_dict, "allowInsecure", "boolean")
+    add_to_dict(formatted_dict, "allow_insecure", cluster_dict, "allowInsecure", FieldType.BOOLEAN)
     add_to_dict(formatted_dict, "version", cluster_dict, "version")
     auth_type = cluster_dict.get("authType", None)
     if auth_type:
@@ -120,6 +134,7 @@ def generate_formatted_snapshot_dict(default_dict, override_dict):
         add_to_dict(type_dict, "role", snapshot_dict, "role")
     return formatted_dict
 
+
 def generate_formatted_metrics_source_dict(default_dict, override_dict):
     observability_dict = reconcile_dicts(default_dict, override_dict)
     if not observability_dict:
@@ -133,13 +148,14 @@ def generate_formatted_metrics_source_dict(default_dict, override_dict):
         add_to_dict(type_dict, "aws_region", observability_dict, "awsRegion")
     return formatted_dict
 
+
 def generate_formatted_metadata_dict(default_dict, override_dict):
     metadata_dict = reconcile_dicts(default_dict, override_dict)
     if not metadata_dict:
         return metadata_dict
     formatted_dict = {}
     add_to_dict(formatted_dict, "otel_endpoint", metadata_dict, "otelEndpoint")
-    add_to_dict(formatted_dict, "min_replicas", metadata_dict, "minReplicas", "integer")
+    add_to_dict(formatted_dict, "min_replicas", metadata_dict, "minReplicas", FieldType.INTEGER)
     add_to_dict(formatted_dict, "index_allowlist", metadata_dict, "indexAllowlist")
     add_to_dict(formatted_dict, "index_template_allowlist", metadata_dict, "indexTemplateAllowlist")
     add_to_dict(formatted_dict, "component_template_allowlist", metadata_dict, "componentTemplateAllowlist")
@@ -148,6 +164,7 @@ def generate_formatted_metadata_dict(default_dict, override_dict):
     if metadata_type:
         formatted_dict[metadata_type] = None
     return formatted_dict
+
 
 def generate_formatted_client_options_dict(default_dict, override_dict):
     client_options_dict = reconcile_dicts(default_dict, override_dict)
@@ -159,7 +176,7 @@ def generate_formatted_client_options_dict(default_dict, override_dict):
 
 
 class YAMLTemplateConverter:
-    def __init__(self, namespace, template_dir='.', template_file='migration_services.yaml.j2'):
+    def __init__(self, namespace, template_dir=Path(__file__).parent, template_file='migration_services.yaml.j2'):
         """
         Initialize the converter with template directory and file.
 
@@ -183,21 +200,35 @@ class YAMLTemplateConverter:
 
         template = env.get_template(self.template_file)
         parsed_values = {}
-        add_to_dict_if_present(parsed_values, "source_cluster", generate_formatted_cluster_dict(values.get("source-cluster-default", None), values.get("source-cluster", None)))
-        add_to_dict_if_present(parsed_values, "target_cluster", generate_formatted_cluster_dict(values.get("target-cluster-default", None), values.get("target-cluster", None)))
-        add_to_dict_if_present(parsed_values, "kafka", generate_formatted_kafka_dict(values.get("kafka-brokers-default", None), values.get("kafka-brokers", None)))
+        add_to_dict_if_present(parsed_values, "source_cluster",
+                               generate_formatted_cluster_dict(values.get("source-cluster-default", None),
+                                                               values.get("source-cluster", None)))
+        add_to_dict_if_present(parsed_values, "target_cluster",
+                               generate_formatted_cluster_dict(values.get("target-cluster-default", None),
+                                                               values.get("target-cluster", None)))
+        add_to_dict_if_present(parsed_values, "kafka",
+                               generate_formatted_kafka_dict(values.get("kafka-brokers-default", None),
+                                                             values.get("kafka-brokers", None)))
         add_to_dict_if_present(parsed_values, "backfill", generate_formatted_rfs_dict(self.namespace))
         add_to_dict_if_present(parsed_values, "replay", generate_formatted_replay_dict(self.namespace))
-        add_to_dict_if_present(parsed_values, "snapshot", generate_formatted_snapshot_dict(values.get("snapshot-default", None), values.get("snapshot", None)))
-        add_to_dict_if_present(parsed_values, "metrics_source", generate_formatted_metrics_source_dict(values.get("metrics-source-default", None), values.get("metrics-source", None)))
-        add_to_dict_if_present(parsed_values, "metadata", generate_formatted_metadata_dict(values.get("metadata-migration-default", None), values.get("metadata-migration", None)))
-        add_to_dict_if_present(parsed_values, "client_options", generate_formatted_client_options_dict(values.get("client-options-default", None), values.get("client-options", None)))
+        add_to_dict_if_present(parsed_values, "snapshot",
+                               generate_formatted_snapshot_dict(values.get("snapshot-default", None),
+                                                                values.get("snapshot", None)))
+        add_to_dict_if_present(parsed_values, "metrics_source",
+                               generate_formatted_metrics_source_dict(values.get("metrics-source-default", None),
+                                                                      values.get("metrics-source", None)))
+        add_to_dict_if_present(parsed_values, "metadata",
+                               generate_formatted_metadata_dict(values.get("metadata-migration-default", None),
+                                                                values.get("metadata-migration", None)))
+        add_to_dict_if_present(parsed_values, "client_options",
+                               generate_formatted_client_options_dict(values.get("client-options-default", None),
+                                                                      values.get("client-options", None)))
         out_stream.write(template.render(values=parsed_values))
 
 
 def main():
     template_path = sys.argv[1] if len(sys.argv) > 1 else 'migration_services.yaml.j2'
-    template_dir = os.path.dirname(template_path) or '.'
+    template_dir = os.path.dirname(template_path) or Path(__file__).parent
     template_file = os.path.basename(template_path)
 
     try:

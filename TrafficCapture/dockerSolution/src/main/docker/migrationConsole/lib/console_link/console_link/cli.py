@@ -165,9 +165,9 @@ def parse_headers(header: str) -> Dict:
 @click.pass_obj
 def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
-    By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is pre-prepared
-    on the migration console, but `--config-file` can point to any YAML file that defines a `source_cluster` or
-    target_cluster` based on the schema of the `services.yaml` file.
+    By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is
+    pre-prepared on the migration console, but `--config-file` can point to any YAML file that defines a
+    source_cluster` or target_cluster` based on the schema of the `services.yaml` file.
     
     In specifying the path of the route, use the name of the YAML object as the domain, followed by a space and the
     path, e.g. `source_cluster /_cat/indices`."""
