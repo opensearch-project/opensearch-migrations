@@ -72,10 +72,17 @@ def parse_args():
     parser.add_argument("--config-file", default="/etc/migration_services.yaml", help="Path to config file")
     # parser.add_argument("--endpoint", help="Cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
 
-    # Temporary workaround for users who need to pass the ALB endpoint to capture live traffic:
-    # - Users should strictly use No-Auth OR Basic-Auth (no other auth methods) on both source and target clusters.
-    # - For Basic-Auth, keep Auth details (username and password) same for both the source and target clusters
-    #   if performing a switchover, to avoid disrupting the live traffic simulation.
+    # Temporary workaround for users who need to pass the ALB endpoint to
+    # capture live traffic:
+    # - Users should strictly use No-Auth OR Basic-Auth (no other auth
+    #   methods) on both source and target clusters.
+    # - For Basic-Auth, keep Auth details (username and password) the same
+    #   for both the source and target clusters if performing a switchover,
+    #   to avoid disrupting the live traffic simulation.
+    # - Alternatively, users can create a custom config file (e.g.,
+    #   `custom_services.yaml`) that defines only the required cluster
+    #   (typically the target) with the appropriate endpoint and auth method,
+    #   then pass it in using `--config-file`.
 
     return parser.parse_args()
 
