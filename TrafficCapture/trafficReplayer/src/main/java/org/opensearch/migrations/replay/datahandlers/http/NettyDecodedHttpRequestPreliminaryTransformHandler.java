@@ -27,7 +27,6 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    boolean redriveRequest = false;
 
     public NettyDecodedHttpRequestPreliminaryTransformHandler(
         IJsonTransformer transformer,
@@ -178,7 +177,6 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             // Send Both
             ctx.fireChannelRead(httpJsonMessage);
-            redriveRequest = true;
         }
     }
 
