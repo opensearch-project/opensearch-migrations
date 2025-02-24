@@ -137,16 +137,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     public OpenSearchWorkCoordinator(
-            AbstractedHttpClient httpClient,
-            long tolerableClientServerClockDifferenceSeconds,
-            String workerId,
-            Clock clock
-    ) {
-        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, w -> {});
-    }
-
-
-    public OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId,
@@ -204,6 +194,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     protected abstract String getCoordinationIndexSettingsBody();
 
     protected abstract String getPathForUpdates(String workItemId);
+
+    protected abstract String getPathForSingleDocumentUpdateByQuery();
 
     protected abstract String getPathForGets(String workItemId);
 
@@ -526,9 +518,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             }
             var payload = objectMapper.readTree(response.getPayloadBytes());
             var totalHits = getTotalHitsFromSearchResponse(payload);
-            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
-            // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
-            if (totalHits == 0 && !payload.path("hits").path("total").path("relation").textValue().equals("eq")) {
+            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. If a `relation`
+            // for the total is present, it must be `eq` or we need to throw an error because it's not safe to rely on this data.
+            var relationValue = payload.path("hits").path("total").path("relation").textValue();
+            if (totalHits == 0 && relationValue != null && !relationValue.equals("eq")) {
                 throw new IllegalStateException("Querying for notYetCompleted work returned 0 hits with an unexpected total relation.");
             }
             return totalHits;
@@ -612,7 +605,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
+            getPathForSingleDocumentUpdateByQuery(),
             null,
             body
         );
@@ -671,18 +664,18 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new AssignedWorkDocumentNotFoundException(response);
         }
 
-        final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
-        if (resultHitsUpper.isMissingNode()) {
+        final var results = objectMapper.readTree(response.getPayloadBytes());
+        if (results.path("hits").isMissingNode()) {
             log.warn("Couldn't find the top level 'hits' field, returning no work item");
             throw new AssignedWorkDocumentNotFoundException(response);
         }
-        final var numDocs = resultHitsUpper.path("total").path("value").longValue();
+        final var numDocs = getTotalHitsFromSearchResponse(results);
         if (numDocs == 0) {
             throw new AssignedWorkDocumentNotFoundException(response);
         } else if (numDocs != 1) {
             throw new MalformedAssignedWorkDocumentException(response);
         }
-        var resultHitInner = resultHitsUpper.path("hits").path(0);
+        var resultHitInner = results.path("hits").path("hits").path(0);
         var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();
         if (expiration == 0) {
             log.atWarn().setMessage("Expiration wasn't found or wasn't set to > 0 for response: {}")

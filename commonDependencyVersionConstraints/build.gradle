@@ -9,7 +9,7 @@ ext {
 dependencies {
 
   constraints {
-    def netty = '4.1.115.Final'
+    def netty = '4.1.118.Final'
     api group: 'io.netty', name: 'netty-buffer', version: netty
     api group: 'io.netty', name: 'netty-codec-http', version: netty
     api group: 'io.netty', name: 'netty-handler', version: netty
@@ -128,7 +128,7 @@ dependencies {
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************
-    implementation group: 'net.minidev', name: 'json-smart', version: '2.4.9'
+    implementation group: 'net.minidev', name: 'json-smart', version: '2.5.2'
     implementation group: 'xalan', name: 'xalan', version: '2.7.3'
     implementation group: 'com.thoughtworks.xstream', name: 'xstream', version: '1.4.21'
     implementation group: 'commons-net', name: 'commons-net', version: '3.9.0'

@@ -12,10 +12,10 @@ kill_minikube_processes() {
   if [ -n "$mount_process_id" ]; then
     kill "$mount_process_id"
   fi
-  tunnel_process_id=$(pgrep -f "minikube tunnel")
-  if [ -n "$tunnel_process_id" ]; then
-    kill "$tunnel_process_id"
-  fi
+  #tunnel_process_id=$(pgrep -f "minikube tunnel")
+  #if [ -n "$tunnel_process_id" ]; then
+  #  kill "$tunnel_process_id"
+  #fi
 }
 
 start() {

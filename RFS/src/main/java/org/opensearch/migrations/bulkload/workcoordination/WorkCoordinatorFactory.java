@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchWorkCoordinator_ES_6_8;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchWorkCoordinator_OS_2_11;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration;
 
@@ -23,19 +24,8 @@ public class WorkCoordinatorFactory {
         ) {
         if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient, tolerableClientServerClockDifferenceSeconds, workerId);
-        } else {
-            throw new IllegalArgumentException("Unsupported version: " + version);
-        }
-    }
-
-    public OpenSearchWorkCoordinator get(
-            AbstractedHttpClient httpClient,
-            long tolerableClientServerClockDifferenceSeconds,
-            String workerId,
-            Clock clock
-        ) {
-        if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
-            return new OpenSearchWorkCoordinator_OS_2_11(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock);
+        } else if (VersionMatchers.isES_6_X.test(version)) {
+            return new OpenSearchWorkCoordinator_ES_6_8(httpClient, tolerableClientServerClockDifferenceSeconds, workerId);
         } else {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
@@ -50,6 +40,8 @@ public class WorkCoordinatorFactory {
         ) {
         if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
+        } else if (VersionMatchers.isES_6_X.test(version)) {
+            return new OpenSearchWorkCoordinator_ES_6_8(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
         } else {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }

@@ -53,7 +53,7 @@ execute_command_and_wait_for_result() {
   fi
   sleep 5
   command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'Status')
-  max_attempts=25
+  max_attempts=30
   attempt_count=0
   while [ "$command_status" != "Success" ] && [ "$command_status" != "Failed" ] && [ "$command_status" != "TimedOut" ]
   do
