@@ -93,8 +93,8 @@ dependencies {
     implementation libs.aws.s3
     implementation libs.aws.s3.transfer.manager
 
-    testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
-    testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
+    testImplementation libs.docker.java.core
+    testImplementation libs.docker.java.transport.httpclient5
 
     testImplementation testFixtures(project(path: ':RFS'))
     testImplementation libs.lucene.v9.backward.codecs

@@ -38,6 +38,8 @@ lucene9 = "9.11.1"
 jni-java = "2.7.3"
 errorprone = "2.32.0"
 commons-collections = "4.4"
+jenkins-pipeline-unit = "1.23"
+groovy = "3.0.23"
 
 [libraries]
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
@@ -78,6 +80,7 @@ jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", ver
 jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml", version.ref = "jackson" }
 jackson-dataformat-smile = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-smile", version.ref = "jackson" }
 
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jupiter" }
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "jupiter" }
 junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "jupiter" }
 junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "jupiter" }
@@ -147,3 +150,7 @@ jni-java = { module = "com.hubspot.jinjava:jinjava", version.ref = "jni-java" }
 errorprone = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
 
 commons-collections = { module = "org.apache.commons:commons-collections4", version.ref = "commons-collections" }
+
+jenkins-pipeline-unit = { module = "com.lesfurets:jenkins-pipeline-unit", version.ref = "jenkins-pipeline-unit" }
+
+groovy = { module = "org.codehaus.groovy:groovy-all", version.ref = "groovy" }
