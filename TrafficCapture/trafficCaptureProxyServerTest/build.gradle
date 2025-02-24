@@ -28,15 +28,6 @@ dependencies {
 }
 
 CommonConfigurations.applyCommonConfigurations(project)
-configurations {
-    all {
-        // TODO: Remove these
-        exclude group: 'org.apache.logging.log4j', module: 'log4j-slf4j-impl'
-        exclude group: 'net.sf.jtidy', module: 'jtidy'
-
-    }
-}
-
 
 def dockerFilesForExternalServices = [
         "nginx_perf_test_webserver": "nginx"
