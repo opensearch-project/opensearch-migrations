@@ -16,6 +16,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.util.ReferenceCountUtil;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -55,6 +56,8 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         if (msg instanceof HttpRequest) {
             if (redriveRequest) {
                 ctx.fireChannelRead(msg);
+            } else {
+                ReferenceCountUtil.release(msg);
             }
         } else if (msg instanceof HttpJsonRequestWithFaultingPayload) {
             var originalHttpJsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
@@ -87,10 +90,7 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     requestPipelineOrchestrator.addJsonParsingHandlers(ctx,
                             transformer,
                             getAuthTransformerAsStreamingTransformer(authTransformer));
-                    // send both!  We’ll allow some built-in netty http handlers to do their thing & then
-                    // reunify any additions with our headers model before serializing
                     ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
-//                    redriveRequest = true;
                 } else {
                     throw new TransformationException(e);
                 }
