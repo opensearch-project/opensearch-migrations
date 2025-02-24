@@ -37,9 +37,9 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
                 .addArgument(() -> request.protocolVersion().text())
                 .log();
             var httpJsonMessage = parseHeadersIntoMessage(request);
-            // Send both, may need to re-drive the request through again
-            ctx.fireChannelRead(request);
+            // Send both, may need to re-drive the request through again depending on initial processing of httpJsonMessage
             ctx.fireChannelRead(httpJsonMessage);
+            ctx.fireChannelRead(request);
         } else {
             super.channelRead(ctx, msg);
         }

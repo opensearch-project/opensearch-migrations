@@ -27,7 +27,7 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
-    HttpRequest redriveRequest = null;
+    boolean redriveRequest = false;
 
     public NettyDecodedHttpRequestPreliminaryTransformHandler(
         IJsonTransformer transformer,
@@ -53,7 +53,9 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
-            redriveRequest = (HttpRequest) msg;
+            if (redriveRequest) {
+                ctx.fireChannelRead(msg);
+            }
         } else if (msg instanceof HttpJsonRequestWithFaultingPayload) {
             var originalHttpJsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
             originalHttpJsonMessage.setHeaders(clone(originalHttpJsonMessage.headers()));
@@ -77,18 +79,19 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                 transformedMessage = transform(transformer, httpJsonMessage);
             } catch (Exception e) {
                 var payload = (PayloadAccessFaultingMap) httpJsonMessage.payload();
-                if (payload.missingPayloadWasAccessed() || e instanceof TransformationException) {
+                if (payload.missingPayloadWasAccessed()) {
                     payload.resetMissingPayloadWasAccessed();
                     log.atDebug().setMessage("The transforms for this message require payload manipulation, "
                         + "all content handlers are being loaded.").log();
                     // make a fresh message and its headers
-                    requestPipelineOrchestrator.addContentRepackingHandlers(ctx,
+                    requestPipelineOrchestrator.addJsonParsingHandlers(ctx,
+                            transformer,
                             getAuthTransformerAsStreamingTransformer(authTransformer));
                     // send both!  We’ll allow some built-in netty http handlers to do their thing & then
                     // reunify any additions with our headers model before serializing
                     ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
-                    ctx.fireChannelRead(redriveRequest);
-                } else{
+//                    redriveRequest = true;
+                } else {
                     throw new TransformationException(e);
                 }
             } finally {
@@ -118,24 +121,15 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         IJsonTransformer transformer,
         HttpJsonRequestWithFaultingPayload httpJsonMessage
     ) {
-        var originalHttpJsonMessage = httpJsonMessage;
-
-        var originalContentEncoding = originalHttpJsonMessage.headers().insensitiveGet("Content-Encoding");
-
         assert httpJsonMessage.containsKey("payload");
 
         Object returnedObject = transformer.transformJson(httpJsonMessage);
 
         var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
 
-        if (originalContentEncoding
-                != transformedRequest.headers().insensitiveGet("Content-Encoding")) {
-            throw new TransformationException(new RuntimeException("Need to redrive with payload for content decompression"));
-        }
-
-        if (originalHttpJsonMessage != transformedRequest) {
+        if (httpJsonMessage != transformedRequest) {
             // clear originalHttpJsonMessage for faster garbage collection if not persisted along
-            originalHttpJsonMessage.clear();
+            httpJsonMessage.clear();
         }
         return transformedRequest;
     }
@@ -188,7 +182,9 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload."
             );
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
+            // Send Both
             ctx.fireChannelRead(httpJsonMessage);
+            redriveRequest = true;
         }
     }
 
