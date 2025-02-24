@@ -112,7 +112,7 @@ subprojects {
     configurations.all {
         resolutionStrategy {
             // Force specific versions of transitive dependencies to handle CVEs
-            force 'net.minidev:json-smart:2.5.1'
+            force 'net.minidev:json-smart:2.5.2'
             force 'xalan:xalan:2.7.3'
             force 'com.thoughtworks.xstream:xstream:1.4.21'
             force 'commons-net:commons-net:3.9.0'
