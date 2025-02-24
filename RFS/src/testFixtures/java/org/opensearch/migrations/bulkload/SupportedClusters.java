@@ -26,7 +26,8 @@ public class SupportedClusters {
     public static List<ContainerVersion> targets() {
         return List.of(
             SearchClusterContainer.OS_V1_3_16,
-            SearchClusterContainer.OS_V2_14_0
+            SearchClusterContainer.OS_V2_14_0,
+            SearchClusterContainer.OS_V3_0_0_ALPHA
         );
     }
 }
