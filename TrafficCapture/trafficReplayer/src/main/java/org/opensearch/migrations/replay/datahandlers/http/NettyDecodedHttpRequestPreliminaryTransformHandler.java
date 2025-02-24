@@ -16,7 +16,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpRequest;
-import io.netty.util.ReferenceCountUtil;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -53,13 +52,7 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
 
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-        if (msg instanceof HttpRequest) {
-            if (redriveRequest) {
-                ctx.fireChannelRead(msg);
-            } else {
-                ReferenceCountUtil.release(msg);
-            }
-        } else if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
             var originalHttpJsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
             originalHttpJsonMessage.setHeaders(clone(originalHttpJsonMessage.headers()));
 
@@ -106,11 +99,12 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     authTransformer
                 );
             }
-        } else if (msg instanceof HttpContent) {
-            ctx.fireChannelRead(msg);
+        }
+        else if (msg instanceof HttpRequest || msg instanceof HttpContent) {
+            super.channelRead(ctx, msg);
         } else {
             assert false
-                : "Only HttpRequest and HttpContent should come through here as per RequestPipelineOrchestrator";
+                : "Only HttpJsonRequestWithFaultingPayload, HttpRequest, and HttpContent should come through here as per RequestPipelineOrchestrator";
             // In case message comes through, pass downstream
             super.channelRead(ctx, msg);
         }
