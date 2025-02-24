@@ -1,5 +1,9 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -8,9 +12,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
 
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
@@ -200,6 +206,50 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
             testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
+    }
+
+
+    @Test
+    @Tag("longTest")
+    public void testRemoveCompressionWorks() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        String redactBody = "{ " +
+                "    \"operation\": \"remove\", " +
+                "    \"spec\": { " +
+                "       \"headers\": { " +
+                "         \"Content-Encoding\": \"\"" +
+                "       } " +
+                "   } " +
+                "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
+
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+                jsonJoltTransformer,
+                null,
+                testPacketCapture,
+                rootContext.getTestConnectionRequestContext(0)
+        );
+        byte[] testBytes;
+        try (
+                var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                        "/requests/raw/post_json_gzip.gz"
+                )
+        ) {
+            assert sampleStream != null;
+            testBytes = sampleStream.readAllBytes();
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+                .replace("Content-Encoding: gzip\r\n", "")
+                .replaceAll("Content-Length: .*", "Content-Length: 17")
+                .replaceAll("(Content-Length: .*[\r\n]*)[\\s\\S]*", "$1"+
+                        "{}");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
         Assertions.assertNull(returnedResponse.transformationStatus.getException());
     }

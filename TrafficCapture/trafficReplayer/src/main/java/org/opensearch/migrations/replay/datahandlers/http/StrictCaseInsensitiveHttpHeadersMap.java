@@ -57,9 +57,9 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
         return new AbstractSet<>() {
             @Override
             public Iterator<Entry<String, List<String>>> iterator() {
-                return new Iterator<Entry<String, List<String>>>() {
+                return new Iterator<>() {
                     Iterator<Entry<String, SimpleEntry<String, List<String>>>> backingIterator =
-                        lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
+                            lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
 
                     @Override
                     public boolean hasNext() {
@@ -70,6 +70,11 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
                     public Entry<String, List<String>> next() {
                         var backingEntry = backingIterator.next();
                         return backingEntry == null ? null : backingEntry.getValue();
+                    }
+
+                    @Override
+                    public void remove() {
+                        backingIterator.remove();
                     }
                 };
             }
