@@ -214,7 +214,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
                 "    \"operation\": \"remove\", " +
                 "    \"spec\": { " +
                 "       \"headers\": { " +
-                "         \"Content-Encoding\": \"\"" +
+                "         \"cOnTeNt-Encoding\": \"\"" +
                 "       } " +
                 "   } " +
                 "}";

@@ -65,7 +65,19 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
      * but this should be significantly more efficient.
      */
     @Override
+    @SuppressWarnings("unchecked")
     public Set<Entry<String, Object>> entrySet() {
         return (Set<Entry<String, Object>>) (Object) strictHeadersMap.entrySet();
     }
+
+    @Override
+    public Set<String> keySet() {
+        return strictHeadersMap.keySet();
+    }
+
+    @Override
+    public boolean containsKey(Object key) {
+        return strictHeadersMap.containsKey(key);
+    }
+
 }
