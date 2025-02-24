@@ -1,7 +1,7 @@
+import pytest
 import subprocess
 
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
-import pytest
 
 
 def test_command_runner_builds_command_without_args():
@@ -58,3 +58,40 @@ def test_command_runner_sanitizing_a_flag_field_is_a_noop():
     }, sensitive_fields=["--use-password"])
     assert runner.command == ["command", "--username", "admin", "--use-password"]
     assert runner.sanitized_command() == ["command", "--username", "admin", "--use-password"]
+
+
+def test_command_runner_prints_output_as_run_default(capsys, mocker):
+    mock_stdout = "Found 5 directories"
+    mock_stderr = "Unknown file path"
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=mock_stdout, stderr=mock_stderr)
+    runner = CommandRunner("ls", {})
+    mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+    runner.run()
+    # Capture stdout/stderr output
+    captured = capsys.readouterr()
+    assert captured.out == mock_stdout
+    assert captured.err == mock_stderr
+
+
+def test_command_runner_prints_nothing_when_output_disabled(capsys, mocker):
+    mock_stdout = "Found 5 directories"
+    mock_stderr = "Unknown file path"
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=mock_stdout, stderr=mock_stderr)
+    runner = CommandRunner("ls", {})
+    mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+    runner.run(print_to_console=False)
+    # Capture stdout/stderr output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_command_runner_handles_no_output(capsys, mocker):
+    mock_subprocess_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=None, stderr=None)
+    runner = CommandRunner("ls", {})
+    mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+    runner.run()
+    # Capture stdout/stderr output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""

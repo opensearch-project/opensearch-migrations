@@ -3,10 +3,11 @@ from typing import Dict, Optional
 
 from console_link.models.client_options import ClientOptions
 from console_link.models.replayer_docker import DockerReplayer
+from console_link.models.replayer_k8s import K8sReplayer
 from console_link.models.metrics_source import CloudwatchMetricsSource, PrometheusMetricsSource
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
+from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
 from console_link.models.cluster import Cluster
 from console_link.models.kafka import MSK, StandardKafka
 from console_link.models.replayer_ecs import ECSReplayer
@@ -61,6 +62,8 @@ def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
         return ECSReplayer(config=config, client_options=client_options)
     if 'docker' in config:
         return DockerReplayer(config)
+    if 'k8s' in config:
+        return K8sReplayer(config=config, client_options=client_options)
     logger.error(f"An unsupported replayer type was provided: {config.keys()}")
     raise UnsupportedReplayerError(next(iter(config.keys())))
 
@@ -98,6 +101,11 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
         elif 'ecs' in config[BackfillType.reindex_from_snapshot.name]:
             logger.debug("Creating ECS RFS backfill instance")
             return ECSRFSBackfill(config=config,
+                                  target_cluster=target_cluster,
+                                  client_options=client_options)
+        elif 'k8s' in config[BackfillType.reindex_from_snapshot.name]:
+            logger.debug("Creating K8s RFS backfill instance")
+            return K8sRFSBackfill(config=config,
                                   target_cluster=target_cluster,
                                   client_options=client_options)
 
