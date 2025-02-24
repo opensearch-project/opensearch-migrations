@@ -257,7 +257,7 @@ jobs:
 
   all-ci-checks-pass:
     needs:
-      - console-python-tests
+      - python-tests
       - gradle-tests
       - link-checker
       - node-tests
