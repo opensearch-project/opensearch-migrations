@@ -79,7 +79,8 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     log.atDebug().setMessage("The transforms for this message require payload manipulation, "
                         + "all content handlers are being loaded.").log();
                     // make a fresh message and its headers
-                    requestPipelineOrchestrator.addJsonParsingHandlers(ctx,
+                    requestPipelineOrchestrator.addJsonParsingHandlers(
+                            ctx,
                             transformer,
                             getAuthTransformerAsStreamingTransformer(authTransformer));
                     ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
@@ -121,7 +122,7 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
 
         if (httpJsonMessage != transformedRequest) {
-            // clear originalHttpJsonMessage for faster garbage collection if not persisted along
+            // clear httpJsonMessage for faster garbage collection if not persisted along
             httpJsonMessage.clear();
         }
         return transformedRequest;
@@ -175,7 +176,6 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload."
             );
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
-            // Send Both
             ctx.fireChannelRead(httpJsonMessage);
         }
     }
