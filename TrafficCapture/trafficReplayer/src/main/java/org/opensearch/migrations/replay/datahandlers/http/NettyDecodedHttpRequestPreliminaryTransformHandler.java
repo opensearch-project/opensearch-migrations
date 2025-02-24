@@ -15,6 +15,7 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpRequest;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,6 +27,7 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
     final IJsonTransformer transformer;
     final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
+    HttpRequest redriveRequest = null;
 
     public NettyDecodedHttpRequestPreliminaryTransformHandler(
         IJsonTransformer transformer,
@@ -50,7 +52,9 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
 
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+        if (msg instanceof HttpRequest) {
+            redriveRequest = (HttpRequest) msg;
+        } else if (msg instanceof HttpJsonRequestWithFaultingPayload) {
             var originalHttpJsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
             originalHttpJsonMessage.setHeaders(clone(originalHttpJsonMessage.headers()));
 
@@ -73,17 +77,17 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                 transformedMessage = transform(transformer, httpJsonMessage);
             } catch (Exception e) {
                 var payload = (PayloadAccessFaultingMap) httpJsonMessage.payload();
-                if (payload.missingPayloadWasAccessed()) {
+                if (payload.missingPayloadWasAccessed() || e instanceof TransformationException) {
                     payload.resetMissingPayloadWasAccessed();
                     log.atDebug().setMessage("The transforms for this message require payload manipulation, "
                         + "all content handlers are being loaded.").log();
                     // make a fresh message and its headers
-                    requestPipelineOrchestrator.addJsonParsingHandlers(
-                        ctx,
-                        transformer,
-                        getAuthTransformerAsStreamingTransformer(authTransformer)
-                    );
+                    requestPipelineOrchestrator.addContentRepackingHandlers(ctx,
+                            getAuthTransformerAsStreamingTransformer(authTransformer));
+                    // send both!  We’ll allow some built-in netty http handlers to do their thing & then
+                    // reunify any additions with our headers model before serializing
                     ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
+                    ctx.fireChannelRead(redriveRequest);
                 } else{
                     throw new TransformationException(e);
                 }
@@ -116,11 +120,18 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
     ) {
         var originalHttpJsonMessage = httpJsonMessage;
 
+        var originalContentEncoding = originalHttpJsonMessage.headers().insensitiveGet("Content-Encoding");
+
         assert httpJsonMessage.containsKey("payload");
 
         Object returnedObject = transformer.transformJson(httpJsonMessage);
 
         var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
+
+        if (originalContentEncoding
+                != transformedRequest.headers().insensitiveGet("Content-Encoding")) {
+            throw new TransformationException(new RuntimeException("Need to redrive with payload for content decompression"));
+        }
 
         if (originalHttpJsonMessage != transformedRequest) {
             // clear originalHttpJsonMessage for faster garbage collection if not persisted along

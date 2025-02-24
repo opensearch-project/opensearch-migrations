@@ -1,9 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -12,11 +8,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import java.util.zip.GZIPInputStream;
 
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
@@ -246,9 +240,9 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         var expectedString = new String(testBytes, StandardCharsets.UTF_8)
                 .replace("Content-Encoding: gzip\r\n", "")
-                .replaceAll("Content-Length: .*", "Content-Length: 17")
+                .replaceAll("Content-Length: .*", "Content-Length: 45")
                 .replaceAll("(Content-Length: .*[\r\n]*)[\\s\\S]*", "$1"+
-                        "{}");
+                        "{\"name\": \"John\", \"age\": 30, \"city\": \"Austin\"}");
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
         Assertions.assertNull(returnedResponse.transformationStatus.getException());
