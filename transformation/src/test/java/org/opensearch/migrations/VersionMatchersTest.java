@@ -70,4 +70,14 @@ public class VersionMatchersTest {
             List.of("OS 1.3", "OS 3.0", "ES 2.3")
         );
     }
+
+    @Test
+    void isOS_3_XTest() {
+        testPredicate(
+            VersionMatchers.isOS_3_X,
+            "isOS_3_X",
+            List.of("OS 3.0", "OS 3.15"),
+            List.of("OS 1.3", "OS 2.3", "OS 4.0", "ES 2.3")
+        );
+    }
 }
