@@ -1,13 +1,13 @@
 package org.opensearch.migrations.bulkload.lucene.version_7;
 
 import org.opensearch.migrations.bulkload.common.Uid;
-import org.opensearch.migrations.bulkload.lucene.MyField;
+import org.opensearch.migrations.bulkload.lucene.LuceneField;
 
 import lombok.AllArgsConstructor;
 import shadow.lucene7.org.apache.lucene.index.IndexableField;
 
 @AllArgsConstructor
-public class Field7 implements MyField {
+public class Field7 implements LuceneField {
 
     private final IndexableField wrapped;
 

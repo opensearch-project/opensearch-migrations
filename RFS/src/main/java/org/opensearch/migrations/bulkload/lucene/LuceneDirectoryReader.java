@@ -4,12 +4,14 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 
-public interface MyDirectoryReader {
+public interface LuceneDirectoryReader {
+
     public int maxDoc();
 
-    public List<MyLeafReaderContext> leaves();
+    public List<? extends LuceneLeafReaderContext> leaves();
 
     public Path getIndexDirectoryPath();
 
     public void close() throws IOException;
+
 }

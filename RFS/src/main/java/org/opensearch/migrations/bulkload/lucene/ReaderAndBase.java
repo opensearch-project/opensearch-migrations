@@ -6,6 +6,6 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor
 public class ReaderAndBase {
-    MyLeafReader reader;
+    LuceneLeafReader reader;
     int docBaseInParent;
 }

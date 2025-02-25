@@ -2,46 +2,18 @@ package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
+import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
-import org.opensearch.migrations.bulkload.common.Uid;
+import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
+import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
+import lombok.AllArgsConstructor;
 import lombok.Lombok;
-import lombok.RequiredArgsConstructor;
-import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
-import reactor.core.scheduler.Schedulers;
-import shadow.lucene7.org.apache.lucene.document.Document;
-import shadow.lucene7.org.apache.lucene.index.DirectoryReader;
-import shadow.lucene7.org.apache.lucene.index.IndexReader;
-import shadow.lucene7.org.apache.lucene.index.LeafReader;
-import shadow.lucene7.org.apache.lucene.index.LeafReaderContext;
-import shadow.lucene7.org.apache.lucene.index.SegmentCommitInfo;
-import shadow.lucene7.org.apache.lucene.index.SegmentReader;
-import shadow.lucene7.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
-import shadow.lucene7.org.apache.lucene.store.FSDirectory;
-import shadow.lucene7.org.apache.lucene.util.BytesRef;
 
-@RequiredArgsConstructor
-@Slf4j
-public class LuceneDocumentsReader7 implements LuceneDocumentsReader {
-
-    protected final Path indexDirectoryPath;
-    protected final boolean softDeletesPossible;
-    protected final String softDeletesField;
-
+public interface LuceneIndexReader {
     /**
      * There are a variety of states the documents in our Lucene Index can be in; this method extracts those documents
      * that would be considered "live" from the ElasticSearch/OpenSearch perspective.  The most important thing to know is
@@ -89,33 +61,46 @@ public class LuceneDocumentsReader7 implements LuceneDocumentsReader {
      *    Lucene Index.
 
      */
-    public Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
+    default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
-            () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx),
+            () -> getReader(),
+            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
                 try {
                     reader.close();
                 } catch (IOException e) {
-                    log.atError().setMessage("Failed to close DirectoryReader").setCause(e).log();
                     throw Lombok.sneakyThrow(e);
                 }
         });
     }
 
-    protected DirectoryReader getReader() throws IOException {
-        try (var directory = FSDirectory.open(indexDirectoryPath)) {
-            var commits = DirectoryReader.listCommits(directory);
-            var latestCommit = commits.get(commits.size() - 1);
-
-            return DirectoryReader.open(latestCommit);
-        }
+    default Flux<RfsLuceneDocument> readDocuments() {
+        return readDocuments(0);
     }
 
-    protected MyDirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
-        if (softDeletesEnabled) {
-            return new MyDirectoryReader(new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField));
+    LuceneDirectoryReader getReader() throws IOException;
+
+    @Slf4j
+    @AllArgsConstructor
+    class Factory {
+        private final ClusterSnapshotReader snapshotReader;
+
+        public LuceneIndexReader getReader(Path path) {
+            if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_6_X).test(snapshotReader.getVersion())) {
+                log.atInfo().setMessage("Creating IndexReader7").log();
+                return new IndexReader7(
+                    path,
+                    snapshotReader.getSoftDeletesPossible(),
+                    snapshotReader.getSoftDeletesFieldData()
+                );
+            } else {
+                log.atInfo().setMessage("Creating IndexReader9").log();
+                return new LuceneDocumentsReader9(
+                    path,
+                    snapshotReader.getSoftDeletesPossible(),
+                    snapshotReader.getSoftDeletesFieldData()
+                );
+            }
         }
-        return new MyDirectoryReader(reader);
     }
 }

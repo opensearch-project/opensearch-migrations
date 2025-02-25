@@ -19,13 +19,13 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
-public class CommonLuceneReader {
-    
+public class LuceneReader {
+
     /* Start reading docs from a specific segment and document id.
-    If the startSegmentIndex is 0, it will start from the first segment.
-    If the startDocId is 0, it will start from the first document in the segment.
+       If the startSegmentIndex is 0, it will start from the first segment.
+       If the startDocId is 0, it will start from the first document in the segment.
      */
-    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(MyDirectoryReader reader, int startDocId) {
+    static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -50,19 +50,19 @@ public class CommonLuceneReader {
      * starting from the first segment where the cumulative document base is less than or equal
      * to the specified start document ID.
      *
-     * @param originalLeaves A list of {@link MyLeafReaderContext} representing the document segments.
+     * @param originalLeaves A list of {@link LuceneLeafReaderContext} representing the document segments.
      * @param startDocId The document ID from which to begin processing.
      * @return A {@link Flux} emitting the sorted segments starting from the identified segment,
      *         wrapped in {@link ReaderAndBase}.
      */
-    public static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<MyLeafReaderContext> originalLeaves, int startDocId) {
+    static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
         if (originalLeaves.isEmpty()) {
             return Flux.empty();
         }
 
         // Step 1: Sort the segments by name
         var sortedLeaves = originalLeaves.stream()
-            .map(MyLeafReaderContext::reader)
+            .map(LuceneLeafReaderContext::reader)
             .sorted(SegmentNameSorter.INSTANCE)
             .collect(Collectors.toList());
 
@@ -123,7 +123,7 @@ public class CommonLuceneReader {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {
                             // Get document, returns null to skip malformed docs
-                            RfsLuceneDocument document = CommonLuceneReader.getDocument(segmentReader, docIdx.intValue(), true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath);
+                            RfsLuceneDocument document = LuceneReader.getDocument(segmentReader, docIdx.intValue(), true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath);
                             return Mono.justOrEmpty(document); // Emit only non-null documents
                         } else {
                             return Mono.empty(); // Skip non-live documents
@@ -143,8 +143,8 @@ public class CommonLuceneReader {
                 .subscribeOn(scheduler);
     }
 
-    static RfsLuceneDocument getDocument(MyLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
-        MyDocument document;
+    static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
+        LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
         } catch (IOException e) {

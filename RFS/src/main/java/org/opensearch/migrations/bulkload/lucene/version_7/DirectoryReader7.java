@@ -4,14 +4,14 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.lucene.MyDirectoryReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import shadow.lucene7.org.apache.lucene.index.DirectoryReader;
 
 @AllArgsConstructor
-public class DirectoryReader7 implements MyDirectoryReader {
+public class DirectoryReader7 implements LuceneDirectoryReader {
 
     private final DirectoryReader wrapped;
     @Getter

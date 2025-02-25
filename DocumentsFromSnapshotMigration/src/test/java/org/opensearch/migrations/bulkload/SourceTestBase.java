@@ -36,7 +36,7 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
@@ -217,9 +217,9 @@ public class SourceTestBase {
     }
 
     @AllArgsConstructor
-    public static class FilteredLuceneDocumentsReader implements LuceneDocumentsReader {
+    public static class FilteredLuceneDocumentsReader implements LuceneIndexReader {
 
-        private final LuceneDocumentsReader wrappedReader;
+        private final LuceneIndexReader wrappedReader;
         private final UnaryOperator<RfsLuceneDocument> docTransformer;
 
         @Override
@@ -270,9 +270,9 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-            var readerFactory = new LuceneDocumentsReader.Factory(sourceResourceProvider) {
+            var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider) {
                 @Override
-                public LuceneDocumentsReader getReader(Path path) {
+                public LuceneIndexReader getReader(Path path) {
                     return new FilteredLuceneDocumentsReader(super.getReader(path), terminatingDocumentFilter);
                 }
             };

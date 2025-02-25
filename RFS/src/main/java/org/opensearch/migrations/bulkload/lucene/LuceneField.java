@@ -1,6 +1,6 @@
 package org.opensearch.migrations.bulkload.lucene;
 
-public interface MyField {
+public interface LuceneField {
 
     public String name();
 

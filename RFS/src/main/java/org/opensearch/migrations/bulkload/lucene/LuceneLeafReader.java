@@ -2,11 +2,11 @@ package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
 
-public interface MyLeafReader {
+public interface LuceneLeafReader {
 
-    public MyDocument document(int luceneDocId) throws IOException;
+    public LuceneDocument document(int luceneDocId) throws IOException;
 
-    public MyLiveDocs getLiveDocs();
+    public LuceneLiveDocs getLiveDocs();
 
     public int maxDoc();
 

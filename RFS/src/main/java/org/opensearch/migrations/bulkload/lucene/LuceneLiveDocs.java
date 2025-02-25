@@ -1,6 +1,6 @@
 package org.opensearch.migrations.bulkload.lucene;
 
-public interface MyLiveDocs {
+public interface LuceneLiveDocs {
 
     public boolean get(int docIdx);
 

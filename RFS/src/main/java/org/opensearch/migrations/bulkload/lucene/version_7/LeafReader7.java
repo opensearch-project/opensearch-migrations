@@ -1,15 +1,17 @@
 package org.opensearch.migrations.bulkload.lucene.version_7;
 
 import java.io.IOException;
+import java.util.Optional;
 
-import org.opensearch.migrations.bulkload.lucene.MyLeafReader;
-import shadow.lucene7.org.apache.lucene.index.LeafReader;
-
+import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.AllArgsConstructor;
+import shadow.lucene7.org.apache.lucene.index.LeafReader;
+import shadow.lucene7.org.apache.lucene.index.SegmentCommitInfo;
+import shadow.lucene7.org.apache.lucene.index.SegmentReader;
 
 @AllArgsConstructor
-public class LeafReader7 implements MyLeafReader {
+public class LeafReader7 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
 
@@ -26,11 +28,26 @@ public class LeafReader7 implements MyLeafReader {
     }
 
     public String getContextString() {
-        return wrapped;
+        return wrapped.getContext().toString();
     }
 
-    public String getSegmentName() { return null; };
+    private Optional<SegmentReader> getSegmentReader() {
+        if (wrapped instanceof SegmentReader) {
+            return Optional.of(((SegmentReader)wrapped));
+        }
+        return Optional.empty();
+    }
 
-    public String getSegmentInfoString() { return null; };
+    public String getSegmentName() { 
+        return getSegmentReader()
+            .map(SegmentReader::getSegmentName)
+            .orElse(null);
+    };
 
+    public String getSegmentInfoString() {
+        return getSegmentReader()
+            .map(SegmentReader::getSegmentInfo)
+            .map(SegmentCommitInfo::toString)
+            .orElse(null);
+    }
 }
