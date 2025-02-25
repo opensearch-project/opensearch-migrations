@@ -20,26 +20,26 @@ def mock_k8s_client():
         mock_api.return_value = mock_instance
         yield mock_instance
 
+
 @pytest.fixture
 def mock_k8s_config():
-    """Mock Kubernetes config."""
-    with patch("kubernetes.config") as mock_config:
-        mock_instance = MagicMock()
-        mock_config.return_value = mock_instance
-        yield mock_instance
+    """Mock Kubernetes config (Prevent loading in-cluster config during tests)"""
+    with patch("kubernetes.config.load_incluster_config") as mock_config:
+        mock_config.return_value = None
+        yield mock_config
 
 
 def test_valid_config_map_creates_proper_migration_services_yaml(tmp_path, mock_k8s_client, mock_k8s_config):
     generated_services_yaml_path = tmp_path / "migration_services.yaml"
-    mock_k8s_config.load_incluster_config.return_value = None
     watcher = ConfigMapWatcher(label_selector=None, namespace="ma", output_file=generated_services_yaml_path)
 
-    with open(TEST_DATA_DIRECTORY / "0001_list_config_map_sample_response.json") as input:
-        json_response = json.load(input)
+    with open(TEST_DATA_DIRECTORY / "0001_list_config_map_sample_response.json") as input_data:
+        json_response = json.load(input_data)
         mock_k8s_response_obj = _create_k8s_list_config_maps_response_obj_from_json(json_response)
         mock_k8s_client.list_namespaced_config_map.return_value = mock_k8s_response_obj
         watcher.init_config_map_data()
         mock_k8s_client.list_namespaced_config_map.assert_called_once()
+        mock_k8s_config.assert_called_once()
         with open(TEST_DATA_DIRECTORY / "0001_expected_migration_services_yaml.yaml") as expected_output, \
              open(generated_services_yaml_path) as actual_output:
             yaml1 = yaml.safe_load(expected_output)
@@ -51,8 +51,8 @@ def test_valid_config_map_creates_proper_migration_services_yaml(tmp_path, mock_
 #     generated_services_yaml_path = tmp_path / "migration_services.yaml"
 #     watcher = ConfigMapWatcher(label_selector=None, namespace="ma", output_file=generated_services_yaml_path)
 #
-#     with open(TEST_DATA_DIRECTORY / "0002_list_config_map_empty_response.json") as input:
-#         json_response = json.load(input)
+#     with open(TEST_DATA_DIRECTORY / "0002_list_config_map_empty_response.json") as input_data:
+#         json_response = json.load(input_data)
 #         mock_k8s_response_obj = _create_k8s_list_config_maps_response_obj_from_json(json_response)
 #         k8s_mock = mocker.patch.object(CoreV1Api, 'list_namespaced_config_map', autospec=True,
 #                                        return_value=mock_k8s_response_obj)
@@ -69,8 +69,8 @@ def test_valid_config_map_creates_proper_migration_services_yaml(tmp_path, mock_
 #     generated_services_yaml_path = tmp_path / "migration_services.yaml"
 #     watcher = ConfigMapWatcher(label_selector=None, namespace="ma", output_file=generated_services_yaml_path)
 #
-#     with open(TEST_DATA_DIRECTORY / "0001_list_config_map_sample_response.json") as input:
-#         json_response = json.load(input)
+#     with open(TEST_DATA_DIRECTORY / "0001_list_config_map_sample_response.json") as input_data:
+#         json_response = json.load(input_data)
 #         mock_k8s_response_obj = _create_k8s_list_config_maps_response_obj_from_json(json_response)
 #         k8s_mock = mocker.patch.object(Watch, 'stream', autospec=True,
 #                                        return_value=None)
