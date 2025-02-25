@@ -249,6 +249,7 @@ jobs:
             --exclude "https://localhost*"
             --exclude "http://capture-proxy*"
             --exclude "https://capture-proxy*"
+            --exclude-path "tests/data" 
             --exclude-mail
           fail: true
         env:

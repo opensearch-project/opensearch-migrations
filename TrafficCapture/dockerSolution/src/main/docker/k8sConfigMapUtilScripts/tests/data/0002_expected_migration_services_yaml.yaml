@@ -1,0 +1,9 @@
+backfill:
+  reindex_from_snapshot:
+    k8s:
+      deployment_name: ma-bulk-document-loader
+      namespace: ma
+replay:
+  k8s:
+    deployment_name: ma-replayer
+    namespace: ma

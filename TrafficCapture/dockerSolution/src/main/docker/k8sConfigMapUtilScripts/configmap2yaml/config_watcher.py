@@ -83,7 +83,6 @@ class ConfigMapWatcher:
         """Watch ConfigMaps for changes and write the contents upon any configMap changes"""
         w = watch.Watch()
 
-        # Then watch for changes
         try:
             for event in w.stream(
                     self.k8s_client.list_namespaced_config_map,
@@ -92,6 +91,7 @@ class ConfigMapWatcher:
             ):
                 configmap = event['object']
                 event_type = event['type']
+                logger.info(f"Received {event_type} event for {configmap.metadata.name}")
 
                 if event_type in ['ADDED', 'MODIFIED']:
                     self.current_data[configmap.metadata.name] = configmap.data if configmap.data else {}
