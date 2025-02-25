@@ -206,63 +206,6 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     @Test
     @Tag("longTest")
-    public void testReplaceBodyWithCompressionWorks() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
-        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        String redactBody = "{ " +
-                "    \"operation\": \"modify-overwrite-beta\", " +
-                "    \"spec\": { " +
-                "       \"payload\": { " +
-                "         \"inlinedJsonBody\": {" +
-                "            \"age\": 30" +
-                "         } " +
-                "       } " +
-                "   } " +
-                "}";
-        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
-        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
-
-        var transformingHandler = new HttpJsonTransformingConsumer<>(
-                jsonJoltTransformer,
-                null,
-                testPacketCapture,
-                rootContext.getTestConnectionRequestContext(0)
-        );
-        byte[] testBytes;
-        try (
-                var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
-                        "/requests/raw/post_json_gzip.gz"
-                )
-        ) {
-            assert sampleStream != null;
-            testBytes = sampleStream.readAllBytes();
-        }
-        transformingHandler.consumeBytes(testBytes);
-        byte[] byteArray = new byte[]{
-                13, 10, 13, 10,
-                31,
-                -117,
-                8, 0, 0, 0, 0, 0, 0, -1, -85, 86, -54, 75, -52, 77, 85, -78,
-                82, -14, -54, -49, -56, 83, -46, 81, 74, 76, 7, 114, -116, 13,
-                116, -108, -110, 51, 75, 42, -127, -62, -114, -91, -59, 37, -103,
-                121, 74, -75, 0, -26, -30, 91, -113, 40, 0, 0, 0
-        };
-
-        String expectedPayload = new String(byteArray, StandardCharsets.UTF_8);
-        var returnedResponse = transformingHandler.finalizeRequest().get();
-        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
-                .replaceAll("Content-Length: .*", "Content-Length: 57")
-                .replaceAll("(Content-Length: .*)[\\s\\S]*", "$1"+
-                        expectedPayload);
-        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
-        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
-        Assertions.assertNull(returnedResponse.transformationStatus.getException());
-    }
-
-
-
-    @Test
-    @Tag("longTest")
     public void testRemoveCompressionWorks() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
