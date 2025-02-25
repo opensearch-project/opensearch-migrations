@@ -36,7 +36,7 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 @RequiredArgsConstructor
 @Slf4j
-public class LuceneDocumentsReader9 implements LuceneDocumentsReader {
+public class LuceneDocumentsReader9 implements LuceneIndexReader {
 
     protected final Path indexDirectoryPath;
     protected final boolean softDeletesPossible;

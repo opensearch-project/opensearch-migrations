@@ -22,7 +22,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -334,7 +334,7 @@ public class RfsMigrateDocuments {
             );
 
             run(
-                new LuceneDocumentsReader.Factory(sourceResourceProvider),
+                new LuceneIndexReader.Factory(sourceResourceProvider),
                 reindexer,
                 progressCursor,
                 workCoordinator,
@@ -493,7 +493,7 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(LuceneDocumentsReader.Factory readerFactory,
+    public static DocumentsRunner.CompletionStatus run(LuceneIndexReader.Factory readerFactory,
                                                        DocumentReindexer reindexer,
                                                        AtomicReference<WorkItemCursor> progressCursor,
                                                        IWorkCoordinator workCoordinator,

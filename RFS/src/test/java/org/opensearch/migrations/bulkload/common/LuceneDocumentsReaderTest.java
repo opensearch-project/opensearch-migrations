@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
@@ -103,7 +103,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
+        var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
@@ -166,7 +166,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
+        var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
@@ -253,7 +253,7 @@ public class LuceneDocumentsReaderTest {
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
 
         // Create a custom LuceneDocumentsReader for testing
-        LuceneDocumentsReader reader = new LuceneDocumentsReader9(Paths.get("dummy"), false, "dummy_field") {
+        LuceneIndexReader reader = new LuceneDocumentsReader9(Paths.get("dummy"), false, "dummy_field") {
             @Override
             protected DirectoryReader getReader() {
                 return mockReader;
@@ -314,7 +314,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
+        var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
@@ -351,7 +351,7 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        var reader = new LuceneDocumentsReader.Factory(sourceResourceProvider).getReader(luceneDir);
+        var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
 
 
         for (int startingDocIndex = 0; startingDocIndex < documentIds.size(); startingDocIndex++) {
