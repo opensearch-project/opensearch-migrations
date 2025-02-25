@@ -14,15 +14,24 @@ TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 
 @pytest.fixture
 def mock_k8s_client():
-    """Mock Kubernetes CoreV1API client."""
+    """Mock Kubernetes client."""
     with patch("kubernetes.client.CoreV1Api") as mock_api:
         mock_instance = MagicMock()
         mock_api.return_value = mock_instance
         yield mock_instance
 
+@pytest.fixture
+def mock_k8s_config():
+    """Mock Kubernetes config."""
+    with patch("kubernetes.config") as mock_config:
+        mock_instance = MagicMock()
+        mock_config.return_value = mock_instance
+        yield mock_instance
 
-def test_valid_config_map_creates_proper_migration_services_yaml(tmp_path, mock_k8s_client):
+
+def test_valid_config_map_creates_proper_migration_services_yaml(tmp_path, mock_k8s_client, mock_k8s_config):
     generated_services_yaml_path = tmp_path / "migration_services.yaml"
+    mock_k8s_config.load_incluster_config.return_value = None
     watcher = ConfigMapWatcher(label_selector=None, namespace="ma", output_file=generated_services_yaml_path)
 
     with open(TEST_DATA_DIRECTORY / "0001_list_config_map_sample_response.json") as input:
