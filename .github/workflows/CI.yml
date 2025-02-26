@@ -139,7 +139,7 @@ jobs:
         id: sanitize-name
         run: |
           sanitized_name=$(echo "${{ matrix.subproject }}" | sed 's/[^a-zA-Z0-9]/_/g')
-          echo "::set-output name=sanitized_name::$sanitized_name"
+          echo "name=sanitized_name::$sanitized_name" >> $GITHUB_OUTPUT
       - name: Run tests for ${{ matrix.subproject }}
         run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
         env:
