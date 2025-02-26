@@ -20,7 +20,7 @@
           "PositionalArguments" .PositionalArguments
           "include" .Template.Include
           "Template" .Template) | nindent 6 }}
-      /.venv/bin/python print_env_vars_as_exports.py > /shared/vars.sh
+      pipenv run print_env_vars_as_exports > /shared/vars.sh
 
   volumeMounts:
     - name: {{ $mountName }}

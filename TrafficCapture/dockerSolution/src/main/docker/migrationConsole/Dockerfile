@@ -43,6 +43,8 @@ COPY --from=migration-console-base /k8s/bin/ /usr/local/bin
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
     helm completion bash > /etc/bash_completion.d/helm
 
+RUN mkdir -p /config
+
 WORKDIR /root
 # Add Traffic Replayer jars for running KafkaPrinter from this container
 COPY staging/kafkaCommandLineFormatter/lib /root/kafka-tools/

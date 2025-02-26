@@ -52,7 +52,7 @@ def setup_parser(parser):
     parser.add_argument(
         '--config_file',
         type=str,
-        default='/etc/migration_services.yaml',
+        default='/config/migration_services.yaml',
         help='Path to the configuration file.'
     )
     subparsers = parser.add_subparsers(dest="tool", help="The tool to run.")

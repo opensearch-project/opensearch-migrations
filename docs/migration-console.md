@@ -84,7 +84,7 @@ As mentioned above, there are several smaller frontends that expose specific fun
 
 ### Configuration & the Environment Object
 
-Configuration defines the services, connection details, and preferences for a migration. The "inner" parts of the library don't interact directly with any configuration files, they rely on an Environment object that contains and manages the implementation models for each involved component. The default behavior is that this Environment object is instantiated from a file at `/etc/migrations_services.yaml`. However, any frontend/user can specify a different file or can instantiate an Environment object via another strategy entirely.
+Configuration defines the services, connection details, and preferences for a migration. The "inner" parts of the library don't interact directly with any configuration files, they rely on an Environment object that contains and manages the implementation models for each involved component. The default behavior is that this Environment object is instantiated from a file at `/config/migration_services.yaml`. However, any frontend/user can specify a different file or can instantiate an Environment object via another strategy entirely.
 
 #### Configuration with a `services.yaml` file
 

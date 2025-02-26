@@ -26,7 +26,7 @@ The console link library is designed to provide a unified interface for the many
 
 ![Console_link Library Diagram](console_library_diagram.svg)
 
-The user defines their migration services in a `migration_services.yaml` file, by default found at `/etc/migration_services.yaml`.
+The user defines their migration services in a `migration_services.yaml` file, by default found at `/config/migration_services.yaml`.
 
 Currently, the supported services are:
 
@@ -282,7 +282,7 @@ The structure of cli commands is:
 
 The available global options are:
 
-- `--config-file FILE` to specify the path to a config file (default is `/etc/migration_services.yaml`)
+- `--config-file FILE` to specify the path to a config file (default is `/config/migration_services.yaml`)
 - `--json` to get output in JSON designed for machine consumption instead of printing to the console
 
 #### Objects

@@ -11,7 +11,7 @@ services:
     networks:
       - migrations
     volumes:
-      - ./lib/console_link/services.yaml:/etc/migration_services.yaml
+      - ./lib/console_link/services.yaml:/config/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
       - ./lib:/root/lib
       - ~/.aws:/root/.aws

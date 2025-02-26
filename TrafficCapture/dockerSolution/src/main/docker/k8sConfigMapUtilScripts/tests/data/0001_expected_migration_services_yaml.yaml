@@ -1,0 +1,32 @@
+source_cluster:
+  allow_insecure: true
+  endpoint: http://elasticsearch-master:9200
+  no_auth:
+  version: 7.10.2
+target_cluster:
+  allow_insecure: true
+  basic_auth:
+    password: myStrongPassword123!
+    username: admin
+  endpoint: https://opensearch-cluster-master:9200
+  version: 2.16.0
+backfill:
+  reindex_from_snapshot:
+    k8s:
+      deployment_name: ma-bulk-document-loader
+      namespace: ma
+replay:
+  k8s:
+    deployment_name: ma-replayer
+    namespace: ma
+snapshot:
+  fs:
+    repo_path: /snapshot
+  snapshot_name: migration-assistant-snapshot
+metadata_migration:
+  from_snapshot:
+  min_replicas: 0
+  source_cluster_version: ES_7.10
+kafka:
+  broker_endpoints: captured-traffic-kafka-bootstrap.ma.svc:9092
+  standard:

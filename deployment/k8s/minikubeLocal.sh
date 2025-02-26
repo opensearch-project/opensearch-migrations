@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# To have running during local development
+# Wrapper around setting up Minikube
 
 usage() {
   echo "Usage: $0 [--start | --pause | --delete]"
@@ -23,17 +23,17 @@ start() {
   helm repo add strimzi https://strimzi.io/charts/
 
   minikube start
-  minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
+  #minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
   #minikube tunnel > /dev/null 2>&1 &
 }
 
 pause() {
-  kill_minikube_processes
+  #kill_minikube_processes
   minikube pause
 }
 
 delete() {
-  kill_minikube_processes
+  #kill_minikube_processes
   minikube delete
 }
 

@@ -3,19 +3,24 @@ source_cluster:
   {{ values | pop_value("source_cluster") | to_yaml | indent(2) }}
 {%- endif %}
 
-{%- if values.target_clusters is defined %}
-target_clusters:
-{%- for cluster_name in (values | pop_value("target_clusters")) %}
-  {%- if values[cluster_name] is defined %}
-  {{ cluster_name }}:
-    {{ values | pop_value(cluster_name) | to_yaml | indent(4) }}
-  {%- endif %}
-{%- endfor %}
+{%- if values.target_cluster is defined %}
+target_cluster:
+  {{ values | pop_value("target_cluster") | to_yaml | indent(2) }}
 {%- endif %}
 
-{%- if values.metricsSource is defined %}
+{%- if values.metrics_source is defined %}
 metrics_source:
-  {{ values | pop_value("metricsSource") | to_yaml | indent(2) }}
+  {{ values | pop_value("metrics_source") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.backfill is defined %}
+backfill:
+  {{ values | pop_value("backfill") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.replay is defined %}
+replay:
+  {{ values | pop_value("replay") | to_yaml | indent(2) }}
 {%- endif %}
 
 {%- if values.snapshot is defined %}
@@ -23,21 +28,18 @@ snapshot:
   {{ values | pop_value("snapshot") | to_yaml | indent(2) }}
 {%- endif %}
 
-{%- if values.otelEndpoint is defined %}
-otel_endpoint: {{ values | pop_value("otelEndpoint")  }}
-{%- endif %}
-
+{%- if values.metadata is defined %}
 metadata_migration:
-  from_snapshot: {{ values.metadata_migration_from_snapshot | default(none) }}
-  min_replicas: {{ values | pop_value("minReplicasForMigratedIndices") | default(0) }}
+  {{ values | pop_value("metadata") | to_yaml | indent(2) }}
+{%- endif %}
 
-{%- if values.kafkaBroker is defined %}
+{%- if values.kafka is defined %}
 kafka:
-  {{ values | pop_value("kafkaBroker") | to_yaml | indent(2) }}
+  {{ values | pop_value("kafka") | to_yaml | indent(2) }}
 {%- endif %}
 
-
-{%- if values %}
-extraValues:
-  {{ values | to_yaml | indent(2) }}
+{%- if values.client_options is defined %}
+client_options:
+  {{ values | pop_value("client_options") | to_yaml | indent(2) }}
 {%- endif %}
+

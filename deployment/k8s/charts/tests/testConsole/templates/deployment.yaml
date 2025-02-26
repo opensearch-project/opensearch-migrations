@@ -37,8 +37,7 @@ spec:
             - name: {{ $envVarMountName }}
               mountPath: /shared2
             - name: merged-config
-              mountPath: /etc
-              subPath: migration_services.yaml
+              mountPath: /config
       volumes:
         - name: {{ $envVarMountName }}
           emptyDir: { }
