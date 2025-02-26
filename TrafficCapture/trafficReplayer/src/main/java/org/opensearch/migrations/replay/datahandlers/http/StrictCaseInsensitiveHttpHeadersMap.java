@@ -120,11 +120,4 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
             }
         };
     }
-
-    private static String getCaseInsensitiveKey(Object key) {
-        if (key instanceof String) {
-            return ((String) key).toLowerCase();
-        }
-        throw new IllegalArgumentException("Expected key as String but was " + key.getClass().getName());
-    }
 }
