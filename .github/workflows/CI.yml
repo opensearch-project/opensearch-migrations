@@ -117,7 +117,7 @@ jobs:
           reports=$(./gradlew tasks --all | grep jacocoTestReport | awk -F' - ' '{print $1}' | sed 's/:jacocoTestReport//' | sort -u)
           matrix=$(echo "$reports" | grep . | jq -R -s -c 'split("\n")[:-1] | {include: map({subproject: .})}')
           echo "Matrix is: $matrix"
-          echo "::set-output name=matrix::$matrix"
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
   gradle-tests:
     needs:
