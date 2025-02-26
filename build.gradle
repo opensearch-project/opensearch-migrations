@@ -309,13 +309,66 @@ subprojects {
     jacocoTestReport {
         dependsOn = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
         executionData.from = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }.collect { it.jacoco.destinationFile }
-        classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
+        classDirectories.setFrom(
+                files(allprojects.collect { project ->
+                    project.sourceSets.main.output.classesDirs.filter { dir ->
+                        !dir.path.contains('captureProtobufs') &&
+                                !dir.path.contains('trafficCaptureProxyServerTest')
+                    }
+                })
+        )
+
+        sourceDirectories.setFrom(
+                files(allprojects.collect { project ->
+                    project.sourceSets.main.allSource.srcDirs
+                })
+        )
+
         reports {
             xml.required = true
             xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
             html.required = true
             html.destination file("${buildDir}/reports/jacoco/test/html")
         }
+    }
+}
+
+// Aggregate JaCoCo report task for all subprojects
+tasks.register('jacocoAggregateReport', JacocoReport) {
+    group = 'Verification'
+    description = 'Generates an aggregate report from exec files in build/jacoco/*.exec over the whole project'
+
+    // Find all .exec files
+    executionData.setFrom(fileTree(dir: "${buildDir}", includes: [
+            "jacoco/*.exec"
+    ]))
+
+    // Get all subprojects with Java plugin
+    def javaProjects = subprojects.findAll { it.plugins.hasPlugin('java') }
+
+    // Collect all class directories from Java subprojects
+    classDirectories.setFrom(
+            files(javaProjects.collect { project ->
+                project.sourceSets.main.output.classesDirs.filter { dir ->
+                    !dir.path.contains('captureProtobufs') &&
+                            !dir.path.contains('trafficCaptureProxyServerTest')
+                }
+            })
+    )
+
+    // Collect all source directories from Java subprojects
+    sourceDirectories.setFrom(
+            files(javaProjects.collect { project ->
+                project.sourceSets.main.allSource.srcDirs
+            })
+    )
+
+
+    reports {
+        xml.required = true
+        xml.destination file("${buildDir}/reports/jacoco/jacocoAggregateReport/jacocoAggregateReport.xml")
+        html.required = true
+        html.destination file("${buildDir}/reports/jacoco/jacocoAggregateReport/html")
     }
 }
 

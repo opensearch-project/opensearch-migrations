@@ -98,9 +98,33 @@ jobs:
           name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
           path: ${{ env.WORKING_DIR }}/coverage.xml
 
+  generate-project-test-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: "corretto"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.gradle-version }}
+      - name: Generate matrix for jacocoTestReport jobs
+        id: set-matrix
+        run: |
+          reports=$(./gradlew tasks --all | grep jacocoTestReport | awk -F' - ' '{print $1}' | sed 's/:jacocoTestReport//' | sort -u)
+          matrix=$(echo "$reports" | grep . | jq -R -s -c 'split("\n")[:-1] | {include: map({subproject: .})}')
+          echo "Matrix is: $matrix"
+          echo "::set-output name=matrix::$matrix"
 
   gradle-tests:
+    needs:
+      - generate-project-test-matrix
     runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-project-test-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -111,13 +135,13 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
-      - name: Run Gradle Build
-        run: ./gradlew build :TrafficCapture:dockerSolution:buildDockerImage_elasticsearch_client_test_console -x test -x spotlessCheck --stacktrace
-        env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-
-      - name: Run Tests with Coverage
-        run: ./gradlew mergeJacocoReports -x spotlessCheck --stacktrace
+      - name: Sanitize subproject name
+        id: sanitize-name
+        run: |
+          sanitized_name=$(echo "${{ matrix.subproject }}" | sed 's/[^a-zA-Z0-9]/_/g')
+          echo "::set-output name=sanitized_name::$sanitized_name"
+      - name: Run tests for ${{ matrix.subproject }}
+        run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -136,23 +160,81 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: ignore
-          name: memory-dumps
+          name: memory-dumps-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: ./**/*.hprof
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload test reports for ${{ matrix.subproject }}
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports-gradle-tests
+          if-no-files-found: ignore # Needed for subprojects that don't have tests
+          name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
-            **/reports/jacoco/mergedReport/
-      - name: Upload Coverage Reports
+
+      - name: Publish jacoco report artifact for ${{ matrix.subproject }}
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          if-no-files-found: ignore # Needed for subprojects that don't have tests
+          name: coverage-exec-artifacts-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
+          path: |
+            **/build/jacoco/*.exec
+
+  jacoco-aggregate:
+    needs: [gradle-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.gradle-version }}
+
+      - name: Download all JaCoCo .exec files
+        uses: actions/download-artifact@v4
+        with:
+          path: jacoco-artifacts
+          pattern: coverage-exec-artifacts-gradle-tests-*
+
+      - name: Create .exec directory
+        run: rm -rf build/jacoco && mkdir -p build/jacoco
+
+      - name: Move .exec files for aggregation
+        run: |
+          # Find and copy .exec files while renaming them to include their subproject name
+          for artifact_dir in jacoco-artifacts/coverage-exec-artifacts-gradle-tests-*; do
+            # Extract the subproject name from the directory
+            subproject=$(basename "$artifact_dir" | sed 's/coverage-exec-artifacts-gradle-tests-//')
+
+            # Find and copy each .exec file with a unique name
+            find "$artifact_dir" -name "*.exec" -exec sh -c '
+              src="$1"
+              filename=$(basename "$src")
+              dest="build/jacoco/'"$subproject"'_$filename"
+              cp "$src" "$dest"
+              echo "Copied $src to $dest"
+            ' sh {} \;
+          done
+
+          # List all the .exec files copied
+          echo "All copied .exec files:"
+          find build/jacoco -type f -name "*.exec" | sort
+
+      - name: Generate aggregate JaCoCo report
+        run: ./gradlew jacocoAggregateReport -x spotlessCheck
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - name: Upload Aggregate JaCoCo report
         uses: actions/upload-artifact@v4
         with:
-          if-no-files-found: error
-          name: coverage-reports-gradle-tests
-          path: ./**/jacocoMergedReport.xml
-
+          name: coverage-reports-gradle-tests-aggregate
+          path: |
+            build/reports/jacoco/jacocoAggregateReport/jacocoAggregateReport.xml
 
   python-e2e-tests:
     runs-on: ubuntu-latest
@@ -167,7 +249,7 @@ jobs:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/setup-python@v5
         with:
-         python-version: ${{ env.python-version }}
+          python-version: ${{ env.python-version }}
       - name: Generate Cache Key from Dockerfiles
         id: generate_cache_key
         run: |
