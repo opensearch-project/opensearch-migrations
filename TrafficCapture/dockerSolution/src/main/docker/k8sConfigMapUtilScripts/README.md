@@ -10,6 +10,11 @@ To install the library for development purposes, create a virtual env and instal
 pipenv install
 ```
 
+To run `config_watcher.py` locally, a command like below can be used:
+```shell
+pipenv run config_watcher --outfile ./test.yaml
+```
+
 ### Unit Tests
 
 Unit tests can be run from this current `k8sConfigMapUtilScripts/` directory by first installing dependencies then running pytest:

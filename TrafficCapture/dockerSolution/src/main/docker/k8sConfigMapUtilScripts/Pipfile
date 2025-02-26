@@ -11,12 +11,13 @@ Jinja2 = ">=3.1.4"
 [dev-packages]
 pytest = "*"
 pytest-mock = "*"
-pytest-timeout = "*"
 coverage = "*"
 
 [requires]
 python_version = "3.11"
 
 [scripts]
+config_watcher = "python3 -m configmap2yaml.config_watcher"
+print_env_vars_as_exports = "python3 -m configmap2yaml.print_env_vars_as_exports"
 test = "coverage run -m pytest"
 coverage = "coverage"
