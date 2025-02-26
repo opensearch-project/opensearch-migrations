@@ -32,12 +32,20 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "type2", "indexb"),
             "indexc", Map.of(
                 "type2", "indexc"));
-        var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-$1-$2"),
-            List.of("(.*)", "_doc", "$1")
+        var regexMappings = List.of(
+                Map.of(
+                        "sourceIndexPattern","time-(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "time-$1-$2"
+                ),
+                Map.of(
+                        "sourceIndexPattern","(.*)",
+                        "sourceTypePattern", "_doc",
+                        "targetIndexPattern", "$1"
+                )
             );
         var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(7, 10));
-        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
+        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexMappings, sourceProperties, null);
     }
 
     @AfterAll

@@ -2,6 +2,7 @@ package org.opensearch.migrations.transform;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
@@ -51,8 +52,16 @@ public class TypeMappingsSanitizationDocBackfillTest {
 
         try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
             List.of(
-                List.of("(test_e2e_0001_.*)", ".*", "$1_transformed"),
-                List.of("(.*)", "(.*)", "$1")
+                    Map.of(
+                            "sourceIndexPattern","(test_e2e_0001_.*)",
+                            "sourceTypePattern", ".*",
+                            "targetIndexPattern", "$1_transformed"
+                    ),
+                    Map.of(
+                            "sourceIndexPattern","(.*)",
+                            "sourceTypePattern", "(.*)",
+                            "targetIndexPattern", "$1"
+                    )
             ),
             new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
             var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
@@ -76,8 +85,16 @@ public class TypeMappingsSanitizationDocBackfillTest {
 
         try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
             List.of(
-                List.of("(test_e2e_0001_.*)", "_doc", "$1_transformed"),
-                List.of("(.*)", "(.*)", "$1")
+                    Map.of(
+                            "sourceIndexPattern","(test_e2e_0001_.*)",
+                            "sourceTypePattern", ".*",
+                            "targetIndexPattern", "$1_transformed"
+                    ),
+                    Map.of(
+                            "sourceIndexPattern","(.*)",
+                            "sourceTypePattern", "(.*)",
+                            "targetIndexPattern", "$1"
+                    )
             ),
             new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
             var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
