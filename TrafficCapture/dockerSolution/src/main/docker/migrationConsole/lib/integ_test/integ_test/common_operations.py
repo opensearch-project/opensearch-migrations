@@ -228,25 +228,19 @@ def convert_transformations_to_str(transform_list: List[Dict]) -> str:
     return json.dumps(transform_list)
 
 
-def get_index_name_transformation(existing_index_name: str, target_index_name: str) -> Dict:
+def get_index_name_transformation(existing_index_name: str, target_index_name: str,
+                                  source_major_version: int, source_minor_version: int) -> Dict:
     return {
-        "JsonConditionalTransformerProvider": [
-            {
-                "JsonJMESPathPredicateProvider": {
-                    "script": f"name == '{existing_index_name}'"
+        "TypeMappingSanitizationTransformerProvider": {
+            "regexIndexMappings": [
+                [f"{existing_index_name}", ".*", f"{target_index_name}"],
+            ],
+            "sourceProperties": {
+                "version": {
+                    "major": source_major_version,
+                    "minor": source_minor_version
                 }
-            },
-            [
-                {
-                    "JsonJoltTransformerProvider": {
-                        "script": {
-                            "operation": "modify-overwrite-beta",
-                            "spec": {
-                                "name": f"{target_index_name}"
-                            }
-                        }
-                    }
-                }
-            ]
-        ]
+            }
+
+        }
     }
