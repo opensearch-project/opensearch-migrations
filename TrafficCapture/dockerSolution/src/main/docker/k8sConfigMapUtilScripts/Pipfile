@@ -11,6 +11,7 @@ Jinja2 = ">=3.1.4"
 [dev-packages]
 pytest = "*"
 pytest-mock = "*"
+pytest-timeout = "*"
 coverage = "*"
 
 [requires]

@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import tempfile
+import time
 import sys
 import yaml
 
@@ -83,29 +84,38 @@ class ConfigMapWatcher:
         """Watch ConfigMaps for changes and write the contents upon any configMap changes"""
         w = watch.Watch()
 
-        try:
-            for event in w.stream(
-                    self.k8s_client.list_namespaced_config_map,
-                    namespace=self.namespace,
-                    label_selector=self.label_selector
-            ):
-                configmap = event['object']
-                event_type = event['type']
-                logger.info(f"Received {event_type} event for {configmap.metadata.name}")
+        while True:
+            try:
+                self.process_events(k8s_watch=w)
+            except Exception as error:
+                if "Expired" in str(error):
+                    logger.info("Resource version expired, restarting watch...")
+                    time.sleep(5)
+                    continue
+                else:
+                    logger.error(f"Error watching ConfigMaps: {error}")
+                    raise
 
-                if event_type in ['ADDED', 'MODIFIED']:
-                    self.current_data[configmap.metadata.name] = configmap.data if configmap.data else {}
-                elif event_type == 'DELETED':
-                    name = configmap.metadata.name
-                    if name in self.current_data:
-                        logger.info(f"Removing ConfigMap: {name}")
-                        del self.current_data[name]
+    def process_events(self, k8s_watch):
+        for event in k8s_watch.stream(
+                self.k8s_client.list_namespaced_config_map,
+                namespace=self.namespace,
+                label_selector=self.label_selector,
+        ):
+            configmap = event['object']
+            event_type = event['type']
+            logger.info(f"Received {event_type} event for {configmap.metadata.name}")
+            logger.debug(f"Incoming event: {event}")
 
-                self.update_yaml_file()
+            if event_type in ['ADDED', 'MODIFIED']:
+                self.current_data[configmap.metadata.name] = configmap.data if configmap.data else {}
+            elif event_type == 'DELETED':
+                name = configmap.metadata.name
+                if name in self.current_data:
+                    logger.info(f"Removing ConfigMap: {name}")
+                    del self.current_data[name]
 
-        except Exception as error:
-            logger.error(f"Error watching ConfigMaps: {error}")
-            raise
+            self.update_yaml_file()
 
 
 def parse_args():
@@ -124,8 +134,8 @@ def parse_args():
     )
     parser.add_argument(
         '--namespace',
-        default=os.getenv('NAMESPACE', 'default'),
-        help='Kubernetes namespace (default: default)'
+        default=os.getenv('NAMESPACE', 'ma'),
+        help='Kubernetes namespace (default: ma)'
     )
     return parser.parse_args()
 
