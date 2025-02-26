@@ -120,7 +120,8 @@ public class RequestPipelineOrchestrator<R> {
         // HttpRequestDecoder when it is removed from the pipeline before the Preliminary and Convert Handlers are removed.
         pipeline.addLast(
             new NettyDecodedHttpRequestConvertHandler(
-                httpTransactionContext
+                httpTransactionContext,
+                true
             )
         );
         pipeline.addLast(
