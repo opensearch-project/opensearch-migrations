@@ -17,8 +17,13 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
+import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
+import org.opensearch.migrations.bulkload.lucene.LuceneField;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
+import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
@@ -37,14 +42,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
-import shadow.lucene9.org.apache.lucene.document.BinaryDocValuesField;
-import shadow.lucene9.org.apache.lucene.document.Document;
-import shadow.lucene9.org.apache.lucene.document.StoredField;
-import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
-import shadow.lucene9.org.apache.lucene.index.LeafReaderContext;
-import shadow.lucene9.org.apache.lucene.index.SegmentReader;
-import shadow.lucene9.org.apache.lucene.index.StoredFields;
-import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -138,7 +135,7 @@ public class LuceneDocumentsReaderTest {
             String expectedType = null;
             String actualType = doc.type;
 
-            String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
+            String expectedSource = "{\"title\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
             String actualSource = doc.source;
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
@@ -215,17 +212,17 @@ public class LuceneDocumentsReaderTest {
         // Create a mock IndexReader with multiple leaves (segments)
         int numSegments = 10;
         int docsPerSegment = 100;
-        DirectoryReader mockReader = mock(DirectoryReader.class);
-        var leaves = new ArrayList<LeafReaderContext>();
+        var mockReader = mock(LuceneDirectoryReader.class);
+        var leaves = new ArrayList<>();
 
-        CountDownLatch startLatch = new CountDownLatch(1);
-        AtomicInteger concurrentDocReads = new AtomicInteger(0);
+        var startLatch = new CountDownLatch(1);
+        var concurrentDocReads = new AtomicInteger(0);
         var segmentReadTracker = new ConcurrentHashMap<String, AtomicBoolean>();
-        AtomicInteger concurrentSegmentReads = new AtomicInteger(0);
+        var concurrentSegmentReads = new AtomicInteger(0);
 
         for (int i = 0; i < numSegments; i++) {
-            LeafReaderContext context = mock(LeafReaderContext.class);
-            SegmentReader leafReader = mock(SegmentReader.class);
+            var context = mock(LuceneLeafReaderContext.class);
+            var leafReader = mock(LuceneLeafReader.class);
             when(context.reader()).thenAnswer(invocation -> leafReader);
             var segmentName = "__" + i;
             when(leafReader.getSegmentName()).thenReturn(segmentName);
@@ -233,29 +230,32 @@ public class LuceneDocumentsReaderTest {
             when(leafReader.maxDoc()).thenReturn(docsPerSegment);
             when(leafReader.getLiveDocs()).thenReturn(null); // Assume all docs are live
 
-            var storedFields = mock(StoredFields.class);
-            when(leafReader.storedFields()).thenReturn(storedFields);
             // Wrap the document method to track concurrency
-            when(storedFields.document(anyInt())).thenAnswer(invocation -> {
+            when(leafReader.document(anyInt())).thenAnswer(invocation -> {
                 if (segmentReadTracker.get(segmentName).compareAndSet(false, true)) {
                     concurrentSegmentReads.incrementAndGet(); // Increment only on first read per segment
                 }
                 concurrentDocReads.incrementAndGet();
                 startLatch.await(); // Wait for the latch to be released before proceeding to track concurrency
-                Document doc = new Document();
-                doc.add(new BinaryDocValuesField("_id", new BytesRef("doc" + invocation.getArgument(0))));
-                doc.add(new StoredField("_source", new BytesRef("{\"field\":\"value\"}")));
+                var doc = mock(LuceneDocument.class);
+
+                var field1 = mock(LuceneField.class);
+                when(field1.name()).thenReturn("_id");
+                when(field1.utf8ToStringValue()).thenReturn("doc" + invocation.getArgument(0));
+                var field2 = mock(LuceneField.class);
+                when(field2.name()).thenReturn("_source");
+                when(field2.utf8ToStringValue()).thenReturn("{\"field\":\"value\"}");
                 return doc;
             });
             leaves.add(context);
         }
-        when(mockReader.leaves()).thenReturn(leaves);
+        when(mockReader.leaves()).thenAnswer(inv -> leaves);
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
 
         // Create a custom LuceneDocumentsReader for testing
-        LuceneIndexReader reader = new LuceneDocumentsReader9(Paths.get("dummy"), false, "dummy_field") {
+        LuceneIndexReader reader = new IndexReader9(Paths.get("dummy"), false, "dummy_field") {
             @Override
-            protected DirectoryReader getReader2() {
+            public LuceneDirectoryReader getReader() {
                 return mockReader;
             }
         };

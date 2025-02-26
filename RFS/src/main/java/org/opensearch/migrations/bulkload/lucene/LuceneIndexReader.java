@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
+import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
@@ -95,7 +96,7 @@ public interface LuceneIndexReader {
                 );
             } else {
                 log.atInfo().setMessage("Creating IndexReader9").log();
-                return new LuceneDocumentsReader9(
+                return new IndexReader9(
                     path,
                     snapshotReader.getSoftDeletesPossible(),
                     snapshotReader.getSoftDeletesFieldData()

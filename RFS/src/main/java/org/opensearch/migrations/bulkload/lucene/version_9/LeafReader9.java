@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.lucene.version_7;
+package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -6,21 +6,21 @@ import java.util.Optional;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.AllArgsConstructor;
-import shadow.lucene7.org.apache.lucene.index.LeafReader;
-import shadow.lucene7.org.apache.lucene.index.SegmentCommitInfo;
-import shadow.lucene7.org.apache.lucene.index.SegmentReader;
+import shadow.lucene9.org.apache.lucene.index.LeafReader;
+import shadow.lucene9.org.apache.lucene.index.SegmentCommitInfo;
+import shadow.lucene9.org.apache.lucene.index.SegmentReader;
 
 @AllArgsConstructor
-public class LeafReader7 implements LuceneLeafReader {
+public class LeafReader9 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
 
-    public Document7 document(int luceneDocId) throws IOException {
-        return new Document7(wrapped.document(luceneDocId));
+    public Document9 document(int luceneDocId) throws IOException {
+        return new Document9(wrapped.storedFields().document(luceneDocId));
     };
     
-    public LiveDocs7 getLiveDocs() {
-        return wrapped.getLiveDocs() != null ? new LiveDocs7(wrapped.getLiveDocs()) : null;
+    public LiveDocs9 getLiveDocs() {
+        return wrapped.getLiveDocs() != null ? new LiveDocs9(wrapped.getLiveDocs()) : null;
     }
 
     public int maxDoc() {
@@ -49,9 +49,5 @@ public class LeafReader7 implements LuceneLeafReader {
             .map(SegmentReader::getSegmentInfo)
             .map(SegmentCommitInfo::toString)
             .orElse(null);
-    }
-
-    public String toString() {
-        return wrapped.toString();
     }
 }

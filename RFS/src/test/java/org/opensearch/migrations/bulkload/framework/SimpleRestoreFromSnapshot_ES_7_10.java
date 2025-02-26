@@ -10,7 +10,7 @@ import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
+import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import org.opensearch.migrations.bulkload.version_es_7_10.IndexMetadataFactory_ES_7_10;
@@ -75,7 +75,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     ) {
         for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                final var documents = new LuceneDocumentsReader9(
+                final var documents = new IndexReader9(
                     unpackedShardDataDir.resolve(index.getName()).resolve("" + shardId),
                     ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
                     ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD
