@@ -1,7 +1,7 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok' version '8.6'
+    id 'io.freefair.lombok'
     id 'org.opensearch.migrations.java-application-conventions'
 }
 
@@ -9,18 +9,18 @@ dependencies {
     implementation project(':coreUtilities')
     implementation project(":RFS")
 
-    implementation group: 'org.jcommander', name: 'jcommander'
-    implementation group: 'org.slf4j', name: 'slf4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation libs.jcommander
+    implementation libs.slf4j.api
+    implementation libs.log4j.slf4j2.impl
 
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
-    testImplementation group: 'io.netty', name: 'netty-all'
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.netty.all
+    testImplementation libs.jackson.databind
 }
 
 application {
-    mainClassName = 'org.opensearch.migrations.CreateSnapshot'
+    mainClass.set('org.opensearch.migrations.CreateSnapshot')
 }

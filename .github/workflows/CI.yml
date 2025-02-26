@@ -32,8 +32,14 @@ jobs:
           path: workflow-info.json
 
 
-  style-check:
+  gradle-extended-check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tasks:
+          - spotlessCheck
+          - publishToMavenLocal
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -44,7 +50,7 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
-        run: ./gradlew spotlessCheck
+        run: ./gradlew ${{matrix.tasks}}
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -262,7 +268,7 @@ jobs:
       - node-tests
       - python-e2e-tests
       - python-lint
-      - style-check
+      - gradle-extended-check
     if: always()
     runs-on: ubuntu-latest
     steps:

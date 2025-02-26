@@ -7,23 +7,23 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    implementation group: 'com.google.guava', name: 'guava'
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.guava
+    implementation libs.slf4j.api
 
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: "org.graalvm.polyglot", name: 'polyglot'
-    implementation group: "org.graalvm.polyglot", name: 'js-community'
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+    implementation libs.polyglot
+    implementation libs.polyglot.js.community
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
-    testImplementation group:'org.junit.jupiter', name:'junit-jupiter-api'
-    testImplementation group:'org.junit.jupiter', name:'junit-jupiter-params'
-    testImplementation group:'org.slf4j', name: 'slf4j-api'
-    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.slf4j.api
+    testRuntimeOnly libs.junit.jupiter.engine
 }
 
 /**

@@ -10,21 +10,14 @@
  */
 
 
-buildscript {
-    dependencies {
-        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
-    }
-}
-
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id 'org.owasp.dependencycheck' version '8.2.1'
     id 'io.freefair.lombok'
 }
 
 dependencies {
-    implementation group: 'org.slf4j', name: 'slf4j-api'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation libs.slf4j.api
+    implementation libs.jackson.databind
 
     api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
@@ -36,5 +29,5 @@ dependencies {
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
 
     testRuntimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    testImplementation group: 'io.burt', name: 'jmespath-core'
+    testImplementation libs.jmespath.core
 }
