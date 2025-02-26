@@ -29,10 +29,15 @@ public class TypeMappingsSanitizationCreateIndexTest {
             "socialTypes", Map.of(
                 "tweet", "communal",
                 "user", "communal"));
-        var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-$1-$2"));
+        var regexMappings = List.of(
+                Map.of(
+                        "sourceIndexPattern","time-(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "time-$1-$2"
+                )
+        );
         var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(5, 8));
-        return new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
+        return new TypeMappingsSanitizationTransformer(indexMappings, regexMappings, sourceProperties, null);
     }
 
     private static String makeMultiTypePutIndexRequest(String indexName, Boolean includeTypeName) {
