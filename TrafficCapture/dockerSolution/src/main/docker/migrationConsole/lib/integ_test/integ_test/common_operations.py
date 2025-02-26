@@ -232,9 +232,11 @@ def get_index_name_transformation(existing_index_name: str, target_index_name: s
                                   source_major_version: int, source_minor_version: int) -> Dict:
     return {
         "TypeMappingSanitizationTransformerProvider": {
-            "regexIndexMappings": [
-                [f"{existing_index_name}", ".*", f"{target_index_name}"],
-            ],
+            "staticMappings": {
+                f"{existing_index_name}": {
+                    "_doc": f"{target_index_name}"
+                }
+            },
             "sourceProperties": {
                 "version": {
                     "major": source_major_version,
