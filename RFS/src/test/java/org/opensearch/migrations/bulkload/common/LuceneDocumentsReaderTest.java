@@ -255,7 +255,7 @@ public class LuceneDocumentsReaderTest {
         // Create a custom LuceneDocumentsReader for testing
         LuceneIndexReader reader = new LuceneDocumentsReader9(Paths.get("dummy"), false, "dummy_field") {
             @Override
-            protected DirectoryReader getReader() {
+            protected DirectoryReader getReader2() {
                 return mockReader;
             }
         };

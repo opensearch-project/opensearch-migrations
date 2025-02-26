@@ -69,7 +69,7 @@ public class PerformanceVerificationTest {
         AtomicInteger ingestedDocuments = new AtomicInteger(0);
         var reader = new LuceneDocumentsReader9(Paths.get("dummy"), true, "dummy_field") {
             @Override
-            protected DirectoryReader getReader() {
+            protected DirectoryReader getReader2() {
                 return realReader;
             }
 

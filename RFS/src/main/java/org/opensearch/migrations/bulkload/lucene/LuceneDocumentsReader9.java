@@ -91,7 +91,7 @@ public class LuceneDocumentsReader9 implements LuceneIndexReader {
      */
     public Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
-            () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
+            () -> wrapReader(getReader2(), softDeletesPossible, softDeletesField),
             reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
                 try {
@@ -147,7 +147,7 @@ public class LuceneDocumentsReader9 implements LuceneIndexReader {
         }
     }
 
-    protected shadow.lucene9.org.apache.lucene.index.DirectoryReader getReader() throws IOException {
+    protected shadow.lucene9.org.apache.lucene.index.DirectoryReader getReader2() throws IOException {
         try (var directory = FSDirectory.open(indexDirectoryPath)) {
             var commits = shadow.lucene9.org.apache.lucene.index.DirectoryReader.listCommits(directory);
             var latestCommit = commits.get(commits.size() - 1);
@@ -155,6 +155,14 @@ public class LuceneDocumentsReader9 implements LuceneIndexReader {
             return shadow.lucene9.org.apache.lucene.index.DirectoryReader.open(latestCommit);
         }
     }
+
+    @Override
+    public LuceneDirectoryReader getReader() throws IOException {
+        // TODO Auto-generated method stub
+        return null;
+    }
+
+
 
     @Value
     public static class ReaderAndBase {

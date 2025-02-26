@@ -13,10 +13,9 @@ public class Document7 implements LuceneDocument {
     private final Document wrapped;
 
     public List<Field7> getFields() {
-        var foo = wrapped.getFields()
+        return wrapped.getFields()
             .stream()
             .map(Field7::new)
             .toList();
-        return foo;
     }
 }
