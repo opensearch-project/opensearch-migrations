@@ -74,10 +74,10 @@ By default, all of these components will be deployed, but if a user is certain t
 helm dependency update 
 ```
 
-The full Migration Assistant environment with Mock Customer Clusters can be deployed with the following helm commands
+The full Migration Assistant environment with source and target test clusters can be deployed with the following helm commands
 ```shell
 helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
-helm install mcc -n ma charts/aggregates/mockCustomerClusters
+helm install tc -n ma charts/aggregates/testClusters
 
 ```
 
@@ -100,7 +100,7 @@ replayer:
   parameters:
     targetUri:
       source: parameterConfig
-      value: https://opensearch-cluster-master.mcc:9200/
+      value: https://opensearch-cluster-master.tc:9200/
       allowRuntimeOverride: true
 ```
 
