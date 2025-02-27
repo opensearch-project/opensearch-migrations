@@ -1,13 +1,23 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.netty.handler.codec.http.HttpMethod;
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.data.WorkloadGenerator;
@@ -51,6 +61,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         ToxiProxyWrapper proxyContainer;
     }
 
+    // The following test expects to get an exit code of 0 (TBD_GOES_HERE) at least two times, and then an
+    // exit code of 3 (NO_WORK_LEFT) within a maximum of 21 iterations.
     @Test
     public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
         testProcess(3,
@@ -198,5 +210,52 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         return process.exitValue();
+    }
+
+    @Test
+    void exitCleanlyFromSigtermAfterUpdatingWorkItem() {
+        testProcess(0, d -> {
+            var processBuilder = setupProcess(
+                d.tempDirSnapshot,
+                d.tempDirLucene,
+                d.proxyContainer.getProxyUriAsString(),
+                new String[] {}
+            );
+            Process process = null;
+            try {
+                process = runAndMonitorProcess(processBuilder);
+                process.waitFor(10, TimeUnit.SECONDS);
+                process.destroy();
+                // Give it 30 seconds and then force kill if it hasn't stopped yet.
+                process.waitFor(30, TimeUnit.SECONDS);
+                process.destroyForcibly();
+            } catch (InterruptedException | IOException e) {
+                throw new RuntimeException(e);
+            }
+
+            // Check that there is a .migrations_working_state index on the target, and it has the expected values.
+            var client = new RestClient(ConnectionContextTestParams.builder()
+                    .host(d.proxyContainer.getProxyUriAsString())
+                    .build()
+                    .toConnectionContext());
+            Assertions.assertEquals(200, client.get(".migrations_working_state", null).statusCode);
+            var fullWorkingStateResponse = client.asyncRequest(HttpMethod.GET, ".migrations_working_state/_search", "{\"query\": {\"match_all\": {}}, \"size\": 1000}", null, null).block();
+            Assertions.assertNotNull(fullWorkingStateResponse);
+            Assertions.assertNotNull(fullWorkingStateResponse.body);
+            Assertions.assertEquals(200, fullWorkingStateResponse.statusCode);
+            ObjectMapper objectMapper = new ObjectMapper();
+            try {
+                    var workingState = objectMapper.readValue(fullWorkingStateResponse.body, ObjectNode.class);
+                    // Check that at least one item in the workItemsList has a `successor_items` field.
+                    var workItemsList = workingState.get("hits").get("hits");
+                    Assertions.assertFalse(workItemsList.isEmpty());
+                    var successorItemsList = new ArrayList<Boolean>();
+                    workItemsList.forEach(workItem -> successorItemsList.add(workItem.get("_source").has("successor_items")));
+                    Assertions.assertTrue(successorItemsList.contains(true));
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+            return process.exitValue();
+        });
     }
 }

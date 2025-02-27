@@ -8,10 +8,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
+import lombok.Lombok;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -286,6 +288,8 @@ public class RfsMigrateDocuments {
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
         var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+        var cleanShutdownCompleted = new AtomicBoolean(false);
+
         try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
@@ -301,10 +305,26 @@ public class RfsMigrateDocuments {
                         workItemTimeProvider,
                         arguments.initialLeaseDuration,
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                        cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
-                Clock.systemUTC()
-            );
-        ) {
+                Clock.systemUTC());) {
+            // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
+            // event of a SIGTERM signal.
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                Thread.currentThread().setName("Cleanup-Hook-Thread");
+                // Using `System.err.println` throughout the shutdown hook because log4j also has a shutdown hook that
+                // may be called at any point in this process.
+                System.err.println("Received shutdown signal. Trying to mark progress and shutdown cleanly.");
+                try {
+                    executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
+                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                } catch (Throwable e) {
+                    System.err.println("Could not complete clean exit process, forced to terminate unexpectedly.");
+                    e.printStackTrace();
+                    throw Lombok.sneakyThrow(e);
+                }
+            }));
+
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
@@ -350,11 +370,37 @@ public class RfsMigrateDocuments {
                 workItemTimeProvider);
         } catch (NoWorkLeftException e) {
             log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+            cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
+    }
+
+    private static void executeCleanShutdownProcess(
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
+            AtomicReference<WorkItemCursor> progressCursor,
+            IWorkCoordinator coordinator,
+            AtomicBoolean cleanShutdownCompleted,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException {
+        if (cleanShutdownCompleted.get())  {
+            System.err.println("Clean shutdown already completed");
+            return;
+        }
+        if (workItemRef.get() == null || progressCursor.get() == null) {
+            System.err.println("No work item or progress cursor found. This may indicate that the task is exiting too early to have progress to mark.");
+            return;
+        }
+        var workItemAndDuration = workItemRef.get();
+        System.err.println("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getDocId());
+        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
+
+        coordinator.createSuccessorWorkItemsAndMarkComplete(
+                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+        );
+        cleanShutdownCompleted.set(true);
     }
 
     @SneakyThrows
@@ -366,8 +412,8 @@ public class RfsMigrateDocuments {
             WorkItemTimeProvider workItemTimeProvider,
             Duration initialLeaseDuration,
             Runnable cancellationRunnable,
-            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
-    ) {
+            AtomicBoolean cleanShutdownCompleted,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
@@ -403,7 +449,7 @@ public class RfsMigrateDocuments {
             log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
                     .log();
         }
-
+        cleanShutdownCompleted.set(true);
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
