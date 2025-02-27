@@ -19,7 +19,7 @@ shared-configs:
         endpoint: "http://elasticsearch-master:9200"
         allowInsecure: true
         authType: "no_auth"
-        version: "7.10.2"
+        version: "2.4.5"
     targetCluster:
       allowRuntimeOverride: true
       object:
@@ -49,7 +49,7 @@ shared-configs:
         minReplicas: 0
         metadataType: "from_snapshot"
         #otelEndpoint: "http://localhost:4317"
-        sourceClusterVersion: "ES_7.10"
+        sourceClusterVersion: "ES_2.4"
 #    metricsSource:
 #      allowRuntimeOverride: false
 #      object:
