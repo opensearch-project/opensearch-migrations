@@ -194,35 +194,15 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
 
-      - name: Download all JaCoCo .exec files
-        uses: actions/download-artifact@v4
-        with:
-          path: jacoco-artifacts
-          pattern: coverage-exec-artifacts-gradle-tests-*
-
-      - name: Create .exec directory
+      - name: Create clean .exec directory
         run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
 
-      - name: Move .exec files for aggregation
-        run: |
-          # Find and copy .exec files while renaming them to include their subproject name
-          for artifact_dir in jacoco-artifacts/coverage-exec-artifacts-gradle-tests-*; do
-            # Extract the subproject name from the directory
-            subproject=$(basename "$artifact_dir" | sed 's/coverage-exec-artifacts-gradle-tests-//')
-
-            # Find and copy each .exec file with a unique name
-            find "$artifact_dir" -name "*.exec" -exec sh -c '
-              src="$1"
-              filename=$(basename "$src")
-              dest="build/jacocoMerged/'"$subproject"'_$filename"
-              cp "$src" "$dest"
-              echo "Copied $src to $dest"
-            ' sh {} \;
-          done
-
-          # List all the .exec files copied
-          echo "All copied .exec files:"
-          find build/jacocoMerged -type f -name "*.exec" | sort
+      - name: Download all JaCoCo .exec files into directory expected by jacocoAggregateReport
+        uses: actions/download-artifact@v4
+        with:
+          path: build/jacocoMerged
+          pattern: coverage-exec-artifacts-gradle-tests-*
+          merge-multiple: true
 
       - name: Generate aggregate JaCoCo report
         run: ./gradlew jacocoAggregateReport -x spotlessCheck

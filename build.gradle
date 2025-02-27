@@ -173,7 +173,10 @@ subprojects {
         systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
         // Verify assertions in tests
         jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
-        jacoco.enabled = true
+        jacoco {
+            enabled = true
+            destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
+        }
     }
 
     // Mutually exclusive tests to avoid duplication
@@ -321,7 +324,7 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
 
     // Find all merged .exec files
     executionData.setFrom(fileTree(dir: "${buildDir}", includes: [
-            "jacocoMerged/*.exec"
+            "jacocoMerged/**/*.exec"
     ]))
 
     // Get all subprojects with Java plugin
@@ -391,17 +394,6 @@ task mergeJacocoReports {
         from jacocoReportTasks.collect { it.executionData }
         into "${buildDir}/jacocoMerged/"
         duplicatesStrategy = DuplicatesStrategy.FAIL
-
-        // Ensure unique names by including project path
-        eachFile { fileCopyDetails ->
-            // Get the project from the file path
-            def projectPath = jacocoReportTasks.find { task ->
-                task.executionData.files.contains(fileCopyDetails.file)
-            }?.project?.path?.replaceAll('[^a-zA-Z0-9]', '_') ?: 'unknown'
-
-            // Set a unique name with project identifier
-            fileCopyDetails.name = "${projectPath}_${fileCopyDetails.name}"
-        }
     }
 
     // Make sure sync task runs after all report tasks
