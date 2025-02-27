@@ -43,13 +43,13 @@ allprojects {
 }
 
 subprojects {
-    tasks.named('test', Test) {
+    tasks.matching { it.name == 'test' && it instanceof Test }.configureEach {
         // Memory leak tests are adding too much execution time on `test` in TrafficCapture
         // Disabling and will test in `slowTest`
-        it.systemProperty 'disableMemoryLeakTests', 'true'
+        systemProperty 'disableMemoryLeakTests', 'true'
     }
 
-    tasks.named('slowTest', Test) {
+    tasks.matching { it.name == 'slowTest' && it instanceof Test }.configureEach {
         useJUnitPlatform {
             includeTags = []
             excludeTags = ['isolatedTest']

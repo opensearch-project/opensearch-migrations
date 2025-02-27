@@ -17,12 +17,15 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
 
     final String diagnosticLabel;
     private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
+    final boolean propagateOriginalRequest;
 
     public NettyDecodedHttpRequestConvertHandler(
-        IReplayContexts.IRequestTransformationContext httpTransactionContext
+        IReplayContexts.IRequestTransformationContext httpTransactionContext,
+        boolean propagateOriginalRequest
     ) {
         this.diagnosticLabel = "[" + httpTransactionContext + "] ";
         this.httpTransactionContext = httpTransactionContext;
+        this.propagateOriginalRequest = propagateOriginalRequest;
     }
 
     @Override
@@ -38,6 +41,10 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
                 .log();
             var httpJsonMessage = parseHeadersIntoMessage(request);
             ctx.fireChannelRead(httpJsonMessage);
+            if (propagateOriginalRequest) {
+                // Send both, may need to re-drive the request through again depending on initial processing of httpJsonMessage
+                ctx.fireChannelRead(request);
+            }
         } else {
             super.channelRead(ctx, msg);
         }

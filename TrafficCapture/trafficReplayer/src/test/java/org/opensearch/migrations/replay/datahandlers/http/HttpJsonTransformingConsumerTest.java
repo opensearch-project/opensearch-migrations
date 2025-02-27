@@ -205,6 +205,49 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @Tag("longTest")
+    public void testRemoveCompressionWorks() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        String redactBody = "{ " +
+                "    \"operation\": \"remove\", " +
+                "    \"spec\": { " +
+                "       \"headers\": { " +
+                "         \"cOnTeNt-Encoding\": \"\"" +
+                "       } " +
+                "   } " +
+                "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
+
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+                jsonJoltTransformer,
+                null,
+                testPacketCapture,
+                rootContext.getTestConnectionRequestContext(0)
+        );
+        byte[] testBytes;
+        try (
+                var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                        "/requests/raw/post_json_gzip.gz"
+                )
+        ) {
+            assert sampleStream != null;
+            testBytes = sampleStream.readAllBytes();
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+                .replace("Content-Encoding: gzip\r\n", "")
+                .replaceAll("Content-Length: .*", "Content-Length: 45")
+                .replaceAll("(Content-Length: .*[\r\n]*)[\\s\\S]*", "$1"+
+                        "{\"name\": \"John\", \"age\": 30, \"city\": \"Austin\"}");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
+    }
+
+    @Test
     public void testPartialBodyIsPassedThrough() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);

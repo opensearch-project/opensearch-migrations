@@ -15,6 +15,7 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpRequest;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -79,12 +80,11 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                         + "all content handlers are being loaded.").log();
                     // make a fresh message and its headers
                     requestPipelineOrchestrator.addJsonParsingHandlers(
-                        ctx,
-                        transformer,
-                        getAuthTransformerAsStreamingTransformer(authTransformer)
-                    );
+                            ctx,
+                            transformer,
+                            getAuthTransformerAsStreamingTransformer(authTransformer));
                     ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
-                } else{
+                } else {
                     throw new TransformationException(e);
                 }
             } finally {
@@ -99,11 +99,12 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     authTransformer
                 );
             }
-        } else if (msg instanceof HttpContent) {
-            ctx.fireChannelRead(msg);
+        }
+        else if (msg instanceof HttpRequest || msg instanceof HttpContent) {
+            super.channelRead(ctx, msg);
         } else {
             assert false
-                : "Only HttpRequest and HttpContent should come through here as per RequestPipelineOrchestrator";
+                : "Only HttpJsonRequestWithFaultingPayload, HttpRequest, and HttpContent should come through here as per RequestPipelineOrchestrator";
             // In case message comes through, pass downstream
             super.channelRead(ctx, msg);
         }
@@ -114,17 +115,15 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
         IJsonTransformer transformer,
         HttpJsonRequestWithFaultingPayload httpJsonMessage
     ) {
-        var originalHttpJsonMessage = httpJsonMessage;
-
         assert httpJsonMessage.containsKey("payload");
 
         Object returnedObject = transformer.transformJson(httpJsonMessage);
 
         var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
 
-        if (originalHttpJsonMessage != transformedRequest) {
-            // clear originalHttpJsonMessage for faster garbage collection if not persisted along
-            originalHttpJsonMessage.clear();
+        if (httpJsonMessage != transformedRequest) {
+            // clear httpJsonMessage for faster garbage collection if not persisted along
+            httpJsonMessage.clear();
         }
         return transformedRequest;
     }
