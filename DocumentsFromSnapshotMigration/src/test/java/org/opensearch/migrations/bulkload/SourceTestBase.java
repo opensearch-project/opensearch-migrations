@@ -59,7 +59,6 @@ import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
-import reactor.core.publisher.Flux;
 
 import static org.mockito.Mockito.spy;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
