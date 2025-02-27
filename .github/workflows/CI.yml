@@ -104,20 +104,22 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           java-version: ${{ env.java-version }}
           distribution: "corretto"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
-      - name: Generate matrix for jacocoTestReport jobs
+
+      - name: Generate matrix for test jobs
         id: set-matrix
         run: |
-          reports=$(./gradlew tasks --all | grep jacocoTestReport | awk -F' - ' '{print $1}' | sed 's/:jacocoTestReport//' | sort -u)
-          matrix=$(echo "$reports" | grep . | jq -R -s -c 'split("\n")[:-1] | {include: map({subproject: .})}')
+          matrix=$(./gradlew listTestTasksAsJson --quiet | jq -c)
           echo "Matrix is: $matrix"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"include\": $(echo $matrix)}" >> "$GITHUB_OUTPUT"
 
   gradle-tests:
     needs:
@@ -135,16 +137,15 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
-      - name: Sanitize subproject name
+      - name: Sanitize task name
         id: sanitize-name
         run: |
-          sanitized_name=$(echo "${{ matrix.subproject }}" | sed 's/[^a-zA-Z0-9]/_/g')
+          sanitized_name=$(echo "${{ matrix }}" | sed 's/[^a-zA-Z0-9]/_/g')
           echo "sanitized_name=$sanitized_name" >> "$GITHUB_OUTPUT"
-      - name: Run tests for ${{ matrix.subproject }}
-        run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
+      - name: Run Gradle task ${{ matrix }}
+        run: ./gradlew ${{ matrix }} -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-
       - name: Detect Memory Dumps
         if: failure()
         run: |
@@ -154,7 +155,6 @@ jobs:
             echo "To download and inspect these files, navigate to 'Actions' -> 'Artifacts'."
             echo "::endgroup::"
           fi
-
       - name: Upload memory dump
         if: failure()
         uses: actions/upload-artifact@v4
@@ -163,18 +163,18 @@ jobs:
           name: memory-dumps-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: ./**/*.hprof
 
-      - name: Upload test reports for ${{ matrix.subproject }}
+      - name: Upload test reports for ${{ matrix }}
+        if: always() && contains(matrix, 'jacoco')
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           if-no-files-found: error
           name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
 
-      - name: Publish jacoco report artifact for ${{ matrix.subproject }}
+      - name: Publish Jacoco report artifact for ${{ matrix }}
+        if: always() && contains(matrix, 'jacoco')
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           if-no-files-found: error
           name: coverage-exec-artifacts-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
