@@ -323,6 +323,7 @@ jobs:
     needs:
       - console-python-tests
       - gradle-tests
+      - jacoco-aggregate
       - link-checker
       - node-tests
       - python-e2e-tests
