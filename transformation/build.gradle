@@ -10,12 +10,6 @@
  */
 
 
-buildscript {
-    dependencies {
-        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
-    }
-}
-
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
@@ -26,20 +20,20 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.slf4j.api
 
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
 
     // Log4j
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
 
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
 
-    testImplementation group: 'org.mockito', name: 'mockito-core'
-    testImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testImplementation libs.mockito.core
+    testImplementation libs.hamcrest
 }
