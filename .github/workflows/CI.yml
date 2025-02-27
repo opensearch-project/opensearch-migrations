@@ -117,7 +117,7 @@ jobs:
           reports=$(./gradlew tasks --all | grep jacocoTestReport | awk -F' - ' '{print $1}' | sed 's/:jacocoTestReport//' | sort -u)
           matrix=$(echo "$reports" | grep . | jq -R -s -c 'split("\n")[:-1] | {include: map({subproject: .})}')
           echo "Matrix is: $matrix"
-          echo "::set-output name=matrix::$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   gradle-tests:
     needs:
@@ -139,7 +139,7 @@ jobs:
         id: sanitize-name
         run: |
           sanitized_name=$(echo "${{ matrix.subproject }}" | sed 's/[^a-zA-Z0-9]/_/g')
-          echo "::set-output name=sanitized_name::$sanitized_name"
+          echo "sanitized_name=$sanitized_name" >> "$GITHUB_OUTPUT"
       - name: Run tests for ${{ matrix.subproject }}
         run: ./gradlew :${{ matrix.subproject }}:jacocoTestReport -x spotlessCheck --stacktrace
         env:
