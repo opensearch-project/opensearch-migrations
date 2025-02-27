@@ -63,17 +63,18 @@ jobs:
         run: |
           flake8 $(git ls-files '*.py')
 
-  console-python-tests:
+  python-tests:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         py-project:
-          - lib/console_link
-          - cluster_tools
-          - console_api
+          - migrationConsole/lib/console_link
+          - migrationConsole/cluster_tools
+          - migrationConsole/console_api
+          - k8sConfigMapUtilScripts
     env:
-      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/${{ matrix.py-project }}
+      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/${{ matrix.py-project }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -90,7 +91,7 @@ jobs:
       - name: Get Sanitized Name
         env:
           PY_PROJECT: ${{ matrix.py-project }}
-        run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT/\//-}" >> $GITHUB_ENV
+        run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload Coverage Reports
         uses: actions/upload-artifact@v4
         with:
@@ -313,6 +314,7 @@ jobs:
             --exclude "https://localhost*"
             --exclude "http://capture-proxy*"
             --exclude "https://capture-proxy*"
+            --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
             --exclude-mail
           fail: true
         env:
@@ -321,7 +323,7 @@ jobs:
 
   all-ci-checks-pass:
     needs:
-      - console-python-tests
+      - python-tests
       - gradle-tests
       - jacoco-aggregate
       - link-checker
