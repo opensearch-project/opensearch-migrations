@@ -1,9 +1,7 @@
 import com.lesfurets.jenkins.unit.BasePipelineTest
-import com.lesfurets.jenkins.unit.PipelineTestHelper
-import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Assertions
 
 class JenkinsPipelineTestRunner extends BasePipelineTest {
     def script
@@ -14,9 +12,11 @@ class JenkinsPipelineTestRunner extends BasePipelineTest {
     }
 
     void setProjectDir() {
-        String dir = System.getProperty('projectDir')
+        // When run from base project, projectDir is set, else navigate up parent
+        String dir = System.getProperty('projectDir',
+                new File(System.getProperty('user.dir')).getParent())
         // Store current directory
-        originalDir = new File(System.getProperty("projectDir"))
+        originalDir = new File(dir)
 
         // Change to project root directory
         var testRoot = new File(dir, "vars").absolutePath
