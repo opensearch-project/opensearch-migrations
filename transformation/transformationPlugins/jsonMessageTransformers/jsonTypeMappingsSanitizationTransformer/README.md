@@ -129,8 +129,16 @@ When the regex pattern isn't defined the following pattern is used to map each t
 index, preserving all data and its separation:
 ```
 [
-  ["(.+)", "_doc", "$1"],
-  ["(.+)", "(.+)", "$1_$2"]
+  {
+    "sourceIndexPattern": "(.+)",
+    "sourceTypePattern": "_doc",
+    "targetIndexPattern": "$1"
+  },
+  {
+    "sourceIndexPattern": "(.+)",
+    "sourceTypePattern": "(.+)",
+    "targetIndexPattern": "$1_$2"
+  }
 ]
 ```
 
@@ -141,7 +149,11 @@ The following sample shows how indices that start with 'time-' will be migrated 
 already matched will be dropped.
 ```
 [
-  ["time-(.*)", "(cpu)", "time-$1-$2"]
+  {
+    "sourceIndexPattern": "time-(.*)",
+    "sourceTypePattern": "(cpu)",
+    "targetIndexPattern": "time-$1-$2"
+  }
 ]
 ```
 
@@ -149,8 +161,16 @@ The following example preserves all other non-matched items,
 merging all types into a single index with the same name as the source index.
 ```
 [
-  ["time-(.+)", "(cpu)", "time-$1-$2"],
-  ["(.+)", ".+", "$1"]
+  {
+    "sourceIndexPattern": "time-(.+)",
+    "sourceTypePattern": "(cpu)",
+    "targetIndexPattern": "time-$1-$2"
+  },
+  {
+    "sourceIndexPattern": "(.+)",
+    "sourceTypePattern": ".+",
+    "targetIndexPattern": "$1"
+  }
 ]
 ```
 
@@ -159,13 +179,12 @@ Though note that anything matched by the static maps shown above will block any 
 
 | Regex Entry                                                                | Source Index | Source Type | Target Index      | PUT Doc URL                    | Bulk Index Command                                             |
 |----------------------------------------------------------------------------|-------------|-------------|-------------------|--------------------------------|----------------------------------------------------------------|
-| `[["time-(.*)", "(cpu)", "time-$1-$2"]]`                                   | time-nov11  | cpu         | time-nov11-cpu    | /time-nov11-cpu/_doc/doc512    | `{"index": {"_index": "time-nov11-cpu", "_id": "doc512" }}`    |
-| `[["time-(.*)", "(cpu)", "time-$1-$2"]]`                                   | logs        | access      | [DELETED]         | [DELETED]                      | [DELETED]                                                      |
-| `[["time-(.*)", "(cpu)", "time-$1-$2"],`<br/>` ["(.*)", "(.*)", "$1-$2"]]` | logs        | access      | logs_access       | /logs_access/_doc/doc513       | `{"index": {"_index": "logs_access", "_id": "doc513" }}`       |
-| `[["time-(.*)", "(cpu)", "time-$1-$2"],`<br/>`[["(.*)", ".*", "$1"]]`      | everything  | widgets     | everything        | /everything/_doc/doc514        | `{"index": {"_index": "everything", "_id": "doc514" }}`        |
-| `[["time-(.*)", "(cpu)", "time-$1-$2"],`<br/>`[["(.*)", ".*", "$1"]]`      | everything  | sprockets   | everything        | /everything/_doc/doc515        | `{"index": {"_index": "everything", "_id": "doc515" }}`        |
-| `[["time-(.*)", "(.*)-(cpu)", "$2-$3-$1"]]`                                | time-nov11  | host123-cpu | host123-cpu-nov11 | /host123-cpu-nov11/_doc/doc512 | `{"index": {"_index": "host123-cpu-nov11", "_id": "doc512" }}` |
-| `[["(.*)", ".*", "$1"]]`                                                   | metadata    | users       | metadata          | /metadata/_doc/doc516          | `{"index": {"_index": "metadata", "_id": "doc516" }}`          |
-| `[[".*", ".*", "leftovers"]]`                                              | logs        | access      | leftovers         | /leftovers/_doc/doc517         | `{"index": {"_index": "leftovers", "_id": "doc517" }}`         |
-| `[[".*", ".*", "leftovers"]]`                                              | permissions | access      | leftovers         | /leftovers/_doc/doc517         | `{"index": {"_index": "leftovers", "_id": "doc517" }}`         |
-
+| `[{"sourceIndexPattern": "(.+)", "sourceTypePattern": "_doc", "targetIndexPattern": "$1"}]`                                   | time-nov11  | cpu         | time-nov11-cpu    | /time-nov11-cpu/_doc/doc512    | `{"index": {"_index": "time-nov11-cpu", "_id": "doc512" }}`    |
+| `[{"sourceIndexPattern": "(.+)", "sourceTypePattern": "_doc", "targetIndexPattern": "$1"}]`                                   | logs        | access      | [DELETED]         | [DELETED]                      | [DELETED]                                                      |
+| `[{"sourceIndexPattern": "(.+)", "sourceTypePattern": "_doc", "targetIndexPattern": "$1"},`<br/>`{"sourceIndexPattern": "(.*)", "sourceTypePattern": "(.*)", "targetIndexPattern": "$1-$2"}]` | logs        | access      | logs_access       | /logs_access/_doc/doc513       | `{"index": {"_index": "logs_access", "_id": "doc513" }}`       |
+| `[{"sourceIndexPattern": "time-(.*)", "sourceTypePattern": "(cpu)", "targetIndexPattern": "time-$1-$2"},`<br/>`{"sourceIndexPattern": "(.*)", "sourceTypePattern": ".*", "targetIndexPattern": "$1"}]`      | everything  | widgets     | everything        | /everything/_doc/doc514        | `{"index": {"_index": "everything", "_id": "doc514" }}`        |
+| `[{"sourceIndexPattern": "time-(.*)", "sourceTypePattern": "(cpu)", "targetIndexPattern": "time-$1-$2"},`<br/>`{"sourceIndexPattern": "(.*)", "sourceTypePattern": ".*", "targetIndexPattern": "$1"}]`      | everything  | sprockets   | everything        | /everything/_doc/doc515        | `{"index": {"_index": "everything", "_id": "doc515" }}`        |
+| `[{"sourceIndexPattern": "(.*)", "sourceTypePattern": "(.*)-(cpu)", "targetIndexPattern": "$2-$3-$1"}]`                                | time-nov11  | host123-cpu | host123-cpu-nov11 | /host123-cpu-nov11/_doc/doc512 | `{"index": {"_index": "host123-cpu-nov11", "_id": "doc512" }}` |
+| `[{"sourceIndexPattern": "(.*)", "sourceTypePattern": ".*", "targetIndexPattern": "$1"}]`                                                   | metadata    | users       | metadata          | /metadata/_doc/doc516          | `{"index": {"_index": "metadata", "_id": "doc516" }}`          |
+| `[{"sourceIndexPattern": ".*", "sourceTypePattern": ".*", "targetIndexPattern": "leftovers"}]`                                              | logs        | access      | leftovers         | /leftovers/_doc/doc517         | `{"index": {"_index": "leftovers", "_id": "doc517" }}`         |
+| `[{"sourceIndexPattern": ".*", "sourceTypePattern": ".*", "targetIndexPattern": "leftovers"}]`                                              | permissions | access      | leftovers         | /leftovers/_doc/doc517         | `{"index": {"_index": "leftovers", "_id": "doc517" }}`         |

@@ -40,24 +40,24 @@ function route(input, fieldToMatch, featureFlags, defaultAction, routes) {
     return defaultAction(input);
 }
 
-function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings) {
+function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexMappings) {
     const conjoinedSource = `${sourceIndex}/${sourceType}`;
-    for (const [idxRegex, typeRegex, targetIdxPattern] of regexIndexMappings) {
-        // Add start (^) and end ($) anchors to the regex to ensure it matches the entire string
-        const conjoinedRegexString = `^${idxRegex}/${typeRegex}$`;
+    for (const { sourceIndexPattern, sourceTypePattern, targetIndexPattern } of regexMappings) {
+        // Add start (^) and end ($) anchors to ensure the entire string is matched
+        const conjoinedRegexString = `^${sourceIndexPattern}/${sourceTypePattern}$`;
         const conjoinedRegex = new RegExp(conjoinedRegexString);
         if (conjoinedRegex.test(conjoinedSource)) {
-            return conjoinedSource.replace(conjoinedRegex, targetIdxPattern);
+            return conjoinedSource.replace(conjoinedRegex, targetIndexPattern);
         }
     }
     return null;
 }
 
-function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexIndexMappings) {
+function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexMappings) {
     if (indexMappings[sourceIndex]) {
         return indexMappings[sourceIndex][sourceType];
     }
-    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings);
+    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexMappings);
 }
 
 function makeNoopRequest() {
@@ -73,7 +73,7 @@ function rewriteDocRequest(match, inputMap) {
         match[1],
         match[2],
         inputMap.index_mappings,
-        inputMap.regex_index_mappings
+        inputMap.regex_mappings
     );
 
     if (!targetIndex) return makeNoopRequest();
@@ -110,7 +110,7 @@ function rewriteBulk(match, context) {
             commandParameters._index,
             typeName,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
 
         // If no valid target index, skip.
@@ -230,7 +230,7 @@ function rewriteCreateIndex(match, inputMap) {
     const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
     const types = Object.keys(mappings);
     const sourceTypeToTargetIndicesMap = new Map(types
-        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_index_mappings)])
+        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_mappings)])
         .filter(([, targetIndex]) => targetIndex) // Keep only entries with valid target indices
     );
     return createIndexAsUnionedExcise(sourceTypeToTargetIndicesMap, inputMap);
@@ -257,7 +257,7 @@ function processMetadataRequest(document, context) {
             document.name,
             typeName,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
 
         if (targetIndex) {
@@ -277,7 +277,7 @@ function processMetadataRequest(document, context) {
             document.name,
             type,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
         
         if(targetIndex) {
@@ -305,7 +305,7 @@ function routeHttpRequest(source_document, context) {
     const documentAndContext = {
         request: source_document,
         index_mappings: context.index_mappings,
-        regex_index_mappings: context.regex_index_mappings,
+        regex_mappings: context.regex_mappings,
         properties: context.source_properties
     };
     return route(
@@ -331,7 +331,7 @@ function processBulkIndex(docBackfillPair, context) {
         sourceIndexName,
         typeName,
         context.index_mappings,
-        context.regex_index_mappings
+        context.regex_mappings
     );
 
     if (!targetIndex) return [];

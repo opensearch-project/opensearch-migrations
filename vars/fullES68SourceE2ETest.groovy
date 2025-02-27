@@ -9,11 +9,18 @@ def call(Map config = [:]) {
     def rfsJsonTransformations = [
         [
                 TypeMappingSanitizationTransformerProvider: [
-                        regexIndexMappings: [
-                                ["(test_e2e_0001_.*)", ".*", "\$1_transformed"], // Expected Transform
-                                ["(.*)", "(.*)", "\$1"] // Type Union otherwise
+                        regexMappings: [
+                                [
+                                        "sourceIndexPattern": "(test_e2e_0001_.*)",
+                                        "sourceTypePattern": ".*",
+                                        "targetIndexPattern": "\$1_transformed"
+                                ],
+                                [
+                                        "sourceIndexPattern": "(.*)",
+                                        "sourceTypePattern": "(.*)",
+                                        "targetIndexPattern": "\$1"
+                                ]
                         ],
-
                         sourceProperties: [
                                 version: [
                                         major: 6,
