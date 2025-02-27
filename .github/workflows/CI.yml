@@ -51,17 +51,17 @@ jobs:
   python-lint:
     runs-on: ubuntu-latest
     steps:
-     - uses: actions/checkout@v4
-     - uses: actions/setup-python@v5
-       with:
-         python-version: ${{ env.python-version }}
-     - name: Install dependencies
-       run: |
-        python3 -m pip install --upgrade pip
-        python3 -m pip install flake8
-     - name: Analysing the code with flake8
-       run: |
-        flake8 $(git ls-files '*.py')
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.python-version }}
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install flake8
+      - name: Analysing the code with flake8
+        run: |
+          flake8 $(git ls-files '*.py')
 
   console-python-tests:
     runs-on: ubuntu-latest
@@ -119,14 +119,15 @@ jobs:
         run: |
           matrix=$(./gradlew listTestTasksAsJson --quiet | jq -c)
           echo "Matrix is: $matrix"
-          echo "matrix={\"include\": $(echo $matrix)}" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   gradle-tests:
     needs:
       - generate-project-test-matrix
     runs-on: ubuntu-latest
     strategy:
-      matrix: ${{ fromJson(needs.generate-project-test-matrix.outputs.matrix) }}
+      matrix:
+        task: ${{ fromJson(needs.generate-project-test-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -140,10 +141,10 @@ jobs:
       - name: Sanitize task name
         id: sanitize-name
         run: |
-          sanitized_name=$(echo "${{ matrix }}" | sed 's/[^a-zA-Z0-9]/_/g')
+          sanitized_name=$(echo "${{ matrix.task }}" | sed 's/[^a-zA-Z0-9]/_/g')
           echo "sanitized_name=$sanitized_name" >> "$GITHUB_OUTPUT"
-      - name: Run Gradle task ${{ matrix }}
-        run: ./gradlew ${{ matrix }} -x spotlessCheck --stacktrace
+      - name: Run Gradle task ${{ matrix.task }}
+        run: ./gradlew ${{ matrix.task }} -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Detect Memory Dumps
@@ -163,8 +164,8 @@ jobs:
           name: memory-dumps-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: ./**/*.hprof
 
-      - name: Upload test reports for ${{ matrix }}
-        if: always() && contains(matrix, 'jacoco')
+      - name: Upload test reports for ${{ matrix.task }}
+        if: always() && contains(matrix.task, 'jacoco')
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
@@ -172,8 +173,8 @@ jobs:
           path: |
             **/build/reports/tests/
 
-      - name: Publish Jacoco report artifact for ${{ matrix }}
-        if: always() && contains(matrix, 'jacoco')
+      - name: Publish Jacoco report artifact for ${{ matrix.task }}
+        if: always() && contains(matrix.task, 'jacoco')
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
@@ -182,7 +183,7 @@ jobs:
             **/build/jacoco/*.exec
 
   jacoco-aggregate:
-    needs: [gradle-tests]
+    needs: [ gradle-tests ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
