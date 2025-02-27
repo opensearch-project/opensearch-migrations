@@ -159,7 +159,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          if-no-files-found: ignore
+          if-no-files-found: warn
           name: memory-dumps-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: ./**/*.hprof
 
@@ -167,7 +167,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          if-no-files-found: ignore # Needed for subprojects that don't have tests
+          if-no-files-found: error
           name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/reports/tests/
@@ -176,7 +176,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          if-no-files-found: ignore # Needed for subprojects that don't have tests
+          if-no-files-found: error
           name: coverage-exec-artifacts-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
           path: |
             **/build/jacoco/*.exec
@@ -201,7 +201,7 @@ jobs:
           pattern: coverage-exec-artifacts-gradle-tests-*
 
       - name: Create .exec directory
-        run: rm -rf build/jacoco && mkdir -p build/jacoco
+        run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
 
       - name: Move .exec files for aggregation
         run: |
@@ -214,7 +214,7 @@ jobs:
             find "$artifact_dir" -name "*.exec" -exec sh -c '
               src="$1"
               filename=$(basename "$src")
-              dest="build/jacoco/'"$subproject"'_$filename"
+              dest="build/jacocoMerged/'"$subproject"'_$filename"
               cp "$src" "$dest"
               echo "Copied $src to $dest"
             ' sh {} \;
@@ -222,7 +222,7 @@ jobs:
 
           # List all the .exec files copied
           echo "All copied .exec files:"
-          find build/jacoco -type f -name "*.exec" | sort
+          find build/jacocoMerged -type f -name "*.exec" | sort
 
       - name: Generate aggregate JaCoCo report
         run: ./gradlew jacocoAggregateReport -x spotlessCheck
@@ -232,9 +232,10 @@ jobs:
       - name: Upload Aggregate JaCoCo report
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: error
           name: coverage-reports-gradle-tests-aggregate
           path: |
-            build/reports/jacoco/jacocoAggregateReport/jacocoAggregateReport.xml
+            **/jacocoMergedReport.xml
 
   python-e2e-tests:
     runs-on: ubuntu-latest
@@ -283,6 +284,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: error
           name: e2e-test-logs
           path: |
             logs/docker

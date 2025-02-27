@@ -309,38 +309,19 @@ subprojects {
     jacocoTestReport {
         dependsOn = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
         executionData.from = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }.collect { it.jacoco.destinationFile }
-        classDirectories.setFrom(
-                files(allprojects.collect { project ->
-                    project.sourceSets.main.output.classesDirs.filter { dir ->
-                        !dir.path.contains('captureProtobufs') &&
-                                !dir.path.contains('trafficCaptureProxyServerTest')
-                    }
-                })
-        )
-
-        sourceDirectories.setFrom(
-                files(allprojects.collect { project ->
-                    project.sourceSets.main.allSource.srcDirs
-                })
-        )
-
         reports {
             xml.required = true
-            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
-            html.required = true
-            html.destination file("${buildDir}/reports/jacoco/test/html")
         }
     }
 }
 
-// Aggregate JaCoCo report task for all subprojects
 tasks.register('jacocoAggregateReport', JacocoReport) {
     group = 'Verification'
-    description = 'Generates an aggregate report from exec files in build/jacoco/*.exec over the whole project'
+    description = 'Generates an aggregate report from exec files in build/jacocoMerged/*.exec over the whole project'
 
-    // Find all .exec files
+    // Find all merged .exec files
     executionData.setFrom(fileTree(dir: "${buildDir}", includes: [
-            "jacoco/*.exec"
+            "jacocoMerged/*.exec"
     ]))
 
     // Get all subprojects with Java plugin
@@ -363,12 +344,11 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
             })
     )
 
-
     reports {
         xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/jacocoAggregateReport/jacocoAggregateReport.xml")
+        xml.destination file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
         html.required = true
-        html.destination file("${buildDir}/reports/jacoco/jacocoAggregateReport/html")
+        html.destination file("${buildDir}/reports/jacoco/mergedReport/html")
     }
 }
 
@@ -402,25 +382,34 @@ gradle.projectsEvaluated {
     }
 }
 
-task mergeJacocoReports(type: JacocoReport) {
+task mergeJacocoReports {
     def jacocoReportTasks = subprojects.collect { it.tasks.withType(JacocoReport).matching { it.name == "jacocoTestReport" } }.flatten()
     dependsOn jacocoReportTasks
 
-    additionalSourceDirs.setFrom(files(jacocoReportTasks.collect { it.additionalSourceDirs }.flatten()))
-    sourceDirectories.setFrom(files(jacocoReportTasks.collect { it.sourceDirectories }.flatten()))
-    classDirectories.setFrom(files(subprojects.collect { subproject ->
-        subproject.sourceSets.main.output.classesDirs.filter { dir ->
-            !dir.path.contains('captureProtobufs') && !dir.path.contains('trafficCaptureProxyServerTest')
-        }
-    }))
-    executionData.setFrom(files(jacocoReportTasks.collect { it.executionData }.flatten()))
+    // Create a Sync task to collect all exec files
+    def syncJacocoExecFiles = tasks.create("syncJacocoExecFiles", Sync) {
+        from jacocoReportTasks.collect { it.executionData }
+        into "${buildDir}/jacocoMerged/"
+        duplicatesStrategy = DuplicatesStrategy.FAIL
 
-    reports {
-        xml.required = true
-        xml.destination = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
-        html.required = true
-        html.destination = file("${buildDir}/reports/jacoco/mergedReport/html")
+        // Ensure unique names by including project path
+        eachFile { fileCopyDetails ->
+            // Get the project from the file path
+            def projectPath = jacocoReportTasks.find { task ->
+                task.executionData.files.contains(fileCopyDetails.file)
+            }?.project?.path?.replaceAll('[^a-zA-Z0-9]', '_') ?: 'unknown'
+
+            // Set a unique name with project identifier
+            fileCopyDetails.name = "${projectPath}_${fileCopyDetails.name}"
+        }
     }
+
+    // Make sure sync task runs after all report tasks
+    syncJacocoExecFiles.mustRunAfter jacocoReportTasks
+    dependsOn syncJacocoExecFiles
+
+    // Finalize with jacocoAggregateReport
+    finalizedBy jacocoAggregateReport
 }
 
 task listPublishedArtifacts {
