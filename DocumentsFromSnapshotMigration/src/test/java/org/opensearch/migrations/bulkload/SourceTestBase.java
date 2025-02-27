@@ -61,6 +61,7 @@ import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
+import static org.mockito.Mockito.spy;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Slf4j
@@ -216,18 +217,6 @@ public class SourceTestBase {
         }
     }
 
-    @AllArgsConstructor
-    public static class FilteredLuceneDocumentsReader implements LuceneIndexReader {
-
-        private final LuceneIndexReader wrappedReader;
-        private final UnaryOperator<RfsLuceneDocument> docTransformer;
-
-        @Override
-        public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
-            return wrappedReader.readDocuments(startDoc).map(docTransformer);
-        }
-    }
-
     static class LeasePastError extends Error {
     }
 
@@ -270,12 +259,8 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-            var readerFactory = new LuceneIndexReader.Factory(sourceResourceProvider) {
-                @Override
-                public LuceneIndexReader getReader(Path path) {
-                    return new FilteredLuceneDocumentsReader(super.getReader(path), terminatingDocumentFilter);
-                }
-            };
+            var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
+            // TODO: reinstate terminatingDocumentFilter
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
