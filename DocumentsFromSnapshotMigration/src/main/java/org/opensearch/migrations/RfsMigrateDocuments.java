@@ -323,6 +323,7 @@ public class RfsMigrateDocuments {
                     e.printStackTrace();
                     throw Lombok.sneakyThrow(e);
                 }
+                System.err.println("Shutdown hook completed.");
             }));
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
@@ -368,6 +369,7 @@ public class RfsMigrateDocuments {
                 context,
                 cancellationRunnableRef,
                 workItemTimeProvider);
+            cleanShutdownCompleted.set(true);
         } catch (NoWorkLeftException e) {
             log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             cleanShutdownCompleted.set(true);

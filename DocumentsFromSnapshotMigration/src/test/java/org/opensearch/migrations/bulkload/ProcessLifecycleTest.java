@@ -43,6 +43,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final int OPENSEARCH_PORT = 9200;
+    public static final int RECEIVED_SIGTERM_EXIT_CODE = 143;
 
     enum FailHow {
         NEVER,
@@ -209,15 +210,27 @@ public class ProcessLifecycleTest extends SourceTestBase {
         return process.exitValue();
     }
 
-    @Test
-    void exitCleanlyFromSigtermAfterUpdatingWorkItem() {
-        testProcess(0, d -> {
-            var processBuilder = setupProcess(
+    @SneakyThrows
+    private static ProcessBuilder setupProcessWithSlowProxy(RunData d) {
+        var tp = d.proxyContainer.getProxy();
+        tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 250);
+        return setupProcess(
                 d.tempDirSnapshot,
                 d.tempDirLucene,
                 d.proxyContainer.getProxyUriAsString(),
-                new String[] {}
-            );
+                new String[] {"--documents-per-bulk-request", "4", "--max-connections", "1"}
+        );
+    }
+
+    @Test
+    void exitCleanlyFromSigtermAfterUpdatingWorkItem() {
+        testProcess(RECEIVED_SIGTERM_EXIT_CODE, d -> {
+            // The geonames shards are each 195 documents, and we need to guarantee that we're in the middle
+            // of a shard when the sigterm is sent.
+            // The slow proxy operates with up to 4 bulk requests per second, with 4 documents each, for a total
+            // rate of 16 docs/second, meaning it can finish at most 160 documents in 10 seconds (it will be less
+            // because it also has to acquire a lease and download the shard).
+            var processBuilder = setupProcessWithSlowProxy(d);
             Process process = null;
             try {
                 process = runAndMonitorProcess(processBuilder);
