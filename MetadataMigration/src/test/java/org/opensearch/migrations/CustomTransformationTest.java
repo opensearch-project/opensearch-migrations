@@ -91,19 +91,17 @@ class CustomTransformationTest extends BaseMigrationTest {
         // Define custom transformations
         String customTransformationJson = "[\n" +
             "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"name == 'test_index'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_index\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
+            "    \"TypeMappingSanitizationTransformerProvider\": {\n" +
+            "      \"staticMappings\": {\n" +
+            "        \"_doc\": \"transformed_index\"\n" +
+            "      },\n" +
+            "      \"sourceProperties\": {\n" +
+            "        \"version\": {\n" +
+            "          \"major\": " + sourceCluster.getContainerVersion().getVersion().getMajor() + ",\n" +
+            "          \"minor\": " + sourceCluster.getContainerVersion().getVersion().getMinor() + "\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
             "  },\n" +
             "  {\n" +
             "    \"JsonConditionalTransformerProvider\": [\n" +

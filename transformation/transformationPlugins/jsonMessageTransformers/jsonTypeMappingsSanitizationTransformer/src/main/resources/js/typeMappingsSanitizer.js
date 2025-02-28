@@ -247,7 +247,10 @@ function processMetadataRequest(document, context) {
         return document;
     }
 
-    const mappings = document.body.mappings;
+    let mappings = document.body.mappings;
+    console.log("Found Mapping" + mappings)
+    console.log("For index" + document.name)
+
 
     if (mappings.properties && !mappings.properties?.properties) {
         const typeName = "_doc";
@@ -262,6 +265,13 @@ function processMetadataRequest(document, context) {
 
         if (targetIndex) {
             document.name = targetIndex;
+            if(document.body?.settings) {
+                console.log("Document.body.settings ", document.body?.settings)
+            }
+            if (document.body?.settings?.['index.provided_name']) {
+                console.log("Found index.provided_name")
+                document.body.settings['index.provided_name'] = targetIndex;
+            }
             return [document];
         }
         // Index excluded, skip
@@ -269,10 +279,20 @@ function processMetadataRequest(document, context) {
     }
 
     // Handle types
+
+    // Normalize mappings to an object
+    if (Array.isArray(mappings)) {
+        // If it's an array, convert it to an object by merging entries
+        mappings = Object.assign({}, ...mappings);
+    }
+
     const types = Object.keys(mappings);
     const creationObjects = {};
     for (let idx = 0; idx < types.length; idx++) {
         const type = types[idx];
+        console.log("Found type" + type)
+        console.log("For index2" + document.name)
+
         const targetIndex = convertSourceIndexToTarget(
             document.name,
             type,
@@ -282,16 +302,16 @@ function processMetadataRequest(document, context) {
         
         if(targetIndex) {
             const existing = creationObjects[targetIndex];
-            if(existing) {
+            if (existing) {
                 existing.body.mappings._doc.properties = {
                     ...existing.body.mappings._doc.properties,
-                    ...document.body.mappings[type].properties
+                    ...mappings[type].properties
                 };
             } else {
                 const deepClone = JSON.parse(JSON.stringify(document));
                 deepClone.name = targetIndex;
                 deepClone.body.mappings = {
-                    _doc: deepClone.body.mappings[type]
+                    _doc: mappings[type]
                 };
                 creationObjects[targetIndex] = deepClone;
             }
@@ -354,7 +374,7 @@ function detectAndTransform(document, context) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
 
-    if ("type" in document && "name" in document && "body" in document && document.type === "index") {
+    if ("type" in document && "name" in document && "body" in document) {
         return processMetadataRequest(document, context);
     } else if ("method" in document && "URI" in document) {
         return routeHttpRequest(document, context);
