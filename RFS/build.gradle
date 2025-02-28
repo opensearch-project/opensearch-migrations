@@ -10,13 +10,22 @@ plugins {
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'
+    luceneVersion6 = '6.6.6'
     luceneVersion7 = '7.7.3'
     luceneVersion9 = '9.11.1'
 }
 
 configurations {
+    lucene6
     lucene7
     lucene9
+}
+
+task shadowLucene6(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene6]
+    archiveClassifier.set('lucene6-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene6.org.apache.lucene'
 }
 
 task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
@@ -34,7 +43,7 @@ task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
 }
 
 tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene7, shadowLucene9
+    dependsOn shadowLucene6, shadowLucene7, shadowLucene9
 }
 
 tasks.named('build') {
@@ -68,6 +77,9 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
+    lucene6 "org.apache.lucene:lucene-core:${luceneVersion6}"
+    lucene6 "org.apache.lucene:lucene-backward-codecs:${luceneVersion6}"
+
     lucene7 "org.apache.lucene:lucene-core:${luceneVersion7}"
     lucene7 "org.apache.lucene:lucene-backward-codecs:${luceneVersion7}"
 
@@ -75,12 +87,15 @@ dependencies {
     lucene9 "org.apache.lucene:lucene-analysis-common:${luceneVersion9}"
     lucene9 "org.apache.lucene:lucene-backward-codecs:${luceneVersion9}"
 
+    implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
 
+    testImplementation shadowLucene6.outputs.files
     testImplementation shadowLucene7.outputs.files
     testImplementation shadowLucene9.outputs.files
 
+    testFixturesImplementation shadowLucene6.outputs.files
     testFixturesImplementation shadowLucene7.outputs.files
     testFixturesImplementation shadowLucene9.outputs.files
 
