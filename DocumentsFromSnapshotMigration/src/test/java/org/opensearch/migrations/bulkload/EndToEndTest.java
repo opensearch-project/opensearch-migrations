@@ -142,8 +142,7 @@ public class EndToEndTest extends SourceTestBase {
                         clockJitter,
                         testDocMigrationContext,
                         sourceCluster.getContainerVersion().getVersion(),
-                        targetCluster.getContainerVersion().getVersion(),
-                        false
+                        targetCluster.getContainerVersion().getVersion()
                     )
                 )
             );
