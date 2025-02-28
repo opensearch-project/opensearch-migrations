@@ -180,7 +180,7 @@ public class ParsedHttpMessagesAsDicts {
                         HttpByteBufFormatter.processHttpMessageFromBufs(
                             HttpMessageType.REQUEST,
                             byteBufStream,
-                            new NettyDecodedHttpRequestConvertHandler(transformationCtx),
+                            new NettyDecodedHttpRequestConvertHandler(transformationCtx, false),
                             new NettyJsonBodyAccumulateHandler(transformationCtx)
                         )
                     ))) {

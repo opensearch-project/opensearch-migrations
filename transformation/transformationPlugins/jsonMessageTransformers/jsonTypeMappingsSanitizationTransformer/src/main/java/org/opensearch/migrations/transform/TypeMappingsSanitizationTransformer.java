@@ -19,41 +19,42 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
 
     public TypeMappingsSanitizationTransformer(
         Map<String, Map<String, String>> indexMappings,
-        List<List<String>> regexIndexMappings)
-        throws IOException {
-        this(indexMappings, regexIndexMappings, null, null);
-    }
-
-    public TypeMappingsSanitizationTransformer(
-        Map<String, Map<String, String>> indexMappings,
-        List<List<String>> regexIndexMappings,
+        List<Map<String, String>> regexMappings,
         SourceProperties sourceProperties,
         Map<String, Object> featureFlags)
         throws IOException {
         super(getScripts(),
-            makeContext(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
+            makeContext(sourceProperties, featureFlags, indexMappings, regexMappings));
     }
 
     private static Object
     makeContext(SourceProperties sourceProperties,
                 Map<String, Object> featureFlagsIncoming,
-                Map<String, Map<String, String>> indexMappingsIncoming,
-                List<List<String>> regexIndexMappingsIncoming) {
+                Map<String, Map<String, String>> staticMappingsIncoming,
+                List<Map<String, String>> regexMappingsIncoming) {
         var featureFlags = featureFlagsIncoming != null ? featureFlagsIncoming : Map.of();
-        var indexMappings = indexMappingsIncoming != null ? indexMappingsIncoming : Map.of();
-        // Regex index mappings apply if an index is not found in the index mappings
+        var indexMappings = staticMappingsIncoming != null ? staticMappingsIncoming : Map.of();
+        // Regex  mappings apply if an index is not found in the index mappings
         // The default is to map each type to its own index, mapping _doc type to the same input index
-        var regexIndexMappings = Optional.ofNullable(regexIndexMappingsIncoming)
+        var regexMappings = Optional.ofNullable(regexMappingsIncoming)
             .orElse(
-                List.of(
-                    List.of("(.+)", "_doc", "$1"),
-                    List.of("(.+)", "(.+)", "$1_$2")
-                )
+                    List.of(
+                        Map.of(
+                                "sourceIndexPattern","(.+)",
+                                "sourceTypePattern", "_doc",
+                                "targetIndexPattern", "$1"
+                        ),
+                        Map.of(
+                                "sourceIndexPattern","(.+)",
+                                "sourceTypePattern", "(.+)",
+                                "targetIndexPattern", "$1_$2"
+                        )
+                    )
             );
 
         return new MapProxyObject(Map.of(
             "index_mappings", indexMappings,
-            "regex_index_mappings", regexIndexMappings,
+            "regex_mappings", regexMappings,
             "featureFlags", featureFlags,
             "source_properties", (sourceProperties == null) ?
                 Map.of() :

@@ -40,24 +40,24 @@ function route(input, fieldToMatch, featureFlags, defaultAction, routes) {
     return defaultAction(input);
 }
 
-function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings) {
+function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexMappings) {
     const conjoinedSource = `${sourceIndex}/${sourceType}`;
-    for (const [idxRegex, typeRegex, targetIdxPattern] of regexIndexMappings) {
-        // Add start (^) and end ($) anchors to the regex to ensure it matches the entire string
-        const conjoinedRegexString = `^${idxRegex}/${typeRegex}$`;
+    for (const { sourceIndexPattern, sourceTypePattern, targetIndexPattern } of regexMappings) {
+        // Add start (^) and end ($) anchors to ensure the entire string is matched
+        const conjoinedRegexString = `^${sourceIndexPattern}/${sourceTypePattern}$`;
         const conjoinedRegex = new RegExp(conjoinedRegexString);
         if (conjoinedRegex.test(conjoinedSource)) {
-            return conjoinedSource.replace(conjoinedRegex, targetIdxPattern);
+            return conjoinedSource.replace(conjoinedRegex, targetIndexPattern);
         }
     }
     return null;
 }
 
-function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexIndexMappings) {
+function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexMappings) {
     if (indexMappings[sourceIndex]) {
         return indexMappings[sourceIndex][sourceType];
     }
-    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings);
+    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexMappings);
 }
 
 function makeNoopRequest() {
@@ -73,7 +73,7 @@ function rewriteDocRequest(match, inputMap) {
         match[1],
         match[2],
         inputMap.index_mappings,
-        inputMap.regex_index_mappings
+        inputMap.regex_mappings
     );
 
     if (!targetIndex) return makeNoopRequest();
@@ -110,7 +110,7 @@ function rewriteBulk(match, context) {
             commandParameters._index,
             typeName,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
 
         // If no valid target index, skip.
@@ -230,7 +230,7 @@ function rewriteCreateIndex(match, inputMap) {
     const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
     const types = Object.keys(mappings);
     const sourceTypeToTargetIndicesMap = new Map(types
-        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_index_mappings)])
+        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_mappings)])
         .filter(([, targetIndex]) => targetIndex) // Keep only entries with valid target indices
     );
     return createIndexAsUnionedExcise(sourceTypeToTargetIndicesMap, inputMap);
@@ -242,12 +242,70 @@ const GET_DOC_REGEX      = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*
 const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
 const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^\/]*)/;
 
+function processMetadataRequest(document, context) {
+    if (!document.body || !document.body.mappings) {
+        return document;
+    }
+
+    const mappings = document.body.mappings;
+
+    if (mappings.properties && !mappings.properties?.properties) {
+        const typeName = "_doc";
+
+        // Convert source index to target index.
+        const targetIndex = convertSourceIndexToTarget(
+            document.name,
+            typeName,
+            context.index_mappings,
+            context.regex_mappings
+        );
+
+        if (targetIndex) {
+            document.name = targetIndex;
+            return [document];
+        }
+        // Index excluded, skip
+        return [];
+    }
+
+    // Handle types
+    const types = Object.keys(mappings);
+    const creationObjects = {};
+    for (let idx = 0; idx < types.length; idx++) {
+        const type = types[idx];
+        const targetIndex = convertSourceIndexToTarget(
+            document.name,
+            type,
+            context.index_mappings,
+            context.regex_mappings
+        );
+        
+        if(targetIndex) {
+            const existing = creationObjects[targetIndex];
+            if(existing) {
+                existing.body.mappings._doc.properties = {
+                    ...existing.body.mappings._doc.properties,
+                    ...document.body.mappings[type].properties
+                };
+            } else {
+                const deepClone = JSON.parse(JSON.stringify(document));
+                deepClone.name = targetIndex;
+                deepClone.body.mappings = {
+                    _doc: deepClone.body.mappings[type]
+                };
+                creationObjects[targetIndex] = deepClone;
+            }
+        }
+    }
+    return Object.values(creationObjects);
+}
+
 function routeHttpRequest(source_document, context) {
     const methodAndUri = `${source_document.method} ${source_document.URI}`;
     const documentAndContext = {
         request: source_document,
         index_mappings: context.index_mappings,
-        regex_index_mappings: context.regex_index_mappings,
+        regex_mappings: context.regex_mappings,
         properties: context.source_properties
     };
     return route(
@@ -273,7 +331,7 @@ function processBulkIndex(docBackfillPair, context) {
         sourceIndexName,
         typeName,
         context.index_mappings,
-        context.regex_index_mappings
+        context.regex_mappings
     );
 
     if (!targetIndex) return [];
@@ -296,7 +354,9 @@ function detectAndTransform(document, context) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
 
-    if ("method" in document && "URI" in document) {
+    if ("type" in document && "name" in document && "body" in document && document.type === "index") {
+        return processMetadataRequest(document, context);
+    } else if ("method" in document && "URI" in document) {
         return routeHttpRequest(document, context);
     } else if ("index" in document && "source" in document) {
         return processBulkIndex(document, context);
@@ -304,7 +364,6 @@ function detectAndTransform(document, context) {
         return document;
     }
 }
-
 
 function main(context) {
     console.log("Context: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));

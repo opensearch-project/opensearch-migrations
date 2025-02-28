@@ -4,9 +4,10 @@ import pytest
 
 from console_link.middleware.backfill import describe
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
+from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
 from console_link.models.factories import get_backfill
 from tests.utils import create_valid_cluster
+
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
@@ -33,6 +34,19 @@ def ecs_rfs_backfill() -> ECSRFSBackfill:
         }
     }
     return get_backfill(ecs_rfs_config, None, create_valid_cluster())
+
+
+@pytest.fixture
+def k8s_rfs_backfill() -> ECSRFSBackfill:
+    k8s_rfs_config = {
+        "reindex_from_snapshot": {
+            "k8s": {
+                "namespace": "ma",
+                "deployment_name": "ma-backfill-rfs"
+            }
+        }
+    }
+    return get_backfill(k8s_rfs_config, None, create_valid_cluster())
 
 
 @pytest.fixture
@@ -70,6 +84,7 @@ def test_backfill_describe_includes_salient_details_docker_rfs(docker_rfs_backfi
 
     assert "ecs" not in description
     assert "opensearch_ingestion" not in description
+    assert "k8s" not in description
 
 
 def test_backfill_describe_includes_salient_details_ecs_rfs(ecs_rfs_backfill: ECSRFSBackfill):
@@ -83,6 +98,21 @@ def test_backfill_describe_includes_salient_details_ecs_rfs(ecs_rfs_backfill: EC
 
     assert "docker" not in description
     assert "opensearch_ingestion" not in description
+    assert "k8s" not in description
+
+
+def test_backfill_describe_includes_salient_details_k8s_rfs(k8s_rfs_backfill: K8sRFSBackfill):
+    # I'm trying to be quite non-prescriptive about what should be included in describe
+    # but at a minimum, the backfill strategy and deployment type need to be present.
+    result = describe(k8s_rfs_backfill)
+    description = result[1]
+    assert "reindex_from_snapshot" in description
+    assert "k8s" in description
+    assert k8s_rfs_backfill.k8s_config.get("deployment_name") in description
+
+    assert "docker" not in description
+    assert "opensearch_ingestion" not in description
+    assert "ecs" not in description
 
 
 def test_backfill_describe_includes_salient_details_osi(osi_backfill: OpenSearchIngestionBackfill):
@@ -98,3 +128,4 @@ def test_backfill_describe_includes_salient_details_osi(osi_backfill: OpenSearch
     assert "docker" not in description
     assert "ecs" not in description
     assert "reindex_from_snapshot" not in description
+    assert "k8s" not in description

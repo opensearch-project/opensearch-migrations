@@ -1,5 +1,6 @@
 {{- define "generic.buildArgsFromEnvVarParameters" -}}
     {{- $argsName := .ArgsVarName | default "ARGS" -}}
+    {{- $argsFileName := .ArgsFileVarName | default "/shared/args.txt" -}}
     {{- $lines := list -}}
     {{- $lines = append $lines "set -e" -}}
 
@@ -32,11 +33,13 @@
               {{ fail (printf "Got key %s as a booleanFlag and it is also specified as positional" $key) }}
             {{- end -}}
             {{- $lines = append $lines (printf "  export %s=\"$%s %s\"" $argsName $argsName $formattedKeyFlagName) -}}
+            {{- $lines = append $lines (printf "  echo \"%s\" >> %s" $formattedKeyFlagName $argsFileName) -}}
             {{- $lines = append $lines (printf "fi") -}}
         {{- else -}}
             {{- if not (eq "" $formattedKeyFlagName) -}}
                 {{- $lines = append $lines (printf "if [ -n \"$%s\" ]; then" $envVarName) -}}
                 {{- $lines = append $lines (printf "  export %s=\"$%s %s $%s\"" $argsName $argsName $formattedKeyFlagName $envVarName) -}}
+                {{- $lines = append $lines (printf "  echo \"%s\n$%s\" >> %s" $formattedKeyFlagName $envVarName $argsFileName) -}}
                 {{- $lines = append $lines (printf "fi") -}}
             {{- end -}}
         {{- end -}}
@@ -46,6 +49,7 @@
         {{- $orderedArgs := "" }}
         {{- range $i := until (len $positionalMap) }}
             {{- $orderedArgs = printf "%s $%s" $orderedArgs (get $positionalMap (toString $i)) -}}
+            {{- $lines = append $lines (printf "printf \"$%s\n$(cat %s)\" > \"%s\"" (get $positionalMap (toString $i)) $argsFileName $argsFileName) -}}
         {{- end -}}
         {{- $lines = append $lines (printf "export %s=\"%s $%s\"" $argsName $orderedArgs $argsName) -}}
     {{- end }}

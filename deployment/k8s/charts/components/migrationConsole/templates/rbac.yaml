@@ -2,27 +2,33 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: configmap-watcher
+  name: migration-console-access-role
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: configmap-watcher
+  name: migration-console-access-role
 rules:
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "watch", "list"]
+  - apiGroups: [ "" ]
+    resources: ["secrets"]
+    verbs: ["list"]
+  - apiGroups: [ "" ]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log"]
+    verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: [ "apps" ]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: configmap-watcher
+  name: migration-console-access-role
 subjects:
   - kind: ServiceAccount
-    name: configmap-watcher
+    name: migration-console-access-role
 roleRef:
   kind: Role
-  name: configmap-watcher
+  name: migration-console-access-role
   apiGroup: rbac.authorization.k8s.io
