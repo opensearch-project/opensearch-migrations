@@ -142,7 +142,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             }
             index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         }
-        
+
         if (mappingsNode.isObject()) {
             var mappingsObjectNode = (ObjectNode) mappingsNode;
             var typeNode = mappingsNode.fields().next();

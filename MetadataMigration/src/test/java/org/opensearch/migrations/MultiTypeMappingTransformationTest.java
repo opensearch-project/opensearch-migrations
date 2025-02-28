@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -52,7 +53,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         }
 
         try (
-            final var upgradedSourceCluster = new SearchClusterContainer(ES_V6_8_23);
+            final var upgradedSourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
             final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
         ) {
             this.sourceCluster = upgradedSourceCluster;
@@ -135,7 +136,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             startClusters();
 
-            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster.getUrl());
+            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster);
 
             var originalIndexName = "test_index";
 
@@ -155,7 +156,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             dataFilterArgs.indexTemplateAllowlist = List.of("");
             dataFilterArgs.indexAllowlist = List.of(originalIndexName);
             arguments.dataFilterArgs = dataFilterArgs;
-            arguments.sourceVersion = upgradedSourceCluster.getContainerVersion().getVersion();
+            arguments.sourceVersion = indexCreatedCluster.getContainerVersion().getVersion();
 
             // Use union method for multi-type mappings
             arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
@@ -167,7 +168,10 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             log.info(result.asCliOutput());
             assertThat(result.getExitCode(), equalTo(0));
 
-            assertThat(result.getItems().getIndexes().size(), equalTo(1));
+            assertThat(
+                result.getItems().getIndexes().stream().map(i -> i.getName() + ", failure: " + i.getFailureType()).collect(Collectors.joining(",")),
+                result.getItems().getIndexes().size(),
+                equalTo(3));
             var actualCreationResult = result.getItems().getIndexes().get(0);
             assertThat(actualCreationResult.getException(), equalTo(null));
             assertThat(actualCreationResult.getName(), equalTo(originalIndexName));
