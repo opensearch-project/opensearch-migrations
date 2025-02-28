@@ -21,6 +21,8 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class LuceneReader {
 
+    private LuceneReader() {}
+
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
@@ -196,7 +198,7 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            if (sourceBytes == null || sourceBytes.length() == 0) {
+            if (sourceBytes == null || sourceBytes.isEmpty()) {
                 log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
                     .addArgument(luceneDocId)
                     .addArgument(getSegmentReaderDebugInfo)

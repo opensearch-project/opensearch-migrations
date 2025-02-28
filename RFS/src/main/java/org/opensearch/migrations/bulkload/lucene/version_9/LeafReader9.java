@@ -17,7 +17,7 @@ public class LeafReader9 implements LuceneLeafReader {
 
     public Document9 document(int luceneDocId) throws IOException {
         return new Document9(wrapped.storedFields().document(luceneDocId));
-    };
+    }
     
     public LiveDocs9 getLiveDocs() {
         return wrapped.getLiveDocs() != null ? new LiveDocs9(wrapped.getLiveDocs()) : null;
@@ -42,7 +42,7 @@ public class LeafReader9 implements LuceneLeafReader {
         return getSegmentReader()
             .map(SegmentReader::getSegmentName)
             .orElse(null);
-    };
+    }
 
     public String getSegmentInfoString() {
         return getSegmentReader()

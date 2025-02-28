@@ -26,7 +26,7 @@ public class DirectoryReader9 implements LuceneDirectoryReader {
             .stream()
             .map(LeafReaderContext9::new)
             .toList();
-    };
+    }
 
     public void close() throws IOException {
         wrapped.close();

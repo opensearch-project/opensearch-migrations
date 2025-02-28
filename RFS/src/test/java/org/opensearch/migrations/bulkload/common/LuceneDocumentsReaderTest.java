@@ -241,10 +241,12 @@ public class LuceneDocumentsReaderTest {
 
                 var field1 = mock(LuceneField.class);
                 when(field1.name()).thenReturn("_id");
-                when(field1.utf8ToStringValue()).thenReturn("doc" + invocation.getArgument(0));
+                when(field1.asUid()).thenReturn("doc" + invocation.getArgument(0));
                 var field2 = mock(LuceneField.class);
                 when(field2.name()).thenReturn("_source");
                 when(field2.utf8ToStringValue()).thenReturn("{\"field\":\"value\"}");
+                when(doc.getFields()).thenAnswer(inv -> List.of(field1, field2));
+
                 return doc;
             });
             leaves.add(context);

@@ -64,7 +64,7 @@ public interface LuceneIndexReader {
      */
     default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
-            () -> getReader(),
+            this::getReader,
             reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
                 try {
