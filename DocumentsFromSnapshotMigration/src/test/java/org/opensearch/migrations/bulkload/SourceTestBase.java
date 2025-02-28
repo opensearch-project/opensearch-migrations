@@ -59,8 +59,11 @@ import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
+import reactor.core.publisher.Flux;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Slf4j
@@ -182,8 +185,7 @@ public class SourceTestBase {
         Random clockJitter,
         DocumentMigrationTestContext testContext,
         Version sourceVersion,
-        Version targetVersion,
-        boolean compressionEnabled
+        Version targetVersion
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
@@ -195,8 +197,7 @@ public class SourceTestBase {
                     clockJitter,
                     testContext,
                     sourceVersion,
-                    targetVersion,
-                    compressionEnabled
+                    targetVersion
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -219,6 +220,7 @@ public class SourceTestBase {
     static class LeasePastError extends Error {
     }
 
+    @SuppressWarnings("unchecked")
     @SneakyThrows
     public static DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(
         SourceRepo sourceRepo,
@@ -228,8 +230,7 @@ public class SourceTestBase {
         Random clockJitter,
         DocumentMigrationTestContext context,
         Version sourceVersion,
-        Version targetVersion,
-        boolean compressionEnabled
+        Version targetVersion
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -259,7 +260,14 @@ public class SourceTestBase {
             log.info("nextClockShift=" + nextClockShift);
 
             var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
-            // TODO: reinstate terminatingDocumentFilter
+            when(readerFactory.getReader(any())).thenAnswer(inv -> {
+                var reader = (LuceneIndexReader)spy(inv.callRealMethod());
+                when(reader.readDocuments()).thenAnswer(inv2 -> {
+                    var flux = (Flux<RfsLuceneDocument>)inv2.callRealMethod();
+                    return flux.map(terminatingDocumentFilter);
+                });
+                return reader;
+            });
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
@@ -267,7 +275,7 @@ public class SourceTestBase {
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
             var connectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
-                    .compressionEnabled(compressionEnabled)
+                    .compressionEnabled(true)
                     .build()
                     .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
