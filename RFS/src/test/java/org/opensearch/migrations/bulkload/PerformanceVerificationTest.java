@@ -1,17 +1,19 @@
 package org.opensearch.migrations.bulkload;
 
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader9;
+import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
+import org.opensearch.migrations.bulkload.lucene.version_9.DirectoryReader9;
+import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
@@ -19,12 +21,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import shadow.lucene9.org.apache.lucene.document.Document;
 import shadow.lucene9.org.apache.lucene.document.StoredField;
 import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
-import shadow.lucene9.org.apache.lucene.index.IndexReader;
 import shadow.lucene9.org.apache.lucene.index.IndexWriter;
 import shadow.lucene9.org.apache.lucene.index.IndexWriterConfig;
 import shadow.lucene9.org.apache.lucene.store.ByteBuffersDirectory;
@@ -67,16 +69,10 @@ public class PerformanceVerificationTest {
 
         // Create a custom LuceneDocumentsReader for testing
         AtomicInteger ingestedDocuments = new AtomicInteger(0);
-        var reader = new LuceneDocumentsReader9(Paths.get("dummy"), true, "dummy_field") {
+        var reader = new IndexReader9(Paths.get("dummy"), true, "dummy_field") {
             @Override
-            protected DirectoryReader getReader() {
-                return realReader;
-            }
-
-            @Override
-            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase, Supplier<String> getSegmentReaderDebugInfo) {
-                ingestedDocuments.incrementAndGet();
-                return super.getDocument(reader, luceneDocId, isLive, segmentDocBase, () -> "TestReaderWrapper(" + getSegmentReaderDebugInfo.get() + ")");
+            public LuceneDirectoryReader getReader() {
+                return new DirectoryReader9(realReader, Path.of("in", "memory"));
             }
         };
 
@@ -108,9 +104,14 @@ public class PerformanceVerificationTest {
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);
         when(mockContext.createBulkRequest()).thenReturn(mock(IRfsContexts.IRequestContext.class));
 
+        Flux<RfsLuceneDocument> documentsStream = reader.readDocuments().map(d -> {
+            ingestedDocuments.incrementAndGet();
+            return d;
+        });
+
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", reader.readDocuments(), mockContext).then().block();
+            reindexer.reindex("test-index", documentsStream, mockContext).then().block();
         });
         reindexThread.start();
 

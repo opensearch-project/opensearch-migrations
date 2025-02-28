@@ -12,7 +12,7 @@ import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
@@ -33,7 +33,7 @@ public class DocumentsRunner {
     private final DocumentReindexer reindexer;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
-    private final LuceneDocumentsReader.Factory readerFactory;
+    private final LuceneIndexReader.Factory readerFactory;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
     private final WorkItemTimeProvider timeProvider;
