@@ -5,10 +5,11 @@ import time
 import argparse
 from datetime import datetime
 import urllib3
-import os
 from collections import deque
 import logging
 import json
+from console_link.environment import Environment
+from console_link.models.cluster import Cluster
 
 # Disable InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -59,9 +60,6 @@ def send_multi_type_request(session, index_name, type_name, payload, url_base, a
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--endpoint", help="Cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
-    parser.add_argument("--username", help="Cluster username.")
-    parser.add_argument("--password", help="Cluster password.")
     parser.add_argument("--enable_multi_type", action='store_true',
                         help="Flag to enable sending documents to a multi-type index.")
     parser.add_argument("--no-clear-output", action='store_true',
@@ -69,6 +67,9 @@ def parse_args():
                              "Helpful for piping to a file or other utility.")
     parser.add_argument("--requests-per-sec", type=float, default=10.0, help="Target requests per second to be sent.")
     parser.add_argument("--no-refresh", action='store_true', help="Flag to disable refresh after each request.")
+    parser.add_argument("--cluster", type=str, default="source", choices=["source", "target"],
+                        help="Specify 'source' or 'target' cluster.")
+    parser.add_argument("--config-file", default="/etc/migration_services.yaml", help="Path to config file")
     return parser.parse_args()
 
 
@@ -121,11 +122,17 @@ def calculate_sleep_time(request_timestamps, target_requests_per_sec):
     return max(0, sleep_time)
 
 
+def get_cluster_and_auth(config_file, cluster_type):
+    env = Environment(config_file)
+    cluster: Cluster = env.source_cluster if cluster_type == "source" else env.target_cluster
+    auth = cluster._generate_auth_object()
+    return cluster.endpoint, auth
+
+
 def main():
     args = parse_args()
-
-    url_base = args.endpoint or os.environ.get('SOURCE_DOMAIN_ENDPOINT', 'https://capture-proxy:9200')
-    auth = (args.username, args.password) if args.username and args.password else None
+    
+    url_base, auth = get_cluster_and_auth(args.config_file, args.cluster)
 
     session = requests.Session()
     keep_alive_headers = {'Connection': 'keep-alive'}
