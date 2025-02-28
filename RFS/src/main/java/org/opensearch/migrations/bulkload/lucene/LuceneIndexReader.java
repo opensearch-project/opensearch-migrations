@@ -5,10 +5,7 @@ import java.nio.file.Path;
 
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
-<<<<<<< HEAD
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
-=======
->>>>>>> origin/main
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
