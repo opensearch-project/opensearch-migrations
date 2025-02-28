@@ -135,7 +135,7 @@ public class LuceneDocumentsReaderTest {
             String expectedType = null;
             String actualType = doc.type;
 
-            String expectedSource = "{\"title\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
+            String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
             String actualSource = doc.source;
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
