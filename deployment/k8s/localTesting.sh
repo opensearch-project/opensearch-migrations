@@ -1,9 +1,9 @@
 minikube start
 eval $(minikube docker-env)
 
-helm dependency build charts/aggregates/mockCustomerClusters
-./linkSubChartsToDependencies.sh charts/aggregates/mockCustomerClusters
-helm install mcc -n mcc charts/aggregates/mockCustomerClusters --create-namespace
+helm dependency build charts/aggregates/testClusters
+./linkSubChartsToDependencies.sh charts/aggregates/testClusters
+helm install tc -n tc charts/aggregates/testClusters --create-namespace
 
 
 helm dependency build charts/aggregates/migrationAssistant
@@ -11,7 +11,7 @@ helm dependency build charts/aggregates/migrationAssistant
 helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
 
 # Test with
-# kc exec -n ma  -it migration-console-7c846764b8-zvf6w --  curl https://opensearch-cluster-master.mcc:9200/   -u admin:myStrongPassword123!  --insecure
+# kc exec -n ma  -it migration-console-7c846764b8-zvf6w --  curl https://opensearch-cluster-master.tc:9200/   -u admin:myStrongPassword123!  --insecure
 
 kubectl port-forward service/capture-proxy 9200:9200 &
 kubectl port-forward service/elasticsearch 19200:9200 &
