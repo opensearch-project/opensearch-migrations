@@ -105,19 +105,19 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = {REMOVE_AUTH_HEADER_VALUE_ARG },
+            names = {REMOVE_AUTH_HEADER_VALUE_ARG, "--removeAuthHeader" },
             arity = 0, description = "Remove the authorization header if present and do not replace it with anything.  "
                 + "(cannot be used with other auth arguments)")
         boolean removeAuthHeader;
         @Parameter(
             required = false,
-            names = { AUTH_HEADER_VALUE_ARG },
+            names = { AUTH_HEADER_VALUE_ARG, "--authHeaderValue" },
             arity = 1, description = "Static value to use for the \"authorization\" header of each request "
                 + "(cannot be used with other auth arguments)")
         String authHeaderValue;
         @Parameter(
-            required = false, names = {
-            AWS_AUTH_HEADER_USER_AND_SECRET_ARG },
+            required = false,
+            names = { AWS_AUTH_HEADER_USER_AND_SECRET_ARG, "--authHeaderUserAndSecret" },
             splitter = NoSplitter.class,
             arity = 2,
             description = "<USERNAME> <SECRET_ARN> pair to specify "
@@ -128,7 +128,7 @@ public class TrafficReplayer {
         List<String> awsAuthHeaderUserAndSecret;
         @Parameter(
             required = false,
-            names = { SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG },
+            names = { SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG, "--sigv4AuthHeaderServiceRegion" },
             arity = 1,
             description = "Use AWS SigV4 to sign each request with the specified service name and region.  "
                 + "(e.g. es,us-east-1)  "
@@ -144,7 +144,7 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--user-agent",
+            names = { "--user-agent", "--userAgent" },
             arity = 1,
             description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
             + "the existing user-agent field or if the field wasn't present, simply use this value")
@@ -158,33 +158,33 @@ public class TrafficReplayer {
         String inputFilename;
         @Parameter(
             required = false,
-            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME },
+            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds" },
             arity = 1,
             description = "assume that connections were terminated after this many "
                 + "seconds of inactivity observed in the captured stream")
         int observedPacketConnectionTimeout = 70;
         @Parameter(
             required = false,
-            names = { "--speedup-factor" },
+            names = { "--speedup-factor", "--speedupFactor" },
             arity = 1, description = "Accelerate the replayed communications by this factor.  "
                 + "This means that between each interaction will be replayed at this rate faster "
                 + "than the original observations, provided that the replayer and target are able to keep up.")
         double speedupFactor = 1.0;
         @Parameter(
             required = false,
-            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME },
+            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow" },
             arity = 1,
             description = "Number of seconds of data that will be buffered.")
         int lookaheadTimeSeconds = 300;
         @Parameter(
             required = false,
-            names = { "--max-concurrent-requests" },
+            names = { "--max-concurrent-requests", "--maxConcurrentRequests" },
             arity = 1,
             description = "Maximum number of requests at a time that can be outstanding")
         int maxConcurrentRequests = 1024;
         @Parameter(
             required = false,
-            names = { "--num-client-threads" },
+            names = { "--num-client-threads", "--numClientThreads" },
             arity = 1,
             description = "Number of threads to use to send requests from.")
         int numClientThreads = 0;
@@ -192,46 +192,46 @@ public class TrafficReplayer {
         // https://github.com/opensearch-project/opensearch-java/blob/main/java-client/src/main/java/org/opensearch/client/transport/httpclient5/ApacheHttpClient5TransportBuilder.java#L49-L54
         @Parameter(
             required = false,
-            names = { "--target-response-timeout" },
+            names = { "--target-response-timeout", "--targetResponseTimeout" },
             arity = 1,
             description = "Seconds to wait before timing out a replayed request to the target.")
         int targetServerResponseTimeoutSeconds = 30;
 
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-brokers" },
+            names = { "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
             arity = 1,
             description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers " +
                 "to bootstrap with i.e. 'kafka-1:9092,kafka-2:9092'")
         String kafkaTrafficBrokers;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-topic" },
+            names = { "--kafka-traffic-topic", "--kafkaTrafficTopic" },
             arity = 1,
             description = "Topic name used to pull messages from Kafka")
         String kafkaTrafficTopic;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-group-id" },
+            names = { "--kafka-traffic-group-id", "--kafkaTrafficGroupId" },
             arity = 1,
             description = "Consumer group id that is used when pulling messages from Kafka")
         String kafkaTrafficGroupId;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-enable-msk-auth" },
+            names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth" },
             arity = 0,
             description = "Enables SASL properties required for connecting to MSK with IAM auth")
         boolean kafkaTrafficEnableMSKAuth;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-property-file" },
+            names = { "--kafka-traffic-property-file", "--kafkaTrafficPropertyFile" },
             arity = 1,
             description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
 
         @Parameter(
             required = false,
-            names = { "--otelCollectorEndpoint" },
+            names = { "--otelCollectorEndpoint", "--otel-collector-endpoint" },
             arity = 1,
             description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
@@ -242,13 +242,15 @@ public class TrafficReplayer {
     public static class RequestTransformationParams implements TransformerParams {
         @Override
         public String getTransformerConfigParameterArgPrefix() {
-            return REQUEST_TRANSFORMER_ARG_PREFIX;
+            return REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX;
         }
-        private final static String REQUEST_TRANSFORMER_ARG_PREFIX = "";
+        private static final String REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX = "";
+        private static final String REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX = "";
 
         @Parameter(
             required = false,
-            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config-encoded",
+            names = { "--" + REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX + "transformer-config-encoded",
+                "--" + REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX + "transformerConfigEncoded" },
             arity = 1,
             description = "Configuration of message transformers.  The same contents as --transformer-config but " +
                 "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
@@ -256,7 +258,8 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config",
+            names = {"--" + REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX + "transformer-config",
+                "--" + REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX + "transformerConfig",},
             arity = 1,
             description = "Configuration of message transformers.  Either as a string that identifies the "
                 + "transformer that should be run (with default settings) or as json to specify options "
@@ -267,7 +270,8 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config-file",
+            names = {"--" + REQUEST_SNAKE_TRANSFORMER_ARG_PREFIX + "transformer-config-file",
+                "--" + REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX + "transformerConfigFile"},
             arity = 1,
             description = "Path to the JSON configuration file of message transformers.")
         private String transformerConfigFile;
@@ -276,13 +280,15 @@ public class TrafficReplayer {
     @Getter
     public static class TupleTransformationParams implements TransformerParams {
         public String getTransformerConfigParameterArgPrefix() {
-            return TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX;
+            return TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX;
         }
-        final static String TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX = "tuple-";
+        static final String TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX = "tuple-";
+        static final String TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX = "tuple";
 
         @Parameter(
             required = false,
-            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfigBase64" },
             arity = 1,
             description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
                 "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
@@ -290,7 +296,8 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
+            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config",
+                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfig" },
             arity = 1,
             description = "Configuration of tuple transformers.  Either as a string that identifies the "
                 + "transformer that should be run (with default settings) or as json to specify options "
@@ -301,7 +308,8 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
+            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config-file",
+                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfigFile" } ,
             arity = 1,
             description = "Path to the JSON configuration file of tuple transformers.")
         private String transformerConfigFile;
@@ -397,11 +405,12 @@ public class TrafficReplayer {
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
 
+            var transformationLoader = new TransformationLoader();
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
                 authTransformer,
-                new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
+                () -> transformationLoader.getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,

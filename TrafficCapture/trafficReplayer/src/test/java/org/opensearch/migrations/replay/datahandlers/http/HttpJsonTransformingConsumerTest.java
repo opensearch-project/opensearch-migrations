@@ -205,16 +205,59 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @Tag("longTest")
+    public void testRemoveCompressionWorks() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        String redactBody = "{ " +
+                "    \"operation\": \"remove\", " +
+                "    \"spec\": { " +
+                "       \"headers\": { " +
+                "         \"cOnTeNt-Encoding\": \"\"" +
+                "       } " +
+                "   } " +
+                "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
+
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+                jsonJoltTransformer,
+                null,
+                testPacketCapture,
+                rootContext.getTestConnectionRequestContext(0)
+        );
+        byte[] testBytes;
+        try (
+                var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                        "/requests/raw/post_json_gzip.gz"
+                )
+        ) {
+            assert sampleStream != null;
+            testBytes = sampleStream.readAllBytes();
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+                .replace("Content-Encoding: gzip\r\n", "")
+                .replaceAll("Content-Length: .*", "Content-Length: 45")
+                .replaceAll("(Content-Length: .*[\r\n]*)[\\s\\S]*", "$1"+
+                        "{\"name\": \"John\", \"age\": 30, \"city\": \"Austin\"}");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
+    }
+
+    @Test
     public void testPartialBodyIsPassedThrough() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
-            public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
-                var payload = (Map) incomingJson.get("payload");
+            public Object transformJson(Object incomingJson) {
+                var payload = (Map) ((Map) incomingJson).get("payload");
                 Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY));
                 Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
-                ((Map) incomingJson.get("headers"))
+                ((Map) ((Map) incomingJson).get("headers"))
                     .put("extraKey", "extraValue");
                 // just walk everything - that's enough to touch the payload and throw
                 walkMaps(incomingJson);
@@ -261,11 +304,11 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 19, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
-            var payload = (Map) incomingJson.get("payload");
+            var payload = (Map) ((Map) incomingJson).get("payload");
             Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
             Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
             var list = (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
-            ((Map) incomingJson.get("headers"))
+            ((Map) ((Map) incomingJson).get("headers"))
                 .put("listSize", ""+list.size());
             return incomingJson;
         });
@@ -289,13 +332,13 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 19, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
-            var payload = (Map) incomingJson.get("payload");
+            var payload = (Map) ((Map) incomingJson).get("payload");
             Assertions.assertFalse(payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
             Assertions.assertFalse(payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
             Assertions.assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
             var list = (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
             var leftoverString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
-            var headers = (Map<String,Object>) incomingJson.get("headers");
+            var headers = (Map<String,Object>) ((Map<String,Object>) incomingJson).get("headers");
             headers.put("listSize", "" + list.size());
             headers.put("leftover", "" + leftoverString.getBytes(StandardCharsets.UTF_8).length);
             return incomingJson;

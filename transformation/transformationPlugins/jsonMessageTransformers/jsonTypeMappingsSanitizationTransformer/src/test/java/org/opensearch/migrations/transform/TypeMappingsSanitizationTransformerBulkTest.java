@@ -1,15 +1,17 @@
 package org.opensearch.migrations.transform;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -30,9 +32,26 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "type2", "indexb"),
             "indexc", Map.of(
                 "type2", "indexc"));
-        var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-\\1-\\2"));
-        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
+        var regexMappings = List.of(
+                Map.of(
+                        "sourceIndexPattern","time-(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "time-$1-$2"
+                ),
+                Map.of(
+                        "sourceIndexPattern","(.*)",
+                        "sourceTypePattern", "_doc",
+                        "targetIndexPattern", "$1"
+                )
+            );
+        var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(7, 10));
+        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexMappings, sourceProperties, null);
+    }
+
+    @AfterAll
+    static void tearDown() throws Exception {
+        indexTypeMappingRewriter.close();
+        indexTypeMappingRewriter = null;
     }
 
     @Test
@@ -111,15 +130,27 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "}";
 
 
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
-            try {
-                return OBJECT_MAPPER.writeValueAsString(resultObj);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
+        long totalNanos = 0;
+        final int totalRuns = 10000;
+        int totalCounted = 0;
+        final double warmupPercent = .5;
+        for (int i=0; i<(int)(totalRuns*(1.0+warmupPercent)); ++i) {
+            var input = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
+            final var start = System.nanoTime();
+            var resultObj = indexTypeMappingRewriter.transformJson(input);
+            if (i >= totalRuns*warmupPercent) {
+                totalNanos += System.nanoTime() - start;
+                totalCounted++;
             }
-        }).log();
-        Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+        }
+        log.atInfo().setMessage("Total time={} over {} runs. Avg: {}, Uncompressed Throughput: {} MBps")
+            .addArgument(Duration.ofNanos(totalNanos))
+            .addArgument(totalCounted)
+            .addArgument(Duration.ofNanos(totalNanos).dividedBy(totalRuns))
+            .addArgument(testString.length() / (Duration.ofNanos(totalNanos).dividedBy(totalRuns).toNanos() / 1000d / 1000d / 1000d) / 1024d / 1024d)
+
+            .log();
     }
 
 }

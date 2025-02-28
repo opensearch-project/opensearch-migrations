@@ -2,7 +2,7 @@ package org.opensearch.migrations;
 
 import java.text.NumberFormat;
 
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
@@ -35,7 +35,8 @@ public class DataGenerator {
 
     public void run(DataGeneratorArgs arguments) {
         var connectionContext = arguments.targetArgs.toConnectionContext();
-        var client = new OpenSearchClient(connectionContext);
+        var clientFactory = new OpenSearchClientFactory(connectionContext);
+        var client = clientFactory.determineVersionAndCreate();
 
         var startTimeMillis = System.currentTimeMillis();
         var workloadGenerator = new WorkloadGenerator(client);

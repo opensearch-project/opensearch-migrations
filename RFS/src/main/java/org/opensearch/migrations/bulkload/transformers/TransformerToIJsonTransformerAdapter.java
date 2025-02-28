@@ -24,7 +24,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
+/**
+ * Adapts an {@link IJsonTransformer} to a {@link Transformer}.
+ */
 @Slf4j
 public class TransformerToIJsonTransformerAdapter implements Transformer {
     public static final String OUTPUT_TRANSFORMATION_JSON_LOGGER = "OutputTransformationJsonLogger";
@@ -41,7 +43,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
         this(transformer, LoggerFactory.getLogger(OUTPUT_TRANSFORMATION_JSON_LOGGER));
     }
 
-    private void logTransformation(Map<String, Object> before, Map<String, Object> after) {
+    private void logTransformation(Map<String, Object> before, Object after) {
         if (transformerLogger.isInfoEnabled()) {
             try {
                 var transformationTuple = toTransformationMap(before, after);
@@ -55,7 +57,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
         }
     }
 
-    private Map<String, Object> toTransformationMap(Map<String, Object> before, Map<String, Object> after) {
+    private Map<String, Object> toTransformationMap(Map<String, Object> before, Object after) {
         var transformationMap = new LinkedHashMap<String, Object>();
         transformationMap.put("before", before);
         transformationMap.put("after", after);
@@ -69,17 +71,26 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
     }
 
     @SneakyThrows
-    private static String printMap(Map<String, Object> map) {
+    private static String printMap(Object map) {
         return MAPPER.writeValueAsString(map);
     }
 
     @SuppressWarnings("unchecked")
-    private MigrationItem transformMigrationItem(MigrationItem migrationItem) {
+    private List<MigrationItem> transformMigrationItem(MigrationItem migrationItem) {
         // Keep untouched original for logging
         final Map<String, Object> originalMap = MAPPER.convertValue(migrationItem, Map.class);
-        var transformedMigrationItem = transformer.transformJson(MAPPER.convertValue(migrationItem, Map.class));
-        logTransformation(originalMap, transformedMigrationItem);
-        return MAPPER.convertValue(transformedMigrationItem, MigrationItem.class);
+        Object transformedResult = transformer.transformJson(MAPPER.convertValue(migrationItem, Map.class));
+        logTransformation(originalMap, transformedResult);
+
+        List<MigrationItem> transformedItems = new ArrayList<>();
+        if (transformedResult instanceof List) {
+            for (Object item : (List<Object>) transformedResult) {
+                transformedItems.add(MAPPER.convertValue(item, MigrationItem.class));
+            }
+        } else {
+            transformedItems.add(MAPPER.convertValue(transformedResult, MigrationItem.class));
+        }
+        return transformedItems;
     }
 
     void updateTemplates(Collection<? extends MigrationItem> transformedItems, ObjectNode itemsRoot) {
@@ -98,11 +109,8 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
 
     @Override
     public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData) {
-        var inputJson = objectNodeToMap(globalData.toObjectNode());
-        log.atInfo().setMessage("BeforeJsonGlobal: {}").addArgument(() -> printMap(inputJson)).log();
-        var afterJson = transformer.transformJson(inputJson);
-        log.atInfo().setMessage("AfterJsonGlobal: {}").addArgument(() -> printMap(afterJson)).log();
-
+        log.atInfo().setMessage("BeforeJsonGlobal: {}")
+            .addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
 
         final List<LegacyTemplate> legacyTemplates = new ArrayList<>();
         globalData.getTemplates().fields().forEachRemaining(
@@ -122,7 +130,8 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
                 indexTemplates.stream()),
                 componentTemplates.stream()
                 )
-                .map(this::transformMigrationItem).collect(Collectors.toList());
+                .flatMap(item -> transformMigrationItem(item).stream())
+                .collect(Collectors.toList());
 
         var transformedLegacy = transformedTemplates.stream()
                 .filter(LegacyTemplate.class::isInstance)
@@ -139,24 +148,30 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
                 .map(ComponentTemplate.class::cast)
                 .collect(Collectors.toList());
 
-        assert transformedLegacy.size() + transformedIndex.size() + transformedComponent.size() == transformedTemplates.size();
-
         updateTemplates(transformedLegacy, globalData.getTemplates());
         updateTemplates(transformedIndex, globalData.getIndexTemplates());
         updateTemplates(transformedComponent, globalData.getComponentTemplates());
 
-        log.atInfo().setMessage("GlobalOutput: {}").addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
+        log.atInfo().setMessage("AfterJsonGlobal: {}")
+            .addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
         return globalData;
     }
 
     @SuppressWarnings("unchecked")
     @Override
-    public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
+    public List<IndexMetadata> transformIndexMetadata(IndexMetadata indexData) {
         final Map<String, Object> originalInput = MAPPER.convertValue(indexData, Map.class);
         final Map<String, Object> inputJson = MAPPER.convertValue(indexData, Map.class);
-        var afterJson = transformer.transformJson(inputJson);
+        Object afterJson = transformer.transformJson(inputJson);
         logTransformation(originalInput, afterJson);
-        return MAPPER.convertValue(inputJson, IndexMetadata.class);
+        if (afterJson instanceof List) {
+            return ((List<Map<String, Object>>) afterJson).stream()
+                    .map(json -> MAPPER.convertValue(json, IndexMetadata.class))
+                    .collect(Collectors.toList());
+        } else if (afterJson instanceof Map) {
+            return List.of(MAPPER.convertValue(afterJson, IndexMetadata.class));
+        } else {
+            throw new IllegalArgumentException("Unexpected transformation result type: " + afterJson.getClass());
+        }
     }
-
 }

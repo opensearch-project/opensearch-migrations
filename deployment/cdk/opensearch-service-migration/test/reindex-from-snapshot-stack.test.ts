@@ -382,16 +382,159 @@ describe('ReindexFromSnapshotStack Tests', () => {
         VolumeConfigurations: volumesCapture,
       });
       const volumes = volumesCapture.asArray();
-        expect(volumes).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              ManagedEBSVolume: expect.objectContaining({
-                Encrypted: true,
-                SizeInGiB: 218,
-                Throughput: 450,
-              }),
+      expect(volumes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ManagedEBSVolume: expect.objectContaining({
+              Encrypted: true,
+              SizeInGiB: 194,
+              Throughput: 450,
             }),
-          ])
-        );
+          }),
+        ])
+      );
+      const volumeCapture = new Capture();
+      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+        Volumes: volumeCapture,
+      });
+      // Ensure there are 2 volumes, ebs and ephemeral
+      expect(volumeCapture.asArray().length).toBe(2);
     });
+
+  test('ReindexFromSnapshotStack configures ephemeral storage in GovCloud', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      migrationAssistanceEnabled: true,
+    };
+    const stacks = createStackComposer(contextOptions, undefined, 'us-gov-west-1');
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    expect(reindexStack.region).toEqual("us-gov-west-1");
+    const template = Template.fromStack(reindexStack);
+
+    const taskDefinitionCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: taskDefinitionCapture,
+    });
+
+    const containerDefinitions = taskDefinitionCapture.asArray();
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+
+    const ephemeralStorageCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      EphemeralStorage: ephemeralStorageCapture,
+    });
+
+    const ephemeralStorage = ephemeralStorageCapture.asObject();
+    expect(ephemeralStorage.SizeInGiB).toBe(199);
+
+    const volumeCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      Volumes: volumeCapture,
+    });
+    // Ensure the only volume is the ephemeral storage
+    expect(volumeCapture.asArray().length).toBe(1);
+  });
+
+  test('ReindexFromSnapshotStack uses ceiling of maxShardSizeBytes calculation', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      targetCluster: {
+        "endpoint": "https://target-cluster",
+        "auth": {"type": "sigv4", "region": "eu-west-1", "serviceSigningName": "aoss"}
+      },
+      migrationAssistanceEnabled: true,
+      reindexFromSnapshotMaxShardSizeGiB: 1.000001
+    };
+
+
+    const stacks = createStackComposer(contextOptions);
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    const template = Template.fromStack(reindexStack);
+
+    const taskDefinitionCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: taskDefinitionCapture,
+    });
+
+    const containerDefinitions = taskDefinitionCapture.asArray();
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
+      {
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir \"/storage/lucene\" --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+              " --max-shard-size-bytes 1181117188 --max-connections 10 --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
+            ],
+          ],
+        }
+      },
+      {
+        Name: 'RFS_TARGET_USER',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD_ARN',
+        Value: ''
+      },
+      {
+        Name: 'SHARED_LOGS_DIR_PATH',
+        Value: '/shared-logs-output/reindex-from-snapshot-default'
+      }
+    ]);
+  });
+
+
+  test('ReindexFromSnapshotStack throws error for large shard size in GovCloud', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      reindexFromSnapshotMaxShardSizeGiB: 81, // Exceeding the limit
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      migrationAssistanceEnabled: true,
+    };
+
+    expect(() => createStackComposer(contextOptions, undefined, 'us-gov-west-1')).toThrowError(
+      /Your max shard size of 81 GiB is too large to migrate in GovCloud, the max supported is 80 GiB/
+    );
+  });
 });

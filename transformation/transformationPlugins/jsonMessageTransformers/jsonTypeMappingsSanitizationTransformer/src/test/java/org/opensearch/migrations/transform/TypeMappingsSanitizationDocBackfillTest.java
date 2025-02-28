@@ -1,8 +1,11 @@
 package org.opensearch.migrations.transform;
 
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -26,16 +29,89 @@ public class TypeMappingsSanitizationDocBackfillTest {
             "  \"source\": { \"field1\": \"value1\" }\n" +
             "}";
 
+        try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null,
+            new SourceProperties("ES", new SourceProperties.Version(7, 10)), null)) {
+            var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
+            var resultObj = indexTypeMappingRewriter.transformJson(docObj);
+            printObject(resultObj);
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+        }
+    }
 
-        var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null);
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+    @Test
+    public void testWithTypeMapping() throws Exception {
+        var testString = "{\n" +
+            "  \"index\": { \"_index\": \"test_e2e_0001_1234\", \"_type\": \"doc\", \"_id\": \"1\" },\n" +
+            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "}";
+
+        var expectedString = "{\n" +
+            "  \"index\": { \"_index\": \"test_e2e_0001_1234_transformed\", \"_id\": \"1\" },\n" +
+            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "}";
+
+        try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
+            List.of(
+                    Map.of(
+                            "sourceIndexPattern","(test_e2e_0001_.*)",
+                            "sourceTypePattern", ".*",
+                            "targetIndexPattern", "$1_transformed"
+                    ),
+                    Map.of(
+                            "sourceIndexPattern","(.*)",
+                            "sourceTypePattern", "(.*)",
+                            "targetIndexPattern", "$1"
+                    )
+            ),
+            new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
+            var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
+            var resultObj = indexTypeMappingRewriter.transformJson(docObj);
+            printObject(resultObj);
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+        }
+    }
+
+    @Test
+    public void testWithoutTypeMapping_hasCorrectDefault() throws Exception {
+        var testString = "{\n" +
+            "  \"index\": { \"_index\": \"test_e2e_0001_1234\", \"_id\": \"1\" },\n" +
+            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "}";
+
+        var expectedString = "{\n" +
+            "  \"index\": { \"_index\": \"test_e2e_0001_1234_transformed\", \"_id\": \"1\" },\n" +
+            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "}";
+
+        try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
+            List.of(
+                    Map.of(
+                            "sourceIndexPattern","(test_e2e_0001_.*)",
+                            "sourceTypePattern", ".*",
+                            "targetIndexPattern", "$1_transformed"
+                    ),
+                    Map.of(
+                            "sourceIndexPattern","(.*)",
+                            "sourceTypePattern", "(.*)",
+                            "targetIndexPattern", "$1"
+                    )
+            ),
+            new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
+            var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
+            var resultObj = indexTypeMappingRewriter.transformJson(docObj);
+            printObject(resultObj);
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+        }
+    }
+
+
+    private static void printObject(Object object) {
         log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
             try {
-                return OBJECT_MAPPER.writeValueAsString(resultObj);
+                return OBJECT_MAPPER.writeValueAsString(object);
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);
             }
         }).log();
-        Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
     }
 }

@@ -2,8 +2,6 @@
 
 set -eou pipefail
 
-source /.venv/bin/activate
-
 # Check if the environment variable MIGRATION_SERVICES_YAML_PARAMETER is set
 if [ -z "${MIGRATION_SERVICES_YAML_PARAMETER+x}" ]; then
   echo "Environment variable MIGRATION_SERVICES_YAML_PARAMETER is not set. Exiting successfully and "
@@ -21,7 +19,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Define the output file path
-OUTPUT_FILE="/etc/migration_services.yaml"
+OUTPUT_FILE="/config/migration_services.yaml"
 
 # Write the parameter value to the file
 echo "$PARAMETER_VALUE" > "$OUTPUT_FILE"
@@ -32,7 +30,3 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 echo "Parameter value successfully written to $OUTPUT_FILE"
-
-# Generate bash completion script
-console completion bash > /usr/share/bash-completion/completions/console
-echo "Bash completion for console command has been set up and enabled."

@@ -4,7 +4,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import org.opensearch.migrations.transformation.CanApplyResult;
-import org.opensearch.migrations.transformation.CanApplyResult.Unsupported;
 import org.opensearch.migrations.transformation.entity.Index;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +15,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mockito;
 
-import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
@@ -242,14 +240,11 @@ public class IndexMappingTypeRemovalTest {
 
         var behavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(resolutionBehavior);
 
-        // Action
-        var wasChanged = applyTransformation(behavior, indexJson);
-        var canApply = canApply(behavior, originalJson);
-        assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo(expectedReason));
+        // Action & Assertion
+        var exception = assertThrows(IllegalArgumentException.class, () -> canApply(behavior, originalJson));
+        assertThat(exception.getMessage(), equalTo(expectedReason));
 
         // Verification
-        assertThat(wasChanged, equalTo(false));
         assertThat(originalJson.toPrettyString(), equalTo(indexJson.toPrettyString()));
     }
 
@@ -265,14 +260,11 @@ public class IndexMappingTypeRemovalTest {
         var indexJson = originalJson.deepCopy();
         var behavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(resolutionBehavior);
 
-        // Action
-        var wasChanged = applyTransformation(behavior, indexJson);
-        var canApply = canApply(behavior, originalJson);
-        assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo(expectedReason));
+        // Action & Assertion
+        var exception = assertThrows(IllegalArgumentException.class, () -> canApply(behavior, originalJson));
+        assertThat(exception.getMessage(), equalTo(expectedReason));
 
         // Verification
-        assertThat(wasChanged, equalTo(false));
         assertThat(originalJson.toPrettyString(), equalTo(indexJson.toPrettyString()));
     }
 

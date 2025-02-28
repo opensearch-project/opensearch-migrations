@@ -1,7 +1,37 @@
+import groovy.json.JsonOutput
 
 def call(Map config = [:]) {
     def sourceContextId = 'source-single-node-ec2'
     def migrationContextId = 'full-migration'
+    def time = new Date().getTime()
+    def testUniqueId = "integ_full_${time}_${currentBuild.number}"
+
+    def rfsJsonTransformations = [
+        [
+                TypeMappingSanitizationTransformerProvider: [
+                        regexMappings: [
+                                [
+                                        "sourceIndexPattern": "(test_e2e_0001_.*)",
+                                        "sourceTypePattern": ".*",
+                                        "targetIndexPattern": "\$1_transformed"
+                                ],
+                                [
+                                        "sourceIndexPattern": "(.*)",
+                                        "sourceTypePattern": "(.*)",
+                                        "targetIndexPattern": "\$1"
+                                ]
+                        ],
+                        sourceProperties: [
+                                version: [
+                                        major: 6,
+                                        minor: 8
+                                ]
+                        ]
+                ]
+        ],
+    ]
+    def rfsJsonString = JsonOutput.toJson(rfsJsonTransformations)
+    def rfsTransformersArg = rfsJsonString.bytes.encodeBase64().toString()
     def source_cdk_context = """
         {
           "source-single-node-ec2": {
@@ -40,6 +70,7 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": true,
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
+            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $rfsTransformersArg",
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
@@ -69,6 +100,7 @@ def call(Map config = [:]) {
             defaultStageId: 'full-es68',
             skipCaptureProxyOnNodeSetup: true,
             jobName: 'full-es68source-e2e-test',
+            testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202'
     )
 }

@@ -201,7 +201,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             useTls,
             withServerReadTimeout,
             RESPONSE_TIMEOUT_FOR_HUNG_TEST,
-            RESPONSE_TIMEOUT_FOR_HUNG_TEST.plus(Duration.ofMillis(250))
+            RESPONSE_TIMEOUT_FOR_HUNG_TEST.plus(Duration.ofMillis(1000))
         );
     }
 
@@ -298,7 +298,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
+                () -> new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
             var timeShifter = new TimeShifter();
@@ -409,7 +409,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
+                () -> new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 
@@ -467,7 +467,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
+                () -> new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 

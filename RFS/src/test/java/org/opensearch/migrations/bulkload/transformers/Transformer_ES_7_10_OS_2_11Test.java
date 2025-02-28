@@ -51,19 +51,19 @@ public class Transformer_ES_7_10_OS_2_11Test {
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
 
         IndexMetadata indexMetadataBwc = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "bwc_index_1");
-        IndexMetadata transformedIndexBwc = transformer.transformIndexMetadata(indexMetadataBwc);
+        IndexMetadata transformedIndexBwc = transformer.transformIndexMetadata(indexMetadataBwc).get(0);
         IndexMetadataData_OS_2_11 finalIndexBwc =new IndexMetadataData_OS_2_11(transformedIndexBwc.getRawJson(), transformedIndexBwc.getId(), transformedIndexBwc.getName());
 
         IndexMetadata indexMetadataFwc = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "fwc_index_1");
-        IndexMetadata transformedIndexFwc = transformer.transformIndexMetadata(indexMetadataFwc);
+        IndexMetadata transformedIndexFwc = transformer.transformIndexMetadata(indexMetadataFwc).get(0);
         IndexMetadataData_OS_2_11 finalIndexFwc =new IndexMetadataData_OS_2_11(transformedIndexFwc.getRawJson(), transformedIndexFwc.getId(), transformedIndexFwc.getName());
 
         IndexMetadata indexMetadataNoMappingNoDocs = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "no_mappings_no_docs");
-        IndexMetadata transformedIndexNoMappingNoDocs = transformer.transformIndexMetadata(indexMetadataNoMappingNoDocs);
+        IndexMetadata transformedIndexNoMappingNoDocs = transformer.transformIndexMetadata(indexMetadataNoMappingNoDocs).get(0);
         IndexMetadataData_OS_2_11 finalIndexNoMappingNoDocs = new IndexMetadataData_OS_2_11(transformedIndexNoMappingNoDocs.getRawJson(), transformedIndexNoMappingNoDocs.getId(), transformedIndexNoMappingNoDocs.getName());
 
         IndexMetadata indexMetadataEmptyMappingNoDocs = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "empty_mappings_no_docs");
-        IndexMetadata transformedIndexEmptyMappingNoDocs = transformer.transformIndexMetadata(indexMetadataEmptyMappingNoDocs);
+        IndexMetadata transformedIndexEmptyMappingNoDocs = transformer.transformIndexMetadata(indexMetadataEmptyMappingNoDocs).get(0);
         IndexMetadataData_OS_2_11 finalIndexEmptyMappingNoDocs = new IndexMetadataData_OS_2_11(transformedIndexEmptyMappingNoDocs.getRawJson(), transformedIndexEmptyMappingNoDocs.getId(), transformedIndexEmptyMappingNoDocs.getName());
 
         String expectedIndexBwc = "{\"version\":3,\"mapping_version\":1,\"settings_version\":1,\"aliases_version\":1,\"routing_num_shards\":1024,\"state\":\"open\",\"settings\":{\"creation_date\":\"1727459371883\",\"number_of_replicas\":1,\"number_of_shards\":\"1\",\"provided_name\":\"bwc_index_1\",\"uuid\":\"tBmFXxGhTeiDlznQiKfNCA\",\"version\":{\"created\":\"7100299\"}},\"mappings\":{\"properties\":{\"content\":{\"type\":\"text\"},\"title\":{\"type\":\"text\"}}},\"aliases\":{\"bwc_alias\":{}},\"primary_terms\":[1],\"in_sync_allocations\":{\"0\":[\"jSYEePXYTka3EJ0vvdPGJA\"]},\"rollover_info\":{},\"system\":false}";

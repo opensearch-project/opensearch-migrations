@@ -44,8 +44,8 @@ public class ScopedWorkCoordinator {
             @Override
             public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException,
                 InterruptedException {
-                var workItemId = workItem.getWorkItemId();
-                leaseExpireTrigger.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);
+                var workItemId = workItem.getWorkItem().toString();
+                leaseExpireTrigger.registerExpiration(workItemId, workItem.leaseExpirationTime);
                 var rval = visitor.onAcquiredWork(workItem);
                 workCoordinator.completeWorkItem(workItemId, contextSupplier);
                 leaseExpireTrigger.markWorkAsCompleted(workItemId);

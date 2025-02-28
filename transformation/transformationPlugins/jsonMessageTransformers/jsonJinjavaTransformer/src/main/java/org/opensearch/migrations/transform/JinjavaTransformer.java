@@ -1,11 +1,10 @@
 package org.opensearch.migrations.transform;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.transform.jinjava.DynamicMacroFunction;
 import org.opensearch.migrations.transform.jinjava.JavaRegexCaptureFilter;
@@ -30,16 +29,16 @@ public class JinjavaTransformer implements IJsonTransformer {
     public static final String REGEX_REPLACEMENT_CONVERSION_PATTERNS = "regex_replacement_conversion_patterns";
 
     protected final Jinjava jinjava;
-    protected final Function<Map<String, Object>, Map<String, Object>> createContextWithSourceFunction;
+    protected final Function<Object, Map<String, Object>> createContextWithSourceFunction;
     private final String templateStr;
 
     public JinjavaTransformer(String templateString,
-                              UnaryOperator<Map<String, Object>> contextProviderFromSource) {
+                              Function<Object, Map<String, Object>> contextProviderFromSource) {
         this(templateString, contextProviderFromSource, new JinjavaConfig());
     }
 
     public JinjavaTransformer(String templateString,
-                              UnaryOperator<Map<String, Object>> contextProviderFromSource,
+                              Function<Object, Map<String, Object>> contextProviderFromSource,
                               @NonNull JinjavaConfig jinjavaConfig) {
         this(templateString,
             contextProviderFromSource,
@@ -48,7 +47,7 @@ public class JinjavaTransformer implements IJsonTransformer {
     }
 
     public JinjavaTransformer(String templateString,
-                              UnaryOperator<Map<String, Object>> createContextWithSource,
+                              Function<Object, Map<String, Object>> createContextWithSource,
                               ResourceLocator resourceLocator,
                               List<Map.Entry<String, String>> regexReplacementConversionPatterns)
     {
@@ -77,10 +76,22 @@ public class JinjavaTransformer implements IJsonTransformer {
 
     @SneakyThrows
     @Override
-    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+    @SuppressWarnings("unchecked")
+    public Object transformJson(Object incomingJson) {
         var resultStr = jinjava.render(templateStr, createContextWithSourceFunction.apply(incomingJson));
         log.atDebug().setMessage("output from jinjava... {}").addArgument(resultStr).log();
-        var parsedObj = (Map<String,Object>) objectMapper.readValue(resultStr, LinkedHashMap.class);
-        return PreservesProcessor.doFinalSubstitutions(incomingJson, parsedObj);
+        Object parsedObj = objectMapper.readValue(resultStr, Object.class);
+        if (parsedObj instanceof Map) {
+            return PreservesProcessor.doFinalSubstitutions((Map<String,Object>) incomingJson, (Map<String, Object>) parsedObj);
+        } else if (parsedObj instanceof List) {
+            log.atDebug().setMessage("Received List from jinjava, processing preserves for {} maps.")
+                .addArgument(((List<?>) parsedObj).size()).log();
+            List<Map<String, Object>> listOfMaps = (List<Map<String, Object>>) parsedObj;
+            return listOfMaps.stream().map( json ->
+                PreservesProcessor.doFinalSubstitutions((Map<String,Object>) incomingJson, json)
+            ).collect(Collectors.toList());
+        } else {
+            throw new IllegalArgumentException("Unexpected data format: " + parsedObj.getClass().getName());
+        }
     }
 }

@@ -1,0 +1,45 @@
+{%- if values.source_cluster is defined -%}
+source_cluster:
+  {{ values | pop_value("source_cluster") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.target_cluster is defined %}
+target_cluster:
+  {{ values | pop_value("target_cluster") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.metrics_source is defined %}
+metrics_source:
+  {{ values | pop_value("metrics_source") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.backfill is defined %}
+backfill:
+  {{ values | pop_value("backfill") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.replay is defined %}
+replay:
+  {{ values | pop_value("replay") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.snapshot is defined %}
+snapshot:
+  {{ values | pop_value("snapshot") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.metadata is defined %}
+metadata_migration:
+  {{ values | pop_value("metadata") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.kafka is defined %}
+kafka:
+  {{ values | pop_value("kafka") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.client_options is defined %}
+client_options:
+  {{ values | pop_value("client_options") | to_yaml | indent(2) }}
+{%- endif %}
+

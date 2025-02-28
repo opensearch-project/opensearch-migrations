@@ -12,8 +12,9 @@ from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
                                               WorkingIndexDoesntExist)
-from console_link.models.ecs_service import ECSService, InstanceStatuses
+from console_link.models.ecs_service import ECSService
 from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
+from console_link.models.utils import DeploymentStatus
 from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -210,7 +211,7 @@ def test_ecs_rfs_backfill_scale_sets_ecs_desired_count(ecs_rfs_backfill, mocker)
 
 
 def test_ecs_rfs_backfill_status_gets_ecs_instance_statuses(ecs_rfs_backfill, mocker):
-    mocked_instance_status = InstanceStatuses(
+    mocked_instance_status = DeploymentStatus(
         desired=3,
         running=1,
         pending=2
@@ -225,7 +226,7 @@ def test_ecs_rfs_backfill_status_gets_ecs_instance_statuses(ecs_rfs_backfill, mo
 
 
 def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_stopped(ecs_rfs_backfill, mocker):
-    mocked_stopped_status = InstanceStatuses(
+    mocked_stopped_status = DeploymentStatus(
         desired=8,
         running=0,
         pending=0
@@ -240,7 +241,7 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_stopped(e
 
 
 def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_starting(ecs_rfs_backfill, mocker):
-    mocked_starting_status = InstanceStatuses(
+    mocked_starting_status = DeploymentStatus(
         desired=8,
         running=0,
         pending=6
@@ -255,7 +256,7 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_starting(
 
 
 def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(ecs_rfs_backfill, mocker):
-    mocked_running_status = InstanceStatuses(
+    mocked_running_status = DeploymentStatus(
         desired=1,
         running=3,
         pending=1
@@ -271,7 +272,7 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(e
 
 def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     target = create_valid_cluster()
-    mocked_instance_status = InstanceStatuses(
+    mocked_instance_status = DeploymentStatus(
         desired=1,
         running=1,
         pending=0
@@ -295,7 +296,7 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
 
 
 def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
-    mocked_instance_status = InstanceStatuses(
+    mocked_instance_status = DeploymentStatus(
         desired=1,
         running=1,
         pending=0
@@ -312,7 +313,7 @@ def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
 
 
 def test_ecs_rfs_backfill_archive_as_expected(ecs_rfs_backfill, mocker, tmpdir):
-    mocked_instance_status = InstanceStatuses(
+    mocked_instance_status = DeploymentStatus(
         desired=0,
         running=0,
         pending=0
@@ -340,7 +341,7 @@ def test_ecs_rfs_backfill_archive_as_expected(ecs_rfs_backfill, mocker, tmpdir):
 
 
 def test_ecs_rfs_backfill_archive_no_index_as_expected(ecs_rfs_backfill, mocker, tmpdir):
-    mocked_instance_status = InstanceStatuses(
+    mocked_instance_status = DeploymentStatus(
         desired=0,
         running=0,
         pending=0
@@ -361,7 +362,7 @@ def test_ecs_rfs_backfill_archive_no_index_as_expected(ecs_rfs_backfill, mocker,
 
 
 def test_ecs_rfs_backfill_archive_errors_if_in_progress(ecs_rfs_backfill, mocker):
-    mocked_instance_status = InstanceStatuses(
+    mocked_instance_status = DeploymentStatus(
         desired=3,
         running=1,
         pending=2

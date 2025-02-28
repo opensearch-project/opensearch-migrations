@@ -10,9 +10,6 @@ import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 import groovy.transform.Canonical
 import org.opensearch.migrations.common.CommonUtils
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 @Canonical
 class DockerServiceProps {
     String projectName = ""
@@ -60,6 +57,7 @@ dependencies {
     testImplementation group: 'org.testcontainers', name: 'toxiproxy'
     testImplementation group: 'org.mockito', name: 'mockito-core'
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
+    testImplementation group: 'org.json', name: 'json'
 
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'

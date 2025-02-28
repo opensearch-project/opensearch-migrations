@@ -6,7 +6,7 @@ on:
     tags:
       - "*"
 env:
-  java-version: '11'
+  java-version: '17'
   gradle-version: '8.0.2'
 
 permissions:
@@ -54,27 +54,27 @@ jobs:
         uses: anchore/sbom-action@v0.17.7
         with:
           image: migrations/migration_console:latest
-          artifact-name: opensearch-migrations-console-sbom.spdx.json
+          output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
         uses: anchore/sbom-action@v0.17.7
         with:
           image: migrations/traffic_replayer:latest
-          artifact-name: opensearch-migrations-traffic-replayer-sbom.spdx.json
+          output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
         uses: anchore/sbom-action@v0.17.7
         with:
           image: migrations/capture_proxy:latest
-          artifact-name: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
+          output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
         uses: anchore/sbom-action@v0.17.7
         with:
           image: migrations/reindex_from_snapshot:latest
-          artifact-name: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
+          output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for artifacts
         uses: anchore/sbom-action@v0.17.7
         with:
           file: artifacts.tar.gz
-          artifact-name: artifacts-sbom.spdx.json
+          output-file: artifacts-sbom.spdx.json
       - name: Tag Docker image
         run: |
           docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}

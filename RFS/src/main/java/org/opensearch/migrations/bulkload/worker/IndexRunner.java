@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.worker;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.MigrationMode;
@@ -33,44 +34,56 @@ public class IndexRunner {
         repoDataProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .forEach(index -> {
-                CreationResult creationResult;
+                List<CreationResult> creationResults;
                 if (skipCreation.test(index.getName())) {
                     log.atInfo()
                         .setMessage("Index {} was not part of the allowlist and will not be migrated.")
                         .addArgument(index.getName())
                         .log();
-                    creationResult = CreationResult.builder()
+                    creationResults = List.of(CreationResult.builder()
                         .name(index.getName())
                         .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
-                        .build();
+                        .build());
                 } else {
-                    creationResult = createIndex(index.getName(), mode, context);
+                    creationResults = createIndex(index.getName(), mode, context);
                 }
 
-                results.index(creationResult);
+                creationResults.forEach(results::index);
 
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
                     var aliasResult = CreationResult.builder().name(alias);
-                    aliasResult.failureType(creationResult.getFailureType());
+                    aliasResult.failureType(creationResults.get(0).getFailureType());
                     results.alias(aliasResult.build());
                 });
             });
         return results.build();
     }
 
-    private CreationResult createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) {
+    private List<CreationResult> createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) {
         var originalIndexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
         var indexMetadata = originalIndexMetadata.deepCopy();
+        List<CreationResult> creationResults = new ArrayList<>();
         try {
-            indexMetadata = transformer.transformIndexMetadata(indexMetadata);
-            return indexCreator.create(indexMetadata, mode, context);
+            List<IndexMetadata> transformedMetadataList = transformer.transformIndexMetadata(indexMetadata);
+            for (IndexMetadata transformedMetadata : transformedMetadataList) {
+                try {
+                    creationResults.add(indexCreator.create(transformedMetadata, mode, context));
+                } catch (Exception e) {
+                    creationResults.add(CreationResult.builder()
+                        .name(indexName)
+                        .exception(new IndexTransformationException(indexName, e))
+                        .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
+                        .build());
+                }
+            }
         } catch (Exception e) {
-            return CreationResult.builder()
+            creationResults.add(CreationResult.builder()
                 .name(indexName)
                 .exception(new IndexTransformationException(indexName, e))
                 .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
-                .build();
+                .build());
         }
+        return creationResults;
     } 
 }

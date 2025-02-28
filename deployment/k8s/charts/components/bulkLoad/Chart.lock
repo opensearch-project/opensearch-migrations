@@ -1,0 +1,9 @@
+dependencies:
+- name: helm-common
+  repository: file://../../sharedResources/helmCommon
+  version: 0.1.0
+- name: logs-volume
+  repository: file://../../sharedResources/logsVolume
+  version: 0.1.0
+digest: sha256:5e118d521e5fe18deb458491cbeedae908bd27ded08b0d16f867968c0c591c28
+generated: "2025-01-29T17:20:16.376823-06:00"

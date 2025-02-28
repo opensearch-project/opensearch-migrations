@@ -5,10 +5,11 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.version_es_6_8.RemoteWriter_OS_6_8;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
 import org.opensearch.migrations.bulkload.version_es_7_10.SnapshotReader_ES_7_10;
 import org.opensearch.migrations.bulkload.version_os_2_11.RemoteWriter_OS_2_11;
@@ -27,6 +28,7 @@ public class ClusterProviderRegistry {
             new SnapshotReader_ES_6_8(),
             new SnapshotReader_ES_7_10(),
             new RemoteWriter_OS_2_11(),
+            new RemoteWriter_OS_6_8(),
             new RemoteReader()
         );
     }
@@ -58,7 +60,8 @@ public class ClusterProviderRegistry {
      * @return The remote resource provider
      */
     public ClusterReader getRemoteReader(ConnectionContext connection) {
-        var client = new OpenSearchClient(connection);
+        var clientFactory = new OpenSearchClientFactory(connection);
+        var client = clientFactory.determineVersionAndCreate();
         var version = client.getClusterVersion();
 
         var remoteProvider = getRemoteProviders(connection)
@@ -79,7 +82,7 @@ public class ClusterProviderRegistry {
      */
     public ClusterWriter getRemoteWriter(ConnectionContext connection, Version versionOverride, DataFilterArgs dataFilterArgs) {
         var version = Optional.ofNullable(versionOverride)
-            .orElseGet(() -> new OpenSearchClient(connection).getClusterVersion());
+            .orElseGet(() -> new OpenSearchClientFactory(connection).getClusterVersion());
 
         var remoteProvider = getRemoteProviders(connection)
             .filter(p -> p.compatibleWith(version))

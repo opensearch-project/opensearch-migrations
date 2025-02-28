@@ -4,61 +4,54 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.opensearch.migrations.transform.jinjava.JinjavaConfig;
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
-public class TypeMappingSanitizationTransformerProvider implements IJsonTransformerProvider {
+@Slf4j
+public class TypeMappingSanitizationTransformerProvider extends JsonJSTransformerProvider {
 
     public static final String FEATURE_FLAGS = "featureFlags";
     public static final String STATIC_MAPPINGS = "staticMappings";
     public static final String REGEX_MAPPINGS = "regexMappings";
-
-    public static final String JINJAVA_CONFIG_KEY = "jinjavaConfig";
     public static final String SOURCE_PROPERTIES_KEY = "sourceProperties";
 
-    public final static ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @SneakyThrows
     @Override
+    @SuppressWarnings("unchecked")
     public IJsonTransformer createTransformer(Object jsonConfig) {
         try {
-            if ((jsonConfig == null) ||
-                (jsonConfig instanceof String && ((String) jsonConfig).isEmpty())) {
-                return new TypeMappingsSanitizationTransformer(null, null, null, null, null);
-            } else if (!(jsonConfig instanceof Map)) {
-                throw new IllegalArgumentException(getConfigUsageStr());
-            }
+            log.debug("Creating transformer with config: {}", jsonConfig);
+            var config = validateAndExtractConfig(jsonConfig, new String[]{SOURCE_PROPERTIES_KEY});
+            log.debug("Validated config: {}", config);
 
-            var config = (Map<String, Object>) jsonConfig;
             return new TypeMappingsSanitizationTransformer(
                 (Map<String, Map<String, String>>) config.get(STATIC_MAPPINGS),
-                (List<List<String>>) config.get(REGEX_MAPPINGS),
+                (List<Map<String, String>>) config.get(REGEX_MAPPINGS),
                 Optional.ofNullable(config.get(SOURCE_PROPERTIES_KEY)).map(m ->
-                    mapper.convertValue(m, SourceProperties.class)).orElse(null),
-                (Map<String, Object>) config.get(FEATURE_FLAGS),
-                Optional.ofNullable(config.get(JINJAVA_CONFIG_KEY)).map(m ->
-                    mapper.convertValue(m, JinjavaConfig.class)).orElse(null));
+                    MAPPER.convertValue(m, SourceProperties.class)).orElse(null),
+                (Map<String, Object>) config.get(FEATURE_FLAGS));
         } catch (ClassCastException e) {
+            log.error("Configuration error: {}", e.getMessage(), e);
             throw new IllegalArgumentException(getConfigUsageStr(), e);
         }
     }
 
-    private String getConfigUsageStr() {
+    @Override
+    protected String getConfigUsageStr() {
         return this.getClass().getName() + " " +
             "expects the incoming configuration to be a Map<String, Object>, " +
-            "with values '" + STATIC_MAPPINGS + "', '" + REGEX_MAPPINGS + "', and '" + FEATURE_FLAGS + "'.  " +
+            "with values (some optional) '" +
+            String.join("', '", STATIC_MAPPINGS,REGEX_MAPPINGS,FEATURE_FLAGS,SOURCE_PROPERTIES_KEY) + "'.  " +
             "The value of " + STATIC_MAPPINGS + " should be a two-level map where the top-level key is the name " +
             "of a source index and that key's dictionary maps each sub-type to a specific target index.  " +
-            REGEX_MAPPINGS + " (List<[List<String>>]) matches index names and sub-types to a target pattern.  " +
-            "The patterns are matched in ascending order, finding the first match.  " +
-            "The items within each top-level " + REGEX_MAPPINGS + " element are [indexRegex, typeRegex, targetPattern]." +
-            "  The targetPattern can contain backreferences ('\\1'...) to refer to captured groups from the regex.  " +
-            "Finally, the " + FEATURE_FLAGS + " is an arbitrarily deep map with boolean leaves.  " +
-            "The " + FEATURE_FLAGS + " map is optional.  " +
-            "When present, it can disable some types of transformations, " +
-            "such as when they may not be applicable for a given migration.";
+            REGEX_MAPPINGS + " (List<[Map<String, String>]) matches index names and sub-types to a target pattern.  " +
+            FEATURE_FLAGS + " is a map of feature flags that may alter the behavior of the transformation." +
+            SOURCE_PROPERTIES_KEY + " (required) is a nested map of the source cluster version e.g. " +
+            "{\"version\":{\"major\":7,\"minor\":10}}.";
     }
 }

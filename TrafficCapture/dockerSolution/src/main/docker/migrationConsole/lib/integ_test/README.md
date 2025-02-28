@@ -1,10 +1,10 @@
-### E2E Integration Testing
+## E2E Integration Testing
 Developers can run a test script which will verify the end-to-end Docker Solution.
 
-#### Compatibility
+### Compatibility
 * Python >= 3.7
 
-#### Pre-requisites
+### Pre-requisites
 
 * Have all containers from Docker solution running.
 
@@ -14,6 +14,26 @@ install the required packages and then run the script:
 ```
 pip install -r requirements.txt
 pytest tests.py
+```
+
+### Running in Docker setup
+
+From the root of this repository bring up the Docker environment
+```shell
+./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
+```
+
+The Docker compose file being used can be found [here](../../../docker-compose.yml)
+* The integ_test `lib` directory can be directly mounted as a volume on the migration console container to spe
+
+To run one of the integration test suites a command like below can be used:
+```shell
+docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/full_tests.py --unique_id="testindex" -s
+```
+
+To teardown, execute the following command at the root of this repository
+```shell
+./gradlew -p TrafficCapture dockerSolution:ComposeDown
 ```
 
 #### Notes
@@ -34,7 +54,7 @@ This script accepts various parameters to customize its behavior. Below is a lis
 - `--unique_id`: The unique identifier to apply to created indices/documents.
     - Default: Generated uuid
 - `--config_file_path`: The services yaml config file path for the console library.
-    - Default: `/etc/migration_services.yaml`
+    - Default: `/config/migration_services.yaml`
 
 
 #### Clean Up

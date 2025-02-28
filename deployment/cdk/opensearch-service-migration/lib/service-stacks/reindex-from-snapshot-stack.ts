@@ -16,7 +16,7 @@ import {
     createOpenSearchServerlessIAMAccessPolicy,
     getSecretAccessPolicy,
     getMigrationStringParameterValue,
-    ClusterAuth, parseArgsToDict, appendArgIfNotInExtraArgs
+    ClusterAuth, parseArgsToDict, appendArgIfNotInExtraArgs, isStackInGovCloud
 } from "../common-utilities";
 import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
@@ -116,14 +116,16 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         const storagePath = "/storage"
         const planningSize = props.maxShardSizeGiB ?? 80;
-        const maxShardSizeBytes = planningSize * 1024 * 1024 * 1024 * 1.10 // Add 10% buffer
+        const planningSizeBuffer = 1.10
+        const maxShardSizeGiB = planningSize * planningSizeBuffer
+        const maxShardSizeBytes = maxShardSizeGiB * (1024 ** 3)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${maxShardSizeBytes}`)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${Math.ceil(maxShardSizeBytes)}`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-connections", props.reindexFromSnapshotWorkerSize === "maximum" ? "100" : "10")
         if (props.reindexFromSnapshotWorkerSize === "maximum") {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-compression")
@@ -170,40 +172,60 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
         // Calculate the volume size based on the max shard size
         // Have space for the snapshot and an unpacked copy, with buffer
-        const volumeSizeGB = Math.max(
-            Math.ceil(maxShardSizeBytes/(1000**3) * 2 * 1.15),
+        const shardVolumeSizeGiBBufferMultiple = 1.10
+        const shardVolumeSizeGiB = Math.max(
+            Math.ceil(maxShardSizeGiB * 2 * shardVolumeSizeGiBBufferMultiple),
             1
         )
 
-        if (volumeSizeGB > 16000) {
+        if (shardVolumeSizeGiB > (16*1024)) {
             // 16 TiB is the maximum volume size for GP3
             throw new Error(`"Your max shard size of ${props.maxShardSizeGiB} GiB is too large to migrate."`)
         }
 
-        // Volume we'll use to download and unpack the snapshot
-        const snapshotVolume = new ServiceManagedVolume(this, 'SnapshotVolume', {
-            name: 'snapshot-volume',
-            managedEBSVolume: {
-                size: Size.gibibytes(volumeSizeGB),
-                volumeType: EbsDeviceVolumeType.GP3,
-                fileSystemType: FileSystemType.XFS,
-                throughput: props.reindexFromSnapshotWorkerSize === "maximum" ? 450 : 125,
-                tagSpecifications: [{
-                    tags: {
-                        Name: `rfs-snapshot-volume-${props.stage}`,
-                    },
-                    propagateTags: EbsPropagatedTagSource.SERVICE,
-                }],
-                encrypted: true,
-            },
-        });
+        // Reserve 5 GiB of storage for system
+        const systemStorageGiB = 5
+        let ephemeralStorageGiB = systemStorageGiB
+        if (isStackInGovCloud(this)) {
+            // ECS EBS attachment is not supported in GovCloud
+            // https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-ecs.html#govcloud-ecs-diffs
+            // Use Ephemeral Storage instead, adding size for shard
+            ephemeralStorageGiB = Math.ceil(shardVolumeSizeGiB + systemStorageGiB)
+            const maxSupportedEphemeralStorageGiB = 200
+            if (ephemeralStorageGiB > maxSupportedEphemeralStorageGiB) {
+                // Reverse calculations above for max size
+                const maxGovCloudSupportedShardSizeGiB = Math.floor((maxSupportedEphemeralStorageGiB-systemStorageGiB)
+                    /2/shardVolumeSizeGiBBufferMultiple/planningSizeBuffer)
+                throw new Error(`Your max shard size of ${props.maxShardSizeGiB} GiB is too large to migrate ` +
+                     `in GovCloud, the max supported is ${maxGovCloudSupportedShardSizeGiB} GiB.`)
+            }
+        }
+        else {
+            // Volume we'll use to download and unpack the snapshot
+            const snapshotVolume = new ServiceManagedVolume(this, 'SnapshotVolume', {
+                name: 'snapshot-volume',
+                managedEBSVolume: {
+                    size: Size.gibibytes(shardVolumeSizeGiB),
+                    volumeType: EbsDeviceVolumeType.GP3,
+                    fileSystemType: FileSystemType.XFS,
+                    throughput: props.reindexFromSnapshotWorkerSize === "maximum" ? 450 : 125,
+                    tagSpecifications: [{
+                        tags: {
+                            Name: `rfs-snapshot-volume-${props.stage}`,
+                        },
+                        propagateTags: EbsPropagatedTagSource.SERVICE,
+                    }],
+                    encrypted: true,
+                },
+            });
 
-        volumes.push(snapshotVolume);
-        mountPoints.push({
-            containerPath: storagePath,
-            readOnly: false,
-            sourceVolume: snapshotVolume.name,
-        });
+            volumes.push(snapshotVolume);
+            mountPoints.push({
+                containerPath: storagePath,
+                readOnly: false,
+                sourceVolume: snapshotVolume.name,
+            });
+        }
 
         this.createService({
             serviceName: 'reindex-from-snapshot',
@@ -217,6 +239,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: props.reindexFromSnapshotWorkerSize === "maximum" ? 16 * 1024 : 2 * 1024,
             taskMemoryLimitMiB: props.reindexFromSnapshotWorkerSize === "maximum" ? 32 * 1024 : 4 * 1024,
+            ephemeralStorageGiB: ephemeralStorageGiB,
             environment: {
                 "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,

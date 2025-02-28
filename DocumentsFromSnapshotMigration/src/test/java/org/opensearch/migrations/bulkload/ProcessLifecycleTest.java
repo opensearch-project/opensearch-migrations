@@ -1,19 +1,13 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.data.WorkloadGenerator;
@@ -27,7 +21,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -35,17 +28,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
-/**
- * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
- * Some of the functionality and code are shared between the two and should be refactored.
- */
+import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
+
 @Slf4j
 @Tag("longTest")
 public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
-    public static final String SNAPSHOT_NAME = "test_snapshot";
-    public static final List<String> INDEX_ALLOWLIST = List.of();
     public static final int OPENSEARCH_PORT = 9200;
 
     enum FailHow {
@@ -124,17 +113,18 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
-                CompletableFuture.runAsync(() -> esSourceContainer.start()),
-                CompletableFuture.runAsync(() -> osTargetContainer.start()),
+                CompletableFuture.runAsync(esSourceContainer::start),
+                CompletableFuture.runAsync(osTargetContainer::start),
                 CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
             ).join();
 
             // Populate the source cluster with data
-            var client = new OpenSearchClient(ConnectionContextTestParams.builder()
-                .host(esSourceContainer.getUrl())
-                .build()
-                .toConnectionContext()
+            var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext()
             );
+            var client = clientFactory.determineVersionAndCreate();
             var generator = new WorkloadGenerator(client);
             generator.generate(new WorkloadOptions());
 
@@ -169,8 +159,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer,
-        FailHow failHow)
-    {
+        FailHow failHow
+    ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
         if (failHow == FailHow.AT_STARTUP) {
@@ -180,7 +170,20 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         int timeoutSeconds = 90;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, failHow);
+        String initialLeaseDuration = failHow == FailHow.NEVER ? "PT10M" : "PT1S";
+
+        String[] additionalArgs = {
+            "--documents-per-bulk-request", "10",
+            "--max-connections", "1",
+            "--initial-lease-duration", initialLeaseDuration,
+        };
+
+        ProcessBuilder processBuilder = setupProcess(
+            tempDirSnapshot,
+            tempDirLucene,
+            targetAddress,
+            additionalArgs
+        );
 
         var process = runAndMonitorProcess(processBuilder);
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -196,83 +199,4 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
         return process.exitValue();
     }
-
-
-    @NotNull
-    private static ProcessBuilder setupProcess(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        String targetAddress,
-        FailHow failHow
-    ) {
-        String classpath = System.getProperty("java.class.path");
-        String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-        String[] args = {
-            "--snapshot-name",
-            SNAPSHOT_NAME,
-            "--snapshot-local-dir",
-            tempDirSnapshot.toString(),
-            "--lucene-dir",
-            tempDirLucene.toString(),
-            "--target-host",
-            targetAddress,
-            "--index-allowlist",
-            "geonames",
-            "--documents-per-bulk-request",
-            "10",
-            "--max-connections",
-            "1",
-            "--source-version",
-            "ES_7_10",
-            "--initial-lease-duration",
-            failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
-
-        // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(args))
-            .log();
-        ProcessBuilder processBuilder = new ProcessBuilder(
-            javaExecutable,
-            "-cp",
-            classpath,
-            "org.opensearch.migrations.RfsMigrateDocuments"
-        );
-        processBuilder.command().addAll(Arrays.asList(args));
-        processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput();
-        return processBuilder;
-    }
-
-    @NotNull
-    private static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
-        var process = processBuilder.start();
-
-        log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
-
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        var readerThread = new Thread(() -> {
-            String line;
-            while (true) {
-                try {
-                    if ((line = reader.readLine()) == null) break;
-                } catch (IOException e) {
-                    log.atWarn().setCause(e).setMessage("Couldn't read next line from sub-process").log();
-                    return;
-                }
-                String finalLine = line;
-                log.atInfo()
-                    .setMessage("from sub-process [{}]: {}")
-                    .addArgument(() -> process.toHandle().pid())
-                    .addArgument(finalLine)
-                    .log();
-            }
-        });
-
-        // Kill the process and fail if we have to wait too long
-        readerThread.start();
-        return process;
-    }
-
 }

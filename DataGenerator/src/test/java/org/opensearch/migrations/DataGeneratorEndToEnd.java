@@ -30,6 +30,13 @@ class DataGeneratorEndToEnd {
         }
     }
 
+    @Test
+    void generateData_ES_6_8() throws Exception {
+        try (var targetCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23)) {
+            generateData(targetCluster);
+        }
+    }
+
     @SneakyThrows
     void generateData(final SearchClusterContainer targetCluster) {
         // ACTION: Set up the target clusters
@@ -52,7 +59,7 @@ class DataGeneratorEndToEnd {
         assertThat(refreshResponse.body, refreshResponse.statusCode, equalTo(200));
 
         // Confirm all indexes have the expected number of docs
-        var defaultCount = arguments.workloadOptions.totalDocs;
+        var defaultCount = arguments.workloadOptions.getTotalDocs();
         var expectedIndexes = Map.of(
             "geonames", defaultCount,
             "logs-181998", defaultCount,

@@ -1,0 +1,7 @@
+volume:
+  volumeName: snapshot-volume
+  # Persistent volume claim settings
+  pvcClaimName: snapshot-volume-pvc
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi

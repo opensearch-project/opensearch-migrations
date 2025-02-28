@@ -13,6 +13,7 @@ This document contains a list of maintainers in this repo. See [opensearch-proje
 | Brian Presley      | [sumobrian](https://github.com/sumobrian)             | Amazon      |
 | Andre Kurait       | [andrekurait](https://github.com/AndreKurait)         | Amazon      |
 | Peter Nied         | [peternied](https://github.com/peternied)             | Amazon      |
+| Jugal Chauhan      | [jugal-chauhan](https://github.com/jugal-chauhan)     | Amazon      |
 
 
 ## Emeritus

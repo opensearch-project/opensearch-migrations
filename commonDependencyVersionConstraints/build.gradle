@@ -2,9 +2,6 @@ plugins {
   id "java-library"
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 ext {
   protobufVersion='3.25.5'
 }
@@ -12,7 +9,7 @@ ext {
 dependencies {
 
   constraints {
-    def netty = '4.1.108.Final'
+    def netty = '4.1.118.Final'
     api group: 'io.netty', name: 'netty-buffer', version: netty
     api group: 'io.netty', name: 'netty-codec-http', version: netty
     api group: 'io.netty', name: 'netty-handler', version: netty
@@ -40,7 +37,7 @@ dependencies {
 
     api group: 'org.projectlombok', name:'lombok', version:'1.18.26'
 
-    api group: 'org.apache.kafka', name:'kafka-clients', version:'3.6.0'
+    api group: 'org.apache.kafka', name:'kafka-clients', version:'3.7.2'
 
     api group: 'com.google.protobuf', name: 'protoc', version: protobufVersion
 
@@ -121,12 +118,19 @@ dependencies {
 
     api group: 'org.semver4j', name: 'semver4j', version: '5.3.0'
 
+    def json = '20240303'
+    api group: 'org.json', name: 'json', version: json
+
+    def graalVersion = '24.1.1'
+    api group: "org.graalvm.polyglot", name: 'polyglot', version: graalVersion
+    api group: "org.graalvm.polyglot", name: 'js-community', version: graalVersion
+
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************
-    implementation group: 'net.minidev', name: 'json-smart', version: '2.4.9'
+    implementation group: 'net.minidev', name: 'json-smart', version: '2.5.2'
     implementation group: 'xalan', name: 'xalan', version: '2.7.3'
-    implementation group: 'com.thoughtworks.xstream', name: 'xstream', version: '1.4.20'
+    implementation group: 'com.thoughtworks.xstream', name: 'xstream', version: '1.4.21'
     implementation group: 'commons-net', name: 'commons-net', version: '3.9.0'
     implementation group: 'org.jsoup', name: 'jsoup', version: '1.15.3'
     implementation group: 'org.apache.tika', name: 'tika-core', version: '1.28.4'

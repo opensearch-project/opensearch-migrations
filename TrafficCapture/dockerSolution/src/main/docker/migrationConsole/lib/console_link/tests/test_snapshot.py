@@ -1,6 +1,7 @@
 import unittest.mock as mock
 
 import pytest
+import subprocess
 
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from console_link.middleware import snapshot as snapshot_
@@ -34,17 +35,18 @@ def s3_snapshot(mock_cluster):
 @pytest.fixture
 def fs_snapshot(mock_cluster):
     config = {
-        "snapshot": {
-            "snapshot_name": "reindex_from_snapshot",
-            "fs": {
-                "repo_path": "/path/for/snapshot/repo"
-            },
+        "snapshot_name": "reindex_from_snapshot",
+        "fs": {
+            "repo_path": "/path/for/snapshot/repo"
         }
     }
-    return FileSystemSnapshot(config["snapshot"], mock_cluster)
+    return FileSystemSnapshot(config, mock_cluster)
 
 
-def test_s3_snapshot_status(s3_snapshot, mock_cluster):
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_status(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
     mock_response = mock.Mock()
     mock_response.json.return_value = {
         "snapshots": [
@@ -54,18 +56,21 @@ def test_s3_snapshot_status(s3_snapshot, mock_cluster):
             }
         ]
     }
-    mock_cluster.call_api.return_value = mock_response
+    source_cluster.call_api.return_value = mock_response
 
-    result = s3_snapshot.status()
+    result = snapshot.status()
 
     assert isinstance(result, CommandResult)
     assert result.success
     assert result.value == "SUCCESS"
-    mock_cluster.call_api.assert_called_once_with("/_snapshot/migration_assistant_repo/test_snapshot",
-                                                  HttpMethod.GET)
+    source_cluster.call_api.assert_called_once_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}",
+                                                    HttpMethod.GET)
 
 
-def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_status_full(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
     mock_response = mock.Mock()
     mock_response.json.return_value = {
         "snapshots": [
@@ -98,9 +103,9 @@ def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
             }
         ]
     }
-    mock_cluster.call_api.return_value = mock_response
+    source_cluster.call_api.return_value = mock_response
 
-    result = snapshot_.status(snapshot=s3_snapshot, deep_check=True)
+    result = snapshot_.status(snapshot=snapshot, deep_check=True)
 
     assert isinstance(result, CommandResult)
     assert result.success
@@ -116,8 +121,8 @@ def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
 
     assert "N/A" not in result.value
 
-    mock_cluster.call_api.assert_called_with("/_snapshot/migration_assistant_repo/test_snapshot/_status",
-                                             HttpMethod.GET)
+    source_cluster.call_api.assert_called_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}/_status",
+                                               HttpMethod.GET)
 
 
 def test_s3_snapshot_init_succeeds():
@@ -220,6 +225,8 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     snapshot = FileSystemSnapshot(config["snapshot"], source)
 
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create()
 
@@ -229,7 +236,7 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
-                                  ], stdout=None, stderr=None, text=True, check=True)
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
@@ -247,6 +254,8 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     snapshot = S3Snapshot(config["snapshot"], source)
 
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
 
@@ -259,7 +268,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
-                                  ], stdout=None, stderr=None, text=True, check=True)
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
@@ -278,6 +287,8 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
     source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     snapshot = S3Snapshot(config["snapshot"], source)
 
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
 
@@ -290,7 +301,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   "--s3-role-arn", s3_role,
-                                  ], stdout=None, stderr=None, text=True, check=True)
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
@@ -304,6 +315,8 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
         }
     }
     snapshot = S3Snapshot(config["snapshot"], create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH))
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create()
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
@@ -315,7 +328,7 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
                                   "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait"
-                                  ], stdout=None, stderr=None, text=True, check=True)
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
@@ -329,6 +342,8 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
     }
     max_snapshot_rate = 100
     snapshot = FileSystemSnapshot(config["snapshot"], create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH))
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
@@ -339,7 +354,7 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
                                   "--source-insecure",
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
-                                  ], stdout=None, stderr=None, text=True, check=True)
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
@@ -357,6 +372,8 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
                                   create_valid_cluster(auth_type=AuthMethod.SIGV4,
                                                        details={"service": service_name,
                                                                 "region": signing_region}))
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create()
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
@@ -366,15 +383,27 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
                                   "--source-aws-region", signing_region,
                                   "--source-insecure",
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
-                                  ], stdout=None, stderr=None, text=True, check=True)
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_delete(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
     snapshot.delete()
-    snapshot.source_cluster.call_api.assert_called_once()
-    assert snapshot.source_cluster.call_api.call_args.args[1] == HttpMethod.DELETE
+    source_cluster.call_api.assert_called_once()
+    source_cluster.call_api.assert_called_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}",
+                                               HttpMethod.DELETE)
+
+
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_delete_repo(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
+    snapshot.delete_snapshot_repo()
+    source_cluster.call_api.assert_called_once()
+    source_cluster.call_api.assert_called_with("/_snapshot/migration_assistant_repo",
+                                               HttpMethod.DELETE)
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
@@ -407,6 +436,8 @@ def test_get_snapshot_repository_via_delete(s3_snapshot):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_handling_extra_args(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
     mock = mocker.patch('subprocess.run', autospec=True)
     extra_args = ['--extra-flag', '--extra-arg', 'extra-arg-value', 'this-is-an-option']
     

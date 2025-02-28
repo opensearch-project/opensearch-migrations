@@ -34,7 +34,6 @@ public class TransformFunctions {
                 return new Transformer_ES_7_10_OS_2_11(dimensionality);
             }
         }
-
         throw new IllegalArgumentException("Unsupported transformation requested");
     }
 

@@ -5,6 +5,8 @@ import os
 import pytest
 import re
 import json
+import datetime
+from unittest.mock import patch
 
 from base64 import b64encode
 from botocore.auth import SigV4Auth
@@ -389,8 +391,11 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                                 f"--target-host={cluster.endpoint} --workload={workload} --pipeline=benchmark-only"
+    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0"
+                                 " --exclude-tasks=check-cluster-health"
+                                 " --workload-revision=fc64258a9b2ed2451423d7758ca1c5880626c520"
+                                 f" --target-host={cluster.endpoint} --workload={workload}"
+                                 " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
                                  "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
                                  "--client-options=verify_certs:false", shell=True)
@@ -411,8 +416,11 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                                 f"--target-host={cluster.endpoint} --workload={workload} --pipeline=benchmark-only"
+    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0"
+                                 " --exclude-tasks=check-cluster-health"
+                                 " --workload-revision=fc64258a9b2ed2451423d7758ca1c5880626c520"
+                                 f" --target-host={cluster.endpoint} --workload={workload}"
+                                 " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
                                  "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
                                  "--client-options=verify_certs:false,use_ssl:true,"
@@ -442,8 +450,11 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         requests_mock.get(url, json={'status': 'green'})
     elif method == HttpMethod.POST:
         requests_mock.post(url, json={'hits': {'total': 0, 'hits': []}})
+    # Mock datetime to return a specific timestamp
+    specific_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
+    with mock_aws() and patch("datetime.datetime") as mock_datetime:
+        mock_datetime.utcnow.return_value = specific_time
 
-    with mock_aws():
         # Add default headers to the request
         headers = {
             # These headers are excluded from signing since they are in default request headers
@@ -525,6 +536,8 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         new_auth_header = aws_request.headers.get('Authorization')
         assert new_auth_header is not None, "Failed to generate new Authorization header"
 
+        # Compare timestamp
+        assert amz_date_header == aws_request.headers.get("x-amz-date")
         # Compare signatures
         original_signature = signature_match.group(1)
         new_signature_match = re.search(r"Signature=([a-f0-9]+)", new_auth_header)

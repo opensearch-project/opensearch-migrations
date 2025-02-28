@@ -49,19 +49,17 @@ public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
 
         var protectionArtifacts = protectByteBufInHttpMessage(httpJsonMessage);
 
-        var returnedObject = transformer.transformJson(httpJsonMessage);
+        Object returnedObject = transformer.transformJson(httpJsonMessage);
 
-        if (returnedObject != httpJsonMessage) {
-            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObject);
-        }
+        var transformedRequest = HttpJsonRequestWithFaultingPayload.fromObject(returnedObject);
 
-        unProtectByteBufInHttpMessage(httpJsonMessage, protectionArtifacts);
+        unProtectByteBufInHttpMessage(transformedRequest, protectionArtifacts);
 
-        if (originalHttpJsonMessage != httpJsonMessage) {
+        if (originalHttpJsonMessage != transformedRequest) {
             // clear originalHttpJsonMessage for faster garbage collection if not persisted along
             originalHttpJsonMessage.clear();
         }
-        return httpJsonMessage;
+        return transformedRequest;
     }
 
     @Value

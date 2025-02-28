@@ -23,6 +23,11 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
+
+/**
+ * BulkDocSection represents a single document in a bulk request.  It tracks the shape of the document
+ * as needed for reindexing, as well as the metadata needed for the bulk request.
+ */
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @Slf4j
 public class BulkDocSection {
@@ -75,7 +80,7 @@ public class BulkDocSection {
         }
     }
 
-    public static BulkDocSection fromMap(Map<String, Object> map) {
+    public static BulkDocSection fromMap(Object map) {
         BulkIndex bulkIndex = OBJECT_MAPPER.convertValue(map, BulkIndex.class);
         return new BulkDocSection(bulkIndex);
     }
@@ -105,6 +110,9 @@ public class BulkDocSection {
         return OBJECT_MAPPER.convertValue(bulkIndex, Map.class);
     }
 
+    /**
+     * BulkIndex represents the serialization format of a single document in a bulk request.
+     */
     @NoArgsConstructor(force = true) // For Jackson
     @AllArgsConstructor
     @ToString

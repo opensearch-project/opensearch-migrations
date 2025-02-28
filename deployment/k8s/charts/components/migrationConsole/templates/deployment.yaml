@@ -1,0 +1,75 @@
+{{ $mountName := "all-configs" }}
+{{ $envVarMountName := "env-vars" }}
+{{ $sharedLogsVolumeEnabled := false }}
+{{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "generic.fullname" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "generic.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "generic.fullname" . }}
+        env: v1
+    spec:
+      serviceAccountName: migration-console-access-role
+      initContainers:
+        {{- include "generic.setupEnvLoadInitContainer" (merge (dict
+           "MountName" $envVarMountName
+           "include" .Template.Include) .) | nindent 8 }}
+        {{- include "generic.setupServicesYamlContainer" (merge (dict
+           "MountName" "merged-config"
+           "include" .Template.Include) .) | nindent 8 }}
+      containers:
+        - name: console
+          image: migrations/migration_console:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              source /shared/vars.sh
+              export START_API_COMMAND="pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt"
+              export WAIT_AND_DO_NOTHING_COMMAND="tail -f /dev/null"
+              migrationEnabled=$(echo "$@" | grep -o -- "--migrationApiEnabled" | wc -l); if [ "$migrationEnabled" -gt 0 ]; then $START_API_COMMAND; else $WAIT_AND_DO_NOTHING_COMMAND; fi > run.sh
+              exec migrationEnabled $ARGS
+          volumeMounts:
+            {{- if $sharedLogsVolumeEnabled }}
+            - name: shared-logs
+              mountPath: /shared-logs-output
+            {{- end }}
+            - name: merged-config
+              mountPath: /config
+            - name: {{ $envVarMountName }}
+              mountPath: /shared
+{{/*              Enable if developing the console library */}}
+{{/*            - name: local-console-link*/}}
+{{/*              mountPath: /root/lib/console_link*/}}
+            {{- if $snapshotVolumeEnabled }}
+            - name: snapshot-volume
+              mountPath: /snapshot
+            {{- end }}
+      volumes:
+        - name: {{ $envVarMountName }}
+          emptyDir: { }
+        - name: merged-config
+          emptyDir: { }
+{{/*        - name: local-console-link*/}}
+{{/*          hostPath:*/}}
+{{/*            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link*/}}
+{{/*            type: Directory*/}}
+        {{- if $sharedLogsVolumeEnabled  }}
+        - name: shared-logs
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedLogsPvc }}
+        {{- end }}
+        {{- if $snapshotVolumeEnabled }}
+        - name: snapshot-volume
+          persistentVolumeClaim:
+            claimName: {{ .Values.snapshotVolumePvc }}
+        {{- end }}

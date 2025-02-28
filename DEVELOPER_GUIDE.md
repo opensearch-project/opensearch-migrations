@@ -11,7 +11,7 @@
 
 ## Prerequisites
 
-- Java Development Kit (JDK) 11
+- Java Development Kit (JDK) 11-17
 - Gradle 8
 - Python3
 - Docker and Docker Compose (for local deployment)
