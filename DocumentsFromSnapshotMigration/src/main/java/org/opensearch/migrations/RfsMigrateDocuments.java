@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
+import lombok.extern.java.Log;
+import org.apache.logging.log4j.LogManager;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -256,6 +258,9 @@ public class RfsMigrateDocuments {
         // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
         System.err.println("Starting program with: " + String.join(" ", args));
+        // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
+        // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
+        System.setProperty("log4j2.shutdownHookEnabled", "false");
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
         Args arguments = new Args();
@@ -313,18 +318,17 @@ public class RfsMigrateDocuments {
             // event of a SIGTERM signal.
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
-                // Using `System.err.println` throughout the shutdown hook because log4j also has a shutdown hook that
-                // may be called at any point in this process.
-                System.err.println("Received shutdown signal. Trying to mark progress and shutdown cleanly.");
+                log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
                 try {
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
                 } catch (Throwable e) {
-                    System.err.println("Could not complete clean exit process, forced to terminate unexpectedly.");
-                    e.printStackTrace();
-                    throw Lombok.sneakyThrow(e);
+                    log.atError().setMessage("Could not complete clean exit process, forced to terminate unexpectedly: {}").addArgument(e).log();
                 }
-                System.err.println("Shutdown hook completed.");
+                log.atInfo().setMessage("Clean shutdown completed.").log();
+
+                // Manually flush logs and shutdown log4j after all logging is done
+                LogManager.shutdown();
             }));
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
@@ -389,15 +393,15 @@ public class RfsMigrateDocuments {
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
-            System.err.println("Clean shutdown already completed");
+            log.atInfo().setMessage("Clean shutdown already completed").log();
             return;
         }
         if (workItemRef.get() == null || progressCursor.get() == null) {
-            System.err.println("No work item or progress cursor found. This may indicate that the task is exiting too early to have progress to mark.");
+            log.atInfo().setMessage("No work item or progress cursor found. This may indicate that the task is exiting too early to have progress to mark.").log();
             return;
         }
         var workItemAndDuration = workItemRef.get();
-        System.err.println("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getDocId());
+        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getDocId()).log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
