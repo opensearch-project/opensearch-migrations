@@ -320,13 +320,17 @@ public class RfsMigrateDocuments {
                 try {
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
-                } catch (Throwable e) {
-                    log.atError().setMessage("Could not complete clean exit process, forced to terminate unexpectedly: {}").addArgument(e).log();
+                    log.atInfo().setMessage("Clean shutdown completed.").log();
+                } catch (InterruptedException e) {
+                    log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
+                    // Re-interrupt the thread to maintain interruption state
+                    Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                    log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
+                } finally {
+                    // Manually flush logs and shutdown log4j after all logging is done
+                    LogManager.shutdown();
                 }
-                log.atInfo().setMessage("Clean shutdown completed.").log();
-
-                // Manually flush logs and shutdown log4j after all logging is done
-                LogManager.shutdown();
             }));
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
