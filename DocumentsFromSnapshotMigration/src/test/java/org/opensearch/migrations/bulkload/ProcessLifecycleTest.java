@@ -238,6 +238,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 process.destroy();
                 // Give it 30 seconds and then force kill if it hasn't stopped yet.
                 process.waitFor(30, TimeUnit.SECONDS);
+                Assertions.assertFalse(process.isAlive());
                 process.destroyForcibly();
             } catch (InterruptedException | IOException e) {
                 throw new RuntimeException(e);
@@ -268,4 +269,29 @@ public class ProcessLifecycleTest extends SourceTestBase {
             return process.exitValue();
         });
     }
+
+    @Test
+    void exitCleanlyFromSigtermBeforeReindexingHasStarted() {
+        // This test is very similar to the one above, but does a much quicker sigterm in order to "catch" it before
+        // reindexing has started, and also does a much quicker check that it's actually terminated cleanly (it is able
+        // to shut down almost instantly because it doesn't need to make any network calls).
+        testProcess(RECEIVED_SIGTERM_EXIT_CODE, d -> {
+            var processBuilder = setupProcessWithSlowProxy(d);
+            Process process = null;
+            try {
+                process = runAndMonitorProcess(processBuilder);
+                process.waitFor(2, TimeUnit.SECONDS);
+                process.destroy();
+                // Give it 1 second before checking if it has shutdown.
+                process.waitFor(1, TimeUnit.SECONDS);
+                Assertions.assertFalse(process.isAlive());
+                // If not, forcibly kill it.
+                process.destroyForcibly();
+            } catch (InterruptedException | IOException e) {
+                throw new RuntimeException(e);
+            }
+            return process.exitValue();
+        });
+    }
+
 }
