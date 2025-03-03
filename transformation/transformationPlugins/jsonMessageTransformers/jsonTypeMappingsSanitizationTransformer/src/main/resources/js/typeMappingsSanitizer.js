@@ -273,7 +273,7 @@ function processMetadataRequest(document, context) {
                         compName,
                         "_doc",
                         context.index_mappings,
-                        context.regex_index_mappings
+                        context.regex_mappings
                     );
                     return transformed || compName;
                 });
