@@ -3,6 +3,38 @@
 # Fail the script if any command fails
 set -e
 
+# Store our PID for later use
+OUR_PID=$$
+
+# Setup signal handling
+cleanup() {
+    echo "Received termination signal. Forwarding to child processes..."
+    # Find the Java process PID specifically
+    JAVA_PID=$(pgrep -f "java.*org\.opensearch\.migrations\.RfsMigrateDocuments")
+    if [ -n "$JAVA_PID" ]; then
+        echo "Sending SIGTERM to Java process $JAVA_PID"
+        kill -TERM "$JAVA_PID"
+        # Wait for Java process to terminate gracefully (up to 30 seconds)
+        TIMEOUT=30
+        while kill -0 "$JAVA_PID" 2>/dev/null && [ $TIMEOUT -gt 0 ]; do
+            sleep 1
+            TIMEOUT=$((TIMEOUT-1))
+        done
+        # Force kill if needed
+        if kill -0 "$JAVA_PID" 2>/dev/null; then
+            echo "Java process didn't terminate gracefully, forcing..."
+            kill -9 "$JAVA_PID"
+        fi
+    else
+        echo "No Java process found to terminate"
+    fi
+    exit 0
+}
+
+# Register the trap for SIGTERM and other relevant signals
+trap cleanup SIGTERM SIGINT SIGQUIT
+
+
 # Print our ENV variables
 if [[ $RFS_COMMAND != *"--target-password"* && $RFS_COMMAND != *"--targetPassword"* ]]; then
     echo "RFS_COMMAND: $RFS_COMMAND"
@@ -78,10 +110,18 @@ cleanup_directories() {
 
 [ -z "$RFS_COMMAND" ] && \
 { echo "Warning: RFS_COMMAND is empty! Exiting."; exit 1; } || \
-until ! {
+while true; do
     echo "Running command $RFS_COMMAND"
-    eval "$RFS_COMMAND"
-}; do
+    # Run command in background and get its PID
+    eval "$RFS_COMMAND" &
+    COMMAND_PID=$!
+    # Wait for the command to finish
+    wait $COMMAND_PID
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo "Command exited with code $EXIT_CODE"
+        break
+    fi
     echo "Cleaning up directories before the next run."
     cleanup_directories
 done

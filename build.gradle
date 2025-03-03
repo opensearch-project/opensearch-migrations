@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "2.1.1"
@@ -151,58 +153,69 @@ subprojects {
     tasks.withType(Test) {
         // Getting javadoc to compile is part of the test suite to ensure we are able to publish our artifacts
         dependsOn project.javadoc
-
-        testLogging {
-            events "passed", "skipped", "failed"
-            exceptionFormat "full"
-            showExceptions true
-            showCauses true
-            showStackTraces true
-        }
-        maxParallelForks = gradle.startParameter.maxWorkerCount
-
-        // Provide way to exclude particular tests from CLI
-        // e.g. ../gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
-        if (project.hasProperty('excludeTests')) {
-            exclude project.property('excludeTests')
-        }
-
-        useJUnitPlatform()
-        //  Disable parallel test execution, see MIGRATIONS-1666
-        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
-        systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
-        // Verify assertions in tests
-        jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
-        jacoco.enabled = true
     }
+    if (!sourceSets.test.allSource.files.isEmpty()) {
+        tasks.withType(Test) {
+            testLogging {
+                events "passed", "skipped", "failed"
+                exceptionFormat "full"
+                showExceptions true
+                showCauses true
+                showStackTraces true
+            }
+            maxParallelForks = gradle.startParameter.maxWorkerCount
 
-    // Mutually exclusive tests to avoid duplication
-    tasks.named('test') {
-        systemProperty 'migrationLogLevel', 'TRACE'
-        useJUnitPlatform {
-            excludeTags('longTest', 'isolatedTest')
+            // Provide way to exclude particular tests from CLI
+            // e.g. ../gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
+            if (project.hasProperty('excludeTests')) {
+                exclude project.property('excludeTests')
+            }
+
+            useJUnitPlatform()
+            //  Disable parallel test execution, see MIGRATIONS-1666
+            systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+            systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
+            // Verify assertions in tests
+            jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
+            jacoco {
+                enabled = true
+                destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
+            }
         }
-    }
-
-    tasks.register('slowTest', Test) {
-        systemProperty 'migrationLogLevel', 'DEBUG'
-        useJUnitPlatform {
-            includeTags 'longTest'
-            excludeTags 'isolatedTest'
+        // Mutually exclusive tests to avoid duplication
+        tasks.named('test') {
+            systemProperty 'migrationLogLevel', 'TRACE'
+            useJUnitPlatform {
+                excludeTags('longTest', 'isolatedTest')
+            }
         }
-    }
 
-    tasks.register('isolatedTest', Test) {
-        maxParallelForks = 1
-        useJUnitPlatform {
-            includeTags 'isolatedTest'
+        tasks.register('slowTest', Test) {
+            systemProperty 'migrationLogLevel', 'DEBUG'
+            useJUnitPlatform {
+                includeTags 'longTest'
+                excludeTags 'isolatedTest'
+            }
         }
-    }
 
-    tasks.register('fullTest') {
-        dependsOn test
-        dependsOn slowTest
-        dependsOn isolatedTest
+        tasks.register('isolatedTest', Test) {
+            maxParallelForks = 1
+            useJUnitPlatform {
+                includeTags 'isolatedTest'
+            }
+        }
+
+        tasks.register('fullTest') {
+            dependsOn test
+            dependsOn slowTest
+            dependsOn isolatedTest
+        }
+    } else {
+        tasks.withType(Test) {
+            jacoco {
+                enabled = false
+            }
+        }
     }
 
     task javadocJar(type: Jar, dependsOn: javadoc) {
@@ -306,16 +319,50 @@ subprojects {
         into "${buildDir}/dependencies"
     }
 
+    def testsWithJacoco = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
     jacocoTestReport {
-        dependsOn = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
-        executionData.from = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }.collect { it.jacoco.destinationFile }
-        classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
+        dependsOn = testsWithJacoco
+        executionData.from testsWithJacoco*.jacoco.destinationFile
         reports {
             xml.required = true
-            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
-            html.required = true
-            html.destination file("${buildDir}/reports/jacoco/test/html")
         }
+    }
+}
+
+tasks.register('jacocoAggregateReport', JacocoReport) {
+    group = 'Verification'
+    description = 'Generates an aggregate report from exec files in build/jacocoMerged/*.exec over the whole project'
+
+    // Find all merged .exec files
+    executionData.setFrom(fileTree(dir: "${buildDir}", includes: [
+            "jacocoMerged/**/*.exec"
+    ]))
+
+    // Get all subprojects with Java plugin
+    def javaProjects = subprojects.findAll { it.plugins.hasPlugin('java') }
+
+    // Collect all class directories from Java subprojects
+    classDirectories.setFrom(
+            files(javaProjects.collect { project ->
+                project.sourceSets.main.output.classesDirs.filter { dir ->
+                    !dir.path.contains('captureProtobufs') &&
+                            !dir.path.contains('trafficCaptureProxyServerTest')
+                }
+            })
+    )
+
+    // Collect all source directories from Java subprojects
+    sourceDirectories.setFrom(
+            files(javaProjects.collect { project ->
+                project.sourceSets.main.allSource.srcDirs
+            })
+    )
+
+    reports {
+        xml.required = true
+        xml.destination file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
+        html.required = true
+        html.destination file("${buildDir}/reports/jacoco/mergedReport/html")
     }
 }
 
@@ -349,25 +396,23 @@ gradle.projectsEvaluated {
     }
 }
 
-task mergeJacocoReports(type: JacocoReport) {
+task mergeJacocoReports {
     def jacocoReportTasks = subprojects.collect { it.tasks.withType(JacocoReport).matching { it.name == "jacocoTestReport" } }.flatten()
     dependsOn jacocoReportTasks
 
-    additionalSourceDirs.setFrom(files(jacocoReportTasks.collect { it.additionalSourceDirs }.flatten()))
-    sourceDirectories.setFrom(files(jacocoReportTasks.collect { it.sourceDirectories }.flatten()))
-    classDirectories.setFrom(files(subprojects.collect { subproject ->
-        subproject.sourceSets.main.output.classesDirs.filter { dir ->
-            !dir.path.contains('captureProtobufs') && !dir.path.contains('trafficCaptureProxyServerTest')
-        }
-    }))
-    executionData.setFrom(files(jacocoReportTasks.collect { it.executionData }.flatten()))
-
-    reports {
-        xml.required = true
-        xml.destination = file("${buildDir}/reports/jacoco/mergedReport/jacocoMergedReport.xml")
-        html.required = true
-        html.destination = file("${buildDir}/reports/jacoco/mergedReport/html")
+    // Create a Sync task to collect all exec files
+    def syncJacocoExecFiles = tasks.create("syncJacocoExecFiles", Sync) {
+        from jacocoReportTasks.collect { it.executionData }
+        into "${buildDir}/jacocoMerged/"
+        duplicatesStrategy = DuplicatesStrategy.FAIL
     }
+
+    // Make sure sync task runs after all report tasks
+    syncJacocoExecFiles.mustRunAfter jacocoReportTasks
+    dependsOn syncJacocoExecFiles
+
+    // Finalize with jacocoAggregateReport
+    finalizedBy jacocoAggregateReport
 }
 
 task listPublishedArtifacts {
@@ -382,5 +427,32 @@ task listPublishedArtifacts {
                 }
             }
         }
+    }
+}
+
+tasks.register("listTestTasksAsJson") {
+    doLast {
+        def testTasks = []
+
+        subprojects.each { subproject ->
+            def projectPath = subproject.path
+
+            // Collect test tasks without JaCoCo enabled
+            subproject.tasks.withType(Test).findAll {
+                !(it.extensions.findByType(JacocoTaskExtension)?.enabled ?: false)
+            }.each {
+                testTasks << "${projectPath}:${it.name}"
+            }
+
+            // Add jacocoTestReport if any test task has JaCoCo enabled
+            if (subproject.tasks.withType(Test).any {
+                it.extensions.findByType(JacocoTaskExtension)?.enabled ?: false
+            }) {
+                testTasks << "${projectPath}:jacocoTestReport"
+            }
+        }
+
+        // Print as a clean JSON list
+        println JsonOutput.prettyPrint(JsonOutput.toJson(testTasks))
     }
 }

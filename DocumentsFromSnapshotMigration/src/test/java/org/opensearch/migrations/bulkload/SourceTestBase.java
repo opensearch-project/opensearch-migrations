@@ -36,7 +36,7 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
@@ -61,6 +61,9 @@ import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Slf4j
@@ -182,8 +185,7 @@ public class SourceTestBase {
         Random clockJitter,
         DocumentMigrationTestContext testContext,
         Version sourceVersion,
-        Version targetVersion,
-        boolean compressionEnabled
+        Version targetVersion
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
@@ -195,8 +197,7 @@ public class SourceTestBase {
                     clockJitter,
                     testContext,
                     sourceVersion,
-                    targetVersion,
-                    compressionEnabled
+                    targetVersion
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -216,21 +217,10 @@ public class SourceTestBase {
         }
     }
 
-    @AllArgsConstructor
-    public static class FilteredLuceneDocumentsReader implements LuceneDocumentsReader {
-
-        private final LuceneDocumentsReader wrappedReader;
-        private final UnaryOperator<RfsLuceneDocument> docTransformer;
-
-        @Override
-        public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
-            return wrappedReader.readDocuments(startDoc).map(docTransformer);
-        }
-    }
-
     static class LeasePastError extends Error {
     }
 
+    @SuppressWarnings("unchecked")
     @SneakyThrows
     public static DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(
         SourceRepo sourceRepo,
@@ -240,8 +230,7 @@ public class SourceTestBase {
         Random clockJitter,
         DocumentMigrationTestContext context,
         Version sourceVersion,
-        Version targetVersion,
-        boolean compressionEnabled
+        Version targetVersion
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -270,12 +259,15 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-            var readerFactory = new LuceneDocumentsReader.Factory(sourceResourceProvider) {
-                @Override
-                public LuceneDocumentsReader getReader(Path path) {
-                    return new FilteredLuceneDocumentsReader(super.getReader(path), terminatingDocumentFilter);
-                }
-            };
+            var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
+            when(readerFactory.getReader(any())).thenAnswer(inv -> {
+                var reader = (LuceneIndexReader)spy(inv.callRealMethod());
+                when(reader.readDocuments()).thenAnswer(inv2 -> {
+                    var flux = (Flux<RfsLuceneDocument>)inv2.callRealMethod();
+                    return flux.map(terminatingDocumentFilter);
+                });
+                return reader;
+            });
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
@@ -283,7 +275,7 @@ public class SourceTestBase {
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
             var connectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
-                    .compressionEnabled(compressionEnabled)
+                    .compressionEnabled(true)
                     .build()
                     .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
