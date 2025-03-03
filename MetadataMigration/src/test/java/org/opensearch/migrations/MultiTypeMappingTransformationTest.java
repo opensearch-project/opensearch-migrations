@@ -126,8 +126,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
     @Test
     public void multiTypeTransformationTest_union_5_6() {
         try (
-                final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
-                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
         ) {
             indexCreatedCluster.start();
 
@@ -162,7 +162,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
 
             // Execute migration
-            MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
+            var result = executeMigration(arguments, MetadataCommands.MIGRATE);
 
             // Verify the migration result
             log.info(result.asCliOutput());
@@ -172,7 +172,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
                 result.getItems().getIndexes().stream().map(i -> i.getName() + ", failure: " + i.getFailureType()).collect(Collectors.joining(",")),
                 result.getItems().getIndexes().size(),
                 equalTo(3));
-            var actualCreationResult = result.getItems().getIndexes().get(0);
+            var actualCreationResult = result.getItems().getIndexes().stream().filter(i -> originalIndexName.equals(i.getName())).findFirst().get();
             assertThat(actualCreationResult.getException(), equalTo(null));
             assertThat(actualCreationResult.getName(), equalTo(originalIndexName));
             assertThat(actualCreationResult.getFailureType(), equalTo(null));
@@ -191,7 +191,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var mappingJson = mapper.readTree(mappingResponse.getValue());
 
             // Navigate to the properties of the index mapping
-            JsonNode properties = mappingJson.path(originalIndexName).path("mappings").path("properties");
+            var properties = mappingJson.path(originalIndexName).path("mappings").path("properties");
 
             // Assert that both field1 and field2 are present
             assertThat(properties.get("field1").get("type").asText(), equalTo("text"));

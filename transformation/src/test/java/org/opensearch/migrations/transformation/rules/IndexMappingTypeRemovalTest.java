@@ -323,7 +323,7 @@ public class IndexMappingTypeRemovalTest {
 
     @Test
     @SneakyThrows
-    void testFailed() {
+    void merge_es_5_type_mappings() {
         var originalJson = (ObjectNode)new ObjectMapper().readTree("{\r\n" + //
             "    \"settings\": {\r\n" + //
             "        \"index\": {\r\n" + //
@@ -386,6 +386,8 @@ public class IndexMappingTypeRemovalTest {
         // Verification
         assertThat(wasChanged, equalTo(true));
         assertThat(indexJson.toPrettyString(), not(equalTo(originalJson.toPrettyString())));
+        assertThat(indexJson.toPrettyString(), not(allOf(containsString("type1"), containsString("type2"), containsString("type3"))));
+
         assertThat(indexJson.toPrettyString(), allOf(containsString("field1"), containsString("field2"), containsString("field3")));
                 
     }
