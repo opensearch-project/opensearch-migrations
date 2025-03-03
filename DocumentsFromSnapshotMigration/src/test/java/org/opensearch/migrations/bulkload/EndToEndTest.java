@@ -51,7 +51,6 @@ public class EndToEndTest extends SourceTestBase {
 
     @ParameterizedTest(name = "Source {0} to Target {1}")
     @MethodSource(value = "scenarios")
-    @Ignore
     public void migrationDocuments(
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
