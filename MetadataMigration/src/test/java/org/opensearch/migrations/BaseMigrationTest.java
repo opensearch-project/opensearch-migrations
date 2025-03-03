@@ -147,11 +147,4 @@ abstract class BaseMigrationTest {
         SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
         cluster.copySnapshotData(localDirectory.toString());
     }
-
-    /** TODO: Delete this when ES5 is supported */
-    public static List<ContainerVersion> getSupportedClusters() {
-        return SupportedClusters.sources().stream()
-            .filter(c -> VersionMatchers.isES_5_X.negate().test(c.getVersion())) // ES5 isn't supported for metadata yet
-            .collect(Collectors.toList());
-    }
 }

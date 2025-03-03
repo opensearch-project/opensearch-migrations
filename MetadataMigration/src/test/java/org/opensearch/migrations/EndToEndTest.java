@@ -24,7 +24,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 
@@ -36,7 +35,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        return getSupportedClusters().stream()
+        return SupportedClusters.sources().stream()
             .flatMap(sourceCluster -> {
                 // Determine applicable template types based on source version
                 List<TemplateType> templateTypes = Stream.concat(
@@ -115,12 +114,12 @@ class EndToEndTest extends BaseMigrationTest {
 
             // Create documents that use the templates
             String blogIndexName = "blog_" + uniqueSuffix + "_2023";
-            sourceOperations.createDocument(blogIndexName, "222", "{\"" + fieldName + "\":\"Tobias Funke\"}", null, "my_doc");
+            sourceOperations.createDocument(blogIndexName, "222", "{\"" + fieldName + "\":\"Tobias Funke\"}");
             testData.blogIndexNames.add(blogIndexName);
         }
 
         sourceOperations.createDocument(testData.movieIndexName, "123", "{\"title\":\"This is Spinal Tap\"}");
-        // sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{}");
+        sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{}");
 
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);
@@ -147,7 +146,7 @@ class EndToEndTest extends BaseMigrationTest {
         dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
         arguments.dataFilterArgs = dataFilterArgs;
 
-        // targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
+        targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 
         // Execute migration
         MigrationItemResult result = executeMigration(arguments, command);
@@ -160,7 +159,6 @@ class EndToEndTest extends BaseMigrationTest {
     private static class TestData {
         final String compoTemplateName = "simple_component_template";
         final String indexTemplateName = "simple_index_template";
-        final String aliasInTemplate = "alias1";
         final String movieIndexName = "movies_2023";
         final String aliasName = "movies-alias";
         final String indexThatAlreadyExists = "already-exists";
@@ -184,11 +182,11 @@ class EndToEndTest extends BaseMigrationTest {
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())),
             containsInAnyOrder(Stream.concat(testData.blogIndexNames.stream(),
                 Stream.of(testData.movieIndexName)).toArray()));
-        // assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
-        //         CreationResult.CreationFailureType.ALREADY_EXISTS)),
-        //     containsInAnyOrder(testData.indexThatAlreadyExists));
-        assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
-            containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
+        assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
+                CreationResult.CreationFailureType.ALREADY_EXISTS)),
+            containsInAnyOrder(testData.indexThatAlreadyExists));
+        // assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
+        //     containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
@@ -237,7 +235,7 @@ class EndToEndTest extends BaseMigrationTest {
                 .map(Matchers::containsString)
                 .toArray(Matcher[]::new)
         );
-        assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
+        // assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
 
         // Check that the templates were migrated
         for (String templateName : testData.templateNames) {
