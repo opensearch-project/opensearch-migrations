@@ -20,7 +20,6 @@ public class SupportedClusters {
             SearchClusterContainer.ES_V7_10_2,
             SearchClusterContainer.ES_V7_17,
             SearchClusterContainer.OS_V1_3_16
-
         );
     }
 

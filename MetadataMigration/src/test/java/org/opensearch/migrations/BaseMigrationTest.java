@@ -3,15 +3,12 @@ package org.opensearch.migrations;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.commands.MigrationItemResult;

@@ -38,7 +38,8 @@ public class ClusterOperations {
         httpClient = HttpClients.createDefault();
     }
 
-    public void createSnapshotRepository(final String repoPath, final String repoName) throws IOException {
+    @SneakyThrows
+    public void createSnapshotRepository(final String repoPath, final String repoName) {
         // Create snapshot repository
         final var repositoryJson = "{\n"
             + "  \"type\": \"fs\",\n"
@@ -148,7 +149,8 @@ public class ClusterOperations {
         }
     }
 
-    public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) throws IOException {
+    @SneakyThrows
+    public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) {
         final var snapshotJson = "{\n"
             + "  \"indices\": \""
             + indexPattern
@@ -173,8 +175,9 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
+        var matchPatternClauseName = VersionMatchers.isES_5_X.test(clusterVersion) ? "template" : "index_patterns";
         final var templateJson = "{\r\n" + //
-            "  \"template\": [\r\n" + //
+            "  \"" + matchPatternClauseName + "\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
             "  ],\r\n" + //
             "  \"settings\": {\r\n" + //
@@ -201,7 +204,8 @@ public class ClusterOperations {
             "  }\r\n" + //
             "}";
 
-        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName);
+        var extraParameters = VersionMatchers.isES_5_X.test(clusterVersion) ? "" : "?include_type_name=true";
+        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName + extraParameters);
         createRepoRequest.setEntity(new StringEntity(templateJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 

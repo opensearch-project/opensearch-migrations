@@ -1,7 +1,6 @@
 package org.opensearch.migrations;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -9,7 +8,6 @@ import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +25,6 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Slf4j
 class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
-    @SneakyThrows
     @Test
     public void multiTypeTransformationTest_union_6_8() {
         var es5Repo = "es5";
@@ -42,10 +39,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var indexCreatedOperations = new ClusterOperations(indexCreatedCluster);
 
             // Create index and add documents on the source cluster
-            indexCreatedOperations.createIndex(originalIndexName);
-            indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
-            indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
-            indexCreatedOperations.createDocument(originalIndexName, "3", "{\"field3\":1.1}", null, "type3");
+            createMultiTypeIndex(originalIndexName, indexCreatedOperations);
 
             indexCreatedOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
             indexCreatedOperations.takeSnapshot(es5Repo, snapshotName, originalIndexName);
@@ -77,52 +71,14 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var updatedSnapshotName = createSnapshot("union-snapshot");
             var arguments = prepareSnapshotMigrationArgs(updatedSnapshotName);
 
-            // Set up data filters
-            var dataFilterArgs = new DataFilterArgs();
-            dataFilterArgs.indexTemplateAllowlist = List.of("");
-            dataFilterArgs.indexAllowlist = List.of(originalIndexName);
-            arguments.dataFilterArgs = dataFilterArgs;
-
-            // Use union method for multi-type mappings
-            arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
+            configureDataFilters(originalIndexName, arguments);
 
             // Execute migration
-            MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
-
-            // Verify the migration result
-            log.info(result.asCliOutput());
-            assertThat(result.getExitCode(), equalTo(0));
-
-            assertThat(result.getItems().getIndexes().size(), equalTo(1));
-            var actualCreationResult = result.getItems().getIndexes().get(0);
-            assertThat(actualCreationResult.getException(), equalTo(null));
-            assertThat(actualCreationResult.getName(), equalTo(originalIndexName));
-            assertThat(actualCreationResult.getFailureType(), equalTo(null));
-
-            // Verify that the transformed index exists on the target cluster
-            var res = targetOperations.get("/" + originalIndexName);
-            assertThat(res.getKey(), equalTo(200));
-            assertThat(res.getValue(), containsString(originalIndexName));
-
-            // Fetch the index mapping from the target cluster
-            var mappingResponse = targetOperations.get("/" + originalIndexName + "/_mapping");
-            assertThat(mappingResponse.getKey(), equalTo(200));
-
-            // Parse the mapping response
-            var mapper = new ObjectMapper();
-            var mappingJson = mapper.readTree(mappingResponse.getValue());
-
-            // Navigate to the properties of the index mapping
-            JsonNode properties = mappingJson.path(originalIndexName).path("mappings").path("properties");
-
-            // Assert that both field1 and field2 are present
-            assertThat(properties.get("field1").get("type").asText(), equalTo("text"));
-            assertThat(properties.get("field2").get("type").asText(), equalTo("long"));
-            assertThat(properties.get("field3").get("type").asText(), equalTo("float"));
+            var result = executeMigration(arguments, MetadataCommands.MIGRATE);
+            checkResult(result, originalIndexName);
         }
     }
 
-    @SneakyThrows
     @Test
     public void multiTypeTransformationTest_union_5_6() {
         try (
@@ -140,64 +96,72 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             var originalIndexName = "test_index";
 
-            // Create index and add documents on the source cluster
-            indexCreatedOperations.createIndex(originalIndexName);
-            indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
-            indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
-            indexCreatedOperations.createDocument(originalIndexName, "3", "{\"field3\":1.1}", null, "type3");
+            createMultiTypeIndex(originalIndexName, indexCreatedOperations);
 
             var arguments = new MigrateOrEvaluateArgs();
             arguments.sourceArgs.host = sourceCluster.getUrl();
             arguments.targetArgs.host = targetCluster.getUrl();
 
+            configureDataFilters(originalIndexName, arguments);
 
-            // Set up data filters
-            var dataFilterArgs = new DataFilterArgs();
-            dataFilterArgs.indexTemplateAllowlist = List.of("");
-            dataFilterArgs.indexAllowlist = List.of(originalIndexName);
-            arguments.dataFilterArgs = dataFilterArgs;
-            arguments.sourceVersion = indexCreatedCluster.getContainerVersion().getVersion();
-
-            // Use union method for multi-type mappings
-            arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
-
-            // Execute migration
+            // Execute migration 
             var result = executeMigration(arguments, MetadataCommands.MIGRATE);
-
-            // Verify the migration result
-            log.info(result.asCliOutput());
-            assertThat(result.getExitCode(), equalTo(0));
-
-            assertThat(
-                result.getItems().getIndexes().stream().map(i -> i.getName() + ", failure: " + i.getFailureType()).collect(Collectors.joining(",")),
-                result.getItems().getIndexes().size(),
-                equalTo(3));
-            var actualCreationResult = result.getItems().getIndexes().stream().filter(i -> originalIndexName.equals(i.getName())).findFirst().get();
-            assertThat(actualCreationResult.getException(), equalTo(null));
-            assertThat(actualCreationResult.getName(), equalTo(originalIndexName));
-            assertThat(actualCreationResult.getFailureType(), equalTo(null));
-
-            // Verify that the transformed index exists on the target cluster
-            var res = targetOperations.get("/" + originalIndexName);
-            assertThat(res.getKey(), equalTo(200));
-            assertThat(res.getValue(), containsString(originalIndexName));
-
-            // Fetch the index mapping from the target cluster
-            var mappingResponse = targetOperations.get("/" + originalIndexName + "/_mapping");
-            assertThat(mappingResponse.getKey(), equalTo(200));
-
-            // Parse the mapping response
-            var mapper = new ObjectMapper();
-            var mappingJson = mapper.readTree(mappingResponse.getValue());
-
-            // Navigate to the properties of the index mapping
-            var properties = mappingJson.path(originalIndexName).path("mappings").path("properties");
-
-            // Assert that both field1 and field2 are present
-            assertThat(properties.get("field1").get("type").asText(), equalTo("text"));
-            assertThat(properties.get("field2").get("type").asText(), equalTo("long"));
-            assertThat(properties.get("field3").get("type").asText(), equalTo("float"));
+            checkResult(result, originalIndexName);
         }
+    }
+    
+    private void createMultiTypeIndex(String originalIndexName, ClusterOperations indexCreatedOperations) {
+        indexCreatedOperations.createIndex(originalIndexName);
+        indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
+        indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
+        indexCreatedOperations.createDocument(originalIndexName, "3", "{\"field3\":1.1}", null, "type3");
+    }
+
+    @SneakyThrows
+    private void checkResult(MigrationItemResult result, String indexName) {
+        // Verify the migration result
+        log.info(result.asCliOutput());
+        assertThat(result.getExitCode(), equalTo(0));
+
+        var actualCreationResult = result.getItems().getIndexes().stream().filter(i -> indexName.equals(i.getName())).findFirst().get();
+        assertThat(actualCreationResult.getException(), equalTo(null));
+        assertThat(actualCreationResult.getName(), equalTo(indexName));
+        assertThat(actualCreationResult.getFailureType(), equalTo(null));
+        assertThat(actualCreationResult.getException(), equalTo(null));
+        assertThat(actualCreationResult.getName(), equalTo(indexName));
+        assertThat(actualCreationResult.getFailureType(), equalTo(null));
+
+        // Verify that the transformed index exists on the target cluster
+        var res = targetOperations.get("/" + indexName);
+        assertThat(res.getKey(), equalTo(200));
+        assertThat(res.getValue(), containsString(indexName));
+
+        // Fetch the index mapping from the target cluster
+        var mappingResponse = targetOperations.get("/" + indexName + "/_mapping");
+        assertThat(mappingResponse.getKey(), equalTo(200));
+
+        // Parse the mapping response
+        var mapper = new ObjectMapper();
+        var mappingJson = mapper.readTree(mappingResponse.getValue());
+
+        // Navigate to the properties of the index mapping
+        var properties = mappingJson.path(indexName).path("mappings").path("properties");
+
+        // Assert that both field1 and field2 are present
+        assertThat(properties.get("field1").get("type").asText(), equalTo("text"));
+        assertThat(properties.get("field2").get("type").asText(), equalTo("long"));
+        assertThat(properties.get("field3").get("type").asText(), equalTo("float"));
+    }
+
+    private void configureDataFilters(String originalIndexName, MigrateOrEvaluateArgs arguments) {
+        // Set up data filters
+        var dataFilterArgs = new DataFilterArgs();
+        dataFilterArgs.indexTemplateAllowlist = List.of("");
+        dataFilterArgs.indexAllowlist = List.of(originalIndexName);
+        arguments.dataFilterArgs = dataFilterArgs;
+
+        // Use union method for multi-type mappings
+        arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
     }
 
     @Test
