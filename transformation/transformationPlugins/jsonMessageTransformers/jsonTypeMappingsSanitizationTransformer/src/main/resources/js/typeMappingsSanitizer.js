@@ -200,7 +200,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
     request.URI = "/" + targetIndex;
 
     const newProperties = {}
-    for (const [sourceType, ] of targetIndicesMap) {
+    for (const [sourceType,] of targetIndicesMap) {
         for (const fieldName of Object.keys(oldMappings[sourceType].properties)) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
@@ -208,8 +208,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
                 if (!deepEquals(previouslyProcessedFieldDef, currentlyProcessingFieldDef)) {
                     throw new Error("Cannot create union of different types for field " + fieldName);
                 }
-            }
-            else {
+            } else {
                 newProperties[fieldName] = oldMappings[sourceType].properties[fieldName];
             }
         }
@@ -238,21 +237,23 @@ function rewriteCreateIndex(match, inputMap) {
 
 // Define regex patterns as constants
 const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^\/]*)\/([^\/]*)\/(.*)/;
-const GET_DOC_REGEX      = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/;
+const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/;
 const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
 const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^\/]*)/;
 
 function processMetadataRequest(document, context) {
-    if (!document.body || !document.body.mappings) {
-        return document;
+    let mappings = document?.body?.mappings;
+
+    // Normalize mappings to an object
+    if (Array.isArray(mappings)) {
+        // If it's an array, convert it to an object by merging entries
+        mappings = Object.assign({}, ...mappings);
     }
 
-    let mappings = document.body.mappings;
-    console.log("Found Mapping" + mappings)
-    console.log("For index" + document.name)
+    if (!mappings || (mappings.properties && !mappings.properties?.properties)) {
+        // No Type Exists either because mappings doesn't exist,
+        // or properties directly under mappings (and did not find a type named "properties")
 
-
-    if (mappings.properties && !mappings.properties?.properties) {
         const typeName = "_doc";
 
         // Convert source index to target index.
@@ -265,33 +266,29 @@ function processMetadataRequest(document, context) {
 
         if (targetIndex) {
             document.name = targetIndex;
-            if(document.body?.settings) {
-                console.log("Document.body.settings ", document.body?.settings)
+            // Transform composed_of names if present to make valid index_templates
+            if (document.body?.composed_of && Array.isArray(document.body.composed_of)) {
+                document.body.composed_of = document.body.composed_of.map(compName => {
+                    const transformed = convertSourceIndexToTarget(
+                        compName,
+                        "_doc",
+                        context.index_mappings,
+                        context.regex_index_mappings
+                    );
+                    return transformed || compName;
+                });
             }
-            if (document.body?.settings?.['index.provided_name']) {
-                console.log("Found index.provided_name")
-                document.body.settings['index.provided_name'] = targetIndex;
-            }
+
             return [document];
         }
         // Index excluded, skip
         return [];
     }
 
-    // Handle types
-
-    // Normalize mappings to an object
-    if (Array.isArray(mappings)) {
-        // If it's an array, convert it to an object by merging entries
-        mappings = Object.assign({}, ...mappings);
-    }
-
     const types = Object.keys(mappings);
     const creationObjects = {};
     for (let idx = 0; idx < types.length; idx++) {
         const type = types[idx];
-        console.log("Found type" + type)
-        console.log("For index2" + document.name)
 
         const targetIndex = convertSourceIndexToTarget(
             document.name,
@@ -299,8 +296,8 @@ function processMetadataRequest(document, context) {
             context.index_mappings,
             context.regex_index_mappings
         );
-        
-        if(targetIndex) {
+
+        if (targetIndex) {
             const existing = creationObjects[targetIndex];
             if (existing) {
                 existing.body.mappings._doc.properties = {
