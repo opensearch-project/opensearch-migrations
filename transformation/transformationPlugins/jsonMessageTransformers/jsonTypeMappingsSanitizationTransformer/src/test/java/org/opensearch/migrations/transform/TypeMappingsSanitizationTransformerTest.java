@@ -35,10 +35,15 @@ class TypeMappingsSanitizationTransformerTest {
             "socialTypes", Map.of(
                 "tweet", "communal",
                 "user", "communal"));
-        var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-$1-$2"));
+        var regexMappings = List.of(
+                Map.of(
+                        "sourceIndexPattern","time-(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "time-$1-$2"
+                )
+        );
         var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(7, 10));
-        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
+        indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexMappings, sourceProperties, null);
     }
 
     @AfterAll

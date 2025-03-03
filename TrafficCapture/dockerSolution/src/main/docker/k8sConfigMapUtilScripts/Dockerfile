@@ -33,7 +33,7 @@ COPY Pipfile .
 COPY Pipfile.lock .
 RUN pipenv install --deploy
 
-COPY configmap2yaml/* /root/
-RUN chmod ug+x /root/*.py
+COPY configmap2yaml /root/configmap2yaml/
+RUN chmod ug+x /root/configmap2yaml/*.py
 
 ENTRYPOINT ["tail", "-f", "/dev/null"]

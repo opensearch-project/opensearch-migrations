@@ -22,8 +22,14 @@ public class TypeMappingsSanitizationMetadataTest {
                 "keep", Map.of("_doc", "keep")
         );
         var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(6, 8));
-        var regexIndexMappings = List.of(List.of("time-(.*)", "(.*)", "time-$1-$2"));
-        return new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
+        var regexMappings = List.of(
+                Map.of(
+                        "sourceIndexPattern","time-(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "time-$1-$2"
+                )
+        );
+        return new TypeMappingsSanitizationTransformer(indexMappings, regexMappings, sourceProperties, null);
     }
 
     private static String makeMetadataRequest(String indexName, String type1, String type2) {
