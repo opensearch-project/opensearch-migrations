@@ -58,6 +58,7 @@ class OpenSearchClientFactoryTest {
     private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"true\"}}}";
     private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}";
     private static final String ROOT_RESPONSE_OS_1_0_0 = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"1.0.0\"}}";
+    private static final String ROOT_RESPONSE_OS_3_0_0_alpha = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"3.0.0-alpha1\"}}";
     private static final String ROOT_RESPONSE_ES_7_10_2 = "{\"version\": {\"number\": \"7.10.2\"}}";
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
         .enable(StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION)
@@ -119,6 +120,19 @@ class OpenSearchClientFactoryTest {
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("OS 1.0.0")));
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void testGetClusterVersion_AlphaVersion() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_3_0_0_alpha);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
+
+        var version = openSearchClientFactory.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("OS 3.0.0")));
         verify(restClient).getConnectionContext();
         verify(restClient).getAsync("", null);
         verifyNoMoreInteractions(restClient);

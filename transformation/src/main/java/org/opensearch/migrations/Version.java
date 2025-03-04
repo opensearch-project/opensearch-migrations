@@ -50,7 +50,7 @@ public class Version {
             remainingString = remainingString.replaceFirst("^[_v]+", "");
 
             // Break out into the numeric parts
-            var versionParts = remainingString.split("[\\._]");
+            var versionParts = remainingString.split("[\\._-]");
 
             builder.major(Integer.parseInt(versionParts[0]));
 

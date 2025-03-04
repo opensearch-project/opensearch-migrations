@@ -127,6 +127,7 @@ jobs:
       - generate-project-test-matrix
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         task: ${{ fromJson(needs.generate-project-test-matrix.outputs.matrix) }}
     steps:
