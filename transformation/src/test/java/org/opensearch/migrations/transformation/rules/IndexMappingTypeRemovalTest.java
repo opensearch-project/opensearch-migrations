@@ -323,7 +323,7 @@ public class IndexMappingTypeRemovalTest {
 
     @Test
     @SneakyThrows
-    void merge_es_5_type_mappings() {
+    void testApplyTransformation_multiTypeUnion_withConflicts_es5Format() {
         var originalJson = (ObjectNode)new ObjectMapper().readTree("{\r\n" + //
             "    \"settings\": {\r\n" + //
             "        \"index\": {\r\n" + //
