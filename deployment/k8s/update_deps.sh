@@ -89,6 +89,8 @@ fi
 
 helm_update_with_hash "charts/aggregates/migrationAssistant" "migrationAssistant" "false" "$must_update"
 helm_update_with_hash "charts/aggregates/testClusters" "testClusters" "false" "false"
+helm_update_with_hash "charts/components/elasticsearchCluster" "elasticsearchCluster" "false" "false"
+helm_update_with_hash "charts/components/opensearchCluster" "opensearchCluster" "false" "false"
 
 # Update stored hashes
 mv "$TEMP_FILE" "$HASH_FILE"

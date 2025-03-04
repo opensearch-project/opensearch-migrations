@@ -1,17 +1,11 @@
-conditionalPackageInstalls:
-  proxy: false
-  source: true
-  target: false
-
-
 # Elastic docker registry does not seem to include 2.x versions and thus being pulled from docker hub
-source:
+elasticsearch:
   imageTag: "2.4.5"
   image: "elasticsearch"
   antiAffinity: "soft"
   esJavaOpts: "-Xmx128m -Xms128m"
   protocol: http
-  replicas: 1  # Set replicas to the number of nodes you want in the cluster (e.g., 3)
+  replicas: 1 # Set replicas to the number of nodes you want in the cluster (e.g., 3)
   createCert: false
   sysctlInitContainer:
     enabled: false
