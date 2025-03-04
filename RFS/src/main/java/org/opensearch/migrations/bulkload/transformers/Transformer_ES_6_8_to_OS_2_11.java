@@ -18,8 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final List<TransformationRule<Index>> indexTransformations;
-    private final List<TransformationRule<Index>> indexTemplateTransformations;
+    protected final List<TransformationRule<Index>> indexTransformations;
+    protected final List<TransformationRule<Index>> indexTemplateTransformations;
 
     private final int awarenessAttributeDimensionality;
 
@@ -67,6 +67,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
                         .addArgument(indexTemplate::getRawJson)
                         .setCause(e)
                         .log();
+                    throw e;
                 }
             });
             newRoot.set("templates", templates);

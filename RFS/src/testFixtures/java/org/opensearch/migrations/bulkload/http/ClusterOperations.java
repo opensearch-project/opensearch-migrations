@@ -175,11 +175,13 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
-        var matchPatternClauseName = VersionMatchers.isES_5_X.test(clusterVersion) ? "template" : "index_patterns";
-        final var templateJson = "{\r\n" + //
-            "  \"" + matchPatternClauseName + "\": [\r\n" + //
+        var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
+            ? "\"template\":\"" + pattern + "\","
+            : "\"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
-            "  ],\r\n" + //
+            "  ],\r\n";
+        final var templateJson = "{\r\n" + //
+            "  " + matchPatternClause + //
             "  \"settings\": {\r\n" + //
             "    \"number_of_shards\": 1\r\n" + //
             "  },\r\n" + //

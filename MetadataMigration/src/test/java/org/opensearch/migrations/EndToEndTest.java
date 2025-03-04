@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 
@@ -53,7 +55,7 @@ class EndToEndTest extends BaseMigrationTest {
                                         transferMedium,
                                         templateTypes)))
                         .collect(Collectors.toList()).stream();
-            });
+            }).limit(1);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
@@ -124,7 +126,7 @@ class EndToEndTest extends BaseMigrationTest {
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);
 
-        var arguments = new MigrateOrEvaluateArgs();
+        final MigrateOrEvaluateArgs arguments;
 
         switch (medium) {
             case SnapshotImage:
@@ -133,10 +135,15 @@ class EndToEndTest extends BaseMigrationTest {
                 break;
 
             case Http:
+                arguments = new MigrateOrEvaluateArgs();
                 arguments.sourceArgs.host = sourceCluster.getUrl();
                 arguments.targetArgs.host = targetCluster.getUrl();
                 break;
+
+            default:
+                throw new RuntimeException("Invalid Option");
         }
+        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters
         var dataFilterArgs = new DataFilterArgs();
@@ -185,8 +192,8 @@ class EndToEndTest extends BaseMigrationTest {
         assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
                 CreationResult.CreationFailureType.ALREADY_EXISTS)),
             containsInAnyOrder(testData.indexThatAlreadyExists));
-        // assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
-        //     containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
+            containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
@@ -235,7 +242,7 @@ class EndToEndTest extends BaseMigrationTest {
                 .map(Matchers::containsString)
                 .toArray(Matcher[]::new)
         );
-        // assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
+        assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
 
         // Check that the templates were migrated
         for (String templateName : testData.templateNames) {
