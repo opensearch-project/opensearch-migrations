@@ -27,13 +27,10 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         this.awarenessAttributeDimensionality = awarenessAttributeDimensionality;
         this.indexTransformations = List.of(new IndexMappingTypeRemoval(
                 params.getMultiTypeResolutionBehavior()
-            )
-        );
-        this.indexTemplateTransformations = List.of(
-            new IndexMappingTypeRemoval(
+        ));
+        this.indexTemplateTransformations = List.of(new IndexMappingTypeRemoval(
                 params.getMultiTypeResolutionBehavior()
-            )
-        );
+        ));
     }
 
     @Override
