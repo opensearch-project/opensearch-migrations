@@ -205,6 +205,33 @@ subprojects {
             }
         }
 
+        tasks.register('isolatedTest1', Test) {
+            maxParallelForks = 1
+            systemProperty 'test.striping.total', '3'
+            systemProperty 'test.striping.index', '0'
+            useJUnitPlatform {
+                includeTags 'isolatedTest'
+            }
+        }
+
+        tasks.register('isolatedTest2', Test) {
+            maxParallelForks = 1
+            systemProperty 'test.striping.total', '3'
+            systemProperty 'test.striping.index', '1'
+            useJUnitPlatform {
+                includeTags 'isolatedTest'
+            }
+        }
+
+        tasks.register('isolatedTest3', Test) {
+            maxParallelForks = 1
+            systemProperty 'test.striping.total', '3'
+            systemProperty 'test.striping.index', '2'
+            useJUnitPlatform {
+                includeTags 'isolatedTest'
+            }
+        }
+
         tasks.register('fullTest') {
             dependsOn test
             dependsOn slowTest
