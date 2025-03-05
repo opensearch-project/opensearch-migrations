@@ -4,6 +4,7 @@ import org.opensearch.migrations.transformation.CanApplyResult;
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -96,65 +97,71 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         }
 
         final var mappingsNode = index.getRawJson().get(MAPPINGS_KEY);
+        final var resolvedMappingsNode = MAPPER.createObjectNode();
+        final var resolvedProperties = resolvedMappingsNode.withObject(PROPERTIES_KEY);
         // Handle array case
         if (mappingsNode.isArray()) {
-            final var resolvedMappingsNode = MAPPER.createObjectNode();
-            if (mappingsNode.size() < 2) {
-                final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
+            var mappingsArray = (ArrayNode) mappingsNode;
+            if (mappingsArray.size() < 2) {
+                final var mappingsInnerNode = (ObjectNode) mappingsArray.get(0);
                 var properties = mappingsInnerNode.fields().next().getValue().get(PROPERTIES_KEY);
                 resolvedMappingsNode.set(PROPERTIES_KEY, properties);
             } else if (MultiTypeResolutionBehavior.UNION.equals(multiTypeResolutionBehavior)) {
-                var resolvedProperties = resolvedMappingsNode.withObjectProperty(PROPERTIES_KEY);
-                var mappings = (ArrayNode) mappingsNode;
-                mappings.forEach(
-                        typeNodeEntry -> {
-                            var typeNode = typeNodeEntry.properties().stream().findFirst().orElseThrow();
-                            var type = typeNode.getKey();
-                            var node = typeNode.getValue();
-                            var properties = node.get(PROPERTIES_KEY);
-                            properties.properties().forEach(propertyEntry -> {
-                                var fieldName = propertyEntry.getKey();
-                                var fieldType = propertyEntry.getValue();
-
-                                if (resolvedProperties.has(fieldName)) {
-                                    var existingFieldType = resolvedProperties.get(fieldName);
-                                    if (!existingFieldType.equals(fieldType)) {
-                                        log.atWarn().setMessage("Conflict during type union with index: {}\n" +
-                                                        "field: {}\n" +
-                                                        "existingFieldType: {}\n" +
-                                                        "type: {}\n" +
-                                                        "secondFieldType: {}")
-                                                .addArgument(index.getName())
-                                                .addArgument(fieldName)
-                                                .addArgument(existingFieldType)
-                                                .addArgument(type)
-                                                .addArgument(fieldType)
-                                                .log();
-                                        throw new IllegalArgumentException("Conflicting definitions for property during union "
-                                        + fieldName + " (" + existingFieldType + " and " + fieldType + ")" );
-                                    }
-                                } else {
-                                    resolvedProperties.set(fieldName, fieldType);
-                                }
-                            });
-                        }
-                );
+                mergePropertiesFromMappings(mappingsArray, index, resolvedProperties);
             }
             index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
+        } else if (mappingsNode.isObject()) {
+            mergePropertiesFromMappings((ObjectNode)mappingsNode, index, resolvedProperties);
         }
-
-        if (mappingsNode.isObject()) {
-            var mappingsObjectNode = (ObjectNode) mappingsNode;
-            var typeNode = mappingsNode.fields().next();
-            var typeNodeChildren = typeNode.getValue().fields();
-            // Check if the type node is empty, then there is nothing to move
-            if (typeNodeChildren.hasNext()) {
-                var propertiesNode = typeNodeChildren.next();
-
-                mappingsObjectNode.set(propertiesNode.getKey(), propertiesNode.getValue());
-            }
-            mappingsObjectNode.remove(typeNode.getKey());
-        }
+        index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         return true;
+    }
+
+    private void mergePropertiesFromMappings(ObjectNode mappingsNode, Index index, ObjectNode resolvedProperties) {
+        mappingsNode.fields().forEachRemaining(typeEntry -> {
+            var typeNode = typeEntry.getValue();
+            if (typeNode.has(PROPERTIES_KEY)) {
+                var propertiesNode = typeNode.get(PROPERTIES_KEY);
+                mergePropertiesCheckingConflicts(index, resolvedProperties, typeEntry.getKey(), propertiesNode);
+            }
+        });
+    }
+
+    private void mergePropertiesFromMappings(ArrayNode mappingsArray, Index index, ObjectNode resolvedProperties) {
+        mappingsArray.forEach(typeNodeEntry -> {
+            var typeNode = typeNodeEntry.fields().next().getValue();
+            if (typeNode.has(PROPERTIES_KEY)) {
+                var propertiesNode = typeNode.get(PROPERTIES_KEY);
+                mergePropertiesCheckingConflicts(index, resolvedProperties, typeNode.textValue(), propertiesNode);
+            }
+        });
+    }
+
+    private void mergePropertiesCheckingConflicts(final Index index, ObjectNode resolvedProperties, String type, JsonNode properties) {
+        properties.properties().forEach(propertyEntry -> {
+            var fieldName = propertyEntry.getKey();
+            var fieldType = propertyEntry.getValue();
+
+            if (resolvedProperties.has(fieldName)) {
+                var existingFieldType = resolvedProperties.get(fieldName);
+                if (!existingFieldType.equals(fieldType)) {
+                    log.atWarn().setMessage("Conflict during type union with index: {}\n" +
+                                    "field: {}\n" +
+                                    "existingFieldType: {}\n" +
+                                    "type: {}\n" +
+                                    "secondFieldType: {}")
+                            .addArgument(index.getName())
+                            .addArgument(fieldName)
+                            .addArgument(existingFieldType)
+                            .addArgument(type)
+                            .addArgument(fieldType)
+                            .log();
+                    throw new IllegalArgumentException("Conflicting definitions for property during union "
+                    + fieldName + " (" + existingFieldType + " and " + fieldType + ")" );
+                }
+            } else {
+                resolvedProperties.set(fieldName, fieldType);
+            }
+        });
     }
 }

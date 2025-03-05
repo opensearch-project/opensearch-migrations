@@ -31,8 +31,8 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
 
-        String[] problemFields = { "creation_date", "provided_name", "uuid", "version" };
-        for (String field : problemFields) {
+        String[] problemSettings = { "creation_date", "provided_name", "uuid", "version", "index.mapping.single_type", "index.mapper.dynamic" };
+        for (var field : problemSettings) {
             settings.remove(field);
         }
 
