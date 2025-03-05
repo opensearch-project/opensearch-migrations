@@ -1,5 +1,7 @@
 import {
+    GatewayVpcEndpoint,
     GatewayVpcEndpointAwsService,
+    InterfaceVpcEndpoint,
     InterfaceVpcEndpointAwsService,
     IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
@@ -15,7 +17,6 @@ import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 import { Stack } from "aws-cdk-lib";
 import { createMigrationStringParameter, getMigrationStringParameterName, isStackInGovCloud, MigrationSSMParameter } from "./common-utilities";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
-import { GatewayVpcEndpoint, InterfaceVpcEndpoint } from "aws-cdk-lib/aws-ec2";
 import { CdkLogger } from "./cdk-logger";
 
 export interface NetworkStackProps extends StackPropsExt {
