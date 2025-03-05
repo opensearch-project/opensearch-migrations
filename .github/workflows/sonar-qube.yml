@@ -19,7 +19,7 @@ jobs:
         # `community` tag that supports this option, which we're using as a short-term solution
         # while we support the `token` parameter.credentials:
         # https://opensearch.atlassian.net/browse/MIGRATIONS-2389
-        image: sonarqube@sha256:47e573f85879254dafd7be9845f750155f33de8a6f33542015c31ce050917059
+        image: sonarqube
         ports:
           - 9000:9000
         options: >-
@@ -47,6 +47,22 @@ jobs:
       with:
         gradle-version: 8.0.2
         gradle-home-cache-cleanup: true
+
+    - name: Generate SonarQube Token
+      run: |
+        echo "Generating a SonarQube token..."
+        RESPONSE=$(curl -s -X POST -u "admin:admin" "http://localhost:9000/api/user_tokens/generate" \
+          -d "name=github-action-token" -d "type=GLOBAL_ANALYSIS_TOKEN")
+        
+        SONAR_TOKEN=$(echo "$RESPONSE" | jq -r '.token')
+        
+        if [ "$SONAR_TOKEN" == "null" ]; then
+          echo "❌ Failed to generate SonarQube token!"
+          exit 1
+        fi
+
+        echo "::add-mask::$SONAR_TOKEN"
+        echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run Gradle Build
       run: ./gradlew copyDependencies
     - name: Run SonarQube Scanner
@@ -58,13 +74,12 @@ jobs:
           -Dsonar.projectKey=local_project \
           -Dsonar.sources=. \
           -Dsonar.host.url=http://localhost:9000 \
-          -Dsonar.login=admin \
-          -Dsonar.password=admin
+          -Dsonar.login=$SONAR_TOKEN
     - name: Wait for issues to be processed
       run: sleep 60
     - name: Collect issues from the server
       run: |
-        curl -s -u admin:admin "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
+        curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
 
         echo "::group::SonarQube Issues"
         jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
