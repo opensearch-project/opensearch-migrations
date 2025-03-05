@@ -8,6 +8,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.Builder;
 import lombok.Data;
@@ -30,11 +31,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class CustomTransformationTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
+        // Transformations are differentiated only by source, so lock to a specific target.
+        var target = SupportedClusters.targets().stream().limit(1).findFirst().get();
         return SupportedClusters.sources().stream()
-                .flatMap(sourceCluster ->
-                        SupportedClusters.targets().stream()
-                                .map(targetCluster -> Arguments.of(sourceCluster, targetCluster))
-                );
+                .map(sourceCluster -> Arguments.of(sourceCluster, target));
     }
 
     @ParameterizedTest(name = "Custom Transformation From {0} to {1}")
@@ -159,6 +159,7 @@ class CustomTransformationTest extends BaseMigrationTest {
 
         var snapshotName = createSnapshot("custom_transformation_snap");
         var arguments = prepareSnapshotMigrationArgs(snapshotName);
+        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters
         var dataFilterArgs = new DataFilterArgs();
