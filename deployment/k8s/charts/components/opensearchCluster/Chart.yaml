@@ -1,0 +1,7 @@
+apiVersion: v2
+name: opensearch-cluster
+version: 0.1.0
+dependencies:
+  - name: opensearch
+    version: "2.23.1"
+    repository: "https://opensearch-project.github.io/helm-charts/"
