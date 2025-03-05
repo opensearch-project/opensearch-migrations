@@ -94,15 +94,19 @@ class CustomTransformationTest extends BaseMigrationTest {
             "    \"TypeMappingSanitizationTransformerProvider\": {\n" +
             "      \"staticMappings\": {\n" +
             "        \"test_index\": {\n" +
+            "            \"doc\": \"transformed_index\",\n" +
             "            \"_doc\": \"transformed_index\"\n" +
             "          },\n" +
             "        \"legacy_template\": {\n" +
+            "            \"doc\": \"transformed_legacy_template\",\n" +
             "            \"_doc\": \"transformed_legacy_template\"\n" +
             "          },\n" +
             "        \"index_template\": {\n" +
+            "            \"doc\": \"transformed_index_template\",\n" +
             "            \"_doc\": \"transformed_index_template\"\n" +
             "          },\n" +
             "        \"component_template\": {\n" +
+            "            \"doc\": \"transformed_component_template\",\n" +
             "            \"_doc\": \"transformed_component_template\"\n" +
             "          }\n" +
             "      },\n" +
