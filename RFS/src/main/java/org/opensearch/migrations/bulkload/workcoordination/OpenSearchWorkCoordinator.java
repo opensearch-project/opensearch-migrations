@@ -128,7 +128,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private final Clock clock;
     private final Consumer<WorkItemAndDuration> workItemConsumer;
 
-    public OpenSearchWorkCoordinator(
+    protected OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId
@@ -136,7 +136,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC(), w -> {});
     }
 
-    public OpenSearchWorkCoordinator(
+    protected OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId,
