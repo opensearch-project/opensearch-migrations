@@ -91,69 +91,28 @@ class CustomTransformationTest extends BaseMigrationTest {
         // Define custom transformations
         String customTransformationJson = "[\n" +
             "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"name == 'test_index'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_index\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
-            "  },\n" +
-            "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"type == 'template' && name == 'legacy_template'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_legacy_template\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
-            "  },\n" +
-            "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"type == 'index_template' && name == 'index_template'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_index_template\",\n" +
-            "              \"body\": {\n" +
-            "                \"composed_of\": {\n" +
-            "                  \"[0]\": \"transformed_component_template\"\n" +
-            "                }\n" +
-            "              }\n" +
-            "            }\n" +
+            "    \"TypeMappingSanitizationTransformerProvider\": {\n" +
+            "      \"staticMappings\": {\n" +
+            "        \"test_index\": {\n" +
+            "            \"_doc\": \"transformed_index\"\n" +
+            "          },\n" +
+            "        \"legacy_template\": {\n" +
+            "            \"_doc\": \"transformed_legacy_template\"\n" +
+            "          },\n" +
+            "        \"index_template\": {\n" +
+            "            \"_doc\": \"transformed_index_template\"\n" +
+            "          },\n" +
+            "        \"component_template\": {\n" +
+            "            \"_doc\": \"transformed_component_template\"\n" +
             "          }\n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
-            "  },\n" +
-            "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"type == 'component_template' && name == 'component_template'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_component_template\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
+            "      },\n" +
+            "      \"sourceProperties\": {\n" +
+            "        \"version\": {\n" +
+            "          \"major\": " + sourceCluster.getContainerVersion().getVersion().getMajor() + ",\n" +
+            "          \"minor\": " + sourceCluster.getContainerVersion().getVersion().getMinor() + "\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
             "  }\n" +
             "]";
 
