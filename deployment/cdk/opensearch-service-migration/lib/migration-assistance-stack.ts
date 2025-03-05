@@ -32,7 +32,8 @@ export interface MigrationStackProps extends StackPropsExt {
     readonly mskSubnetIds?: string[],
     readonly mskAZCount?: number,
     readonly replayerOutputEFSRemovalPolicy?: string
-    readonly artifactBucketRemovalPolicy?: string
+    readonly artifactBucketRemovalPolicy?: string,
+    readonly trafficReplayerServiceEnabled?: boolean
 }
 
 
@@ -233,5 +234,7 @@ export class MigrationAssistanceStack extends Stack {
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
 
+        // The Capture & Replay Dashboard is now deployed directly in the CaptureProxyStack
+        // when trafficReplayerServiceEnabled is true
     }
 }
