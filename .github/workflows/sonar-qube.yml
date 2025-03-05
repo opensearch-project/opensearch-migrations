@@ -49,9 +49,9 @@ jobs:
         echo "Generating a SonarQube token..."
         RESPONSE=$(curl -s -X POST -u "admin:admin" "http://localhost:9000/api/user_tokens/generate" \
           -d "name=github-action-token" -d "type=GLOBAL_ANALYSIS_TOKEN")
-        
+
         SONAR_TOKEN=$(echo "$RESPONSE" | jq -r '.token')
-        
+
         if [ "$SONAR_TOKEN" == "null" ]; then
           echo "❌ Failed to generate SonarQube token!"
           exit 1
