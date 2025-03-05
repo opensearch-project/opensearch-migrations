@@ -69,15 +69,7 @@ public class IndexRunner {
         try {
             List<IndexMetadata> transformedMetadataList = transformer.transformIndexMetadata(indexMetadata);
             for (IndexMetadata transformedMetadata : transformedMetadataList) {
-                try {
-                    creationResults.add(indexCreator.create(transformedMetadata, mode, context));
-                } catch (Exception e) {
-                    creationResults.add(CreationResult.builder()
-                        .name(indexName)
-                        .exception(new IndexTransformationException(indexName, e))
-                        .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
-                        .build());
-                }
+                creationResults.add(createInner(indexName, mode, context, transformedMetadata));
             }
         } catch (Exception e) {
             creationResults.add(CreationResult.builder()
@@ -87,5 +79,20 @@ public class IndexRunner {
                 .build());
         }
         return creationResults;
+    }
+
+    private CreationResult createInner(String indexName,
+                                       MigrationMode mode,
+                                       ICreateIndexContext context,
+                                       IndexMetadata transformedMetadata) {
+        try {
+            return indexCreator.create(transformedMetadata, mode, context);
+        } catch (Exception e) {
+            return CreationResult.builder()
+                .name(indexName)
+                .exception(new IndexTransformationException(indexName, e))
+                .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
+                .build();
+        }
     } 
 }
