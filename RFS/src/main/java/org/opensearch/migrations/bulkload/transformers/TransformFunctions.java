@@ -24,6 +24,9 @@ public class TransformFunctions {
         MetadataTransformerParams metadataTransformerParams
     ) {
         if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
+            if (VersionMatchers.isES_5_X.test(sourceVersion)) {
+                return new Transformer_ES_5_6_to_OS_2_11(dimensionality, metadataTransformerParams);
+            }
             if (VersionMatchers.isES_6_X.test(sourceVersion)) {
                 return new Transformer_ES_6_8_to_OS_2_11(dimensionality, metadataTransformerParams);
             }
@@ -34,7 +37,7 @@ public class TransformFunctions {
                 return new Transformer_ES_7_10_OS_2_11(dimensionality);
             }
         }
-        throw new IllegalArgumentException("Unsupported transformation requested");
+        throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion);
     }
 
     /* Turn dotted index settings into a tree, will start like:
