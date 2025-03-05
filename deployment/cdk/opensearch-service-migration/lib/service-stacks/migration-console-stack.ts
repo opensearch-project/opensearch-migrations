@@ -272,9 +272,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }
 
-        if (props.managedServiceSourceSnapshotEnabled &&
-            servicesYaml.snapshot &&
-            servicesYaml.snapshot.s3) {
+        if (props.managedServiceSourceSnapshotEnabled && servicesYaml.snapshot?.s3) {
             servicesYaml.snapshot.s3.role =
                 createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
                     this.region, props.stage, props.defaultDeployId)

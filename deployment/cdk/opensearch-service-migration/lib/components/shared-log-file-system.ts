@@ -9,7 +9,7 @@ export class SharedLogFileSystem {
     readonly volumeId: string;
     readonly volumeName = "sharedLogsVolume";
     public readonly mountPointPath = "/shared-logs-output";
-    constructor(private stack: MigrationServiceCore, stage: string, defaultDeployId: string) {
+    constructor(private readonly stack: MigrationServiceCore, stage: string, defaultDeployId: string) {
         this.volumeId = getMigrationStringParameterValue(stack, {
             stage,
             defaultDeployId,
