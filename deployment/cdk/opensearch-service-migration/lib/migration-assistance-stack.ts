@@ -22,7 +22,6 @@ import {
 } from "@aws-cdk/aws-msk-alpha";
 import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
 import {KafkaYaml} from "./migration-services-yaml";
-import {CaptureReplayDashboard} from './dashboards/capture-replay-dashboard';
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -33,8 +32,7 @@ export interface MigrationStackProps extends StackPropsExt {
     readonly mskSubnetIds?: string[],
     readonly mskAZCount?: number,
     readonly replayerOutputEFSRemovalPolicy?: string
-    readonly artifactBucketRemovalPolicy?: string,
-    readonly trafficReplayerServiceEnabled?: boolean
+    readonly artifactBucketRemovalPolicy?: string
 }
 
 
@@ -234,8 +232,5 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
-
-        // The Capture & Replay Dashboard is now deployed directly in the CaptureProxyStack
-        // when trafficReplayerServiceEnabled is true
     }
 }
