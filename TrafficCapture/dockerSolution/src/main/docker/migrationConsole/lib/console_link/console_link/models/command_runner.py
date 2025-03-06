@@ -50,7 +50,7 @@ class CommandRunner:
                 sys.stdout.write(holder.stdout)
             log_message_out = f"\nSTDOUT ({' '.join(self.command)}):\n{holder.stdout}"
             if is_error:
-                logger.warning(log_message_out)
+                logger.info(log_message_out)
             else:
                 logger.debug(log_message_out)
         if holder.stderr:
@@ -58,7 +58,7 @@ class CommandRunner:
                 sys.stderr.write(holder.stderr)
             log_message_err = f"\nSTDERR ({' '.join(self.command)}):\n{holder.stderr}"
             if is_error:
-                logger.warning(log_message_err)
+                logger.info(log_message_err)
             else:
                 logger.debug(log_message_err)
 
