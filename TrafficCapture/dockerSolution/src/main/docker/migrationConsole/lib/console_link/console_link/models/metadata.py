@@ -238,7 +238,7 @@ class Metadata:
                                        sensitive_fields=["--target-password"])
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
         try:
-            return command_runner.run()
+            return command_runner.run(print_on_error=True)
         except CommandRunnerError as e:
-            logger.error(f"Metadata migration failed: {e}")
+            logger.debug(f"Metadata migration failed: {e}")
             return CommandResult(success=False, value=f"Metadata migration failed: {e}")
