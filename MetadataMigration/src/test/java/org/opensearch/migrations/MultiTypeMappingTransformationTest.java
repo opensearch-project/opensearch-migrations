@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -13,7 +14,11 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -25,43 +30,53 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Slf4j
 class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
-    @Test
-    public void multiTypeTransformationTest_union_6_8() {
-        var es5Repo = "es5";
-        var snapshotName = "es5-created-index";
+    private static Stream<Arguments> scenarios() {
+        var scenarios = Stream.<Arguments>builder();
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V2_14_0));
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_14_0));
+        return scenarios.build();
+    }
+
+    @ParameterizedTest(name = "Legacy {0} snapshot upgrade to {1} migrate onto target {2}")
+    @MethodSource(value = "scenarios")
+    public void migrateFromUpgrade(
+        final SearchClusterContainer.ContainerVersion legacyVersion,
+        final SearchClusterContainer.ContainerVersion sourceVersion,
+        final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
+        var snapshotRepo = "legacy_repo";
+        var snapshotName = "legacy_snapshot";
         var originalIndexName = "test_index";
-
         try (
-            final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)
+            final var legacyCluster = new SearchClusterContainer(legacyVersion)
         ) {
-            indexCreatedCluster.start();
+            legacyCluster.start();
 
-            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster);
+            var legacyClusterOperations = new ClusterOperations(legacyCluster);
 
             // Create index and add documents on the source cluster
-            createMultiTypeIndex(originalIndexName, indexCreatedOperations);
+            createMultiTypeIndex(originalIndexName, legacyClusterOperations);
 
-            indexCreatedOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
-            indexCreatedOperations.takeSnapshot(es5Repo, snapshotName, originalIndexName);
-            indexCreatedCluster.copySnapshotData(localDirectory.toString());
+            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
+            legacyClusterOperations.takeSnapshot(snapshotRepo, snapshotName, originalIndexName);
+            legacyCluster.copySnapshotData(localDirectory.toString());
         }
 
         try (
-            final var upgradedSourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            this.sourceCluster = upgradedSourceCluster;
+            this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
 
             startClusters();
 
-            upgradedSourceCluster.putSnapshotData(localDirectory.toString());
+            sourceCluster.putSnapshotData(localDirectory.toString());
 
-            var upgradedSourceOperations = new ClusterOperations(upgradedSourceCluster);
+            var upgradedSourceOperations = new ClusterOperations(sourceCluster);
 
-            // Register snapshot repository and restore snapshot in ES 6 cluster
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
-            upgradedSourceOperations.restoreSnapshot(es5Repo, snapshotName);
+            // Register snapshot repository and restore snapshot in ES 5 cluster
+            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
+            upgradedSourceOperations.restoreSnapshot(snapshotRepo, snapshotName);
 
             // Verify index exists on upgraded cluster
             var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
@@ -74,37 +89,6 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             configureDataFilters(originalIndexName, arguments);
 
             // Execute migration
-            var result = executeMigration(arguments, MetadataCommands.MIGRATE);
-            checkResult(result, originalIndexName);
-        }
-    }
-
-    @Test
-    public void multiTypeTransformationTest_union_5_6() {
-        try (
-            final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            indexCreatedCluster.start();
-
-            this.sourceCluster = indexCreatedCluster;
-            this.targetCluster = targetCluster;
-
-            startClusters();
-
-            var indexCreatedOperations = new ClusterOperations(indexCreatedCluster);
-
-            var originalIndexName = "test_index";
-
-            createMultiTypeIndex(originalIndexName, indexCreatedOperations);
-
-            var arguments = new MigrateOrEvaluateArgs();
-            arguments.sourceArgs.host = sourceCluster.getUrl();
-            arguments.targetArgs.host = targetCluster.getUrl();
-
-            configureDataFilters(originalIndexName, arguments);
-
-            // Execute migration 
             var result = executeMigration(arguments, MetadataCommands.MIGRATE);
             checkResult(result, originalIndexName);
         }
@@ -150,7 +134,9 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         // Assert that both field1 and field2 are present
         assertThat(properties.get("field1").get("type").asText(), equalTo("text"));
         assertThat(properties.get("field2").get("type").asText(), equalTo("long"));
-        assertThat(properties.get("field3").get("type").asText(), equalTo("float"));
+        // In ES2 the default mapping type for floating point numbers was double, later it was changed to float
+        // https://www.elastic.co/guide/en/elasticsearch/reference/5.6/breaking_50_mapping_changes.html#_floating_points_use_literal_float_literal_instead_of_literal_double_literal
+        assertThat(properties.get("field3").get("type").asText(), anyOf(equalTo("float"), equalTo("double")));
     }
 
     private void configureDataFilters(String originalIndexName, MigrateOrEvaluateArgs arguments) {
