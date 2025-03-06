@@ -17,7 +17,7 @@
             "inputType": "input",
             "id": "REGION",
             "label": "Region",
-            "defaultValue": "${AWS::Region}",
+            "defaultValue": "us-west-1",
             "visible": false
         },
         {
@@ -36,9 +36,9 @@
             "pattern": "MA_STAGE",
             "inputType": "input",
             "id": "MA_STAGE",
-            "label": "Migration Stage",
-            "defaultValue": "dev",
-            "visible": true
+            "label": "Migration Assistant Stage",
+            "defaultValue": "placeholder-stage",
+            "visible": false
         },
         {
             "type": "pattern",
@@ -46,7 +46,7 @@
             "inputType": "input",
             "id": "ACCOUNT_ID",
             "label": "Account ID",
-            "defaultValue": "116981770455",
+            "defaultValue": "ACCOUNT_ID",
             "visible": false
         }
     ],

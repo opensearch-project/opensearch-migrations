@@ -232,6 +232,6 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
-        
+
     }
 }
