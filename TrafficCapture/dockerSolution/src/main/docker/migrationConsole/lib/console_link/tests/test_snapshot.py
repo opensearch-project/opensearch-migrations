@@ -409,7 +409,7 @@ def test_snapshot_delete_repo(request, snapshot_fixture):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
-    fake_command = "/root/createSnapshot/bin/CreateSnapshot --snapshot_name=reindex_from_snapshot"
+    fake_command = ["/root/createSnapshot/bin/CreateSnapshot", "--snapshot_name=reindex_from_snapshot"]
     mock = mocker.patch.object(CommandRunner, 'run', cmd="abc", autospec=True,
                                side_effect=CommandRunnerError(2, cmd=fake_command, output="Snapshot failure"))
 
@@ -417,7 +417,8 @@ def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
 
     mock.assert_called_once()
     assert not result.success
-    assert fake_command in result.value
+    for element in fake_command:
+        assert element in result.value
 
 
 def test_get_snapshot_repository_via_delete(s3_snapshot):
