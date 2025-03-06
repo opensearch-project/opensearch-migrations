@@ -180,12 +180,11 @@ public class SourceTestBase {
         FileSystemRepo sourceRepo,
         String snapshotName,
         List<String> indexAllowlist,
-        String targetAddress,
+        SearchClusterContainer target,
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
-        Version sourceVersion,
-        Version targetVersion
+        Version sourceVersion
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
@@ -193,11 +192,11 @@ public class SourceTestBase {
                     sourceRepo,
                     snapshotName,
                     indexAllowlist,
-                    targetAddress,
+                    target.getUrl(),
                     clockJitter,
                     testContext,
                     sourceVersion,
-                    targetVersion
+                    target.getContainerVersion().getVersion()
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;

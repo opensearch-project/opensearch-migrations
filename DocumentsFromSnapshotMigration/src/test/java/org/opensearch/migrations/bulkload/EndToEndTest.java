@@ -137,12 +137,11 @@ public class EndToEndTest extends SourceTestBase {
                         sourceRepo,
                         snapshotName,
                         List.of(),
-                        targetCluster.getUrl(),
+                        targetCluster,
                         runCounter,
                         clockJitter,
                         testDocMigrationContext,
-                        sourceCluster.getContainerVersion().getVersion(),
-                        targetCluster.getContainerVersion().getVersion()
+                        sourceCluster.getContainerVersion().getVersion()
                     )
                 )
             );
