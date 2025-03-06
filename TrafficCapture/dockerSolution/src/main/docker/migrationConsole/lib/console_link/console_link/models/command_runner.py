@@ -44,15 +44,23 @@ class CommandRunner:
                     display_command[field_index + 1] = "*" * 8
         return display_command
 
-    def print_output_if_enabled(self, holder, should_print):
+    def print_output_if_enabled(self, holder, should_print, is_error):
         if holder.stdout:
             if should_print:
                 sys.stdout.write(holder.stdout)
-            logger.info(f"\nSTDOUT:\n{holder.stdout}")
+            log_message_out = f"\nSTDOUT ({' '.join(self.command)}):\n{holder.stdout}"
+            if is_error:
+                logger.warning(log_message_out)
+            else:
+                logger.debug(log_message_out)
         if holder.stderr:
             if should_print:
                 sys.stderr.write(holder.stderr)
-            logger.info(f"\nSTDERR:\n{holder.stderr}")
+            log_message_err = f"\nSTDERR ({' '.join(self.command)}):\n{holder.stderr}"
+            if is_error:
+                logger.warning(log_message_err)
+            else:
+                logger.debug(log_message_err)
 
     def _run_as_synchronous_process(self, print_to_console: bool, print_on_error: bool) -> CommandResult:
         try:
@@ -61,10 +69,10 @@ class CommandRunner:
                                         stderr=subprocess.PIPE,
                                         text=True,
                                         check=True)
-            self.print_output_if_enabled(holder=cmd_output, should_print=print_to_console)
+            self.print_output_if_enabled(holder=cmd_output, should_print=print_to_console, is_error=False)
             return CommandResult(success=True, value="Command executed successfully", output=cmd_output)
         except subprocess.CalledProcessError as e:
-            self.print_output_if_enabled(holder=e, should_print=print_on_error)
+            self.print_output_if_enabled(holder=e, should_print=print_on_error, is_error=True)
             raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stdout, e.stderr)
 
     def _run_as_detached_process(self, log_file: str) -> CommandResult:
