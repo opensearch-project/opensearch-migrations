@@ -333,7 +333,7 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
 
 def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
     valid_with_sigv4 = {
-        "endpoint": "https://opensearchtarget:9200",
+        "endpoint": "https://test.opensearchtarget.com:9200",
         "allow_insecure": True,
         "sigv4": {
             "region": "us-east-2",
@@ -358,6 +358,8 @@ def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
         assert "Signature=" in auth_header
         assert "es" in auth_header
         assert "us-east-2" in auth_header
+        host_header = requests_mock.last_request.headers['Host']
+        assert "test.opensearchtarget.com" == host_header
 
 
 def test_call_api_via_middleware(requests_mock):

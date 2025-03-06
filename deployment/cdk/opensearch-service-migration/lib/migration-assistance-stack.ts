@@ -22,6 +22,7 @@ import {
 } from "@aws-cdk/aws-msk-alpha";
 import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
 import {KafkaYaml} from "./migration-services-yaml";
+import {CaptureReplayDashboard} from './dashboards/capture-replay-dashboard';
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,

@@ -10,6 +10,7 @@ import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
@@ -26,6 +27,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 /**
  * Operations to perform on a cluster with basic builtin success validation
  */
+@Slf4j
 public class ClusterOperations {
 
     private final String clusterUrl;
@@ -38,7 +40,8 @@ public class ClusterOperations {
         httpClient = HttpClients.createDefault();
     }
 
-    public void createSnapshotRepository(final String repoPath, final String repoName) throws IOException {
+    @SneakyThrows
+    public void createSnapshotRepository(final String repoPath, final String repoName) {
         // Create snapshot repository
         final var repositoryJson = "{\n"
             + "  \"type\": \"fs\",\n"
@@ -50,24 +53,14 @@ public class ClusterOperations {
             + "  }\n"
             + "}";
 
-        final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/" + repoName);
-        createRepoRequest.setEntity(new StringEntity(repositoryJson));
-        createRepoRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(createRepoRequest)) {
-            assertThat(response.getCode(), equalTo(200));
-        }
+        var response = put("/_snapshot/" + repoName, repositoryJson);
+        assertThat(response.getKey(), equalTo(200));
     }
 
     @SneakyThrows
     public void restoreSnapshot(final String repository, final String snapshotName) {
-        var restoreRequest = new HttpPost(clusterUrl + "/_snapshot/" + repository + "/" + snapshotName + "/_restore"+ "?wait_for_completion=true");
-        restoreRequest.setHeader("Content-Type", "application/json");
-        restoreRequest.setEntity(new StringEntity("{}"));
-
-        try (var response = httpClient.execute(restoreRequest)) {
-            assertThat(response.getCode(), anyOf(equalTo(200), equalTo(202)));
-        }
+        var response = post("/_snapshot/" + repository + "/" + snapshotName + "/_restore"+ "?wait_for_completion=true", "{}");
+        assertThat(response.getKey(), anyOf(equalTo(200), equalTo(202)));
     }
 
     public void createDocument(final String index, final String docId, final String body) {
@@ -81,11 +74,8 @@ public class ClusterOperations {
     }
 
     public void deleteDocument(final String index, final String docId) throws IOException {
-        var deleteDocumentRequest = new HttpDelete(clusterUrl + "/" + index + "/" + defaultDocType() + "/" + docId);
-
-        try (var response = httpClient.execute(deleteDocumentRequest)) {
-            assertThat(response.getCode(), equalTo(200));
-        }
+        var response = delete("/" + index + "/" + defaultDocType() + "/" + docId);
+        assertThat(response.getKey(), equalTo(200));
     }
 
     public void createIndexWithMappings(final String index, final String mappings) {
@@ -115,13 +105,28 @@ public class ClusterOperations {
 
     @SneakyThrows
     public void createIndex(final String index, final String body) {
-        var createIndexRequest = new HttpPut(clusterUrl + "/" + index);
-        createIndexRequest.setEntity(new StringEntity(body));
-        createIndexRequest.setHeader("Content-Type", "application/json");
+        var response = put("/" + index, body);
+        assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
+    }
 
-        try (var response = httpClient.execute(createIndexRequest)) {
+    @SneakyThrows
+    public Map.Entry<Integer, String> post(final String path, final String body) {
+        final var postRequest = new HttpPost(clusterUrl + path);
+        if (body != null) {
+            postRequest.setEntity(new StringEntity(body));
+            postRequest.setHeader("Content-Type", "application/json");
+        }
+        try (var response = httpClient.execute(postRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            assertThat(responseBody, response.getCode(), anyOf(equalTo(201), equalTo(200)));
+            log.atInfo()
+                .setMessage("{} {}\n{}\nResponse: {}\n{}")
+                .addArgument("POST")
+                .addArgument(path)
+                .addArgument(body)
+                .addArgument(response.getCode())
+                .addArgument(responseBody)
+                .log();
+            return Map.entry(response.getCode(), responseBody);
         }
     }
 
@@ -134,6 +139,14 @@ public class ClusterOperations {
         }
         try (var response = httpClient.execute(putRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            log.atInfo()
+                .setMessage("{} {}\n{}\nResponse: {}\n{}")
+                .addArgument("PUT")
+                .addArgument(path)
+                .addArgument(body)
+                .addArgument(response.getCode())
+                .addArgument(responseBody)
+                .log();
             return Map.entry(response.getCode(), responseBody);
         }
     }
@@ -144,11 +157,36 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(getRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            log.atInfo()
+                .setMessage("{} {}\nResponse: {}\n{}")
+                .addArgument("GET")
+                .addArgument(path)
+                .addArgument(response.getCode())
+                .addArgument(responseBody)
+                .log();
             return Map.entry(response.getCode(), responseBody);
         }
     }
 
-    public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) throws IOException {
+    @SneakyThrows
+    public Map.Entry<Integer, String> delete(final String path) {
+        final var request = new HttpDelete(clusterUrl + path);
+
+        try (var response = httpClient.execute(request)) {
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            log.atInfo()
+                .setMessage("{} {}\nResponse: {}\n{}")
+                .addArgument("DELETE")
+                .addArgument(path)
+                .addArgument(response.getCode())
+                .addArgument(responseBody)
+                .log();
+            return Map.entry(response.getCode(), responseBody);
+        }
+    }
+
+    @SneakyThrows
+    public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) {
         final var snapshotJson = "{\n"
             + "  \"indices\": \""
             + indexPattern
@@ -156,16 +194,8 @@ public class ClusterOperations {
             + "  \"ignore_unavailable\": true,\n"
             + "  \"include_global_state\": true\n"
             + "}";
-
-        final var createSnapshotRequest = new HttpPut(
-            clusterUrl + "/_snapshot/" + repoName + "/" + snapshotName + "?wait_for_completion=true"
-        );
-        createSnapshotRequest.setEntity(new StringEntity(snapshotJson));
-        createSnapshotRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(createSnapshotRequest)) {
-            assertThat(response.getCode(), equalTo(200));
-        }
+        var response = put("/_snapshot/" + repoName + "/" + snapshotName + "?wait_for_completion=true", snapshotJson);
+        assertThat(response.getKey(), equalTo(200));
     }
 
     /**
@@ -173,10 +203,13 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
-        final var templateJson = "{\r\n" + //
-            "  \"index_patterns\": [\r\n" + //
+        var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
+            ? "\"template\":\"" + pattern + "\","
+            : "\"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
-            "  ],\r\n" + //
+            "  ],\r\n";
+        final var templateJson = "{\r\n" + //
+            "  " + matchPatternClause + //
             "  \"settings\": {\r\n" + //
             "    \"number_of_shards\": 1\r\n" + //
             "  },\r\n" + //
@@ -201,17 +234,10 @@ public class ClusterOperations {
             "  }\r\n" + //
             "}";
 
-        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName + "?include_type_name=true");
-        createRepoRequest.setEntity(new StringEntity(templateJson));
-        createRepoRequest.setHeader("Content-Type", "application/json");
+        var extraParameters = VersionMatchers.isES_5_X.test(clusterVersion) ? "" : "?include_type_name=true";
+        var response = put("/_template/" + templateName + extraParameters, templateJson);
 
-        try (var response = httpClient.execute(createRepoRequest)) {
-            assertThat(
-                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
-                response.getCode(),
-                equalTo(200)
-            );
-        }
+        assertThat(response.getKey(), equalTo(200));
     }
 
     /**
@@ -246,18 +272,9 @@ public class ClusterOperations {
             + "\"version\": 1"
             + "}";
 
-        final var compTempUrl = clusterUrl + "/_component_template/" + componentTemplateName;
-        final var createCompTempRequest = new HttpPut(compTempUrl);
-        createCompTempRequest.setEntity(new StringEntity(componentTemplateJson));
-        createCompTempRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(createCompTempRequest)) {
-            assertThat(
-                    EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
-                    response.getCode(),
-                    equalTo(200)
-            );
-        }
+        final var compTempUrl = "/_component_template/" + componentTemplateName;
+        var response = put(compTempUrl, componentTemplateJson);
+        assertThat(response.getKey(), equalTo(200));
 
         final var indexTemplateJson = "{"
                 + "\"index_patterns\": [\""
@@ -270,18 +287,9 @@ public class ClusterOperations {
                 + "\"version\": 1"
                 + "}";
 
-        final var indexTempUrl = clusterUrl + "/_index_template/" + indexTemplateName;
-        final var createIndexTempRequest = new HttpPut(indexTempUrl);
-        createIndexTempRequest.setEntity(new StringEntity(indexTemplateJson));
-        createIndexTempRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(createIndexTempRequest)) {
-            assertThat(
-                    EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
-                    response.getCode(),
-                    equalTo(200)
-            );
-        }
+        final var indexTempUrl = "/_index_template/" + indexTemplateName;
+        var response2 = put(indexTempUrl, indexTemplateJson);
+        assertThat(response2.getKey(), equalTo(200));
     }
 
 
@@ -322,18 +330,10 @@ public class ClusterOperations {
             + "\"version\": 1"
             + "}";
 
-        final var indexTempUrl = clusterUrl + "/_index_template/" + indexTemplateName;
-        final var createIndexTempRequest = new HttpPut(indexTempUrl);
-        createIndexTempRequest.setEntity(new StringEntity(indexTemplateJson));
-        createIndexTempRequest.setHeader("Content-Type", "application/json");
+        final var indexTempUrl = "/_index_template/" + indexTemplateName;
+        var response = put(indexTempUrl, indexTemplateJson);
 
-        try (var response = httpClient.execute(createIndexTempRequest)) {
-            assertThat(
-                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
-                response.getCode(),
-                equalTo(200)
-            );
-        }
+        assertThat(response.getKey(), equalTo(200));
     }
 
     @SneakyThrows
@@ -349,17 +349,8 @@ public class ClusterOperations {
             "  ]\r\n" + //
             "}";
 
-        final var aliasRequest = new HttpPost(this.clusterUrl + "/_aliases");
-        aliasRequest.setEntity(new StringEntity(requestBodyJson));
-        aliasRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(aliasRequest)) {
-            assertThat(
-                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
-                response.getCode(),
-                equalTo(200)
-            );
-        }
+        var response = post("/_aliases", requestBodyJson);
+        assertThat(response.getKey(), equalTo(200));
     }
 
     private String defaultDocType() {

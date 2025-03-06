@@ -53,7 +53,9 @@ public class IndexRunner {
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
                     var aliasResult = CreationResult.builder().name(alias);
-                    aliasResult.failureType(creationResults.get(0).getFailureType());
+                    if (!creationResults.isEmpty()) {
+                        aliasResult.failureType(creationResults.get(0).getFailureType());
+                    }
                     results.alias(aliasResult.build());
                 });
             });

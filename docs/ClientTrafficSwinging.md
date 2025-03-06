@@ -22,11 +22,11 @@ Our ALB is set up to route traffic to these main services:
 
 2. **Target Cluster Proxy** (Port 9202): This service forwards requests to the new cluster we're migrating to, acting as an intermediary between the ALB and the target cluster.
 
-3. **Weighted Proxy** (Port 9200): This forwards requests to either the Capture Proxy or Target Cluster Proxy based on configuration, see [Weighted Proxy](#weighted-proxy)
+3. **Weighted Proxy** (Port 443): This forwards requests to either the Capture Proxy or Target Cluster Proxy based on configuration, see [Weighted Proxy](#weighted-proxy)
 
 ## Weighted Proxy
 
-A key feature of our ALB is its ability to distribute traffic between the old and new systems. This is accomplished using the weighted listener on port `9200`:
+A key feature of our ALB is its ability to distribute traffic between the old and new systems. This is accomplished using the weighted listener on port `443`:
 
 - The ALB can direct a portion or all of the requests to either the Capture Proxy or Target Cluster Proxy.
 - We can adjust the traffic distribution between each system, allowing for a gradual transition.
@@ -57,7 +57,7 @@ Using this ALB setup offers several advantages:
 5. **Smoke Testing**: Ports 9201 and 9202 can be used for preliminary testing before shifting client traffic:
    - Port 9201 (Capture Proxy): Test requests can be sent here to confirm that the source cluster is still accessible and functioning correctly through the ALB.
    - Port 9202 (Target Cluster Proxy): Send test requests to this port to verify that the new target cluster is properly set up and responding as expected.
-   - By testing both ports, we can ensure that both the old and new systems are working correctly before gradually shifting real client traffic using the weighted routing on port 9200.
+   - By testing both ports, we can ensure that both the old and new systems are working correctly before gradually shifting real client traffic using the weighted routing on port `443`.
 
    This smoke testing process allows us to:
    - Verify the ALB configuration is correct for both source and target clusters.
@@ -78,7 +78,7 @@ graph TD
     subgraph MigrationAssistantInfrastructure
         ALB[Application Load Balancer]
         subgraph ALB
-            L1[Weighted Listener :9200]
+            L1[Weighted Listener :443]
             L2[Source Listener :9201]
             L3[Target Listener :9202]
         end

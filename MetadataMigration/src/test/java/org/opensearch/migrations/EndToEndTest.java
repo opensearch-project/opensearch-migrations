@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -36,7 +37,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        return getSupportedClusters().stream()
+        return SupportedClusters.sources().stream()
             .flatMap(sourceCluster -> {
                 // Determine applicable template types based on source version
                 List<TemplateType> templateTypes = Stream.concat(
@@ -125,7 +126,7 @@ class EndToEndTest extends BaseMigrationTest {
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);
 
-        var arguments = new MigrateOrEvaluateArgs();
+        final MigrateOrEvaluateArgs arguments;
 
         switch (medium) {
             case SnapshotImage:
@@ -134,10 +135,15 @@ class EndToEndTest extends BaseMigrationTest {
                 break;
 
             case Http:
+                arguments = new MigrateOrEvaluateArgs();
                 arguments.sourceArgs.host = sourceCluster.getUrl();
                 arguments.targetArgs.host = targetCluster.getUrl();
                 break;
+
+            default:
+                throw new RuntimeException("Invalid Option");
         }
+        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters
         var dataFilterArgs = new DataFilterArgs();
@@ -160,7 +166,6 @@ class EndToEndTest extends BaseMigrationTest {
     private static class TestData {
         final String compoTemplateName = "simple_component_template";
         final String indexTemplateName = "simple_index_template";
-        final String aliasInTemplate = "alias1";
         final String movieIndexName = "movies_2023";
         final String aliasName = "movies-alias";
         final String indexThatAlreadyExists = "already-exists";
