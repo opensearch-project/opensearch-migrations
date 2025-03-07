@@ -5,8 +5,7 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.utils import raise_for_deprecated_parameter
-from testcontainers.core.waiting_utils import wait_container_is_ready
-from testcontainers.core.waiting_utils import wait_for_logs
+from testcontainers.core.waiting_utils import wait_container_is_ready, wait_for_logs
 
 # This code is modified from testcontainers.elasticsearch and testcontainers.opensearch to create a unified version
 # of the Elasticsearch and OpenSearch test containers, with support for a wider range of versions than the original.

@@ -29,7 +29,7 @@ def seed_data_without_types(cluster: Cluster, doc_count):
                      data=json.dumps({"settings": {"index": {"number_of_shards": 1, "number_of_replicas": 0}}}),
                      headers={"Content-Type": "application/json"})
     for i, _ in enumerate(range(doc_count)):
-        cluster.call_api(f"/{TEST_INDEX_NAME}/_doc/{i+1}", HttpMethod.PUT,
+        cluster.call_api(f"/{TEST_INDEX_NAME}/_doc/{i + 1}", HttpMethod.PUT,
                          data=TEST_DOC, headers={"Content-Type": "application/json"})
 
 
@@ -41,7 +41,7 @@ def seed_data_with_types(cluster: Cluster, doc_count):
     
     doc_type = "document"
     for i, _ in enumerate(range(doc_count)):
-        cluster.call_api(f"/{TEST_INDEX_NAME}/{doc_type}/{i+1}", HttpMethod.PUT,
+        cluster.call_api(f"/{TEST_INDEX_NAME}/{doc_type}/{i + 1}", HttpMethod.PUT,
                          data=TEST_DOC, headers={"Content-Type": "application/json"})
 
 
