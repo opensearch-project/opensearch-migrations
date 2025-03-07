@@ -324,6 +324,7 @@ public abstract class OpenSearchClient {
             final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
+            log.atInfo().setMessage("Request body:{}").addArgument(body).log();
             var additionalHeaders = new HashMap<String, List<String>>();
             // Reduce network bandwidth by attempting request and response compression
             if (client.supportsGzipCompression()) {

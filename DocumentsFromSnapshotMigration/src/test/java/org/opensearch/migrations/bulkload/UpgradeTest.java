@@ -1,19 +1,19 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.MetadataCommands;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -23,12 +23,11 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.mockito.Mockito.mockitoSession;
 
 @Tag("isolatedTest")
+@Slf4j
 public class UpgradeTest extends SourceTestBase {
 
-    private static final String SNAPSHOT_NAME = "snapshot_for_rfs";
     @TempDir
     private File legacySnapshotDirectory;
     @TempDir
@@ -37,8 +36,8 @@ public class UpgradeTest extends SourceTestBase {
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V2_14_0));
-        // scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_14_0));
-        // scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_14_0));
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_14_0));
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_14_0));
         return scenarios.build();
     }
 
@@ -48,9 +47,7 @@ public class UpgradeTest extends SourceTestBase {
         final SearchClusterContainer.ContainerVersion legacyVersion,
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        var snapshotRepo = "legacy_repo";
-        var snapshotName = "legacy_snapshot";
-        var originalIndexName = "test_index";
+        var testData = new TestData();
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
         ) {
@@ -59,10 +56,10 @@ public class UpgradeTest extends SourceTestBase {
             var legacyClusterOperations = new ClusterOperations(legacyCluster);
 
             // Create index and add documents on the source cluster
-            createMultiTypeIndex(originalIndexName, legacyClusterOperations);
+            createMultiTypeIndex(testData, legacyClusterOperations);
 
-            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            legacyClusterOperations.takeSnapshot(snapshotRepo, snapshotName, originalIndexName);
+            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
+            legacyClusterOperations.takeSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName, testData.indexName);
             legacyCluster.copySnapshotData(legacySnapshotDirectory.toString());
         }
 
@@ -76,12 +73,12 @@ public class UpgradeTest extends SourceTestBase {
             var upgradedSourceOperations = new ClusterOperations(sourceCluster);
 
             // Register snapshot repository and restore snapshot to 'upgrade' the cluster
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            upgradedSourceOperations.restoreSnapshot(snapshotRepo, snapshotName);
+            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
+            upgradedSourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
 
             // Create the snapshot from the source cluster
             var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-            createSnapshot(sourceCluster, SNAPSHOT_NAME, testSnapshotContext);
+            createSnapshot(sourceCluster, testData.snapshotName, testSnapshotContext);
             sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
             targetCluster.start();
@@ -90,21 +87,59 @@ public class UpgradeTest extends SourceTestBase {
             var clockJitter = new Random(1);
             var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
             var result = waitForRfsCompletion(() -> migrateDocumentsSequentially(sourceRepo,
-                                          SNAPSHOT_NAME,
+                                          testData.snapshotName,
                                           null,
                                           targetCluster,
                                           counter,
                                           clockJitter,
                                           testDocMigrationContext,
                                           sourceCluster.getContainerVersion().getVersion()));
-            assertThat(result.numRuns, equalTo(3));
+            assertThat(result.numRuns, equalTo(6));
+            var sourceOperations = new ClusterOperations(sourceCluster);
+            sourceOperations.get("/_search");
+
+            var targetOperations = new ClusterOperations(targetCluster);
+            targetOperations.get("/_refresh");
+            var allDocs = targetOperations.get("/" + testData.indexName + "*/_search");
+            var searchResponseBody = allDocs.getValue();
+
+            testData.documentsAndFields.forEach((docId, fields) -> {
+                fields.entrySet().stream().forEach(e -> {
+                    assertThat("For doc:" + docId + " expecting field", searchResponseBody, containsString(e.getKey()));
+                    assertThat("For doc:" + docId + " expecting value", searchResponseBody, containsString(e.getValue().toString()));
+                });
+            });
         }
     }
 
-    private void createMultiTypeIndex(String originalIndexName, ClusterOperations indexCreatedOperations) {
-        indexCreatedOperations.createIndex(originalIndexName);
-        indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
-        indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
-        indexCreatedOperations.createDocument(originalIndexName, "3", "{\"field3\":1.1}", null, "type3");
+    private void createMultiTypeIndex(TestData testData, ClusterOperations operations) {
+        operations.createIndex(testData.indexName);
+        testData.documentsAndFields.forEach((docId, fields) -> {
+            var docBody = "{" + fields.entrySet().stream()
+                .map(e -> {
+                    final String valueStr;
+                    if (e.getValue() instanceof String) {
+                        valueStr = "\"" + e.getValue() + "\"";
+                    } else {
+                        valueStr = e.getValue().toString();
+                    }
+                    return "\"" + e.getKey() + "\":" + valueStr;
+                })
+                .collect(Collectors.joining(",")) + "}";
+            
+            operations.createDocument(testData.indexName, docId.toString(), docBody, null, null /*TODO Need to handle this better for different version */);
+        });
+    }
+
+    private class TestData {
+        final String legacySnapshotRepo = "legacy_repo";
+        final String legacySnapshotName = "legacy_snapshot";
+        final String snapshotName = "snapshot_name";
+        final String indexName = "test_index";
+        final Map<Integer, Map<String, Object>> documentsAndFields = Map.of(
+            1, Map.of("field1", "field1-in-doc1"),
+            2, Map.of("field1", "filed1-in-doc2", "field2", 2_12345),
+            3, Map.of("field3", 3.12345)
+        );
     }
 }
