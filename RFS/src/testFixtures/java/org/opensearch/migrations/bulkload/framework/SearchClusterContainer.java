@@ -13,6 +13,7 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
@@ -39,7 +40,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
         Version.fromString("ES 5.6.16")
     );
-
+    public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
+        "elasticsearch:2.4.6",
+        Version.fromString("ES 2.4.6"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
 
     public static final ContainerVersion OS_V1_3_16 = new OpenSearchVersion(
         "opensearchproject/opensearch:1.3.16",
@@ -82,9 +88,15 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @SuppressWarnings("resource")
     public SearchClusterContainer(final ContainerVersion version) {
         super(DockerImageName.parse(version.imageName));
-        this.withExposedPorts(9200, 9300)
-            .withEnv(version.getInitializationType().getEnvVariables())
-            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(5)));
+        var builder = this.withExposedPorts(9200, 9300);
+
+        if (version instanceof OverrideFile) {
+            var overrideFile = (OverrideFile) version;
+            builder = builder.withCopyToContainer(Transferable.of(overrideFile.getContents()), overrideFile.getFilePath());
+        }
+
+        builder.withEnv(version.getInitializationType().getEnvVariables())
+            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         this.containerVersion = version;
     }
@@ -143,10 +155,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     @EqualsAndHashCode
     @Getter
-    @ToString(onlyExplicitlyIncluded = true, includeFieldNames = false)
     public static class ContainerVersion {
         final String imageName;
-        @ToString.Include
         final Version version;
         final INITIALIZATION_FLAVOR initializationType;
 
@@ -156,6 +166,15 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.initializationType = initializationType;
         }
 
+        @Override
+        public String toString() {
+            return "Container(" + version.toString() + ")";
+        }
+    }
+
+    interface OverrideFile {
+        String getContents();
+        String getFilePath();
     }
 
     public static class ElasticsearchOssVersion extends ContainerVersion {
@@ -173,6 +192,20 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH);
+        }
+    }
+
+    /**
+     * Older versions of elasticsearch require modifications to the configuration on disk 
+     */
+    @Getter
+    public static class OlderElasticsearchVersion extends ElasticsearchVersion implements OverrideFile {
+        private final String contents;
+        private final String filePath;
+        public OlderElasticsearchVersion(String imageName, Version version, String filePath, String contents) {
+            super(imageName, version);
+            this.contents = contents;
+            this.filePath = filePath;
         }
     }
 }
