@@ -267,12 +267,12 @@ function rewriteCreateIndex(match, inputMap) {
 }
 
 // Define regex patterns as constants
-const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^\/]*)\/([^\/]*)\/(.*)/;
-const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/;
+const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^/]*)\/([^/]*)\/(.*)/;
+const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/([^/]+)$/;
 const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
-const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^\/]*)/;
-const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^\/]+)\/_bulk/;
-const INDEX_TYPE_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^\/]+)\/([^\/]+)\/_bulk/;
+const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^/]*)/;
+const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/_bulk/;
+const INDEX_TYPE_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/([^/]+)\/_bulk/;
 
 function processMetadataRequest(document, context) {
     let mappings = document?.body?.mappings;
@@ -358,7 +358,6 @@ function routeHttpRequest(source_document, context) {
         regex_mappings: context.regex_mappings,
         properties: context.source_properties
     };
-    console.log("Route test on" + methodAndUri)
     return route(
         documentAndContext,
         methodAndUri,
