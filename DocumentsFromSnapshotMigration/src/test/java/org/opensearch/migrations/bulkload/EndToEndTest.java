@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -129,22 +130,16 @@ public class EndToEndTest extends SourceTestBase {
             final var clockJitter = new Random(1);
 
             // ExpectedMigrationWorkTerminationException is thrown on completion.
-            var expectedTerminationException = Assertions.assertTimeout(
-                Duration.ofSeconds(30),
-                () -> Assertions.assertThrows(
-                    ExpectedMigrationWorkTerminationException.class,
-                    () -> migrateDocumentsSequentially(
-                        sourceRepo,
-                        snapshotName,
-                        List.of(),
-                        targetCluster,
-                        runCounter,
-                        clockJitter,
-                        testDocMigrationContext,
-                        sourceCluster.getContainerVersion().getVersion()
-                    )
-                )
-            );
+            var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                sourceRepo,
+                snapshotName,
+                List.of(),
+                targetCluster,
+                runCounter,
+                clockJitter,
+                testDocMigrationContext,
+                sourceCluster.getContainerVersion().getVersion()
+            ));
 
             Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 

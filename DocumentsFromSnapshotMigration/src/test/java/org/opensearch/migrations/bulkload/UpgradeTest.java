@@ -70,11 +70,7 @@ public class UpgradeTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            var bothClustersStarted = CompletableFuture.allOf(
-                CompletableFuture.runAsync(sourceCluster::start),
-                CompletableFuture.runAsync(targetCluster::start)
-            );
-            bothClustersStarted.join();
+            sourceCluster.start();
             sourceCluster.putSnapshotData(legacySnapshotDirectory.toString());
 
             var upgradedSourceOperations = new ClusterOperations(sourceCluster);
@@ -88,18 +84,20 @@ public class UpgradeTest extends SourceTestBase {
             createSnapshot(sourceCluster, SNAPSHOT_NAME, testSnapshotContext);
             sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
+            targetCluster.start();
             var sourceRepo = new FileSystemRepo(sourceSnapshotDirectory.toPath());
             var counter = new AtomicInteger();
             var clockJitter = new Random(1);
             var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
-            migrateDocumentsSequentially(sourceRepo,
+            var result = waitForRfsCompletion(() -> migrateDocumentsSequentially(sourceRepo,
                                           SNAPSHOT_NAME,
                                           null,
                                           targetCluster,
                                           counter,
                                           clockJitter,
                                           testDocMigrationContext,
-                                          sourceCluster.getContainerVersion().getVersion());
+                                          sourceCluster.getContainerVersion().getVersion()));
+            assertThat(result.numRuns, equalTo(3));
         }
     }
 

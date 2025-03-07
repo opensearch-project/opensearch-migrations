@@ -59,6 +59,7 @@ import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.function.Executable;
 import reactor.core.publisher.Flux;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -394,5 +395,18 @@ public class SourceTestBase {
 
         var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
         snapshotCreator.run();
+    }
+
+    protected ExpectedMigrationWorkTerminationException waitForRfsCompletion(Executable executable) {
+        var expectedTerminationException = Assertions.assertTimeout(
+            Duration.ofSeconds(30),
+            () -> {
+                return Assertions.assertThrows(
+                    ExpectedMigrationWorkTerminationException.class,
+                    executable
+                );
+            }
+        );
+        return expectedTerminationException;
     }
 }

@@ -107,7 +107,7 @@ public class ShardMetadataData_ES_5_6 implements ShardMetadata {
         private final String physicalName;
         private final long length;
         private final String checksum;
-        private final long numberOfParts;
+        private final long numberOfParts = 1;
         private final String writtenBy;
         private final BytesRef metaHash;
 
@@ -116,7 +116,7 @@ public class ShardMetadataData_ES_5_6 implements ShardMetadata {
                 fileMetadataRaw.name,
                 fileMetadataRaw.physicalName,
                 fileMetadataRaw.length,
-                fileMetadataRaw.checksum
+                fileMetadataRaw.checksum,
                 fileMetadataRaw.writtenBy,
                 fileMetadataRaw.metaHash
             );
@@ -155,6 +155,11 @@ public class ShardMetadataData_ES_5_6 implements ShardMetadata {
             } catch (Exception e) {
                 return "Error converting to string: " + e.getMessage();
             }
+        }
+
+        @Override
+        public long getPartSize() {
+            return 1;
         }
     }
 
