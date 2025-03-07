@@ -19,7 +19,43 @@ import { ECSReplayerYaml } from "../migration-services-yaml";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
 import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import { CdkLogger } from "../cdk-logger";
+import { CfnDashboard } from "aws-cdk-lib/aws-cloudwatch";
+import * as CnRDashboard from '../components/migrationassistant-capture-replay-dashboard.json';
 
+
+interface DashboardVariable {
+    id: string;
+    defaultValue: string;
+}
+
+function setDefaultValueForVariable(variables: DashboardVariable[], variableName:string, defaultValue: string): DashboardVariable[] {
+    for (const variable of variables) {
+        if (variable.id === variableName) {
+            variable.defaultValue = defaultValue;
+            break;
+        }
+    }
+    return variables;
+}
+
+interface DashboardBody {
+    variables: DashboardVariable[];
+}
+
+function setAccountIdForDashboard(dashboardBody: DashboardBody, account: string): DashboardBody {
+    dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'ACCOUNT_ID', account);
+    return dashboardBody;
+}
+
+function setRegionForDashboard(dashboardBody: DashboardBody, region: string): DashboardBody {
+    dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'REGION', region);
+    return dashboardBody;
+}
+
+function setStageForDashboard(dashboardBody: DashboardBody, stage: string): DashboardBody {
+    dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'MA_STAGE', stage);
+    return dashboardBody;
+}
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -31,7 +67,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
     readonly otelCollectorEnabled: boolean,
-    readonly maxUptime?: Duration
+    readonly maxUptime?: Duration,
+    readonly trafficReplayerServiceEnabled?: boolean
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -145,5 +182,13 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         this.replayerYaml = new ECSReplayerYaml();
         this.replayerYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
         this.replayerYaml.ecs.service_name = `migration-${props.stage}-traffic-replayer-${deployId}`;
+
+        let dashboard = setAccountIdForDashboard(CnRDashboard, this.account)
+        dashboard = setRegionForDashboard(dashboard, this.region)
+        dashboard = setStageForDashboard(dashboard, props.stage)
+        new CfnDashboard(this, 'CnRDashboard', {
+            dashboardName: `MigrationAssistant_CaptureAndReplay_${props.stage}_Dashboard`,
+            dashboardBody: JSON.stringify(dashboard)
+        });
     }
 }
