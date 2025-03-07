@@ -3,7 +3,6 @@ import logging
 import os
 import tempfile
 import json
-import time
 
 import yaml
 import pytest
@@ -102,23 +101,24 @@ def env_with_source_container(request):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("env_with_source_container,refresh,json",
-                         itertools.product(SUPPORTED_SOURCE_CLUSTERS, [True, False], [True, False]),
+@pytest.mark.parametrize("env_with_source_container,json",
+                         itertools.product(SUPPORTED_SOURCE_CLUSTERS, [True, False]),
                          indirect=["env_with_source_container"])
-def test_cluster_cat_indices(env_with_source_container: Environment, refresh: bool, json: bool):
+def test_cluster_cat_indices(env_with_source_container: Environment, json: bool):
     env = env_with_source_container
     assert type(env.source_cluster) is Cluster
-    if not refresh:
-        # If no refresh, give the cluster a second to catch up with the document additions.
-        time.sleep(1)
-    result = clusters_.cat_indices(env.source_cluster, refresh=refresh, as_json=json)
+    # First, test with refresh enabled.
+    result = clusters_.cat_indices(env.source_cluster, refresh=True, as_json=json)
     if not json:
-        result = result.decode('utf-8')
-        result_lines = result.split('\n')
+        result_lines = result.decode('utf-8').split('\n')
         assert any(TEST_INDEX_NAME in line and str(DOC_COUNT) in line for line in result_lines)
-
     else:
         assert any(item['index'] == TEST_INDEX_NAME and int(item['docs.count']) == DOC_COUNT for item in result)
+    # And then test again with refresh disabled. Doing both checks in one test halves the number of container starts
+    # and eliminates the need to `sleep` before testing.
+    result = clusters_.cat_indices(env.source_cluster, refresh=False, as_json=False)
+    result_lines = result.decode('utf-8').split('\n')
+    assert any(TEST_INDEX_NAME in line and str(DOC_COUNT) in line for line in result_lines)
 
 
 @pytest.mark.slow
