@@ -6,7 +6,7 @@
             "inputType": "select",
             "id": "SRC_DOMAIN_NAME",
             "label": "Source Cluster Domain",
-            "search": "{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\"",
+            "search": "{AWS/ES,DomainName} MetricName=\"ClusterStatus.green\"",
             "populateFrom": "DomainName",
             "defaultValue": "placeholder-source",
             "visible": true
@@ -26,7 +26,7 @@
             "inputType": "select",
             "id": "TGT_DOMAIN_NAME",
             "label": "Target Cluster Domain",
-            "search": "{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\"",
+            "search": "{AWS/ES,DomainName} MetricName=\"ClusterStatus.green\"",
             "populateFrom": "DomainName",
             "defaultValue": "placeholder-target",
             "visible": true
@@ -36,9 +36,9 @@
             "pattern": "MA_STAGE",
             "inputType": "input",
             "id": "MA_STAGE",
-            "label": "Migration Assistant Stage",
-            "defaultValue": "placeholder-stage",
-            "visible": false
+            "label": "Migration Stage",
+            "defaultValue": "dev",
+            "visible": true
         },
         {
             "type": "pattern",
@@ -46,7 +46,7 @@
             "inputType": "input",
             "id": "ACCOUNT_ID",
             "label": "Account ID",
-            "defaultValue": "ACCOUNT_ID",
+            "defaultValue": "123456789",
             "visible": false
         }
     ],
@@ -64,13 +64,13 @@
         },
         {
             "height": 9,
-            "width": 11,
+            "width": 12,
             "y": 1,
             "x": 0,
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "(m1-m2)", "label": "Integrity Gap", "id": "e1", "region": "us-west-1" } ],
+                    [ { "expression": "(m1-m2)/(m2*100)", "label": "Data Loss %", "id": "e1", "region": "us-west-1" } ],
                     [ "OpenSearchMigrations", "bytesWrittenToTarget", "OTelLib", "replayer", { "region": "us-west-1", "id": "m1", "label": "Replayed on T" } ],
                     [ ".", "bytesRead", ".", "captureProxy", { "label": "Captured from S", "region": "us-west-1", "id": "m2" } ]
                 ],
@@ -79,7 +79,7 @@
                 "region": "us-west-1",
                 "stat": "Sum",
                 "period": 60,
-                "title": "Captured vs Replayed Bytes",
+                "title": "Captured vs Replayed Bytes with Data Loss %",
                 "yAxis": {
                     "left": {
                         "label": "Bytes"
@@ -91,18 +91,23 @@
             "height": 9,
             "width": 12,
             "y": 1,
-            "x": 11,
+            "x": 12,
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "activeConnection", "OTelLib", "captureProxy" ]
+                    [ "OpenSearchMigrations", "activeConnection", "OTelLib", "captureProxy" ],
+                    [ "OpenSearchMigrations", "activeTargetConnections", "OTelLib", "replayer" ],
+                    [ "OpenSearchMigrations", "connectionsOpened", "OTelLib", "replayer" ],
+                    [ "OpenSearchMigrations", "connectionsClosedCount", "OTelLib", "replayer" ],
+                    [ "OpenSearchMigrations", "gatheringRequestCount", "OTelLib", "captureProxy" ],
+                    [ "OpenSearchMigrations", "gatheringResponseCount", "OTelLib", "captureProxy" ]
                 ],
                 "sparkline": true,
                 "view": "singleValue",
                 "region": "us-west-1",
                 "stat": "Average",
                 "period": 60,
-                "title": "Active Proxy Connections",
+                "title": "Active Capture Proxy & Replayer Connections",
                 "liveData": true
             }
         },
@@ -118,62 +123,9 @@
             }
         },
         {
-            "height": 10,
-            "width": 11,
-            "y": 11,
-            "x": 0,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ "OpenSearchMigrations", "gatheringResponseCount", "OTelLib", "captureProxy", { "label": "captureProxy gatheringResponseCount" } ],
-                    [ "AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "TargetGroup", "targetgroup/ALBSourceProxy-dev-TG/e642595a90e5038d", "AvailabilityZone", "us-west-1b", "LoadBalancer", "app/MigrationAssistant-dev/623c250c55648626" ]
-                ],
-                "view": "timeSeries",
-                "stacked": true,
-                "title": "4xx/5xx Errors by Origin",
-                "region": "us-west-1",
-                "stat": "Sum",
-                "period": 60
-            }
-        },
-        {
-            "height": 10,
-            "width": 12,
-            "y": 11,
-            "x": 11,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ { "expression": "(m1/m3) * 100", "label": "Expression1", "id": "e1", "region": "us-west-1" } ],
-                    [ "AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "TargetGroup", "targetgroup/ALBSourceProxy-dev-TG/e642595a90e5038d", "LoadBalancer", "app/MigrationAssistant-dev/623c250c55648626", { "id": "m1", "region": "us-west-1" } ],
-                    [ ".", "RequestCount", ".", ".", ".", ".", { "id": "m3", "region": "us-west-1" } ]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "title": "Source Proxy Error Rate (%) Over Time",
-                "region": "us-west-1",
-                "stat": "Average",
-                "period": 300,
-                "yAxis": {
-                    "left": {
-                        "label": "Error %"
-                    }
-                },
-                "annotations": {
-                    "horizontal": [
-                        {
-                            "label": "Error",
-                            "value": 0.99,
-                            "fill": "above"
-                        }
-                    ]
-                }
-            }
-        },
-        {
             "height": 1,
             "width": 24,
-            "y": 21,
+            "y": 31,
             "x": 0,
             "type": "text",
             "properties": {
@@ -183,8 +135,8 @@
         },
         {
             "height": 10,
-            "width": 11,
-            "y": 22,
+            "width": 12,
+            "y": 32,
             "x": 0,
             "type": "metric",
             "properties": {
@@ -206,8 +158,8 @@
         {
             "height": 10,
             "width": 12,
-            "y": 22,
-            "x": 11,
+            "y": 32,
+            "x": 12,
             "type": "metric",
             "properties": {
                 "metrics": [
@@ -228,7 +180,7 @@
         {
             "height": 1,
             "width": 24,
-            "y": 32,
+            "y": 42,
             "x": 0,
             "type": "text",
             "properties": {
@@ -236,9 +188,9 @@
             }
         },
         {
-            "height": 9,
-            "width": 11,
-            "y": 33,
+            "height": 10,
+            "width": 12,
+            "y": 21,
             "x": 0,
             "type": "metric",
             "properties": {
@@ -263,8 +215,8 @@
         {
             "height": 9,
             "width": 12,
-            "y": 33,
-            "x": 11,
+            "y": 43,
+            "x": 12,
             "type": "metric",
             "properties": {
                 "metrics": [
@@ -287,7 +239,7 @@
         {
             "height": 1,
             "width": 24,
-            "y": 42,
+            "y": 52,
             "x": 0,
             "type": "text",
             "properties": {
@@ -295,9 +247,9 @@
             }
         },
         {
-            "height": 6,
-            "width": 11,
-            "y": 43,
+            "height": 9,
+            "width": 12,
+            "y": 53,
             "x": 0,
             "type": "metric",
             "properties": {
@@ -314,10 +266,10 @@
             }
         },
         {
-            "height": 6,
+            "height": 9,
             "width": 12,
-            "y": 43,
-            "x": 11,
+            "y": 53,
+            "x": 12,
             "type": "metric",
             "properties": {
                 "metrics": [
@@ -335,6 +287,88 @@
                         "label": "Latency (ms)"
                     }
                 }
+            }
+        },
+        {
+            "height": 10,
+            "width": 12,
+            "y": 11,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "(m2/m1)*100", "label": "Replay Ratio %", "id": "e1" } ],
+                    [ "OpenSearchMigrations", "gatheringRequestCount", "OTelLib", "captureProxy", { "label": "Captured Requests", "id": "m1" } ],
+                    [ ".", "httpTransactionCount", ".", "replayer", { "label": "Replayed Requests", "id": "m2" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "us-west-1",
+                "stat": "Sum",
+                "period": 60,
+                "title": "Request Count Comparison"
+            }
+        },
+        {
+            "height": 10,
+            "width": 12,
+            "y": 11,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "(m1/(m1+m2))*100", "label": "Mismatch Percentage", "id": "e1" } ],
+                    [ "OpenSearchMigrations", "tupleComparison", "OTelLib", "replayer", "statusCodesMatch", "false", { "label": "Mismatched Status Code", "id": "m1" } ],
+                    [ "...", "true", { "label": "Matched Status Codes", "id": "m2" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Status Code Mismatch Analyzer",
+                "region": "us-west-1",
+                "stat": "Sum",
+                "period": 60
+            }
+        },
+        {
+            "height": 10,
+            "width": 12,
+            "y": 21,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "tupleComparison", "OTelLib", "replayer", "statusCodesMatch", "false", { "label": "All Mismatches" } ],
+                    [ "...", "method", "GET", "OTelLib", "replayer", { "label": "GET Mismatches" } ],
+                    [ "...", "PUT", ".", ".", { "label": "PUT Mismatches" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "us-west-1",
+                "stat": "Sum",
+                "period": 60,
+                "title": "HTTP Method-Specific Error Analysis"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 43,
+            "width": 12,
+            "height": 9,
+            "properties": {
+                "metrics": [
+                    [ { "expression": "((m2+m3)/m1) *100", "label": "Transformation Success Rate %", "id": "e1" } ],
+                    [ "OpenSearchMigrations", "transformSuccess", "OTelLib", "replayer", { "label": "Total Transformations", "id": "m1" } ],
+                    [ ".", "transformedJsonSucceeded", ".", ".", { "label": "JSON Transformations Succeeded", "id": "m2" } ],
+                    [ ".", "transformedTextSucceeded", ".", ".", { "label": "Text Transformations Succeeded", "id": "m3" } ]
+                ],
+                "view": "singleValue",
+                "stacked": false,
+                "region": "us-west-1",
+                "stat": "Sum",
+                "period": 60,
+                "sparkline": true,
+                "singleValueFullPrecision": true
             }
         }
     ]
