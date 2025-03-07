@@ -101,6 +101,7 @@ def env_with_source_container(request):
     os.remove(temp_config_path)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("env_with_source_container,refresh,json",
                          itertools.product(SUPPORTED_SOURCE_CLUSTERS, [True, False], [True, False]),
                          indirect=["env_with_source_container"])
@@ -120,6 +121,7 @@ def test_cluster_cat_indices(env_with_source_container: Environment, refresh: bo
         assert any(item['index'] == TEST_INDEX_NAME and int(item['docs.count']) == DOC_COUNT for item in result)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("env_with_source_container", SUPPORTED_SOURCE_CLUSTERS, indirect=True)
 def test_connection_check(env_with_source_container: Environment):
     env = env_with_source_container
@@ -128,6 +130,7 @@ def test_connection_check(env_with_source_container: Environment):
     assert result.connection_established
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("env_with_source_container,deep_status_check",
                          itertools.product(SUPPORTED_SOURCE_CLUSTERS, [False, True]),
                          indirect=["env_with_source_container"])
