@@ -15,9 +15,8 @@ from console_link.middleware.clusters import connection_check, clear_cluster, ru
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 
-from common_operations import (get_index, create_index, delete_index, get_document, create_document, delete_document,
-                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call,
-                               wait_for_running_replayer, EXPECTED_BENCHMARK_DOCS)
+from common_utils import execute_api_call
+from default_operations.DefaultOperationsLibrary (get_index, create_index, delete_index, get_document, create_document, delete_document,check_doc_match, check_doc_counts_match, generate_large_doc, wait_for_running_replayer, EXPECTED_BENCHMARK_DOCS)
 from metric_operations import assert_metrics_present
 
 logger = logging.getLogger(__name__)

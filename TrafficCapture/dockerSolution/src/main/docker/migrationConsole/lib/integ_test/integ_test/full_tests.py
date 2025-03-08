@@ -15,8 +15,8 @@ from console_link.models.snapshot import Snapshot
 from console_link.middleware.kafka import delete_topic
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
-from common_operations import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer,
-                               get_index_name_transformation, convert_transformations_to_str)
+from default_operations.DefaultOperationsLibrary import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer,
+                                                   get_index_name_transformation, convert_transformations_to_str)
 logger = logging.getLogger(__name__)
 
 

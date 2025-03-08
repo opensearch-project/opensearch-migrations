@@ -8,8 +8,8 @@ from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
-from common_operations import (get_document, create_document, create_index, check_doc_counts_match,
-                               EXPECTED_BENCHMARK_DOCS)
+from default_operations.DefaultOperationsLibrary import (get_document, create_document, create_index, check_doc_counts_match,
+                                                   EXPECTED_BENCHMARK_DOCS)
 
 logger = logging.getLogger(__name__)
 
