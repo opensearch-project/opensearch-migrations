@@ -46,18 +46,19 @@ The OpenSearch Migrations Engine is a comprehensive set of tools designed to fac
 
 | **Source Version**          | **Target Version**               | Status|
 |-----------------------------|----------------------------------|---------|
+| Elasticsearch 5.6           | OpenSearch 1.3                   |Supported|
+| Elasticsearch 5.6           | OpenSearch 2.19                  |Supported|
 | Elasticsearch 6.8           | OpenSearch 1.3                   |Supported|
-| Elasticsearch 6.8           | OpenSearch 2.14                  |Supported|
+| Elasticsearch 6.8           | OpenSearch 2.19                  |Supported|
 | Elasticsearch 7.10.2        | OpenSearch 1.3                   |Supported|
-| Elasticsearch 7.10.2        | OpenSearch 2.14                  |Supported|
+| Elasticsearch 7.10.2        | OpenSearch 2.19                  |Supported|
 | Elasticsearch 7.17          | OpenSearch 1.3                   |Supported|
-| Elasticsearch 7.17          | OpenSearch 2.14                  |Supported|
-| OpenSearch 1.3              | OpenSearch 2.14                  |Supported|
+| Elasticsearch 7.17          | OpenSearch 2.19                  |Supported|
+| OpenSearch 1.3              | OpenSearch 2.19                  |Supported|
 | Elasticsearch 8.x           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1071)|
-| Elasticsearch 5.6           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1067)|
-| Elasticsearch 2.3           | OpenSearch 2.<latest>            |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1069)|
-| Elasitcsearch 1.5           | OpenSearch 2.x .                 |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1070)|
-| OpenSearch 2.x              | OpenSearch 2.x .                  |[Requested](https://github.com/opensearch-project/opensearch-migrations/issues/1038)|
+| Elasticsearch 2.3           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1069)|
+| Elasitcsearch 1.5           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1070)|
+| OpenSearch 2.x              | OpenSearch 2.x                   |[Requested](https://github.com/opensearch-project/opensearch-migrations/issues/1038)|
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
