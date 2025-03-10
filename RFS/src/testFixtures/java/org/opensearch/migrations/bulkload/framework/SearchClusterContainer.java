@@ -21,7 +21,7 @@ import org.testcontainers.utility.MountableFile;
  */
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
-    public static final String CLUSTER_SNAPSHOT_DIR = "/usr/share/snapshots";
+    public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
     public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
@@ -43,7 +43,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "elasticsearch:2.4.6",
         Version.fromString("ES 2.4.6"),
         "/usr/share/elasticsearch/config/elasticsearch.yml",
-        "network.host: 0.0.0.0\npath.repo: \"/usr/share/snapshots\""
+        "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
     );
 
     public static final ContainerVersion OS_V1_3_16 = new OpenSearchVersion(
@@ -137,6 +137,23 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
         super.start();
+
+        try {            
+            log.atInfo().setMessage("Container started, other activities").log();
+            // var chown = this.execInContainer("chown", "-R", "elasticsearch:elasticsearch", CLUSTER_SNAPSHOT_DIR);
+            // log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
+
+            var listUsers = this.execInContainer("cat", "/etc/passwd");
+            log.atInfo().setMessage("ListUsers result {} {}").addArgument(listUsers.getStdout()).addArgument(listUsers.getStderr()).log();
+
+            var chmod = this.execInContainer("sh", "-c", "chmod 777 " + CLUSTER_SNAPSHOT_DIR);
+            log.atInfo().setMessage("chmod result {} {}").addArgument(chmod.getStdout()).addArgument(chmod.getStderr()).log();
+            var ls = this.execInContainer("sh", "-c", "ls -ld " + CLUSTER_SNAPSHOT_DIR);
+            log.atInfo().setMessage("LS result {} {}").addArgument(ls.getStdout()).addArgument(ls.getStderr()).log();
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public String getUrl() {
