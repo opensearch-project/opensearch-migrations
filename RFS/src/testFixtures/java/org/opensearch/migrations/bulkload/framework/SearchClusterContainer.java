@@ -127,7 +127,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public void putSnapshotData(final String directory) {
         try {
             this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
-            this.execInContainer("chown", "-R", "elasticsearch:elasticsearch", CLUSTER_SNAPSHOT_DIR);
         } catch (final Exception e) {
             throw new RuntimeException(e);
         }
@@ -140,8 +139,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
         try {            
             log.atInfo().setMessage("Container started, other activities").log();
-            // var chown = this.execInContainer("chown", "-R", "elasticsearch:elasticsearch", CLUSTER_SNAPSHOT_DIR);
-            // log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
+            var user = this.containerVersion.user;
+            var chown = this.execInContainer("chown", "-R", user + ":" + user, CLUSTER_SNAPSHOT_DIR);
+            log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
 
             var listUsers = this.execInContainer("cat", "/etc/passwd");
             log.atInfo().setMessage("ListUsers result {} {}").addArgument(listUsers.getStdout()).addArgument(listUsers.getStderr()).log();
@@ -175,11 +175,13 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         final String imageName;
         final Version version;
         final INITIALIZATION_FLAVOR initializationType;
+        final String user;
 
-        public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType) {
+        public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType, String user) {
             this.imageName = imageName;
             this.version = version;
             this.initializationType = initializationType;
+            this.user = user;
         }
 
         @Override
@@ -195,19 +197,19 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public static class ElasticsearchOssVersion extends ContainerVersion {
         public ElasticsearchOssVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS);
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS, "elasticsearch");
         }
     }
 
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH);
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
         }
     }
 
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH);
+            super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
         }
     }
 
