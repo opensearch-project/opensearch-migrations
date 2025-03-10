@@ -87,7 +87,7 @@ public class StringMappingType implements TransformationRule<Index> {
 
     private void findStringFieldType(final JsonNode mappingNode, Consumer<ObjectNode> whenMatched) {
         var properties = mappingNode.get(PROPERTIES_KEY);
-        properties.fields().forEachRemaining((mappingFields) -> {
+        properties.fields().forEachRemaining(mappingFields -> {
             log.atInfo().setMessage("Inspecting field " + mappingFields.getKey() + " " + mappingFields.getValue()).log();
             var mappingFieldType = mappingFields.getValue().get("type");
             if (mappingFieldType != null && "string".equals(mappingFieldType.asText())) {
