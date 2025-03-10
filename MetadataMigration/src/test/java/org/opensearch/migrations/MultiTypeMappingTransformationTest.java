@@ -42,8 +42,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         final SearchClusterContainer.ContainerVersion legacyVersion,
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        var snapshotRepo = "legacy_repo";
-        var snapshotName = "legacy_snapshot";
+        var legacySnapshotRepo = "legacy_repo";
+        var legacySnapshotName = "legacy_snapshot";
         var originalIndexName = "test_index";
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
@@ -55,11 +55,12 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             // Create index and add documents on the source cluster
             createMultiTypeIndex(originalIndexName, legacyClusterOperations);
 
-            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            legacyClusterOperations.takeSnapshot(snapshotRepo, snapshotName, originalIndexName);
+            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
+            legacyClusterOperations.takeSnapshot(legacySnapshotRepo, legacySnapshotName, originalIndexName);
             legacyCluster.copySnapshotData(localDirectory.toString());
         }
 
+        var snapshotRepo = "snap_repo";
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
@@ -75,7 +76,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             // Register snapshot repository and restore snapshot in ES 5 cluster
             upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            upgradedSourceOperations.restoreSnapshot(snapshotRepo, snapshotName);
+            upgradedSourceOperations.restoreSnapshot(snapshotRepo, legacySnapshotName);
 
             // Verify index exists on upgraded cluster
             var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
