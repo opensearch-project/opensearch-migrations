@@ -87,6 +87,8 @@ function retargetCommandParameters(parameters, targetIndex) {
     // Add the '_index' key with the new target index if exists
     if (targetIndex) {
         parameters.set('_index', targetIndex);
+    } else {
+        parameters.delete('_index');
     }
     return parameters;
 }
