@@ -5,7 +5,7 @@ function isEnabled(features, path) {
     const keys = path.split('.');
 
     for (const key of keys) {
-        if (value && typeof value === 'object' && key in value) {
+        if (value && value instanceof Map && value.has(key)) {
             value = value[key];
         } else {
             value = null;
@@ -14,7 +14,7 @@ function isEnabled(features, path) {
     }
 
     if (typeof value === 'boolean') return value;
-    if (value && typeof value === 'object' && 'enabled' in value) {
+    if (value && value instanceof Map && value.has('enabled')) {
         return Boolean(value.enabled);
     }
     return false;
@@ -119,7 +119,7 @@ function rewriteBulk(match, context) {
 
     while (ndi < lines.length) {
         const command = lines[ndi++];
-        const commandType = Object.keys(command)[0];
+        const commandType = command.keys().next().value;
         let commandParameters = command[commandType] || {};
 
         // Next line is doc if it's not a 'delete' command.
@@ -232,7 +232,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
 
     const newProperties = {}
     for (const [sourceType,] of targetIndicesMap) {
-        for (const fieldName of Object.keys(oldMappings[sourceType].properties)) {
+        for (fieldName of oldMappings[sourceType].properties.keys()) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
                 const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];
@@ -258,7 +258,7 @@ function rewriteCreateIndex(match, inputMap) {
     }
 
     const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
-    const types = Object.keys(mappings);
+    const types = [...mappings.keys()];
     const sourceTypeToTargetIndicesMap = new Map(types
         .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_mappings)])
         .filter(([, targetIndex]) => targetIndex) // Keep only entries with valid target indices
@@ -279,9 +279,15 @@ function processMetadataRequest(document, context) {
 
     // Normalize mappings to an object
     if (Array.isArray(mappings)) {
-        // If it's an array, convert it to an object by merging entries
-        mappings = Object.assign({}, ...mappings);
-    }
+        // If it's an array, convert it to a map by merging entries
+        const merged = new Map();
+        for (const mapping of mappings) {
+            for (const [key, value] of mapping.entries()) {
+                merged.set(key, value);
+            }
+        }
+        mappings = merged;
+        }
 
     if (!mappings || (mappings.properties && !mappings.properties?.properties)) {
         // No Type Exists either because mappings doesn't exist,
@@ -318,37 +324,59 @@ function processMetadataRequest(document, context) {
         return [];
     }
 
-    const types = Object.keys(mappings);
-    const creationObjects = {};
-    for (let idx = 0; idx < types.length; idx++) {
-        const type = types[idx];
-
+    const creationObjects = new Map();
+    for (const [type, mappingValue] of mappings.entries()) {
         const targetIndex = convertSourceIndexToTarget(
-            document.name,
+            document.get('name'),
             type,
             context.index_mappings,
             context.regex_mappings
         );
 
         if (targetIndex) {
-            const existing = creationObjects[targetIndex];
-            if (existing) {
-                existing.body.mappings._doc.properties = {
-                    ...existing.body.mappings._doc.properties,
-                    ...mappings[type].properties
-                };
+            if (creationObjects.has(targetIndex)) {
+                const existing = creationObjects.get(targetIndex);
+                const body = existing.get('body');
+                const mappingsMap = body.get('mappings');
+                const docMapping = mappingsMap.get('_doc');
+
+                // Merge the 'properties' Maps:
+                const existingProperties = docMapping.get('properties');
+                const newProperties = mappingValue.get('properties');
+                const mergedProperties = new Map([...existingProperties, ...newProperties]);
+                docMapping.set('properties', mergedProperties);
             } else {
-                const deepClone = JSON.parse(JSON.stringify(document));
-                deepClone.name = targetIndex;
-                deepClone.body.mappings = {
-                    _doc: mappings[type]
-                };
-                creationObjects[targetIndex] = deepClone;
+                const newMetadataItem = deepCloneMap(document);
+                newMetadataItem.set('name', targetIndex);
+                // Replace the mappings with a new Map containing '_doc'
+                newMetadataItem.get('body').set('mappings', new Map([['_doc', mappingValue]]));
+                creationObjects.set(targetIndex, newMetadataItem);
             }
         }
     }
-    return Object.values(creationObjects);
+    return [...creationObjects.values()];
 }
+
+// Helper function to deep clone a Map, including nested Maps/objects
+function deepCloneMap(map) {
+    const clone = new Map();
+    for (const [key, value] of map.entries()) {
+        let clonedValue;
+        if (value instanceof Map) {
+            clonedValue = deepCloneMap(value);
+        } else if (Array.isArray(value)) {
+            clonedValue = value.map(item => (item instanceof Map ? deepCloneMap(item) : item));
+        } else if (value !== null && typeof value === 'object') {
+            // For plain objects, use JSON methods (assumes JSON-safe objects)
+            clonedValue = JSON.parse(JSON.stringify(value));
+        } else {
+            clonedValue = value;
+        }
+        clone.set(key, clonedValue);
+    }
+    return clone;
+}
+
 
 function routeHttpRequest(source_document, context) {
     const methodAndUri = `${source_document.method} ${source_document.URI}`;
@@ -406,11 +434,11 @@ function detectAndTransform(document, context) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
 
-    if ("type" in document && "name" in document && "body" in document) {
+    if (document.has("type") && document.has("name") && document.has("body")) {
         return processMetadataRequest(document, context);
-    } else if ("method" in document && "URI" in document) {
+    } else if (document.has("method") && document.has("URI")) {
         return routeHttpRequest(document, context);
-    } else if ("index" in document && "source" in document) {
+    } else if (document.has("index") && document.has("source")) {
         return processBulkIndex(document, context);
     } else {
         return document;
@@ -425,7 +453,13 @@ function main(context) {
         console.error("Context Missing source_properties: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));
         throw new Error("No source_properties defined - required to transform correctly!");
     }
-    return (document) => detectAndTransform(document, context);
+    // Support bulk processing
+    return (document) => {
+        if (Array.isArray(document)) {
+            return document.flat().map(item => detectAndTransform(item, context));
+        }
+        return detectAndTransform(document, context);
+    };
 }
 
 // Entrypoint function

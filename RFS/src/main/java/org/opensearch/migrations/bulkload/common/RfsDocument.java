@@ -36,19 +36,29 @@ public class RfsDocument {
     }
 
     @SuppressWarnings("unchecked")
-    public static List<RfsDocument> transform(IJsonTransformer transformer, RfsDocument doc) {
-        var transformedObject = transformer.transformJson(doc.document.toMap());
+    public static List<RfsDocument> transform(IJsonTransformer transformer, List<RfsDocument> docs) {
+        var listOfDocMaps = docs.stream().map(doc -> doc.document.toMap())
+                .toList();
+
+        if (listOfDocMaps.isEmpty()) {
+            return docs;
+        }
+
+        // Use the first luceneDocNumber in the batch to associated with all returned objects
+        var luceneDocNumber = docs.get(0).luceneDocNumber;
+
+        var transformedObject = transformer.transformJson(listOfDocMaps);
         if (transformedObject instanceof Map) {
             Map<String, Object> transformedMap = (Map<String, Object>) transformedObject;
             return List.of(new RfsDocument(
-                doc.luceneDocNumber,
+                    luceneDocNumber,
                 BulkDocSection.fromMap(transformedMap)
             ));
         } else if (transformedObject instanceof List) {
             var transformedList = (List<Map<String, Object>>) transformedObject;
             return transformedList.stream()
                 .map(item -> new RfsDocument(
-                    doc.luceneDocNumber,
+                    luceneDocNumber,
                     BulkDocSection.fromMap(item)
                 ))
                 .collect(Collectors.toList());

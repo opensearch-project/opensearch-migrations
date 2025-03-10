@@ -131,9 +131,10 @@ class DocumentReindexerTest {
     void reindex_shouldBufferByTransformedSize() throws JsonProcessingException {
         // Set up the transformer that replaces the sourceDoc from the document
         var replacedSourceDoc = Map.of("simpleKey", "simpleValue");
-        IJsonTransformer transformer = originalJson -> {
-            ((Map<String, Object>) originalJson).put("source", replacedSourceDoc);
-            return originalJson;
+        IJsonTransformer transformer = originalJsons -> {
+            ((List<Map<String, Object>>) originalJsons)
+                    .forEach(json -> json.put("source", replacedSourceDoc));
+            return originalJsons;
         };
         int numDocs = 5;
 
@@ -155,7 +156,7 @@ class DocumentReindexerTest {
             });
 
         StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
-            .expectNext(new WorkItemCursor(5))
+            .expectNext(new WorkItemCursor(1))
             .thenRequest(5)
             .verifyComplete();
 
@@ -296,7 +297,7 @@ class DocumentReindexerTest {
 
         // Execute the reindexing process
         StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
-            .expectNext(new WorkItemCursor(3))
+            .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
 
