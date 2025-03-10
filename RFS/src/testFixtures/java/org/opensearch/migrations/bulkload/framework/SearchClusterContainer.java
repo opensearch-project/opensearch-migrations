@@ -128,9 +128,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         try {
             this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
             var user = this.containerVersion.user;
-            var chown = this.execInContainer("chown", "-R", user + ":" + user, CLUSTER_SNAPSHOT_DIR);
+            var ls = this.execInContainer("sh", "-c", "sudo ls -ld " + CLUSTER_SNAPSHOT_DIR);
+            log.atInfo().setMessage("LS result {} {}").addArgument(ls.getStdout()).addArgument(ls.getStderr()).log();
+            var chown = this.execInContainer("sh", "-c", "sudo chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR);
             log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
-            var chmod = this.execInContainer("sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR);
+            var chmod = this.execInContainer("sh", "-c", "sudo chmod -R 777 " + CLUSTER_SNAPSHOT_DIR);
             log.atInfo().setMessage("CHMOD result {} {}").addArgument(chmod.getStdout()).addArgument(chmod.getStderr()).log();
         } catch (final Exception e) {
             throw new RuntimeException(e);
