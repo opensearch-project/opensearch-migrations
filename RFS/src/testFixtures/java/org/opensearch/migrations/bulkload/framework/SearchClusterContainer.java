@@ -10,6 +10,7 @@ import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.testcontainers.containers.ExecConfig;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
@@ -128,11 +129,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         try {
             this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
             var user = this.containerVersion.user;
-            var ls = this.execInContainer("sh", "-c", "sudo ls -ld " + CLUSTER_SNAPSHOT_DIR);
+            var ls = this.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", "ls -ld " + CLUSTER_SNAPSHOT_DIR}).user("root").build());
             log.atInfo().setMessage("LS result {} {}").addArgument(ls.getStdout()).addArgument(ls.getStderr()).log();
-            var chown = this.execInContainer("sh", "-c", "sudo chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR);
+            var chown = this.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR}).user("root").build());
             log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
-            var chmod = this.execInContainer("sh", "-c", "sudo chmod -R 777 " + CLUSTER_SNAPSHOT_DIR);
+            var chmod = this.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR}).user("root").build());
             log.atInfo().setMessage("CHMOD result {} {}").addArgument(chmod.getStdout()).addArgument(chmod.getStderr()).log();
         } catch (final Exception e) {
             throw new RuntimeException(e);
