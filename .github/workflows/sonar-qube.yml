@@ -81,8 +81,8 @@ jobs:
         jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
         echo "::endgroup::"
 
-        # Annotate issue on the PR
-        jq -c '.issues[]' issues.json | while read -r issue; do
+        # Annotate issue on the PR with newest first
+        jq -c '.issues[] | sort_by(.creationDate) | reverse' issues.json | while read -r issue; do
           FILE=$(echo "$issue" | jq -r '.component | split(":")[1]')
           LINE=$(echo "$issue" | jq -r '.line')
           MESSAGE=$(echo "$issue" | jq -r '.message')
