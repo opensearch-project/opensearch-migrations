@@ -21,7 +21,7 @@ import org.testcontainers.utility.MountableFile;
  */
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
-    public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
+    public static final String CLUSTER_SNAPSHOT_DIR = "/usr/share/snapshots";
     public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
@@ -43,7 +43,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "elasticsearch:2.4.6",
         Version.fromString("ES 2.4.6"),
         "/usr/share/elasticsearch/config/elasticsearch.yml",
-        "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+        "network.host: 0.0.0.0\npath.repo: \"/usr/share/snapshots\""
     );
 
     public static final ContainerVersion OS_V1_3_16 = new OpenSearchVersion(
