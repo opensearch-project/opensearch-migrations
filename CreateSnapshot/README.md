@@ -26,7 +26,7 @@ In order for this succeed, you'll need to make sure:
 * The S3 URI currently exists, and is in the region you specify
 * There are no other snapshots present in that S3 URI
 
-If your source cluster is OpenSearch 1.x, you may also need to:
+If your source cluster uses AWS SIGv4 Authentication, you may also need to:
 * Pass args `--source-aws-service-signing-name es` and `--source-aws-region` parameters to correctly sign your AWS SIGV4 requests
 * Configure and pass `--s3-role-arn` to register your S3 repository (see [AWS OpenSearch Managed Domains Snapshots Guide](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/managedomains-snapshots.html))
 
