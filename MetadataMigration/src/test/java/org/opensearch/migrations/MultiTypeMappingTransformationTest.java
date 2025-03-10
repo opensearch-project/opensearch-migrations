@@ -42,8 +42,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         final SearchClusterContainer.ContainerVersion legacyVersion,
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        var legacySnapshotRepo = "legacy_repo";
-        var legacySnapshotName = "legacy_snapshot";
+        var legacySnapshotRepo = "repo";
+        var legacySnapshotName = "snapshot";
         var originalIndexName = "test_index";
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
@@ -60,7 +60,6 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             legacyCluster.copySnapshotData(localDirectory.toString());
         }
 
-        var snapshotRepo = "snap_repo";
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
@@ -75,8 +74,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var upgradedSourceOperations = new ClusterOperations(sourceCluster);
 
             // Register snapshot repository and restore snapshot in ES 5 cluster
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            upgradedSourceOperations.restoreSnapshot(snapshotRepo, legacySnapshotName);
+            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
+            upgradedSourceOperations.restoreSnapshot(legacySnapshotRepo, legacySnapshotName);
 
             // Verify index exists on upgraded cluster
             var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
