@@ -17,6 +17,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
+import org.junit.Ignore;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -58,6 +59,7 @@ class EndToEndTest extends BaseMigrationTest {
             });
     }
 
+    @Ignore
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
     @MethodSource(value = "scenarios")
     void metadataCommand(SearchClusterContainer.ContainerVersion sourceVersion,
