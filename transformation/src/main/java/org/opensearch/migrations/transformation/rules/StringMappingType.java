@@ -58,7 +58,7 @@ public class StringMappingType implements TransformationRule<Index> {
         }
 
         var hasStringType = new AtomicReference<>(CanApplyResult.NO);
-        findStringFieldType(mappingNode, (_ignored) -> hasStringType.set(CanApplyResult.YES));
+        findStringFieldType(mappingNode, ignored -> hasStringType.set(CanApplyResult.YES));
 
         return hasStringType.get();
     }
