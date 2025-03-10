@@ -81,11 +81,14 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-function retargetCommandParameters({ _type, ...remainingParameters }, targetIndex) {
-    return {
-        ...remainingParameters,
-        _index: targetIndex
-    };
+function retargetCommandParameters(parameters, targetIndex) {
+    // Remove the '_type' key
+    parameters.delete('_type');
+    // Add the '_index' key with the new target index if exists
+    if (targetIndex) {
+        parameters.set('_index', targetIndex);
+    }
+    return parameters;
 }
 
 function rewriteBulk(match, context) {
@@ -104,8 +107,9 @@ function rewriteBulk(match, context) {
         defaultSourceIndex = match[1];
     }
 
+    let defaultTargetIndex = null;
     if (defaultSourceIndex) {
-        let defaultTargetIndex = convertSourceIndexToTarget(defaultSourceIndex,
+        defaultTargetIndex = convertSourceIndexToTarget(defaultSourceIndex,
             defaultType,
             context.index_mappings,
             context.regex_mappings);
@@ -147,11 +151,11 @@ function rewriteBulk(match, context) {
         }
 
         // Update command parameters and ensure they're correctly inserted
-        commandParameters = retargetCommandParameters(commandParameters, targetIndex);
+        const targetIndexInBulk = targetIndex !== defaultTargetIndex ? targetIndex : null;
+        commandParameters = retargetCommandParameters(commandParameters, targetIndexInBulk);
         const updatedCommand = { [commandType]: commandParameters };
         newLines.push(updatedCommand);
         if (doc) newLines.push(doc);
-
     }
 
     context.request.payload.inlinedJsonSequenceBodies = newLines;
