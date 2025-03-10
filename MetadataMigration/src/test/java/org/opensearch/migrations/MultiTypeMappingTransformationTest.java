@@ -13,7 +13,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -43,8 +42,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         final SearchClusterContainer.ContainerVersion legacyVersion,
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        var snapshotRepo = "legacy_repo";
-        var snapshotName = "legacy_snapshot";
+        var legacySnapshotRepo = "repo";
+        var legacySnapshotName = "snapshot";
         var originalIndexName = "test_index";
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
@@ -56,8 +55,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             // Create index and add documents on the source cluster
             createMultiTypeIndex(originalIndexName, legacyClusterOperations);
 
-            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            legacyClusterOperations.takeSnapshot(snapshotRepo, snapshotName, originalIndexName);
+            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
+            legacyClusterOperations.takeSnapshot(legacySnapshotRepo, legacySnapshotName, originalIndexName);
             legacyCluster.copySnapshotData(localDirectory.toString());
         }
 
@@ -75,8 +74,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var upgradedSourceOperations = new ClusterOperations(sourceCluster);
 
             // Register snapshot repository and restore snapshot in ES 5 cluster
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, snapshotRepo);
-            upgradedSourceOperations.restoreSnapshot(snapshotRepo, snapshotName);
+            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
+            upgradedSourceOperations.restoreSnapshot(legacySnapshotRepo, legacySnapshotName);
 
             // Verify index exists on upgraded cluster
             var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
@@ -150,7 +149,6 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
     }
 
-    @Test
     public void es5_doesNotAllow_multiTypeConflicts() {
         try (
             final var es5 = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.framework;
 
 import java.io.File;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 
@@ -9,8 +10,8 @@ import org.opensearch.migrations.Version;
 import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
+import org.testcontainers.containers.ExecConfig;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
@@ -128,10 +129,29 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public void putSnapshotData(final String directory) {
         try {
             this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
-            this.execInContainer("chown", "-R", "elasticsearch:elasticsearch", CLUSTER_SNAPSHOT_DIR);
+            var user = this.containerVersion.user;
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR})
+                .user("root")
+                .build());
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR})
+                .user("root")
+                .build());
         } catch (final Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void executeAndLog(ExecConfig command) throws UnsupportedOperationException, IOException, InterruptedException {
+            var result = this.execInContainer(command);
+            log.atInfo()
+                .setMessage("Command result: {} as <{}>\nStdOut:\n{}\nStdErr:\n{}")
+                .addArgument(command.getCommand())
+                .addArgument(command.getUser())
+                .addArgument(result.getStdout())
+                .addArgument(result.getStderr())
+                .log();
     }
 
 
@@ -159,11 +179,13 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         final String imageName;
         final Version version;
         final INITIALIZATION_FLAVOR initializationType;
+        final String user;
 
-        public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType) {
+        public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType, String user) {
             this.imageName = imageName;
             this.version = version;
             this.initializationType = initializationType;
+            this.user = user;
         }
 
         @Override
@@ -179,19 +201,19 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public static class ElasticsearchOssVersion extends ContainerVersion {
         public ElasticsearchOssVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS);
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS, "elasticsearch");
         }
     }
 
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH);
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
         }
     }
 
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH);
+            super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
         }
     }
 
