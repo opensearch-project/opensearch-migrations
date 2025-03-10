@@ -73,7 +73,7 @@ public class StringMappingType implements TransformationRule<Index> {
         final var mappingNode = index.getRawJson().get(MAPPINGS_KEY);
 
         var anyChanges = new AtomicBoolean(false);
-        findStringFieldType(mappingNode, (matchedNode) -> {
+        findStringFieldType(mappingNode, matchedNode -> {
             matchedNode.put("type", "text")
                 .withObject("fields")
                     .withObject("keyword")
