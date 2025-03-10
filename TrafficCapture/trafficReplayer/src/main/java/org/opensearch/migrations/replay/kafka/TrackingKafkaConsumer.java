@@ -194,9 +194,13 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     public Optional<Instant> getNextRequiredTouch() {
         var lastTouchTime = lastTouchTimeRef.get();
-        var r = kafkaRecordsLeftToCommitEventually.get() == 0
-            ? Optional.<Instant>empty()
-            : Optional.of(kafkaRecordsReadyToCommit.get() ? Instant.now() : lastTouchTime.plus(keepAliveInterval));
+        Optional<Instant> r;
+        if (kafkaRecordsLeftToCommitEventually.get() == 0) {
+            r = Optional.empty();
+        }
+        else {
+            r = Optional.of(kafkaRecordsReadyToCommit.get() ? Instant.now() : lastTouchTime.plus(keepAliveInterval));
+        }
         log.atTrace().setMessage("returning next required touch at {} from a lastTouchTime of {}")
             .addArgument(() -> r.map(Instant::toString).orElse("N/A"))
             .addArgument(lastTouchTime)
