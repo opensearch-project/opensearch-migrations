@@ -1,7 +1,10 @@
 package org.opensearch.migrations;
 
 import java.util.List;
+import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.SupportedClusters;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.transform.TransformerParams;
@@ -12,6 +15,9 @@ import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -24,27 +30,27 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Slf4j
 class CustomTransformationTest extends BaseMigrationTest {
 
-    // private static Stream<Arguments> scenarios() {
-    //     // Transformations are differentiated only by source, so lock to a specific target.
-    //     var target = SupportedClusters.targets().stream().limit(1).findFirst().get();
-    //     return SupportedClusters.sources().stream()
-    //             .map(sourceCluster -> Arguments.of(sourceCluster, target));
-    // }
+    private static Stream<Arguments> scenarios() {
+        // Transformations are differentiated only by source, so lock to a specific target.
+        var target = SupportedClusters.targets().stream().limit(1).findFirst().get();
+        return SupportedClusters.sources().stream()
+                .map(sourceCluster -> Arguments.of(sourceCluster, target));
+    }
 
-    // @ParameterizedTest(name = "Custom Transformation From {0} to {1}")
-    // @MethodSource(value = "scenarios")
-    // void customTransformationMetadataMigration(
-    //         SearchClusterContainer.ContainerVersion sourceVersion,
-    //         SearchClusterContainer.ContainerVersion targetVersion) {
-    //     try (
-    //             final var sourceCluster = new SearchClusterContainer(sourceVersion);
-    //             final var targetCluster = new SearchClusterContainer(targetVersion)
-    //     ) {
-    //         this.sourceCluster = sourceCluster;
-    //         this.targetCluster = targetCluster;
-    //         performCustomTransformationTest();
-    //     }
-    // }
+    @ParameterizedTest(name = "Custom Transformation From {0} to {1}")
+    @MethodSource(value = "scenarios")
+    void customTransformationMetadataMigration(
+            SearchClusterContainer.ContainerVersion sourceVersion,
+            SearchClusterContainer.ContainerVersion targetVersion) {
+        try (
+                final var sourceCluster = new SearchClusterContainer(sourceVersion);
+                final var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            performCustomTransformationTest();
+        }
+    }
 
     @SneakyThrows
     private void performCustomTransformationTest() {

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.framework;
 
 import java.io.File;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 
@@ -129,39 +130,34 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         try {
             this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
             var user = this.containerVersion.user;
-            var ls = this.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", "ls -ld " + CLUSTER_SNAPSHOT_DIR}).user("root").build());
-            log.atInfo().setMessage("LS result {} {}").addArgument(ls.getStdout()).addArgument(ls.getStderr()).log();
-            var chown = this.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR}).user("root").build());
-            log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
-            var chmod = this.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR}).user("root").build());
-            log.atInfo().setMessage("CHMOD result {} {}").addArgument(chmod.getStdout()).addArgument(chmod.getStderr()).log();
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR})
+                .user("root")
+                .build());
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR})
+                .user("root")
+                .build());
         } catch (final Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void executeAndLog(ExecConfig command) throws UnsupportedOperationException, IOException, InterruptedException {
+            var result = this.execInContainer(command);
+            log.atInfo()
+                .setMessage("Command result: {} as <{}>\nStdOut:\n{}\nStdErr:\n{}")
+                .addArgument(command.getCommand())
+                .addArgument(command.getUser())
+                .addArgument(result.getStdout())
+                .addArgument(result.getStderr())
+                .log();
     }
 
 
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
         super.start();
-
-        try {            
-            log.atInfo().setMessage("Container started, other activities").log();
-            var user = this.containerVersion.user;
-            var chown = this.execInContainer("chown", "-R", user + ":" + user, CLUSTER_SNAPSHOT_DIR);
-            log.atInfo().setMessage("CHOWN result {} {}").addArgument(chown.getStdout()).addArgument(chown.getStderr()).log();
-
-            var listUsers = this.execInContainer("cat", "/etc/passwd");
-            log.atInfo().setMessage("ListUsers result {} {}").addArgument(listUsers.getStdout()).addArgument(listUsers.getStderr()).log();
-
-            var chmod = this.execInContainer("sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR);
-            log.atInfo().setMessage("chmod result {} {}").addArgument(chmod.getStdout()).addArgument(chmod.getStderr()).log();
-            var ls = this.execInContainer("sh", "-c", "ls -ld " + CLUSTER_SNAPSHOT_DIR);
-            log.atInfo().setMessage("LS result {} {}").addArgument(ls.getStdout()).addArgument(ls.getStderr()).log();
-
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 
     public String getUrl() {
