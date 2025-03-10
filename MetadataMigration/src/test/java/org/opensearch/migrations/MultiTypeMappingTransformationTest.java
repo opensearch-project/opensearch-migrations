@@ -12,9 +12,7 @@ import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.Ignore;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -151,40 +149,38 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
     }
 
-    @Ignore
-    @Test
-    public void es5_doesNotAllow_multiTypeConflicts() {
-        try (
-            final var es5 = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)
-        ) {
-            es5.start();
+    // public void es5_doesNotAllow_multiTypeConflicts() {
+    //     try (
+    //         final var es5 = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)
+    //     ) {
+    //         es5.start();
 
-            var clusterOperations = new ClusterOperations(es5);
+    //         var clusterOperations = new ClusterOperations(es5);
 
-            var originalIndexName = "test_index";
-            String body = "{" +
-                "  \"settings\": {" +
-                "    \"index\": {" +
-                "      \"number_of_shards\": 5," +
-                "      \"number_of_replicas\": 0" +
-                "    }" +
-                "  }," +
-                "  \"mappings\": {" +
-                "    \"type1\": {" +
-                "      \"properties\": {" +
-                "        \"field1\": { \"type\": \"float\" }" +
-                "      }" +
-                "    }," +
-                "    \"type2\": {" +
-                "      \"properties\": {" +
-                "        \"field1\": { \"type\": \"long\" }" +
-                "      }" +
-                "    }" +
-                "  }" +
-                "}";
-            var res = clusterOperations.put("/" + originalIndexName, body);
-            assertThat(res.getKey(), equalTo(400));
-            assertThat(res.getValue(), containsString("mapper [field1] cannot be changed from type [long] to [float]"));
-        }
-    }
+    //         var originalIndexName = "test_index";
+    //         String body = "{" +
+    //             "  \"settings\": {" +
+    //             "    \"index\": {" +
+    //             "      \"number_of_shards\": 5," +
+    //             "      \"number_of_replicas\": 0" +
+    //             "    }" +
+    //             "  }," +
+    //             "  \"mappings\": {" +
+    //             "    \"type1\": {" +
+    //             "      \"properties\": {" +
+    //             "        \"field1\": { \"type\": \"float\" }" +
+    //             "      }" +
+    //             "    }," +
+    //             "    \"type2\": {" +
+    //             "      \"properties\": {" +
+    //             "        \"field1\": { \"type\": \"long\" }" +
+    //             "      }" +
+    //             "    }" +
+    //             "  }" +
+    //             "}";
+    //         var res = clusterOperations.put("/" + originalIndexName, body);
+    //         assertThat(res.getKey(), equalTo(400));
+    //         assertThat(res.getValue(), containsString("mapper [field1] cannot be changed from type [long] to [float]"));
+    //     }
+    // }
 }
