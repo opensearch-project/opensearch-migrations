@@ -102,8 +102,6 @@ check_ssm_ready() {
     echo "Checking for SSM registration of instance ${instance_id}..."
 
     while [ $elapsed -lt $timeout ]; do
-        # Using the --filters parameter to retrieve info for the specific instance ID.
-        # If the instance is not registered, the returned InstanceInformationList will be empty.
         ssm_status=$(aws ssm describe-instance-information \
             --filters "Key=InstanceIds,Values=${instance_id}" \
             --query "InstanceInformationList[0].PingStatus" --output text)
