@@ -64,17 +64,17 @@ public class ClusterOperations {
     }
 
     public void createDocument(final String index, final String docId, final String body) {
-        createDocument(index, docId, body, null, defaultDocType());
+        createDocument(index, docId, body, null, null);
     }
 
     @SneakyThrows
     public void createDocument(final String index, final String docId, final String body, String routing, String type) {
-        var response = put("/" + index + "/" + Optional.ofNullable(type).orElse(defaultDocType()) + "/" + docId + "?routing=" + routing, body);
+        var response = put("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing, body);
         assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
-    public void deleteDocument(final String index, final String docId) throws IOException {
-        var response = delete("/" + index + "/" + defaultDocType() + "/" + docId);
+    public void deleteDocument(final String index, final String docId, final String type) throws IOException {
+        var response = delete("/" + index + "/" + docTypePathOrDefault(type) + docId);
         assertThat(response.getKey(), equalTo(200));
     }
 
@@ -354,10 +354,18 @@ public class ClusterOperations {
     }
 
     private String defaultDocType() {
-        if (VersionMatchers.isES_5_X.test(clusterVersion)) {
+        if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_2_X).test(clusterVersion)) {
             return "doc";
+        }
+        return "_doc";
+    }
+
+    private String docTypePathOrDefault(final String typeOverride) {
+        var defaultDocType = defaultDocType();
+        if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_2_X).test(clusterVersion)) {
+            return Optional.ofNullable(typeOverride).orElse(defaultDocType) + "/";
         } else {
-            return "_doc";
+            return defaultDocType + "/";
         }
     }
 }

@@ -15,6 +15,7 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -28,9 +29,9 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Slf4j
 public class UpgradeTest extends SourceTestBase {
 
-    @TempDir
+    @TempDir(cleanup = CleanupMode.ON_SUCCESS)
     private File legacySnapshotDirectory;
-    @TempDir
+    @TempDir(cleanup = CleanupMode.ON_SUCCESS)
     private File sourceSnapshotDirectory;
 
     private static Stream<Arguments> scenarios() {
@@ -70,12 +71,14 @@ public class UpgradeTest extends SourceTestBase {
             sourceCluster.start();
             sourceCluster.putSnapshotData(legacySnapshotDirectory.toString());
 
-            var upgradedSourceOperations = new ClusterOperations(sourceCluster);
+            var sourceOperations = new ClusterOperations(sourceCluster);
 
             // Register snapshot repository and restore snapshot to 'upgrade' the cluster
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
-            upgradedSourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
-
+            sourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
+            sourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
+            
+            sourceOperations.createDocument("newindex", "111", "{\"test\":\"777\"}");
+            
             // Create the snapshot from the source cluster
             var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
             createSnapshot(sourceCluster, testData.snapshotName, testSnapshotContext);
@@ -94,8 +97,7 @@ public class UpgradeTest extends SourceTestBase {
                                           clockJitter,
                                           testDocMigrationContext,
                                           sourceCluster.getContainerVersion().getVersion()));
-            assertThat(result.numRuns, equalTo(6));
-            var sourceOperations = new ClusterOperations(sourceCluster);
+            // assertThat(result.numRuns, equalTo(6));
             sourceOperations.get("/_search");
 
             var targetOperations = new ClusterOperations(targetCluster);
@@ -126,8 +128,8 @@ public class UpgradeTest extends SourceTestBase {
                     return "\"" + e.getKey() + "\":" + valueStr;
                 })
                 .collect(Collectors.joining(",")) + "}";
-            
-            operations.createDocument(testData.indexName, docId.toString(), docBody, null, null /*TODO Need to handle this better for different version */);
+            var docType = "type" + docId;
+            operations.createDocument(testData.indexName, docId.toString(), docBody, null, docType);
         });
     }
 

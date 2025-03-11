@@ -37,7 +37,7 @@ public class ShardMetadataFactory_ES_5_6 implements ShardMetadata.Factory {
                 indexName,
                 indexId,
                 shardId,
-                shardMetadataRaw.indexVersion,
+                shardMetadataRaw.indexVersion,  
                 shardMetadataRaw.startTime,
                 shardMetadataRaw.time,
                 shardMetadataRaw.numberOfFiles,
@@ -45,7 +45,7 @@ public class ShardMetadataFactory_ES_5_6 implements ShardMetadata.Factory {
                 shardMetadataRaw.files
             );
         } catch (Exception e) { 
-            log.atError().setMessage("Metadata that failed to load {}").addArgument(root).log();
+            log.atError().setMessage("Metadata that failed to load {} {}").addArgument(root).addArgument(root.toPrettyString()).log();
             throw new ShardMetadata.CouldNotParseShardMetadata(
                 "Could not parse shard metadata for Index " + indexId + ", Shard " + shardId,
                 e
