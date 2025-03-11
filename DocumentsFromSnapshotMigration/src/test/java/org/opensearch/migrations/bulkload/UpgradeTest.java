@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload;
 import java.io.File;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -15,7 +16,6 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -29,16 +29,16 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Slf4j
 public class UpgradeTest extends SourceTestBase {
 
-    @TempDir(cleanup = CleanupMode.ON_SUCCESS)
+    @TempDir
     private File legacySnapshotDirectory;
-    @TempDir(cleanup = CleanupMode.ON_SUCCESS)
+    @TempDir
     private File sourceSnapshotDirectory;
 
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V2_14_0));
-        // scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_14_0));
-        // scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_14_0));
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_14_0));
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_14_0));
         return scenarios.build();
     }
 
@@ -68,7 +68,10 @@ public class UpgradeTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            sourceCluster.start();
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(sourceCluster::start),
+                CompletableFuture.runAsync(targetCluster::start)
+            ).join();
             sourceCluster.putSnapshotData(legacySnapshotDirectory.toString());
 
             var sourceOperations = new ClusterOperations(sourceCluster);
@@ -76,15 +79,14 @@ public class UpgradeTest extends SourceTestBase {
             // Register snapshot repository and restore snapshot to 'upgrade' the cluster
             sourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
             sourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
-            
-            sourceOperations.createDocument("newindex", "111", "{\"test\":\"777\"}");
+            sourceOperations.deleteSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
             
             // Create the snapshot from the source cluster
             var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
             createSnapshot(sourceCluster, testData.snapshotName, testSnapshotContext);
+
             sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
-            targetCluster.start();
             var sourceRepo = new FileSystemRepo(sourceSnapshotDirectory.toPath());
             var counter = new AtomicInteger();
             var clockJitter = new Random(1);
@@ -97,8 +99,7 @@ public class UpgradeTest extends SourceTestBase {
                                           clockJitter,
                                           testDocMigrationContext,
                                           sourceCluster.getContainerVersion().getVersion()));
-            // assertThat(result.numRuns, equalTo(6));
-            sourceOperations.get("/_search");
+            assertThat("5 shards + 1 nothing to do worker shoul d spin up", result.numRuns, equalTo(6));
 
             var targetOperations = new ClusterOperations(targetCluster);
             targetOperations.get("/_refresh");

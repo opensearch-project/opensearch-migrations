@@ -63,6 +63,11 @@ public class ClusterOperations {
         assertThat(response.getKey(), anyOf(equalTo(200), equalTo(202)));
     }
 
+    public void deleteSnapshot(final String repository, final String snapshotName) {
+        var response = delete("/_snapshot/" + repository + "/" + snapshotName);
+        assertThat(response.getKey(), equalTo(200));
+    }
+
     public void createDocument(final String index, final String docId, final String body) {
         createDocument(index, docId, body, null, null);
     }
