@@ -49,6 +49,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "opensearchproject/opensearch:2.14.0",
         Version.fromString("OS 2.14.0")
     );
+    public static final ContainerVersion OS_V2_19_1 = new OpenSearchVersion(
+        "opensearchproject/opensearch:2.19.1",
+        Version.fromString("OS 2.19.1")
+    );
+    public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     private enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
