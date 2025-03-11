@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -149,6 +150,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
     }
 
+    @Test
     public void es5_doesNotAllow_multiTypeConflicts() {
         try (
             final var es5 = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)
