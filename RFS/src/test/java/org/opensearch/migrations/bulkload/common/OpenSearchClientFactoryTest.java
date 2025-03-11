@@ -39,7 +39,7 @@ class OpenSearchClientFactoryTest {
                 "        \"successful\": 1,\r\n" + //
                 "        \"failed\": 0\r\n" + //
                 "    },\r\n" + //
-                "    \"cluster_name\": \"336984078605:target-domain\",\r\n" + //
+                "    \"cluster_name\": \"123456789012:target-domain\",\r\n" + //
                 "    \"nodes\": {\r\n" + //
                 "        \"HDzrwdO8TneRQaxzx94uKA\": {\r\n" + //
                 "            \"name\": \"74c8fa743d5e3626e3903c3b1d5450e0\",\r\n" + //
