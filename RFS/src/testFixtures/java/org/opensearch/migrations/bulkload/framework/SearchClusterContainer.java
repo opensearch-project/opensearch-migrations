@@ -70,6 +70,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("plugins.security.disabled", "true")
                 .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .put("search.insights.top_queries.exporter.type", "debug")
                 .build()
         );
 
