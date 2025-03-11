@@ -26,7 +26,7 @@ public class ClusterProviderRegistry {
     /** Ensure we are always getting fresh providers when searching for one */
     private List<VersionSpecificCluster> getProviders() {
         return List.of(
-            new SnapshotReader_ES_5_6(),
+            // new SnapshotReader_ES_5_6(),
             new SnapshotReader_ES_6_8(),
             new SnapshotReader_ES_7_10(),
             new RemoteWriter_OS_2_11(),
