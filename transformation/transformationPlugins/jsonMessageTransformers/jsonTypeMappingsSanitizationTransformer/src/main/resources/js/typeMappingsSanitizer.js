@@ -81,10 +81,11 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-function retargetCommandParameters(parameters, targetIndex) {
-    parameters._index = targetIndex;
-    delete parameters._type;
-    return parameters;
+function retargetCommandParameters({ _type, ...remainingParameters }, targetIndex) {
+    return {
+        ...remainingParameters,
+        _index: targetIndex
+    };
 }
 
 function rewriteBulk(match, context) {
@@ -92,10 +93,34 @@ function rewriteBulk(match, context) {
     const newLines = [];
     let ndi = 0;
 
+    let defaultSourceIndex = null;
+    let defaultType = "_doc";
+    if (match.length === 3) {
+        // Case: /{index}/{type}/_bulk
+        defaultSourceIndex = match[1];
+        defaultType = match[2];
+    } else if (match.length === 2) {
+        // Case: /{index}/_bulk (default type _doc)
+        defaultSourceIndex = match[1];
+    }
+
+    if (defaultSourceIndex) {
+        let defaultTargetIndex = convertSourceIndexToTarget(defaultSourceIndex,
+            defaultType,
+            context.index_mappings,
+            context.regex_mappings);
+        const patternToReplace = /^.*\/(.*\/)?_bulk/;
+        // Replace the pattern in the URI with the converted target index, if available.
+        // If no valid conversion is found, remove the source index/type segment and default to '/_bulk'.
+        context.request.URI = defaultTargetIndex
+            ? context.request.URI.replace(patternToReplace, `/${defaultTargetIndex}/_bulk`)
+            : context.request.URI.replace(patternToReplace, "/_bulk");
+    }
+
     while (ndi < lines.length) {
         const command = lines[ndi++];
         const commandType = Object.keys(command)[0];
-        const commandParameters = command[commandType] || {};
+        let commandParameters = command[commandType] || {};
 
         // Next line is doc if it's not a 'delete' command.
         let doc = null;
@@ -103,11 +128,14 @@ function rewriteBulk(match, context) {
             doc = lines[ndi++];
         }
 
-        const typeName = commandParameters._type ?? "_doc";
+        // Use command index or default source index if available
+        const sourceIndex = commandParameters._index || defaultSourceIndex;
+        // Use provided _type if exists, otherwise use the defaultType
+        const typeName = commandParameters._type ?? defaultType;
 
         // Convert source index to target index.
         const targetIndex = convertSourceIndexToTarget(
-            commandParameters._index,
+            sourceIndex,
             typeName,
             context.index_mappings,
             context.regex_mappings
@@ -117,8 +145,11 @@ function rewriteBulk(match, context) {
         if (!targetIndex) {
             continue;
         }
-        retargetCommandParameters(commandParameters, targetIndex);
-        newLines.push(command);
+
+        // Update command parameters and ensure they're correctly inserted
+        commandParameters = retargetCommandParameters(commandParameters, targetIndex);
+        const updatedCommand = { [commandType]: commandParameters };
+        newLines.push(updatedCommand);
         if (doc) newLines.push(doc);
 
     }
@@ -236,10 +267,12 @@ function rewriteCreateIndex(match, inputMap) {
 }
 
 // Define regex patterns as constants
-const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^\/]*)\/([^\/]*)\/(.*)/;
-const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/;
+const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^/]*)\/([^/]*)\/(.*)/;
+const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/([^/]+)$/;
 const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
-const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^\/]*)/;
+const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^/]*)/;
+const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/_bulk/;
+const INDEX_TYPE_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/([^/]+)\/_bulk/;
 
 function processMetadataRequest(document, context) {
     let mappings = document?.body?.mappings;
@@ -331,9 +364,11 @@ function routeHttpRequest(source_document, context) {
         context.flags,
         () => (source_document),
         [
+            [INDEX_TYPE_BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
+            [INDEX_BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
+            [BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
             [PUT_POST_DOC_REGEX, rewriteDocRequest, 'rewrite_add_request_to_strip_types'],
             [GET_DOC_REGEX, rewriteDocRequest, 'rewrite_get_request_to_strip_types'],
-            [BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
             [CREATE_INDEX_REGEX, rewriteCreateIndex, 'rewrite_create_index']
         ]
     );
