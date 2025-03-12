@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import lombok.extern.slf4j.Slf4j;
+import org.graalvm.polyglot.HostAccess;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -80,10 +81,119 @@ public class JavascriptTransformerTest {
             Assertions.assertEquals(input, result);
             Assertions.assertInstanceOf(CustomMapAlwaysContainsKey.class, result);
         }
-
     }
 
     @Test
+    public void testMapOperations() throws Exception {
+        var scriptCallsHas = "((map) => (map.has('foo')))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsHas, null)) {
+            var result = testTransformer.transformJson(Map.of("foo", "bar"));
+            Assertions.assertEquals(true, result);
+        }
+
+        var scriptCallsGet = "((map) => (map.get('foo')))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsGet, null)) {
+            var result = testTransformer.transformJson(Map.of("foo", "bar"));
+            Assertions.assertEquals("bar", result);
+        }
+
+        var scriptCallsDotAccess = "((map) => (map.foo))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsDotAccess, null)) {
+            var result = testTransformer.transformJson(Map.of("foo", "bar"));
+            Assertions.assertEquals("bar", result);
+        }
+
+        var scriptCallsDotModify = "(map) => { map.foo = 'modified'; return map }";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsDotModify, null)) {
+            var map = new HashMap<String, Object>();
+            map.put("foo", "bar");
+            var result = testTransformer.transformJson(map);
+            Assertions.assertEquals(Map.of("foo", "modified"), result);
+        }
+
+        var scriptCallsBracketGet = "((map) => (map.foo))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsBracketGet, null)) {
+            var result = testTransformer.transformJson(Map.of("foo", "bar"));
+            Assertions.assertEquals("bar", result);
+        }
+
+        var scriptCallsBracketModify = "((map) => { map['foo'] = 'modified'; return map })";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsBracketModify, null)) {
+            var map = new HashMap<String, Object>();
+            map.put("foo", "bar");
+            var result = testTransformer.transformJson(map);
+            Assertions.assertEquals(Map.of("foo", "modified"), result);
+        }
+
+        var scriptCallsInFails = "(map) => ('foo' in map)";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsInFails, null)) {
+            var result = testTransformer.transformJson(Map.of("foo", "bar"));
+            Assertions.assertThrows(AssertionError.class, () ->
+                            Assertions.assertEquals(true, result),
+                    "The 'key' in map operation is not expected to operate on the keys of a map");
+        }
+    }
+
+    public static class TestJson {
+        @HostAccess.Export
+        public String foo = "bar";
+    }
+    // JSON objects are usually represented as maps, but if they are native java objects, verify GraalJS behavior
+    @Test
+    public void testObjectOperations() throws Exception {
+        var scriptCallsHas = "((obj) => (obj.has('foo')))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsHas, null)) {
+            Assertions.assertThrows(
+                    org.graalvm.polyglot.PolyglotException.class,
+                    () -> testTransformer.transformJson(new TestJson()),
+                    "Expected TypeError due to unknown identifier 'has'"
+            );
+        }
+
+        var scriptCallsGet = "((obj) => (obj.get('foo')))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsGet, null)) {
+            Assertions.assertThrows(
+                    org.graalvm.polyglot.PolyglotException.class,
+                    () -> testTransformer.transformJson(new TestJson()),
+                    "Expected TypeError due to unknown identifier 'get'"
+            );
+        }
+
+        var scriptCallsDotAccess = "((obj) => (obj.foo))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsDotAccess, null)) {
+            var result = testTransformer.transformJson(new TestJson());
+            Assertions.assertEquals("bar", result);
+        }
+
+        var scriptCallsDotModify = "(obj) => { obj.foo = 'modified'; return obj }";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsDotModify, null)) {
+            var obj = new TestJson();
+            testTransformer.transformJson(obj);
+            Assertions.assertEquals("modified", obj.foo);
+        }
+
+        var scriptCallsBracketGet = "((obj) => (obj.foo))";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsBracketGet, null)) {
+            var result = testTransformer.transformJson(new TestJson());
+            Assertions.assertEquals("bar", result);
+        }
+
+        var scriptCallsBracketModify = "((obj) => { obj['foo'] = 'modified'; return obj })";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsBracketModify, null)) {
+            var obj = new TestJson();
+            testTransformer.transformJson(obj);
+            Assertions.assertEquals("modified", obj.foo);
+        }
+
+        var scriptCallsInFails = "(obj) => ('foo' in obj)";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsInFails, null)) {
+            var result = testTransformer.transformJson(new TestJson());
+            Assertions.assertEquals(true, result);
+        }
+    }
+
+
+        @Test
     public void testPromiseHandling() throws Exception {
         // Script that returns a resolved Promise
         var successScript =

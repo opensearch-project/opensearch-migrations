@@ -50,6 +50,7 @@ public class JavascriptTransformer implements IJsonTransformer {
         var builder = Context.newBuilder()
             .engine(engine)
             .allowHostAccess(HostAccess.newBuilder()
+                .allowAccessAnnotatedBy(HostAccess.Export.class)
                 .allowArrayAccess(true)
                 .allowMapAccess(true)
                 .allowListAccess(true)
