@@ -20,6 +20,19 @@ function isEnabled(features, path) {
     return false;
 }
 
+function retargetCommandParameters(parameters, targetIndex) {
+    // Remove the '_type' key
+    parameters.delete('_type');
+    // Add the '_index' key with the new target index if exists
+    if (targetIndex) {
+        parameters.set('_index', targetIndex);
+    } else {
+        parameters.delete('_index');
+    }
+    return parameters;
+}
+
+
 function route(input, fieldToMatch, featureFlags, defaultAction, routes) {
     let matched = false;
 
@@ -81,17 +94,6 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-function retargetCommandParameters(parameters, targetIndex) {
-    // Remove the '_type' key
-    parameters.delete('_type');
-    // Add the '_index' key with the new target index if exists
-    if (targetIndex) {
-        parameters.set('_index', targetIndex);
-    } else {
-        parameters.delete('_index');
-    }
-    return parameters;
-}
 
 function rewriteBulk(match, context) {
     const lines = context.request.payload.inlinedJsonSequenceBodies;
