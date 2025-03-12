@@ -306,9 +306,10 @@ export class NetworkStack extends Stack {
             protocolVersion: ApplicationProtocolVersion.HTTP1,
             port: containerPort,
             vpc: vpc,
+            // Cluster may reject requests with no authentication
             healthCheck: {
                 path: "/",
-                healthyHttpCodes: "200,401"
+                healthyHttpCodes: "200-499"
             }
         });
     }
