@@ -24,8 +24,8 @@ import static org.hamcrest.Matchers.hasEntry;
 class DataGeneratorEndToEnd {
 
     @Test
-    void generateData_OS_2_14() throws Exception {
-        try (var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)) {
+    void generateData_OS_2_X() throws Exception {
+        try (var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)) {
             generateData(targetCluster);
         }
     }

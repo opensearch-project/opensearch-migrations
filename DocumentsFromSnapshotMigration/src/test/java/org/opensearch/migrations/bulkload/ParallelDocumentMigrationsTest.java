@@ -38,7 +38,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         var numWorkersList = List.of(1, 3, 40);
         return numWorkersList.stream()
-            .map(numWorkers -> Arguments.of(numWorkers, SearchClusterContainer.OS_V2_14_0)
+            .map(numWorkers -> Arguments.of(numWorkers, SearchClusterContainer.OS_LATEST)
             );
     }
 

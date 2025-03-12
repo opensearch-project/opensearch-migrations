@@ -107,7 +107,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private void testProcess(int expectedExitCode, Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
+        var targetImageName = SearchClusterContainer.OS_LATEST.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
         var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");

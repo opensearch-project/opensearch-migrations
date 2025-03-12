@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.Map;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
 
 import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
@@ -56,6 +57,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "opensearchproject/opensearch:2.14.0",
         Version.fromString("OS 2.14.0")
     );
+    public static final ContainerVersion OS_V2_19_1 = new OpenSearchVersion(
+        "opensearchproject/opensearch:2.19.1",
+        Version.fromString("OS 2.19.1")
+    );
+    public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     private enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
@@ -72,6 +78,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("plugins.security.disabled", "true")
                 .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .build()),
+        OPENSEARCH_2_19(
+        new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
+                .put("plugins.security.disabled", "true")
+                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .put("search.insights.top_queries.exporter.type", "debug")
                 .build()
         );
 
@@ -213,7 +225,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
+            super(imageName, version, VersionMatchers.isOS_2_19.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19 : INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
         }
     }
 

@@ -17,6 +17,7 @@ pytest-mock = "*"
 requests-mock = "*"
 coverage = "*"
 moto = "*"
+testcontainers = "*"
 
 [requires]
 python_version = "3.11"

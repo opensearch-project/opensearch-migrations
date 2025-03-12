@@ -15,6 +15,7 @@ public class VersionMatchers {
 
     public static final Predicate<Version> isOS_1_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 1.0.0"));
     public static final Predicate<Version> isOS_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 2.0.0"));
+    public static final Predicate<Version> isOS_2_19 = VersionMatchers.matchesMinorVersion(Version.fromString("OS 2.19.1"));
 
     private static Predicate<Flavor> compatibleFlavor(final Flavor flavor) {
         return other -> {
