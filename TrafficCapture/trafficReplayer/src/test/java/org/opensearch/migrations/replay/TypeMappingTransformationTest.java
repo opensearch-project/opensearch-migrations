@@ -25,7 +25,7 @@ public class TypeMappingTransformationTest {
      * Each argument consists of:
      * - inputPath: the original HTTP path (determines the match length)
      * - expectedUri: the expected transformed URI after removing defaults and applying conversion
-     * - expectedFirstIndex: the expected _index value in the first NDJSON command after transformation
+     * - expectedFirstIndex: the expected _index value in the first NDJSON command after transformation (when this matches the default index, it is set to null)
      *
      * Cases:
      * 1. No default index in URI: inputPath="/_bulk"
@@ -35,8 +35,8 @@ public class TypeMappingTransformationTest {
     static Stream<Arguments> bulkTransformationTestCases() {
         return Stream.of(
                 Arguments.of("/_bulk", "/_bulk", "btc-rfs_transformed"),
-                Arguments.of("/btc-rfs/_bulk", "/btc-rfs_transformed/_bulk", "btc-rfs_transformed"),
-                Arguments.of("/btc-rfs/sometype/_bulk", "/btc-rfs_transformed-sometype/_bulk", "btc-rfs_transformed-sometype")
+                Arguments.of("/btc-rfs/_bulk", "/btc-rfs_transformed/_bulk", null),
+                Arguments.of("/btc-rfs/sometype/_bulk", "/btc-rfs_transformed-sometype/_bulk", null)
         );
     }
 
@@ -58,7 +58,7 @@ public class TypeMappingTransformationTest {
         List<Map<String, Object>> dataList = new ArrayList<>();
 
         Map<String, Object> indexCommand = new HashMap<>();
-        indexCommand.put("index", Map.of("_id", "sampleId", "_index", "btc-rfs"));
+        indexCommand.put("index", new HashMap<>(Map.of("_id", "sampleId", "_index", "btc-rfs")));
         dataList.add(indexCommand);
 
         // Add a dummy document (transaction) which remains unchanged.
