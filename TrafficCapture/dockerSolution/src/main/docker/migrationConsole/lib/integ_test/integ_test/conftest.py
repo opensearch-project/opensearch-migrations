@@ -6,13 +6,14 @@ from typing import List
 from .cluster_version import ClusterVersion
 from .test_cases.ma_test_base import ClusterVersionCombinationUnsupported
 from .test_cases.basic_tests import *
+from .test_cases.multi_type_tests import *
 
 from console_link.cli import Context
 from console_link.environment import Environment
 
 logger = logging.getLogger(__name__)
 
-# Dynamically collect all test case classes
+# Dynamically collect all test case classes that have been imported above
 ALL_TEST_CASES = [cls for cls in globals().values() if isinstance(cls, type)
                   and cls.__module__.__contains__("integ_test.test_cases")
                   and cls.__name__.startswith("Test")]

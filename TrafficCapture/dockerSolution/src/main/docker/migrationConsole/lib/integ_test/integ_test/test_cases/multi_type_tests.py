@@ -1,0 +1,76 @@
+import logging
+from ..cluster_version import ClusterVersion, ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X
+from .ma_test_base import MATestBase
+from console_link.environment import Environment
+from console_link.models.command_result import CommandResult
+
+logger = logging.getLogger(__name__)
+
+
+class Test0004MultiTypeUnionMigration(MATestBase):
+    def __init__(self, source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
+                 console_link_env: Environment, unique_id: str):
+        allow_combinations = [
+            (ElasticsearchV5_X, OpensearchV1_X),
+            (ElasticsearchV5_X, OpensearchV2_X),
+        ]
+        run_isolated = True
+        super().__init__(source_version=source_version,
+                         target_version=target_version,
+                         console_config_path=console_config_path,
+                         console_link_env=console_link_env,
+                         unique_id=unique_id,
+                         allow_source_target_combinations=allow_combinations,
+                         run_isolated=run_isolated)
+        self.index_name = f"test_0004_{self.unique_id}"
+        self.doc_id1 = "test_0004_1"
+        self.doc_id2 = "test_0004_2"
+        self.doc_id3 = "test_0004_3"
+        self.doc_id4 = "test_0004_4"
+        self.doc_type1 = "sample_type1"
+        self.doc_type2 = "sample_type2"
+        self.sample_data1 = {
+            'author': 'Alice Quantum',
+            'published_date': '2025-03-11T12:00:00Z',
+            'tags': ['quantum computing', 'technology', 'innovation', 'research'],
+        }
+        self.sample_data2 = {
+            'title': 'Exploring Quantum Computing',
+            'content': 'Quantum computing is an emerging field that leverages quantum phenomena to perform '
+                       'computations at unprecedented speeds. This document explores the basic principles, '
+                       'potential applications, and future challenges of this revolutionary technology.',
+            'published_date': '2025-03-11T14:00:00Z'
+        }
+        self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
+
+    def perform_initial_operations(self):
+        union_transform = self.source_operations.get_type_mapping_union_transformation(multi_type_index_name=self.index_name, doc_type_1=self.doc_type1, doc_type_2=self.doc_type2, cluster_version=self.source_version)
+        self.source_operations.create_transformation_json_file(transform_config_data=[union_transform], file_path_to_create=self.transform_config_file)
+        self.source_operations.create_and_verify_document(cluster=self.source_cluster, index_name=self.index_name,
+                                                          doc_id=self.doc_id1, doc_type=self.doc_type1, data=self.sample_data1)
+        self.source_operations.create_and_verify_document(cluster=self.source_cluster, index_name=self.index_name,
+                                                          doc_id=self.doc_id2, doc_type=self.doc_type2, data=self.sample_data2)
+
+    def perform_metadata_migration(self):
+        #console metadata migrate --multi-type-behavior UNION --index-template-allowlist 'test'
+        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test", "--transformer-config-file", self.transform_config_file])
+        assert metadata_result.success
+
+    def perform_operations_after_metadata_migration(self):
+        self.target_operations.get_index(cluster=self.target_cluster, index_name=self.index_name, max_attempts=3, delay=2.0)
+
+    def start_backfill_migration(self):
+        backfill_scale_result: CommandResult = self.backfill.scale(units=1)
+        assert backfill_scale_result.success
+
+    def perform_operations_during_backfill_migration(self):
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id1, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id2, max_attempts=10, delay=3.0)
+
+    def perform_operations_after_backfill_migration(self):
+        self.source_operations.create_and_verify_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id3, doc_type=self.doc_type1, data=self.sample_data1)
+        self.source_operations.create_and_verify_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id4, doc_type=self.doc_type2, data=self.sample_data2)
+
+    def perform_operations_during_live_capture_migration(self):
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id3, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id4, max_attempts=10, delay=3.0)

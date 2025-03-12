@@ -1,5 +1,6 @@
 import logging
 import pytest
+import shutil
 from typing import List
 
 from .test_cases.ma_test_base import MATestBase
@@ -23,8 +24,14 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
     assert source_con_result.connection_established is True
     target_con_result: ConnectionResult = connection_check(target_cluster)
     assert target_con_result.connection_established is True
-    # TODO what if kafka is not provided
     kafka: Kafka = test_case.console_link_env.kafka
+
+    # Cleanup generated transformation files
+    try:
+        shutil.rmtree("/shared-logs-output/test-transformations")
+        logger.info("Removed existing /shared-logs-output/test-transformations directory")
+    except FileNotFoundError:
+        logger.info(f"No transformation files detected to cleanup")
 
     # Clear cluster data
     clear_cluster(source_cluster)
@@ -38,11 +45,17 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
 
     #-----Teardown-----
     logger.info("\nTearing down resources...")
-    backfill: Backfill = test_case.console_link_env.backfill
-    backfill.stop()
+    try:
+        backfill: Backfill = test_case.console_link_env.backfill
+        backfill.stop()
+    except Exception as e:
+        logger.error(f"Error encountered when stopping backfill, resources may not have been cleaned up: {e}")
+    try:
+        replayer: Replayer = test_case.console_link_env.replay
+        replayer.stop()
+    except Exception as e:
+        logger.error(f"Error encountered when stopping replayer, resources may not have been cleaned up: {e}")
 
-    replayer: Replayer = test_case.console_link_env.replay
-    replayer.stop()
 
 
 

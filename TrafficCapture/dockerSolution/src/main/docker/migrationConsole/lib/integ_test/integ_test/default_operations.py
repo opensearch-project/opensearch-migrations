@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 import random
 import string
 import json
@@ -25,16 +26,13 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}",
                                 headers=headers, **kwargs)
 
-
     def get_index(self, index_name: str, cluster: Cluster, **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}",
                                 **kwargs)
 
-
     def delete_index(self, index_name: str, cluster: Cluster, **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}",
                                 **kwargs)
-
 
     def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type = "_doc", **kwargs):
         if data is None:
@@ -46,23 +44,24 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 data=json.dumps(data), headers=headers, **kwargs)
 
+    def create_and_verify_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type = "_doc", **kwargs):
+        self.create_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type, **kwargs)
+        headers = {'Content-Type': 'application/json'}
+        self.get_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type, headers=headers, **kwargs)
 
     def get_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type = "_doc", **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
 
-
     def delete_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type = "_doc", **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
-
 
     def index_matches_ignored_index(self, index_name: str, index_prefix_ignore_list: List[str]):
         for prefix in index_prefix_ignore_list:
             if index_name.startswith(prefix):
                 return True
         return False
-
 
     def get_all_index_details(self, cluster: Cluster, index_prefix_ignore_list=None, **kwargs) -> Dict[str, Dict[str, str]]:
         all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
@@ -81,7 +80,6 @@ class DefaultOperationsLibrary:
                 index_dict[index_name] = count_response.json()
                 index_dict[index_name]['index'] = index_name
         return index_dict
-
 
     def check_doc_counts_match(self, cluster: Cluster,
                                expected_index_details: Dict[str, Dict[str, str]],
@@ -119,7 +117,6 @@ class DefaultOperationsLibrary:
                 time.sleep(delay)
         test_case.fail(error_message)
 
-
     def check_doc_match(self, test_case: TestCase, index_name: str, doc_id: str, source_cluster: Cluster,
                         target_cluster: Cluster):
         source_response = self.get_document(index_name=index_name, doc_id=doc_id, cluster=source_cluster)
@@ -130,7 +127,6 @@ class DefaultOperationsLibrary:
         target_document = target_response.json()
         target_content = target_document['_source']
         test_case.assertEqual(source_content, target_content)
-
 
     def generate_large_doc(self, size_mib):
         # Calculate number of characters needed (1 char = 1 byte)
@@ -144,10 +140,15 @@ class DefaultOperationsLibrary:
             "large_field": large_string
         }
 
+    def create_transformation_json_file(self, transform_config_data, file_path_to_create: str):
+        directory = os.path.dirname(file_path_to_create)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(file_path_to_create, "w") as file:
+            json.dump(transform_config_data, file, indent=4)
 
     def convert_transformations_to_str(self, transform_list: List[Dict]) -> str:
         return json.dumps(transform_list)
-
 
     def get_index_name_transformation(self, existing_index_name: str, target_index_name: str) -> Dict:
         return {

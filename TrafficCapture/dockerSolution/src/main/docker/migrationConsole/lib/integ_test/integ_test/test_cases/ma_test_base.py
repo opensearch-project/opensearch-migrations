@@ -1,5 +1,6 @@
 from ..common_utils import wait_for_running_replayer
-from ..cluster_version import ClusterVersion, get_operations_library_by_version, is_incoming_version_supported
+from ..cluster_version import ClusterVersion, is_incoming_version_supported
+from ..operations_library_factory import get_operations_library_by_version
 
 from console_link.models.backfill_base import Backfill
 from console_link.environment import Environment

@@ -192,11 +192,12 @@ public class RfsMigrateDocuments {
         public String getTransformerConfigParameterArgPrefix() {
             return DOC_CONFIG_PARAMETER_ARG_PREFIX;
         }
-        private static final String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc-";
+        private static final String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc";
 
         @Parameter(
                 required = false,
-                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+                names = { "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "-transformer-config-base64",
+                        "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "TransformerConfigBase64" },
                 arity = 1,
                 description = "Configuration of doc transformers.  The same contents as --doc-transformer-config but " +
                         "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
@@ -204,7 +205,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(
                 required = false,
-                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
+                names = { "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "-transformer-config",
+                        "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "TransformerConfig" },
                 arity = 1,
                 description = "Configuration of doc transformers.  Either as a string that identifies the "
                         + "transformer that should be run (with default settings) or as json to specify options "
@@ -215,7 +217,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(
                 required = false,
-                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
+                names = { "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "-transformer-config-file",
+                        "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "TransformerConfigFile" },
                 arity = 1,
                 description = "Path to the JSON configuration file of doc transformers.")
         private String transformerConfigFile;
