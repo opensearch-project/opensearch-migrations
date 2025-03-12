@@ -146,7 +146,6 @@ class K8sRFSBackfill(RFSBackfill):
         return self.kubectl_runner.perform_scale_command(replicas=units)
 
     def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
-        logger.info("Confirming there are no currently in-progress workers")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         return perform_archive(target_cluster=self.target_cluster,
                                deployment_status=deployment_status,
@@ -204,7 +203,6 @@ class ECSRFSBackfill(RFSBackfill):
         return self.ecs_client.set_desired_count(units)
     
     def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
-        logger.info("Confirming there are no currently in-progress workers")
         status = self.ecs_client.get_instance_statuses()
         return perform_archive(target_cluster=self.target_cluster,
                                deployment_status=status,

@@ -26,6 +26,14 @@ In order for this succeed, you'll need to make sure:
 * The S3 URI currently exists, and is in the region you specify
 * There are no other snapshots present in that S3 URI
 
+If your source cluster uses AWS SIGv4 Authentication, you may also need to:
+* Pass args `--source-aws-service-signing-name es` and `--source-aws-region` parameters to correctly sign your AWS SIGV4 requests
+* Configure and pass `--s3-role-arn` to register your S3 repository (see [AWS OpenSearch Managed Domains Snapshots Guide](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/managedomains-snapshots.html))
+
+```shell
+./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --s3-role-arn arn:aws:iam::123456789012:role/your-role --source-aws-region us-fake-1 --source-aws-service-signing-name es --source-host https://hostname.us-fake-1.es.amazonaws.com'
+```
+
 ### On-Disk Snapshot
 
 From the root directory of the repo, run a CLI command like so:
