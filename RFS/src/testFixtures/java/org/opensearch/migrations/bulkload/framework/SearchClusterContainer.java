@@ -222,7 +222,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
-            super(imageName, version, VersionMatchers.isOS_2_19.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19 : INITIALIZATION_FLAVOR.OPENSEARCH);
+            super(imageName, version, VersionMatchers.isOS_2_19.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19 : INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
         }
     }
 
