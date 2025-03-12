@@ -111,7 +111,7 @@ public class JavascriptTransformerTest {
             Assertions.assertEquals(Map.of("foo", "modified"), result);
         }
 
-        var scriptCallsBracketGet = "((map) => (map.foo))";
+        var scriptCallsBracketGet = "((map) => (map['foo']))";
         try (var testTransformer = new JavascriptTransformer(scriptCallsBracketGet, null)) {
             var result = testTransformer.transformJson(Map.of("foo", "bar"));
             Assertions.assertEquals("bar", result);
@@ -131,6 +131,12 @@ public class JavascriptTransformerTest {
             Assertions.assertThrows(AssertionError.class, () ->
                             Assertions.assertEquals(true, result),
                     "The 'key' in map operation is not expected to operate on the keys of a map");
+        }
+
+        var scriptCallsGetWithoutKey = "(map) => (map.baz)";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsGetWithoutKey, null)) {
+            var result = testTransformer.transformJson(Map.of());
+            Assertions.assertNull(result);
         }
     }
 
@@ -172,7 +178,7 @@ public class JavascriptTransformerTest {
             Assertions.assertEquals("modified", obj.foo);
         }
 
-        var scriptCallsBracketGet = "((obj) => (obj.foo))";
+        var scriptCallsBracketGet = "((obj) => (obj['foo']))";
         try (var testTransformer = new JavascriptTransformer(scriptCallsBracketGet, null)) {
             var result = testTransformer.transformJson(new TestJson());
             Assertions.assertEquals("bar", result);
@@ -189,6 +195,12 @@ public class JavascriptTransformerTest {
         try (var testTransformer = new JavascriptTransformer(scriptCallsInFails, null)) {
             var result = testTransformer.transformJson(new TestJson());
             Assertions.assertEquals(true, result);
+        }
+
+        var scriptCallsGetWithoutKey = "(obj) => (obj.baz)";
+        try (var testTransformer = new JavascriptTransformer(scriptCallsGetWithoutKey, null)) {
+            var result = testTransformer.transformJson(new TestJson());
+            Assertions.assertNull(result);
         }
     }
 
