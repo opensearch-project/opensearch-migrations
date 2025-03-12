@@ -84,6 +84,9 @@ class E2ETests(unittest.TestCase):
 
     def test_e2e_0001_default(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
+        # Populate with https://opensearch.atlassian.net/browse/MIGRATIONS-2382
+        source_major_version = 6
+        source_minor_version = 8
         target_cluster: Cluster = pytest.console_env.target_cluster
 
         backfill: Backfill = pytest.console_env.backfill
@@ -113,7 +116,9 @@ class E2ETests(unittest.TestCase):
 
         # Perform metadata migration with a transform to index name
         index_name_transform = get_index_name_transformation(existing_index_name=index_name,
-                                                             target_index_name=transformed_index_name)
+                                                             target_index_name=transformed_index_name,
+                                                             source_major_version=source_major_version,
+                                                             source_minor_version=source_minor_version)
         transform_arg = convert_transformations_to_str(transform_list=[index_name_transform])
         metadata_result: CommandResult = metadata.migrate(extra_args=["--transformer-config", transform_arg])
         assert metadata_result.success

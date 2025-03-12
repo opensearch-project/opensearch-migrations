@@ -1,21 +1,10 @@
 #!/bin/bash
 
-# To have running during local development
+# Wrapper around setting up Minikube
 
 usage() {
   echo "Usage: $0 [--start | --pause | --delete]"
   exit 1
-}
-
-kill_minikube_processes() {
-  mount_process_id=$(pgrep -f "minikube mount")
-  if [ -n "$mount_process_id" ]; then
-    kill "$mount_process_id"
-  fi
-  tunnel_process_id=$(pgrep -f "minikube tunnel")
-  if [ -n "$tunnel_process_id" ]; then
-    kill "$tunnel_process_id"
-  fi
 }
 
 start() {
@@ -23,17 +12,13 @@ start() {
   helm repo add strimzi https://strimzi.io/charts/
 
   minikube start
-  minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
-  minikube tunnel > /dev/null 2>&1 &
 }
 
 pause() {
-  kill_minikube_processes
   minikube pause
 }
 
 delete() {
-  kill_minikube_processes
   minikube delete
 }
 

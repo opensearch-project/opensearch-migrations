@@ -47,7 +47,7 @@ export function parseArgsToDict(argString: string | undefined): Record<string, s
         if (trimmedPart.length === 0) return; // Skip empty parts
 
         // Use a regular expression to find the first whitespace character
-        const firstWhitespaceMatch = trimmedPart.match(/\s/);
+        const firstWhitespaceMatch = /\s/.exec(trimmedPart);
         const firstWhitespaceIndex = firstWhitespaceMatch?.index;
 
         const key = firstWhitespaceIndex === undefined ? trimmedPart : trimmedPart.slice(0, firstWhitespaceIndex).trim();

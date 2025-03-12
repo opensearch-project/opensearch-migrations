@@ -40,24 +40,24 @@ function route(input, fieldToMatch, featureFlags, defaultAction, routes) {
     return defaultAction(input);
 }
 
-function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings) {
+function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexMappings) {
     const conjoinedSource = `${sourceIndex}/${sourceType}`;
-    for (const [idxRegex, typeRegex, targetIdxPattern] of regexIndexMappings) {
-        // Add start (^) and end ($) anchors to the regex to ensure it matches the entire string
-        const conjoinedRegexString = `^${idxRegex}/${typeRegex}$`;
+    for (const { sourceIndexPattern, sourceTypePattern, targetIndexPattern } of regexMappings) {
+        // Add start (^) and end ($) anchors to ensure the entire string is matched
+        const conjoinedRegexString = `^${sourceIndexPattern}/${sourceTypePattern}$`;
         const conjoinedRegex = new RegExp(conjoinedRegexString);
         if (conjoinedRegex.test(conjoinedSource)) {
-            return conjoinedSource.replace(conjoinedRegex, targetIdxPattern);
+            return conjoinedSource.replace(conjoinedRegex, targetIndexPattern);
         }
     }
     return null;
 }
 
-function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexIndexMappings) {
+function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexMappings) {
     if (indexMappings[sourceIndex]) {
         return indexMappings[sourceIndex][sourceType];
     }
-    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings);
+    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexMappings);
 }
 
 function makeNoopRequest() {
@@ -73,7 +73,7 @@ function rewriteDocRequest(match, inputMap) {
         match[1],
         match[2],
         inputMap.index_mappings,
-        inputMap.regex_index_mappings
+        inputMap.regex_mappings
     );
 
     if (!targetIndex) return makeNoopRequest();
@@ -81,10 +81,11 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-function retargetCommandParameters(parameters, targetIndex) {
-    parameters._index = targetIndex;
-    delete parameters._type;
-    return parameters;
+function retargetCommandParameters({ _type, ...remainingParameters }, targetIndex) {
+    return {
+        ...remainingParameters,
+        _index: targetIndex
+    };
 }
 
 function rewriteBulk(match, context) {
@@ -92,10 +93,34 @@ function rewriteBulk(match, context) {
     const newLines = [];
     let ndi = 0;
 
+    let defaultSourceIndex = null;
+    let defaultType = "_doc";
+    if (match.length === 3) {
+        // Case: /{index}/{type}/_bulk
+        defaultSourceIndex = match[1];
+        defaultType = match[2];
+    } else if (match.length === 2) {
+        // Case: /{index}/_bulk (default type _doc)
+        defaultSourceIndex = match[1];
+    }
+
+    if (defaultSourceIndex) {
+        let defaultTargetIndex = convertSourceIndexToTarget(defaultSourceIndex,
+            defaultType,
+            context.index_mappings,
+            context.regex_mappings);
+        const patternToReplace = /^.*\/(.*\/)?_bulk/;
+        // Replace the pattern in the URI with the converted target index, if available.
+        // If no valid conversion is found, remove the source index/type segment and default to '/_bulk'.
+        context.request.URI = defaultTargetIndex
+            ? context.request.URI.replace(patternToReplace, `/${defaultTargetIndex}/_bulk`)
+            : context.request.URI.replace(patternToReplace, "/_bulk");
+    }
+
     while (ndi < lines.length) {
         const command = lines[ndi++];
         const commandType = Object.keys(command)[0];
-        const commandParameters = command[commandType] || {};
+        let commandParameters = command[commandType] || {};
 
         // Next line is doc if it's not a 'delete' command.
         let doc = null;
@@ -103,22 +128,28 @@ function rewriteBulk(match, context) {
             doc = lines[ndi++];
         }
 
-        const typeName = commandParameters._type ?? "_doc";
+        // Use command index or default source index if available
+        const sourceIndex = commandParameters._index || defaultSourceIndex;
+        // Use provided _type if exists, otherwise use the defaultType
+        const typeName = commandParameters._type ?? defaultType;
 
         // Convert source index to target index.
         const targetIndex = convertSourceIndexToTarget(
-            commandParameters._index,
+            sourceIndex,
             typeName,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
 
         // If no valid target index, skip.
         if (!targetIndex) {
             continue;
         }
-        retargetCommandParameters(commandParameters, targetIndex);
-        newLines.push(command);
+
+        // Update command parameters and ensure they're correctly inserted
+        commandParameters = retargetCommandParameters(commandParameters, targetIndex);
+        const updatedCommand = { [commandType]: commandParameters };
+        newLines.push(updatedCommand);
         if (doc) newLines.push(doc);
 
     }
@@ -200,7 +231,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
     request.URI = "/" + targetIndex;
 
     const newProperties = {}
-    for (const [sourceType, ] of targetIndicesMap) {
+    for (const [sourceType,] of targetIndicesMap) {
         for (const fieldName of Object.keys(oldMappings[sourceType].properties)) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
@@ -208,8 +239,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
                 if (!deepEquals(previouslyProcessedFieldDef, currentlyProcessingFieldDef)) {
                     throw new Error("Cannot create union of different types for field " + fieldName);
                 }
-            }
-            else {
+            } else {
                 newProperties[fieldName] = oldMappings[sourceType].properties[fieldName];
             }
         }
@@ -230,26 +260,33 @@ function rewriteCreateIndex(match, inputMap) {
     const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
     const types = Object.keys(mappings);
     const sourceTypeToTargetIndicesMap = new Map(types
-        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_index_mappings)])
+        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_mappings)])
         .filter(([, targetIndex]) => targetIndex) // Keep only entries with valid target indices
     );
     return createIndexAsUnionedExcise(sourceTypeToTargetIndicesMap, inputMap);
 }
 
 // Define regex patterns as constants
-const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^\/]*)\/([^\/]*)\/(.*)/;
-const GET_DOC_REGEX      = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z\\/*?\"<>|,# ]*)\/([^\/]+)$/;
+const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^/]*)\/([^/]*)\/(.*)/;
+const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/([^/]+)$/;
 const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
-const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^\/]*)/;
+const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^/]*)/;
+const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/_bulk/;
+const INDEX_TYPE_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/([^/]+)\/_bulk/;
 
 function processMetadataRequest(document, context) {
-    if (!document.body || !document.body.mappings) {
-        return document;
+    let mappings = document?.body?.mappings;
+
+    // Normalize mappings to an object
+    if (Array.isArray(mappings)) {
+        // If it's an array, convert it to an object by merging entries
+        mappings = Object.assign({}, ...mappings);
     }
 
-    const mappings = document.body.mappings;
+    if (!mappings || (mappings.properties && !mappings.properties?.properties)) {
+        // No Type Exists either because mappings doesn't exist,
+        // or properties directly under mappings (and did not find a type named "properties")
 
-    if (mappings.properties && !mappings.properties?.properties) {
         const typeName = "_doc";
 
         // Convert source index to target index.
@@ -257,41 +294,54 @@ function processMetadataRequest(document, context) {
             document.name,
             typeName,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
 
         if (targetIndex) {
             document.name = targetIndex;
+            // Transform composed_of names if present to make valid index_templates
+            if (document.body?.composed_of && Array.isArray(document.body.composed_of)) {
+                document.body.composed_of = document.body.composed_of.map(compName => {
+                    const transformed = convertSourceIndexToTarget(
+                        compName,
+                        "_doc",
+                        context.index_mappings,
+                        context.regex_mappings
+                    );
+                    return transformed || compName;
+                });
+            }
+
             return [document];
         }
         // Index excluded, skip
         return [];
     }
 
-    // Handle types
     const types = Object.keys(mappings);
     const creationObjects = {};
     for (let idx = 0; idx < types.length; idx++) {
         const type = types[idx];
+
         const targetIndex = convertSourceIndexToTarget(
             document.name,
             type,
             context.index_mappings,
-            context.regex_index_mappings
+            context.regex_mappings
         );
-        
-        if(targetIndex) {
+
+        if (targetIndex) {
             const existing = creationObjects[targetIndex];
-            if(existing) {
+            if (existing) {
                 existing.body.mappings._doc.properties = {
                     ...existing.body.mappings._doc.properties,
-                    ...document.body.mappings[type].properties
+                    ...mappings[type].properties
                 };
             } else {
                 const deepClone = JSON.parse(JSON.stringify(document));
                 deepClone.name = targetIndex;
                 deepClone.body.mappings = {
-                    _doc: deepClone.body.mappings[type]
+                    _doc: mappings[type]
                 };
                 creationObjects[targetIndex] = deepClone;
             }
@@ -305,7 +355,7 @@ function routeHttpRequest(source_document, context) {
     const documentAndContext = {
         request: source_document,
         index_mappings: context.index_mappings,
-        regex_index_mappings: context.regex_index_mappings,
+        regex_mappings: context.regex_mappings,
         properties: context.source_properties
     };
     return route(
@@ -314,9 +364,11 @@ function routeHttpRequest(source_document, context) {
         context.flags,
         () => (source_document),
         [
+            [INDEX_TYPE_BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
+            [INDEX_BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
+            [BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
             [PUT_POST_DOC_REGEX, rewriteDocRequest, 'rewrite_add_request_to_strip_types'],
             [GET_DOC_REGEX, rewriteDocRequest, 'rewrite_get_request_to_strip_types'],
-            [BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
             [CREATE_INDEX_REGEX, rewriteCreateIndex, 'rewrite_create_index']
         ]
     );
@@ -331,7 +383,7 @@ function processBulkIndex(docBackfillPair, context) {
         sourceIndexName,
         typeName,
         context.index_mappings,
-        context.regex_index_mappings
+        context.regex_mappings
     );
 
     if (!targetIndex) return [];
@@ -354,7 +406,7 @@ function detectAndTransform(document, context) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
 
-    if ("type" in document && "name" in document && "body" in document && document.type === "index") {
+    if ("type" in document && "name" in document && "body" in document) {
         return processMetadataRequest(document, context);
     } else if ("method" in document && "URI" in document) {
         return routeHttpRequest(document, context);

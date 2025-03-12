@@ -6,7 +6,7 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    api libs.jni.java
+    api libs.jin.java
 
     implementation libs.guava
 

@@ -1,10 +1,10 @@
 import subprocess
 import os
 import logging
+import sys
 from typing import Any, Dict, List, Optional
 
 from console_link.models.command_result import CommandResult
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +27,10 @@ class CommandRunner:
         self.run_as_detached = run_as_detatched
         self.log_file = log_file
 
-    def run(self) -> CommandResult:
+    def run(self, print_to_console=True, print_on_error=False) -> CommandResult:
         if self.run_as_detached:
             return self._run_as_detached_process(self.log_file)
-        return self._run_as_synchronous_process()
+        return self._run_as_synchronous_process(print_to_console=print_to_console, print_on_error=print_on_error)
 
     def sanitized_command(self) -> List[str]:
         if not self.sensitive_fields:
@@ -44,13 +44,36 @@ class CommandRunner:
                     display_command[field_index + 1] = "*" * 8
         return display_command
 
-    def _run_as_synchronous_process(self) -> CommandResult:
+    def print_output_if_enabled(self, holder, should_print, is_error):
+        if holder.stdout:
+            if should_print:
+                sys.stdout.write(holder.stdout)
+            log_message_out = f"\nSTDOUT ({' '.join(self.command)}):\n{holder.stdout}"
+            if is_error:
+                logger.info(log_message_out)
+            else:
+                logger.debug(log_message_out)
+        if holder.stderr:
+            if should_print:
+                sys.stderr.write(holder.stderr)
+            log_message_err = f"\nSTDERR ({' '.join(self.command)}):\n{holder.stderr}"
+            if is_error:
+                logger.info(log_message_err)
+            else:
+                logger.debug(log_message_err)
+
+    def _run_as_synchronous_process(self, print_to_console: bool, print_on_error: bool) -> CommandResult:
         try:
-            # Pass None to stdout and stderr to not capture output and show in terminal
-            subprocess.run(self.command, stdout=None, stderr=None, text=True, check=True)
-            return CommandResult(success=True, value="Command executed successfully")
+            cmd_output = subprocess.run(self.command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True,
+                                        check=True)
+            self.print_output_if_enabled(holder=cmd_output, should_print=print_to_console, is_error=False)
+            return CommandResult(success=True, value="Command executed successfully", output=cmd_output)
         except subprocess.CalledProcessError as e:
-            raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stderr, self)
+            self.print_output_if_enabled(holder=e, should_print=print_on_error, is_error=True)
+            raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stdout, e.stderr)
 
     def _run_as_detached_process(self, log_file: str) -> CommandResult:
         try:
@@ -62,9 +85,13 @@ class CommandRunner:
                 return CommandResult(success=True, value=f"Process started with PID {process.pid}\n"
                                      f"Logs are being written to {log_file}")
         except subprocess.CalledProcessError as e:
-            raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stderr, self)
+            raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stdout, e.stderr)
 
 
 class CommandRunnerError(subprocess.CalledProcessError):
     def __init__(self, returncode, cmd, output=None, stderr=None):
         super().__init__(returncode, cmd, output=output, stderr=stderr)
+
+    def __str__(self):
+        return (f"Command [{' '.join(self.cmd)}] failed with exit code {self.returncode}. For more verbose output, "
+                f"repeat the console command with '-v', for example 'console -v snapshot create'")

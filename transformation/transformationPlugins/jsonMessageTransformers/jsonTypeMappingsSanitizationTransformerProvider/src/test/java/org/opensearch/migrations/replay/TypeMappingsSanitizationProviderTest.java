@@ -34,9 +34,15 @@ public class TypeMappingsSanitizationProviderTest {
                     "type2", "indexb"),
                 "indexc", Map.of(
                     "type2", "indexc")),
-            "regexIndexMappings", List.of(
-                    List.of("(time.*)", "(type.*)", "$1_And_$2"),
-                    List.of("(.*)", "(.*)", "$1") // Type Union
+            "regexMappings", List.of(
+                    Map.of(
+                        "sourceIndexPattern", "(time.*)",
+                        "sourceTypePattern", "(type.*)",
+                        "targetIndexPattern", "$1_And_$2"),
+                    Map.of(
+                        "sourceIndexPattern", "(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "$1") // Type Union
                 ),
             "sourceProperties", Map.of(
                 "version", Map.of(
@@ -94,7 +100,10 @@ public class TypeMappingsSanitizationProviderTest {
                 Map.of("version",
                     Map.of("major",  (Object) 6,
                         "minor", (Object) 10)),
-                "regexIndexMappings", List.of(List.of("(.*)", "(.*)", "$1")));
+                "regexMappings", List.of(Map.of(
+                        "sourceIndexPattern", "(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "$1")));
         try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig)) {
             var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
             Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
@@ -108,7 +117,10 @@ public class TypeMappingsSanitizationProviderTest {
             Map.of("sourceProperties", Map.of("version",
                     Map.of("major",  (Object) 5,
                         "minor", (Object) 10)),
-                "regexIndexMappings", List.of(List.of("(.*)", ".*", "$1")));
+                "regexMappings", List.of(Map.of(
+                        "sourceIndexPattern", "(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "$1")));
         try (var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig)) {
             var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
             Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));

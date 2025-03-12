@@ -7,10 +7,9 @@
   volumeMounts:
     - name: {{ $mountName }}
       mountPath: /config
-      subPath: migration_services.yaml
   command:
-    - /.venv/bin/python
-    - config_watcher.py
-    - "--namespace={{.Release.Namespace}}"
-    - "--outfile=/config/migration_services.yaml"
+    - /bin/sh
+    - -c
+    - |
+      pipenv run config_watcher --namespace={{.Release.Namespace}} --outfile=/config/migration_services.yaml
 {{- end -}}

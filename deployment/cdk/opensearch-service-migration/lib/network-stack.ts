@@ -1,5 +1,7 @@
 import {
+    GatewayVpcEndpoint,
     GatewayVpcEndpointAwsService,
+    InterfaceVpcEndpoint,
     InterfaceVpcEndpointAwsService,
     IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
@@ -15,7 +17,6 @@ import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 import { Stack } from "aws-cdk-lib";
 import { createMigrationStringParameter, getMigrationStringParameterName, isStackInGovCloud, MigrationSSMParameter } from "./common-utilities";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
-import { GatewayVpcEndpoint, InterfaceVpcEndpoint } from "aws-cdk-lib/aws-ec2";
 import { CdkLogger } from "./cdk-logger";
 
 export interface NetworkStackProps extends StackPropsExt {
@@ -225,15 +226,15 @@ export class NetworkStack extends Stack {
 
             // Setup ALB weighted listener when both source and target proxies are enabled
             if (this.albSourceProxyTG && this.albTargetProxyTG) {
-                const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200, alb, cert);
+                const albMigrationListener = this.createSecureListener('ALBMigrationListener', 443, alb, cert);
                 albMigrationListener.addAction("default", {
                     action: ListenerAction.weightedForward([
                         {targetGroup: this.albSourceProxyTG, weight: 1},
                         {targetGroup: this.albTargetProxyTG, weight: 0}
                     ])
                 });
-                createALBListenerUrlParameter(9200, MigrationSSMParameter.MIGRATION_LISTENER_URL);
-                createALBListenerUrlParameterAlias(9200, MigrationSSMParameter.MIGRATION_LISTENER_URL_ALIAS);
+                createALBListenerUrlParameter(443, MigrationSSMParameter.MIGRATION_LISTENER_URL);
+                createALBListenerUrlParameterAlias(443, MigrationSSMParameter.MIGRATION_LISTENER_URL_ALIAS);
             }
         }
 

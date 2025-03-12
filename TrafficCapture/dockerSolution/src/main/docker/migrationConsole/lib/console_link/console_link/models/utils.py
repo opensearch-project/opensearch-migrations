@@ -1,15 +1,25 @@
 from botocore import config
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, NamedTuple, Optional
 from datetime import datetime
 import boto3
 import requests.utils
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from requests.models import PreparedRequest
+from urllib.parse import urlparse
 
 
 from console_link.models.client_options import ClientOptions
+
+
+class DeploymentStatus(NamedTuple):
+    running: int = 0
+    pending: int = 0
+    desired: int = 0
+
+    def __str__(self):
+        return f"Running={self.running}\nPending={self.pending}\nDesired={self.desired}"
 
 
 class AWSAPIError(Exception):
@@ -75,6 +85,11 @@ class SigV4AuthPlugin(requests.auth.AuthBase):
         # Exclude signing headers that may change after signing
         default_headers = requests.utils.default_headers()
         excluded_headers = default_headers.keys()
+
+        # Opensearch has unique port signing behavior where it cannot be in the signature
+        # Thus adding a custom Host header streamline auth edge cases
+        r.headers['Host'] = urlparse(r.url).hostname
+
         filtered_headers = {k: v for k, v in r.headers.items() if k.lower() not in excluded_headers}
         aws_request = AWSRequest(method=r.method, url=r.url, data=r.body, headers=filtered_headers)
         signer = SigV4Auth(self.credentials, self.service, self.region)

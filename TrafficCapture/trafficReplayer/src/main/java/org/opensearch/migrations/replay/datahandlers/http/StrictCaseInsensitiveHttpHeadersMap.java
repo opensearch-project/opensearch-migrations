@@ -14,7 +14,7 @@ import lombok.EqualsAndHashCode;
  * This implements an ordered map of headers. The order is the same as the order that the keys were
  * added.  We want to play them back in the same order. . LinkedHashMap is used to keep the objects
  * so that we can maintain that original order.  However, we add an extra ability to keep key values
- * (or header names) case insensitive.
+ * (or header names) case-insensitive.
  */
 @EqualsAndHashCode(callSuper = false)
 public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, List<String>> {
@@ -48,8 +48,15 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
 
     @Override
     public List<String> remove(Object key) {
-        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(((String) key).toLowerCase());
+        String keyStr = (key instanceof String) ? (String) key : key.toString();
+        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(keyStr.toLowerCase());
         return origKeyAndVal == null ? null : origKeyAndVal.getValue();
+    }
+
+    @Override
+    public boolean containsKey(Object key) {
+        String keyStr = (key instanceof String) ? (String) key : key.toString();
+        return lowerCaseToUpperCaseAndValueMap.containsKey(keyStr.toLowerCase());
     }
 
     @Override
@@ -57,9 +64,9 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
         return new AbstractSet<>() {
             @Override
             public Iterator<Entry<String, List<String>>> iterator() {
-                return new Iterator<Entry<String, List<String>>>() {
+                return new Iterator<>() {
                     Iterator<Entry<String, SimpleEntry<String, List<String>>>> backingIterator =
-                        lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
+                            lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
 
                     @Override
                     public boolean hasNext() {
@@ -71,12 +78,45 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
                         var backingEntry = backingIterator.next();
                         return backingEntry == null ? null : backingEntry.getValue();
                     }
+
+                    @Override
+                    public void remove() {
+                        backingIterator.remove();
+                    }
                 };
             }
 
             @Override
             public int size() {
                 return lowerCaseToUpperCaseAndValueMap.size();
+            }
+        };
+    }
+
+    // Custom keySet that supports case-insensitive removals.
+    @Override
+    public Set<String> keySet() {
+        return new AbstractSet<>() {
+            @Override
+            public Iterator<String> iterator() {
+                return lowerCaseToUpperCaseAndValueMap.keySet().iterator();
+            }
+
+            @Override
+            public int size() {
+                return lowerCaseToUpperCaseAndValueMap.size();
+            }
+
+            @Override
+            public boolean contains(Object key) {
+                String keyStr = (key instanceof String) ? (String) key : key.toString();
+                return lowerCaseToUpperCaseAndValueMap.containsKey(keyStr.toLowerCase());
+            }
+
+            @Override
+            public boolean remove(Object key) {
+                String keyStr = (key instanceof String) ? (String) key : key.toString();
+                return lowerCaseToUpperCaseAndValueMap.remove(keyStr.toLowerCase()) != null;
             }
         };
     }

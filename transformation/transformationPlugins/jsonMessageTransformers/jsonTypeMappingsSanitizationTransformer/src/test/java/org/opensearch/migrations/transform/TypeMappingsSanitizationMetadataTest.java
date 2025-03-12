@@ -22,14 +22,20 @@ public class TypeMappingsSanitizationMetadataTest {
                 "keep", Map.of("_doc", "keep")
         );
         var sourceProperties = new SourceProperties("ES", new SourceProperties.Version(6, 8));
-        var regexIndexMappings = List.of(List.of("time-(.*)", "(.*)", "time-$1-$2"));
-        return new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings, sourceProperties, null);
+        var regexMappings = List.of(
+                Map.of(
+                        "sourceIndexPattern","time-(.*)",
+                        "sourceTypePattern", "(.*)",
+                        "targetIndexPattern", "time-$1-$2"
+                )
+        );
+        return new TypeMappingsSanitizationTransformer(indexMappings, regexMappings, sourceProperties, null);
     }
 
     private static String makeMetadataRequest(String indexName, String type1, String type2) {
         StringBuilder json = new StringBuilder();
         json.append("{\n");
-        json.append("  \"type\": \"index\",\n");
+        json.append("  \"type\": \"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\n");
         json.append("  \"name\": \"").append(indexName).append("\",\n");
         json.append("  \"body\": {\n");
         json.append("    \"mappings\": {\n");
@@ -56,8 +62,8 @@ public class TypeMappingsSanitizationMetadataTest {
     public void testSplitTypeMappings() throws Exception {
         String inputJson = makeMetadataRequest("split", "type1", "type2");
         String expectedJson = "[" +
-                "{\"type\":\"index\",\"name\":\"split_a\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field1\":{\"type\":\"text\"}}}}}}," +
-                "{\"type\":\"index\",\"name\":\"split_b\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field2\":{\"type\":\"keyword\"}}}}}}" +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\"name\":\"split_a\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field1\":{\"type\":\"text\"}}}}}}," +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\"name\":\"split_b\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field2\":{\"type\":\"keyword\"}}}}}}" +
                 "]";
         try (var transformer = makeIndexTypeMappingRewriter()) {
             Object result = transformer.transformJson(OBJECT_MAPPER.readValue(inputJson, LinkedHashMap.class));
@@ -70,7 +76,7 @@ public class TypeMappingsSanitizationMetadataTest {
     public void testUnionTypeMappings() throws Exception {
         String inputJson = makeMetadataRequest("union", "type1", "type2");
         String expectedJson = "[" +
-                "{\"type\":\"index\",\"name\":\"union\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field1\":{\"type\":\"text\"},\"field2\":{\"type\":\"keyword\"}}}}}}" +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\"name\":\"union\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field1\":{\"type\":\"text\"},\"field2\":{\"type\":\"keyword\"}}}}}}" +
                 "]";
         try (var transformer = makeIndexTypeMappingRewriter()) {
             Object result = transformer.transformJson(OBJECT_MAPPER.readValue(inputJson, LinkedHashMap.class));
@@ -94,7 +100,7 @@ public class TypeMappingsSanitizationMetadataTest {
     public void testKeepTypeMappings() throws Exception {
         String inputJson = makeMetadataRequest("keep", "_doc", null);
         String expectedJson = "[" +
-                "{\"type\":\"index\",\"name\":\"keep\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field1\":{\"type\":\"text\"}}}}}}" +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\"name\":\"keep\",\"body\":{\"mappings\":{\"_doc\":{\"properties\":{\"field1\":{\"type\":\"text\"}}}}}}" +
                 "]";
         try (var transformer = makeIndexTypeMappingRewriter()) {
             Object result = transformer.transformJson(OBJECT_MAPPER.readValue(inputJson, LinkedHashMap.class));

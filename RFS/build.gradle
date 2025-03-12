@@ -13,8 +13,16 @@ ext {
 }
 
 configurations {
+    lucene6
     lucene7
     lucene9
+}
+
+task shadowLucene6(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene6]
+    archiveClassifier.set('lucene6-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene6.org.apache.lucene'
 }
 
 task shadowLucene7(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
@@ -32,7 +40,7 @@ task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
 }
 
 tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene7, shadowLucene9
+    dependsOn shadowLucene6, shadowLucene7, shadowLucene9
 }
 
 tasks.named('build') {
@@ -66,6 +74,9 @@ dependencies {
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
 
+    lucene6 libs.lucene.v6.core
+    lucene6 libs.lucene.v6.backward.codecs
+
     lucene7 libs.lucene.v7.core
     lucene7 libs.lucene.v7.backward.codecs
 
@@ -73,12 +84,15 @@ dependencies {
     lucene9 libs.lucene.v9.analysis.common
     lucene9 libs.lucene.v9.backward.codecs
 
+    implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
 
+    testImplementation shadowLucene6.outputs.files
     testImplementation shadowLucene7.outputs.files
     testImplementation shadowLucene9.outputs.files
 
+    testFixturesImplementation shadowLucene6.outputs.files
     testFixturesImplementation shadowLucene7.outputs.files
     testFixturesImplementation shadowLucene9.outputs.files
 

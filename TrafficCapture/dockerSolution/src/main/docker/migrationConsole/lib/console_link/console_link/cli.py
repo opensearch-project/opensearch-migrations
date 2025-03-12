@@ -38,7 +38,7 @@ class Context(object):
 
 
 @click.group()
-@click.option("--config-file", default="/etc/migration_services.yaml", help="Path to config file")
+@click.option("--config-file", default="/config/migration_services.yaml", help="Path to config file")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.pass_context
@@ -165,9 +165,9 @@ def parse_headers(header: str) -> Dict:
 @click.pass_obj
 def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
-    By default the cluster definition is configured to use the `/etc/migration-services.yaml` file that is pre-prepared
-    on the migration console, but `--config-file` can point to any YAML file that defines a `source_cluster` or
-    target_cluster` based on the schema of the `services.yaml` file.
+    By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is
+    pre-prepared on the migration console, but `--config-file` can point to any YAML file that defines a
+    source_cluster` or target_cluster` based on the schema of the `services.yaml` file.
     
     In specifying the path of the route, use the name of the YAML object as the domain, followed by a space and the
     path, e.g. `source_cluster /_cat/indices`."""
@@ -248,6 +248,26 @@ def delete_snapshot_cmd(ctx, acknowledge_risk: bool):
             return
     logger.info("Deleting snapshot")
     result = snapshot_.delete(ctx.env.snapshot)
+    click.echo(result.value)
+
+
+@snapshot_group.command(name="unregister-repo")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.pass_obj
+def unregister_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
+    """Remove the snapshot repository"""
+    if not acknowledge_risk:
+        confirmed = click.confirm('If you proceed with unregistering the snapshot repository, the cluster will '
+                                  'deregister the existing snapshot repository but will not perform cleanup of '
+                                  'existing snapshot files that may exist. To remove the existing snapshot files '
+                                  '"console snapshot delete" must be used while this repository still exists. '
+                                  'Are you sure you want to continue?')
+        if not confirmed:
+            click.echo("Aborting the command to remove snapshot repository.")
+            return
+    logger.info("Removing snapshot repository")
+    result = snapshot_.delete_snapshot_repo(ctx.env.snapshot)
     click.echo(result.value)
 
 # ##################### BACKFILL ###################
@@ -548,7 +568,7 @@ def describe_topic_records_cmd(ctx, topic_name):
 
 @cli.command()
 @click.option(
-    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+    "--config-file", default="/config/migration_services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
 @click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))

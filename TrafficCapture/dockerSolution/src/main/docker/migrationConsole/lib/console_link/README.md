@@ -26,7 +26,7 @@ The console link library is designed to provide a unified interface for the many
 
 ![Console_link Library Diagram](console_library_diagram.svg)
 
-The user defines their migration services in a `migration_services.yaml` file, by default found at `/etc/migration_services.yaml`.
+The user defines their migration services in a `migration_services.yaml` file, by default found at `/config/migration_services.yaml`.
 
 Currently, the supported services are:
 
@@ -130,8 +130,12 @@ OpenSearch Ingestion Pipeline (OSI).
 
 #### Reindex From Snapshot
 
-Depending on the purpose/deployment strategy, RFS can be used in Docker or on AWS in an Elastic Container Service (ECS) deployment.
-Most of the parameters for these two are the same, with some additional ones specific to the deployment.
+Depending on the purpose/deployment strategy, RFS can be used in various environments, including:
+1. Docker container environment, e.g. Docker compose setup
+2. AWS in an Elastic Container Service (ECS) deployment
+3. Kubernetes environment, e.g. Minikube environment
+
+Most of the parameters for these options are the same, with some additional ones specific to the deployment.
 
 - `reindex_from_snapshot`
     - `snapshot_repo`: optional, path to the snapshot repo. If not provided, ???
@@ -147,8 +151,11 @@ There is also a block that specifies the deployment type. Exactly one of the fol
     - `cluster_name`: required, name of the ECS cluster containing the RFS service
     - `service_name`: required, name of the ECS service for RFS
     - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+- `k8s`:
+  - `namespace`: required, name of the Kubernetes namespace the RFS deployment is in
+  - `deployment_name`: required, name of the RFS deployment within the Kubernetes cluster
 
-Both of the following are valid RFS backfill specifications:
+All the following are valid RFS backfill specifications:
 
 ```yaml
 backfill:
@@ -166,6 +173,14 @@ backfill:
             cluster_name: migration-aws-integ-ecs-cluster
             service_name: migration-aws-integ-reindex-from-snapshot
             aws-region: us-east-1
+```
+
+```yaml
+backfill:
+  reindex_from_snapshot:
+    k8s:
+      namespace: "ma"
+      deployment_name: "ma-backfill"
 ```
 
 #### OpenSearch Ingestion
@@ -225,6 +240,10 @@ Exactly one of the following blocks must be present:
     - `cluster_name`: required, name of the ECS cluster containing the replayer service
     - `service_name`: required, name of the ECS replayer service
     - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+  
+- `k8s`:
+  - `namespace`: required, name of the Kubernetes namespace the Replayer deployment is in
+  - `deployment_name`: required, name of the Replayer deployment within the Kubernetes cluster
 
 ### Kafka
 
@@ -263,7 +282,7 @@ The structure of cli commands is:
 
 The available global options are:
 
-- `--config-file FILE` to specify the path to a config file (default is `/etc/migration_services.yaml`)
+- `--config-file FILE` to specify the path to a config file (default is `/config/migration_services.yaml`)
 - `--json` to get output in JSON designed for machine consumption instead of printing to the console
 
 #### Objects
@@ -293,6 +312,18 @@ Unit tests can be run from this current `console_link/` by first installing depe
 ```shell
 pipenv install --dev
 pipenv run test
+```
+
+There are a handful of tests which involve creating an Elasticsearch/OpenSearch container and testing against it, which comes with a higher startup time. They're marked as "slow" tests. To skip those tests, run:
+
+```shell
+pipenv run test -m "not slow"
+```
+
+To run only those tests,
+
+```shell
+pipenv run test -m "slow"
 ```
 
 ### Coverage

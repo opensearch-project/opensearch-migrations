@@ -64,6 +64,11 @@ class Snapshot(ABC):
         """Delete a snapshot."""
         pass
 
+    @abstractmethod
+    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        """Delete a snapshot repository."""
+        pass
+
     def _collect_universal_command_args(self) -> Dict:
         command_args = {
             "--snapshot-name": self.snapshot_name,
@@ -146,7 +151,7 @@ class S3Snapshot(Snapshot):
             return CommandResult(success=True,
                                  value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
         except CommandRunnerError as e:
-            logger.error(f"Failed to create snapshot: {str(e)}")
+            logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
@@ -156,6 +161,9 @@ class S3Snapshot(Snapshot):
 
     def delete(self, *args, **kwargs) -> CommandResult:
         return delete_snapshot(self.source_cluster, self.snapshot_name)
+
+    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        return delete_snapshot_repo(self.source_cluster)
 
 
 class FileSystemSnapshot(Snapshot):
@@ -188,14 +196,19 @@ class FileSystemSnapshot(Snapshot):
             return CommandResult(success=True,
                                  value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
         except CommandRunnerError as e:
-            logger.error(f"Failed to create snapshot: {str(e)}")
+            logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
-    def status(self, *args, **kwargs) -> CommandResult:
-        raise NotImplementedError("Status check for FileSystemSnapshot is not implemented yet.")
+    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+        if deep_check:
+            return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         return delete_snapshot(self.source_cluster, self.snapshot_name)
+
+    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        return delete_snapshot_repo(self.source_cluster)
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str,
@@ -327,3 +340,9 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'mig
     path = f"/_snapshot/{repository}/{snapshot_name}"
     response = cluster.call_api(path, HttpMethod.DELETE)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
+
+
+def delete_snapshot_repo(cluster: Cluster, repository: str = 'migration_assistant_repo'):
+    path = f"/_snapshot/{repository}"
+    response = cluster.call_api(path, HttpMethod.DELETE)
+    logging.debug(f"Raw delete snapshot repository status response: {response.text}")

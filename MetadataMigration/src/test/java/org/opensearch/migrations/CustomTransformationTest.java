@@ -8,6 +8,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.Builder;
 import lombok.Data;
@@ -30,11 +31,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class CustomTransformationTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        return getSupportedClusters().stream()
-                .flatMap(sourceCluster ->
-                        SupportedClusters.targets().stream()
-                                .map(targetCluster -> Arguments.of(sourceCluster, targetCluster))
-                );
+        // Transformations are differentiated only by source, so lock to a specific target.
+        var target = SupportedClusters.targets().stream().limit(1).findFirst().get();
+        return SupportedClusters.sources().stream()
+                .map(sourceCluster -> Arguments.of(sourceCluster, target));
     }
 
     @ParameterizedTest(name = "Custom Transformation From {0} to {1}")
@@ -91,74 +91,38 @@ class CustomTransformationTest extends BaseMigrationTest {
         // Define custom transformations
         String customTransformationJson = "[\n" +
             "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"name == 'test_index'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_index\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
-            "  },\n" +
-            "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"type == 'template' && name == 'legacy_template'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_legacy_template\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
-            "  },\n" +
-            "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"type == 'index_template' && name == 'index_template'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_index_template\",\n" +
-            "              \"body\": {\n" +
-            "                \"composed_of\": {\n" +
-            "                  \"[0]\": \"transformed_component_template\"\n" +
-            "                }\n" +
-            "              }\n" +
-            "            }\n" +
+            "    \"TypeMappingSanitizationTransformerProvider\": {\n" +
+            "      \"staticMappings\": {\n" +
+            "        \"test_index\": {\n" +
+            "            \"doc\": \"transformed_index\",\n" +
+            "            \"_doc\": \"transformed_index\"\n" +
+            "          },\n" +
+            "        \"legacy_template\": {\n" +
+            "            \"doc\": \"transformed_legacy_template\",\n" +
+            "            \"_doc\": \"transformed_legacy_template\"\n" +
+            "          },\n" +
+            "        \"index_template\": {\n" +
+            "            \"doc\": \"transformed_index_template\",\n" +
+            "            \"_doc\": \"transformed_index_template\"\n" +
+            "          },\n" +
+            "        \"component_template\": {\n" +
+            "            \"doc\": \"transformed_component_template\",\n" +
+            "            \"_doc\": \"transformed_component_template\"\n" +
             "          }\n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
-            "  },\n" +
-            "  {\n" +
-            "    \"JsonConditionalTransformerProvider\": [\n" +
-            "      {\"JsonJMESPathPredicateProvider\": { \"script\": \"type == 'component_template' && name == 'component_template'\"}},\n" +
-            "      [\n" +
-            "        {\"JsonJoltTransformerProvider\": { \n" +
-            "          \"script\": {\n" +
-            "            \"operation\": \"modify-overwrite-beta\",\n" +
-            "            \"spec\": {\n" +
-            "              \"name\": \"transformed_component_template\"\n" +
-            "            }\n" +
-            "          } \n" +
-            "        }}\n" +
-            "      ]\n" +
-            "    ]\n" +
+            "      },\n" +
+            "      \"sourceProperties\": {\n" +
+            "        \"version\": {\n" +
+            "          \"major\": " + sourceCluster.getContainerVersion().getVersion().getMajor() + ",\n" +
+            "          \"minor\": " + sourceCluster.getContainerVersion().getVersion().getMinor() + "\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
             "  }\n" +
             "]";
 
         var snapshotName = createSnapshot("custom_transformation_snap");
         var arguments = prepareSnapshotMigrationArgs(snapshotName);
+        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters
         var dataFilterArgs = new DataFilterArgs();

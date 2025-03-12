@@ -1,13 +1,16 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.data.WorkloadGenerator;
@@ -16,7 +19,11 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
+import io.netty.handler.codec.http.HttpMethod;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -36,6 +43,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final int OPENSEARCH_PORT = 9200;
+    public static final int RECEIVED_SIGTERM_EXIT_CODE = 143;
 
     enum FailHow {
         NEVER,
@@ -51,6 +59,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         ToxiProxyWrapper proxyContainer;
     }
 
+    // The following test expects to get an exit code of 0 (TBD_GOES_HERE) at least two times, and then an
+    // exit code of 3 (NO_WORK_LEFT) within a maximum of 21 iterations.
     @Test
     public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
         testProcess(3,
@@ -97,7 +107,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private void testProcess(int expectedExitCode, Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
+        var targetImageName = SearchClusterContainer.OS_LATEST.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
         var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
@@ -199,4 +209,89 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
         return process.exitValue();
     }
+
+    @SneakyThrows
+    private static ProcessBuilder setupProcessWithSlowProxy(RunData d) {
+        var tp = d.proxyContainer.getProxy();
+        tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 250);
+        return setupProcess(
+                d.tempDirSnapshot,
+                d.tempDirLucene,
+                d.proxyContainer.getProxyUriAsString(),
+                new String[] {"--documents-per-bulk-request", "4", "--max-connections", "1"}
+        );
+    }
+
+    @Test
+    void exitCleanlyFromSigtermAfterUpdatingWorkItem() {
+        testProcess(RECEIVED_SIGTERM_EXIT_CODE, d -> {
+            // The geonames shards are each 195 documents, and we need to guarantee that we're in the middle
+            // of a shard when the sigterm is sent.
+            // The slow proxy operates with up to 4 bulk requests per second, with 4 documents each, for a total
+            // rate of 16 docs/second, meaning it can finish at most 160 documents in 10 seconds (it will be less
+            // because it also has to acquire a lease and download the shard).
+            var processBuilder = setupProcessWithSlowProxy(d);
+            Process process = null;
+            try {
+                process = runAndMonitorProcess(processBuilder);
+                process.waitFor(10, TimeUnit.SECONDS);
+                process.destroy();
+                // Give it 30 seconds and then force kill if it hasn't stopped yet.
+                process.waitFor(30, TimeUnit.SECONDS);
+                Assertions.assertFalse(process.isAlive());
+                process.destroyForcibly();
+            } catch (InterruptedException | IOException e) {
+                throw new RuntimeException(e);
+            }
+
+            // Check that there is a .migrations_working_state index on the target, and it has the expected values.
+            var client = new RestClient(ConnectionContextTestParams.builder()
+                    .host(d.proxyContainer.getProxyUriAsString())
+                    .build()
+                    .toConnectionContext());
+            Assertions.assertEquals(200, client.get(".migrations_working_state", null).statusCode);
+            var fullWorkingStateResponse = client.asyncRequest(HttpMethod.GET, ".migrations_working_state/_search", "{\"query\": {\"match_all\": {}}, \"size\": 1000}", null, null).block();
+            Assertions.assertNotNull(fullWorkingStateResponse);
+            Assertions.assertNotNull(fullWorkingStateResponse.body);
+            Assertions.assertEquals(200, fullWorkingStateResponse.statusCode);
+            ObjectMapper objectMapper = new ObjectMapper();
+            try {
+                    var workingState = objectMapper.readValue(fullWorkingStateResponse.body, ObjectNode.class);
+                    // Check that at least one item in the workItemsList has a `successor_items` field.
+                    var workItemsList = workingState.get("hits").get("hits");
+                    Assertions.assertFalse(workItemsList.isEmpty());
+                    var successorItemsList = new ArrayList<Boolean>();
+                    workItemsList.forEach(workItem -> successorItemsList.add(workItem.get("_source").has("successor_items")));
+                    Assertions.assertTrue(successorItemsList.contains(true));
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+            return process.exitValue();
+        });
+    }
+
+    @Test
+    void exitCleanlyFromSigtermBeforeReindexingHasStarted() {
+        // This test is very similar to the one above, but does a much quicker sigterm in order to "catch" it before
+        // reindexing has started, and also does a much quicker check that it's actually terminated cleanly (it is able
+        // to shut down almost instantly because it doesn't need to make any network calls).
+        testProcess(RECEIVED_SIGTERM_EXIT_CODE, d -> {
+            var processBuilder = setupProcessWithSlowProxy(d);
+            Process process = null;
+            try {
+                process = runAndMonitorProcess(processBuilder);
+                process.waitFor(2, TimeUnit.SECONDS);
+                process.destroy();
+                // Give it 1 second before checking if it has shutdown.
+                process.waitFor(1, TimeUnit.SECONDS);
+                Assertions.assertFalse(process.isAlive());
+                // If not, forcibly kill it.
+                process.destroyForcibly();
+            } catch (InterruptedException | IOException e) {
+                throw new RuntimeException(e);
+            }
+            return process.exitValue();
+        });
+    }
+
 }

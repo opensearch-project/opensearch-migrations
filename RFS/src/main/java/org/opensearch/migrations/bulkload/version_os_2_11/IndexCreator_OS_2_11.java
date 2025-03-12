@@ -6,6 +6,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
+import org.opensearch.migrations.metadata.CreationResult.CreationResultBuilder;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -31,8 +32,8 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
 
-        String[] problemFields = { "creation_date", "provided_name", "uuid", "version" };
-        for (String field : problemFields) {
+        String[] problemSettings = { "creation_date", "provided_name", "uuid", "version", "index.mapping.single_type", "index.mapper.dynamic" };
+        for (var field : problemSettings) {
             settings.remove(field);
         }
 
@@ -43,44 +44,53 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         body.set("settings", settings);
 
         try {
-            // Create the index; it's fine if it already exists
-            try {
-                var alreadyExists = false;
-                if (mode == MigrationMode.SIMULATE) {
-                    alreadyExists = client.hasIndex(index.getName());
-                } else if (mode == MigrationMode.PERFORM) {
-                    alreadyExists = client.createIndex(index.getName(), body, context).isEmpty();
-                }
-
-                if (alreadyExists) {
-                    result.failureType(CreationFailureType.ALREADY_EXISTS);
-                }
-            } catch (InvalidResponse invalidResponse) {
-                var illegalArguments = invalidResponse.getIllegalArguments();
-
-                if (illegalArguments.isEmpty()) {
-                    log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
-                    throw invalidResponse;
-                }
-
-                for (var illegalArgument : illegalArguments) {
-                    if (!illegalArgument.startsWith("index.")) {
-                        log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
-                        throw invalidResponse;
-                    }
-
-                    var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
-                    removeFieldsByPath(settings, shortenedIllegalArgument);
-                }
-
-                log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
-                client.createIndex(index.getName(), body, context);
-            }
+            createInner(index, mode, context, result, settings, body);
         } catch (Exception e) {
             result.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
             result.exception(e);
         }
         return result.build();
+    }
+
+    private void createInner(IndexMetadata index,
+                             MigrationMode mode,
+                             ICreateIndexContext context,
+                             CreationResultBuilder result,
+                             ObjectNode settings,
+                             ObjectNode body) {
+        // Create the index; it's fine if it already exists
+        try {
+            var alreadyExists = false;
+            if (mode == MigrationMode.SIMULATE) {
+                alreadyExists = client.hasIndex(index.getName());
+            } else if (mode == MigrationMode.PERFORM) {
+                alreadyExists = client.createIndex(index.getName(), body, context).isEmpty();
+            }
+
+            if (alreadyExists) {
+                result.failureType(CreationFailureType.ALREADY_EXISTS);
+            }
+        } catch (InvalidResponse invalidResponse) {
+            var illegalArguments = invalidResponse.getIllegalArguments();
+
+            if (illegalArguments.isEmpty()) {
+                log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
+                throw invalidResponse;
+            }
+
+            for (var illegalArgument : illegalArguments) {
+                if (!illegalArgument.startsWith("index.")) {
+                    log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
+                    throw invalidResponse;
+                }
+
+                var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+                removeFieldsByPath(settings, shortenedIllegalArgument);
+            }
+
+            log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
+            client.createIndex(index.getName(), body, context);
+        }
     }
 
     private void removeFieldsByPath(ObjectNode node, String path) {

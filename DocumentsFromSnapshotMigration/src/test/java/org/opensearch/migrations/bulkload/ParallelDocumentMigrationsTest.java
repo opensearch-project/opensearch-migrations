@@ -37,22 +37,16 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         var numWorkersList = List.of(1, 3, 40);
-        var compressionEnabledList = List.of(true, false);
         return numWorkersList.stream()
-                    .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
-                            numWorkers,
-                            SearchClusterContainer.OS_V2_14_0,
-                            compression
-                        ))
-                    );
+            .map(numWorkers -> Arguments.of(numWorkers, SearchClusterContainer.OS_LATEST)
+            );
     }
 
     @ParameterizedTest
     @MethodSource("makeDocumentMigrationArgs")
     public void testDocumentMigration(
         int numWorkers,
-        SearchClusterContainer.ContainerVersion targetVersion,
-        boolean compressionEnabled
+        SearchClusterContainer.ContainerVersion targetVersion
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
@@ -103,8 +97,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 clockJitter,
                                 testDocMigrationContext,
                                 sourceVersion.getVersion(),
-                                targetVersion.getVersion(),
-                                compressionEnabled
+                                targetVersion.getVersion()
                             ),
                             executorService
                         )
