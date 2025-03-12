@@ -44,6 +44,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
         "elasticsearch:2.4.6",
         Version.fromString("ES 2.4.6"),
+        // This version of doesn't support path.repo based via env variables, passing this value via config 
         "/usr/share/elasticsearch/config/elasticsearch.yml",
         "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
     );

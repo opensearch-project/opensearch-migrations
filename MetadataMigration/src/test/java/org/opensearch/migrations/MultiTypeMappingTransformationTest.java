@@ -53,8 +53,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             var legacyClusterOperations = new ClusterOperations(legacyCluster);
 
-            // Create index and add documents on the source cluster
-            createMultiTypeIndex(originalIndexName, legacyClusterOperations);
+            createDocumentsWithManyTypes(originalIndexName, legacyClusterOperations);
 
             legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
             legacyClusterOperations.takeSnapshot(legacySnapshotRepo, legacySnapshotName, originalIndexName);
@@ -74,11 +73,9 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             var upgradedSourceOperations = new ClusterOperations(sourceCluster);
 
-            // Register snapshot repository and restore snapshot in ES 5 cluster
             upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
             upgradedSourceOperations.restoreSnapshot(legacySnapshotRepo, legacySnapshotName);
 
-            // Verify index exists on upgraded cluster
             var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
             assertThat(checkIndexUpgraded.getKey(), equalTo(200));
             assertThat(checkIndexUpgraded.getValue(), containsString(originalIndexName));
@@ -88,13 +85,12 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             configureDataFilters(originalIndexName, arguments);
 
-            // Execute migration
             var result = executeMigration(arguments, MetadataCommands.MIGRATE);
             checkResult(result, originalIndexName);
         }
     }
     
-    private void createMultiTypeIndex(String originalIndexName, ClusterOperations indexCreatedOperations) {
+    private void createDocumentsWithManyTypes(String originalIndexName, ClusterOperations indexCreatedOperations) {
         indexCreatedOperations.createIndex(originalIndexName);
         indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
         indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
@@ -103,7 +99,6 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
     @SneakyThrows
     private void checkResult(MigrationItemResult result, String indexName) {
-        // Verify the migration result
         log.info(result.asCliOutput());
         assertThat(result.getExitCode(), equalTo(0));
 
@@ -115,23 +110,18 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         assertThat(actualCreationResult.getName(), equalTo(indexName));
         assertThat(actualCreationResult.getFailureType(), equalTo(null));
 
-        // Verify that the transformed index exists on the target cluster
         var res = targetOperations.get("/" + indexName);
         assertThat(res.getKey(), equalTo(200));
         assertThat(res.getValue(), containsString(indexName));
 
-        // Fetch the index mapping from the target cluster
         var mappingResponse = targetOperations.get("/" + indexName + "/_mapping");
         assertThat(mappingResponse.getKey(), equalTo(200));
 
-        // Parse the mapping response
         var mapper = new ObjectMapper();
         var mappingJson = mapper.readTree(mappingResponse.getValue());
 
-        // Navigate to the properties of the index mapping
         var properties = mappingJson.path(indexName).path("mappings").path("properties");
 
-        // Assert that both field1 and field2 are present
         assertThat(properties.get("field1").get("type").asText(), equalTo("text"));
         assertThat(properties.get("field2").get("type").asText(), equalTo("long"));
         // In ES2 the default mapping type for floating point numbers was double, later it was changed to float
@@ -140,13 +130,11 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
     }
 
     private void configureDataFilters(String originalIndexName, MigrateOrEvaluateArgs arguments) {
-        // Set up data filters
         var dataFilterArgs = new DataFilterArgs();
         dataFilterArgs.indexTemplateAllowlist = List.of("");
         dataFilterArgs.indexAllowlist = List.of(originalIndexName);
         arguments.dataFilterArgs = dataFilterArgs;
 
-        // Use union method for multi-type mappings
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
     }
 
