@@ -74,11 +74,11 @@ function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, rege
 }
 
 function makeNoopRequest() {
-    return {
-        method: "GET",
-        URI: "/",
-        protocol: "HTTP/1.0"
-    }
+    return new Map([
+        ["method", "GET"],
+        ["URI", "/"],
+        ["protocol", "HTTP/1.0"]
+    ]);
 }
 
 function rewriteDocRequest(match, inputMap) {
@@ -441,7 +441,6 @@ function detectAndTransform(document, context) {
     if (!document) {
         throw new Error("No source_document was defined - nothing to transform!");
     }
-
     if (document.has("type") && document.has("name") && document.has("body")) {
         return processMetadataRequest(document, context);
     } else if (document.has("method") && document.has("URI")) {

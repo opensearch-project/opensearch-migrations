@@ -82,7 +82,7 @@ public class JavascriptTransformer implements IJsonTransformer {
 
     @SneakyThrows
     public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
-        return runScriptAsFuture(mainJavascriptTransformFunction, incomingJson);
+        return runScriptAsFuture(incomingJson);
     }
 
     @Override
