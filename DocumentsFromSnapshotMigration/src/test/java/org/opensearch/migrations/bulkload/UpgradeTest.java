@@ -56,7 +56,6 @@ public class UpgradeTest extends SourceTestBase {
 
             var legacyClusterOperations = new ClusterOperations(legacyCluster);
 
-            // Create index and add documents on the source cluster
             createMultiTypeIndex(testData, legacyClusterOperations);
 
             legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
@@ -76,12 +75,10 @@ public class UpgradeTest extends SourceTestBase {
 
             var sourceOperations = new ClusterOperations(sourceCluster);
 
-            // Register snapshot repository and restore snapshot to 'upgrade' the cluster
             sourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
             sourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
             sourceOperations.deleteSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
             
-            // Create the snapshot from the source cluster
             var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
             createSnapshot(sourceCluster, testData.snapshotName, testSnapshotContext);
 
