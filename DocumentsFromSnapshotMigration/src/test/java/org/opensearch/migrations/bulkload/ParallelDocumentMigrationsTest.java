@@ -92,12 +92,11 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 sourceRepo,
                                 "test_snapshot",
                                 INDEX_ALLOWLIST,
-                                osTargetContainer.getUrl(),
+                                osTargetContainer,
                                 runCounter,
                                 clockJitter,
                                 testDocMigrationContext,
-                                sourceVersion.getVersion(),
-                                targetVersion.getVersion()
+                                sourceVersion.getVersion()
                             ),
                             executorService
                         )

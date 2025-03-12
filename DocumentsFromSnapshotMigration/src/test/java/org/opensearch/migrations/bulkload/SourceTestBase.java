@@ -59,6 +59,7 @@ import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.function.Executable;
 import reactor.core.publisher.Flux;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -180,12 +181,11 @@ public class SourceTestBase {
         FileSystemRepo sourceRepo,
         String snapshotName,
         List<String> indexAllowlist,
-        String targetAddress,
+        SearchClusterContainer target,
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
-        Version sourceVersion,
-        Version targetVersion
+        Version sourceVersion
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
@@ -193,11 +193,11 @@ public class SourceTestBase {
                     sourceRepo,
                     snapshotName,
                     indexAllowlist,
-                    targetAddress,
+                    target.getUrl(),
                     clockJitter,
                     testContext,
                     sourceVersion,
-                    targetVersion
+                    target.getContainerVersion().getVersion()
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -395,5 +395,18 @@ public class SourceTestBase {
 
         var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
         snapshotCreator.run();
+    }
+
+    protected ExpectedMigrationWorkTerminationException waitForRfsCompletion(Executable executable) {
+        var expectedTerminationException = Assertions.assertTimeout(
+            Duration.ofSeconds(30),
+            () -> {
+                return Assertions.assertThrows(
+                    ExpectedMigrationWorkTerminationException.class,
+                    executable
+                );
+            }
+        );
+        return expectedTerminationException;
     }
 }
