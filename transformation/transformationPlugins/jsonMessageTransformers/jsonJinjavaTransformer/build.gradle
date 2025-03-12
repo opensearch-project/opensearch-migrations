@@ -9,6 +9,7 @@ dependencies {
     api libs.jin.java
 
     implementation libs.guava
+    implementation libs.slf4j.api
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
@@ -17,6 +18,5 @@ dependencies {
 
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
-    implementation libs.slf4j.api
     testRuntimeOnly libs.junit.jupiter.engine
 }
