@@ -124,7 +124,8 @@ jobs:
       - name: Generate matrix for test jobs
         id: set-matrix
         run: |
-          matrix=$(./gradlew listTestTasksAsJson --quiet | jq -c)
+          listTasks=$(./gradlew listTestTasksAsJson --quiet)
+          matrix=echo $listTasks | jq -c
           echo "Matrix is: $matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
