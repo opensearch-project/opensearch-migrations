@@ -94,7 +94,7 @@ public class CustomRfsTransformationTest extends SourceTestBase {
             var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
                     .withAccessToHost(true);
             var network = Network.newNetwork();
-            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
                     .withAccessToHost(true)
                     .withNetwork(network)
                     .withNetworkAliases(TARGET_DOCKER_HOSTNAME);

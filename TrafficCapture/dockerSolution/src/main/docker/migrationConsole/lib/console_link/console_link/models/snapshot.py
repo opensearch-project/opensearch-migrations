@@ -151,7 +151,7 @@ class S3Snapshot(Snapshot):
             return CommandResult(success=True,
                                  value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
         except CommandRunnerError as e:
-            logger.error(f"Failed to create snapshot: {str(e)}")
+            logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
@@ -196,7 +196,7 @@ class FileSystemSnapshot(Snapshot):
             return CommandResult(success=True,
                                  value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
         except CommandRunnerError as e:
-            logger.error(f"Failed to create snapshot: {str(e)}")
+            logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:

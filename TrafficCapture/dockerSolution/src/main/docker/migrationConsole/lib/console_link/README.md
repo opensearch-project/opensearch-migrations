@@ -314,6 +314,18 @@ pipenv install --dev
 pipenv run test
 ```
 
+There are a handful of tests which involve creating an Elasticsearch/OpenSearch container and testing against it, which comes with a higher startup time. They're marked as "slow" tests. To skip those tests, run:
+
+```shell
+pipenv run test -m "not slow"
+```
+
+To run only those tests,
+
+```shell
+pipenv run test -m "slow"
+```
+
 ### Coverage
 
 _Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
