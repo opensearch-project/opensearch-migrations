@@ -63,8 +63,13 @@ public class JavascriptTransformer implements IJsonTransformer {
                 .out(infoStream)
                 .err(errorStream)
                 .build();
-        var convertedContextObject = convertObject(context, this.polyglotContext);
-        this.mainJavascriptTransformFunction = this.polyglotContext.eval(sourceCode).execute(convertedContextObject);
+        var sourceCodeValue = this.polyglotContext.eval(sourceCode);
+        if (context != null) {
+            var convertedContextObject = convertObject(context, this.polyglotContext);
+            this.mainJavascriptTransformFunction = sourceCodeValue.execute(convertedContextObject);
+        } else {
+            this.mainJavascriptTransformFunction = sourceCodeValue;
+        }
     }
 
     @Override
@@ -113,7 +118,7 @@ public class JavascriptTransformer implements IJsonTransformer {
         }
     }
 
-    Value runScript(Value jsCallableObject, Object... args) {
+    private Value runScript(Value jsCallableObject, Object... args) {
         var convertedArgs = Arrays.stream(args)
                 .map(o -> convertObject(o, this.polyglotContext)).toArray();
         var rval = jsCallableObject.execute(convertedArgs);
@@ -125,8 +130,8 @@ public class JavascriptTransformer implements IJsonTransformer {
         return context.asValue(o);
     }
 
-    <T> CompletableFuture<T> runScriptAsFuture(Value jsCallableObject, Object... args) {
-        return fromPromise(runScript(jsCallableObject, args));
+    public <T> CompletableFuture<T> runScriptAsFuture(Object... args) {
+        return fromPromise(runScript(mainJavascriptTransformFunction, args));
     }
 
     @SuppressWarnings("unchecked")

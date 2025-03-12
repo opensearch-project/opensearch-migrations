@@ -63,7 +63,7 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
                 ));
     }
 
-    private static String getScripts() throws IOException {
+    public static String getScripts() throws IOException {
         return Resources.toString(Resources.getResource(INIT_SCRIPT_RESOURCE_NAME), StandardCharsets.UTF_8);
     }
 }
