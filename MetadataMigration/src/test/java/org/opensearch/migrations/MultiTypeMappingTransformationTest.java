@@ -48,7 +48,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
         try (
             final var upgradedSourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
         ) {
             this.sourceCluster = upgradedSourceCluster;
             this.targetCluster = targetCluster;
@@ -83,7 +83,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
     public void multiTypeTransformationTest_union_5_6() {
         try (
             final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
         ) {
             indexCreatedCluster.start();
 
