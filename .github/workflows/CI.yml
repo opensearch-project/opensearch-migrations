@@ -7,7 +7,7 @@ on:
 env:
   python-version: '3.11'
   java-version: '17'
-  gradle-version: '8.0.2'
+  gradle-version: '8.12.1'
   node-version: '18.x'
 
 jobs:
