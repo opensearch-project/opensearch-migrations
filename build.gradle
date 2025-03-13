@@ -88,7 +88,11 @@ task buildDockerImages() {
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
 
-def commonExclusions = ['**/build/**', '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**']
+def commonExclusions = ['**/build/**',
+                        '**/node_modules/**',
+                        '**/opensearch-cluster-cdk/**',
+                        '**/cdk.out/**',
+                        '**/transformation/standardJavascriptTransforms/node_modules/**']
 spotless {
     format 'misc', {
         target fileTree('.') {
