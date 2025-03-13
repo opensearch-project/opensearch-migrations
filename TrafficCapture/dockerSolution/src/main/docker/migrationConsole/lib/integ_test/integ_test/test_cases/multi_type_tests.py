@@ -1,5 +1,5 @@
 import logging
-from ..cluster_version import ClusterVersion, ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X
+from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X
 from .ma_test_base import MATestBase
 from console_link.environment import Environment
 from console_link.models.command_result import CommandResult
@@ -41,20 +41,31 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
     def perform_initial_operations(self):
-        union_transform = self.source_operations.get_type_mapping_union_transformation(multi_type_index_name=self.index_name, doc_type_1=self.doc_type1, doc_type_2=self.doc_type2, cluster_version=self.source_version)
-        self.source_operations.create_transformation_json_file(transform_config_data=[union_transform], file_path_to_create=self.transform_config_file)
+        union_transform = self.source_operations.get_type_mapping_union_transformation(
+            multi_type_index_name=self.index_name,
+            doc_type_1=self.doc_type1,
+            doc_type_2=self.doc_type2,
+            cluster_version=self.source_version
+        )
+        self.source_operations.create_transformation_json_file(transform_config_data=[union_transform],
+                                                               file_path_to_create=self.transform_config_file)
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
-                                                            doc_id=self.doc_id1, doc_type=self.doc_type1, data=self.sample_data1)
+                                                            doc_id=self.doc_id1, doc_type=self.doc_type1,
+                                                            data=self.sample_data1)
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
-                                                            doc_id=self.doc_id2, doc_type=self.doc_type2, data=self.sample_data2)
+                                                            doc_id=self.doc_id2, doc_type=self.doc_type2,
+                                                            data=self.sample_data2)
 
     def perform_metadata_migration(self):
         #console metadata migrate --multi-type-behavior UNION --index-template-allowlist 'test'
-        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test", "--transformer-config-file", self.transform_config_file])
+        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test",
+                                                                           "--transformer-config-file",
+                                                                           self.transform_config_file])
         assert metadata_result.success
 
     def perform_operations_after_metadata_migration(self):
-        self.target_operations.get_index(cluster=self.target_cluster, index_name=self.index_name, max_attempts=3, delay=2.0)
+        self.target_operations.get_index(cluster=self.target_cluster, index_name=self.index_name, max_attempts=3,
+                                         delay=2.0)
         # Get all keys from sample data
         expected_keys = set(self.sample_data1.keys()).union(set(self.sample_data2.keys()))
         self.target_operations.verify_index_mapping_properties(cluster=self.target_cluster, index_name=self.index_name,
@@ -65,16 +76,24 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         assert backfill_scale_result.success
 
     def perform_operations_during_backfill_migration(self):
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id1, max_attempts=10, delay=3.0)
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id2, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id1, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id2, max_attempts=10, delay=3.0)
 
     def perform_operations_after_backfill_migration(self):
-        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id3, doc_type=self.doc_type1, data=self.sample_data1)
-        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id4, doc_type=self.doc_type2, data=self.sample_data2)
+        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
+                                                            doc_id=self.doc_id3, doc_type=self.doc_type1,
+                                                            data=self.sample_data1)
+        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
+                                                            doc_id=self.doc_id4, doc_type=self.doc_type2,
+                                                            data=self.sample_data2)
 
     def perform_operations_during_live_capture_migration(self):
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id3, max_attempts=10, delay=3.0)
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id4, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id3, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id4, max_attempts=10, delay=3.0)
 
 
 class Test0005MultiTypeSplitMigration(MATestBase):
@@ -131,7 +150,9 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                                             data=self.sample_data2)
 
     def perform_metadata_migration(self):
-        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test", "--transformer-config-file", self.transform_config_file])
+        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test",
+                                                                           "--transformer-config-file",
+                                                                           self.transform_config_file])
         assert metadata_result.success
 
     def perform_operations_after_metadata_migration(self):
@@ -147,13 +168,21 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         assert backfill_scale_result.success
 
     def perform_operations_during_backfill_migration(self):
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1, doc_id=self.doc_id1, max_attempts=10, delay=3.0)
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2, doc_id=self.doc_id2, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
+                                            doc_id=self.doc_id1, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
+                                            doc_id=self.doc_id2, max_attempts=10, delay=3.0)
 
     def perform_operations_after_backfill_migration(self):
-        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id3, doc_type=self.doc_type1, data=self.sample_data1)
-        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id4, doc_type=self.doc_type2, data=self.sample_data2)
+        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
+                                                            doc_id=self.doc_id3, doc_type=self.doc_type1,
+                                                            data=self.sample_data1)
+        self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
+                                                            doc_id=self.doc_id4, doc_type=self.doc_type2,
+                                                            data=self.sample_data2)
 
     def perform_operations_during_live_capture_migration(self):
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1, doc_id=self.doc_id3, max_attempts=10, delay=3.0)
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2, doc_id=self.doc_id4, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
+                                            doc_id=self.doc_id3, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
+                                            doc_id=self.doc_id4, max_attempts=10, delay=3.0)

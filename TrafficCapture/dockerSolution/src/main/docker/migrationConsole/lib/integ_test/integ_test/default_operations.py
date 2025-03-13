@@ -12,6 +12,7 @@ from .common_utils import execute_api_call, DEFAULT_INDEX_IGNORE_LIST
 
 logger = logging.getLogger(__name__)
 
+
 class DefaultOperationsLibrary:
     """
     Provides a library of high-level common operations to perform on an elasticsearch or opensearch cluster as well as
@@ -34,7 +35,8 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}",
                                 **kwargs)
 
-    def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type = "_doc", **kwargs):
+    def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type="_doc",
+                        **kwargs):
         if data is None:
             data = {
                 'title': 'Test Document',
@@ -44,16 +46,19 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 data=json.dumps(data), headers=headers, **kwargs)
 
-    def create_and_retrieve_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type = "_doc", **kwargs):
-        self.create_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type, **kwargs)
+    def create_and_retrieve_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None,
+                                     doc_type="_doc", **kwargs):
+        self.create_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type,
+                             **kwargs)
         headers = {'Content-Type': 'application/json'}
-        self.get_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type, headers=headers, **kwargs)
+        self.get_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type,
+                          headers=headers, **kwargs)
 
-    def get_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type = "_doc", **kwargs):
+    def get_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type="_doc", **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
 
-    def delete_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type = "_doc", **kwargs):
+    def delete_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type="_doc", **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
 
@@ -62,7 +67,8 @@ class DefaultOperationsLibrary:
         data = response.json()
         mappings = data[index_name]["mappings"]["properties"]
         if not all(prop in mappings for prop in expected_props):
-            raise AssertionError(f"Expected properties: {expected_props} not found in index mappings {list(mappings.keys())}")
+            raise AssertionError(f"Expected properties: {expected_props} not found in index "
+                                 f"mappings {list(mappings.keys())}")
 
     def index_matches_ignored_index(self, index_name: str, index_prefix_ignore_list: List[str]):
         for prefix in index_prefix_ignore_list:
@@ -70,7 +76,8 @@ class DefaultOperationsLibrary:
                 return True
         return False
 
-    def get_all_index_details(self, cluster: Cluster, index_prefix_ignore_list=None, **kwargs) -> Dict[str, Dict[str, str]]:
+    def get_all_index_details(self, cluster: Cluster, index_prefix_ignore_list=None,
+                              **kwargs) -> Dict[str, Dict[str, str]]:
         all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
         index_dict = {}
         for index_details in all_index_details:
@@ -101,7 +108,8 @@ class DefaultOperationsLibrary:
         for attempt in range(1, max_attempts + 1):
             # Refresh documents
             execute_api_call(cluster=cluster, path="/_refresh")
-            actual_index_details = self.get_all_index_details(cluster=cluster, index_prefix_ignore_list=index_prefix_ignore_list)
+            actual_index_details = self.get_all_index_details(cluster=cluster,
+                                                              index_prefix_ignore_list=index_prefix_ignore_list)
             logger.debug(f"Received actual indices: {actual_index_details}")
             if actual_index_details.keys() != expected_index_details.keys():
                 error_message = (f"Indices are different: \n Expected: {expected_index_details.keys()} \n "
@@ -113,8 +121,8 @@ class DefaultOperationsLibrary:
                     actual_doc_count = index_details['count']
                     expected_doc_count = expected_index_details[index_name]['count']
                     if actual_doc_count != expected_doc_count:
-                        error_message = (f"Index {index_name} has {actual_doc_count} documents but {expected_doc_count} "
-                                         f"were expected")
+                        error_message = (f"Index {index_name} has {actual_doc_count} documents "
+                                         f"but {expected_doc_count} were expected")
                         logger.debug(f"Error on attempt {attempt}: {error_message}")
                         break
             if not error_message:

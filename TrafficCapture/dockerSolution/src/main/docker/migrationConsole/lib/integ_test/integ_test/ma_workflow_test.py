@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(autouse=True)
 def setup_and_teardown(request, test_cases: List[MATestBase]):
     #-----Setup-----
-    logger.info(f"Performing setup...")
+    logger.info("Performing setup...")
     test_case = test_cases[0]
     source_cluster = test_case.source_cluster
     target_cluster = test_case.target_cluster
@@ -31,7 +31,7 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
         shutil.rmtree("/shared-logs-output/test-transformations")
         logger.info("Removed existing /shared-logs-output/test-transformations directory")
     except FileNotFoundError:
-        logger.info(f"No transformation files detected to cleanup")
+        logger.info("No transformation files detected to cleanup")
 
     # Clear cluster data
     clear_cluster(source_cluster)
@@ -61,6 +61,7 @@ def run_on_all_cases(test_cases: List, operation: Callable) -> None:
     for tc in test_cases:
         operation(tc)
 
+
 # The test_cases parameter here is dynamically provided by the pytest_generate_tests() function in conftest.py. This
 # function will add a parametrize tag on this test to provide the 'test_cases' it has collected
 def test_migration_assistant_workflow(test_cases: List[MATestBase]):
@@ -79,8 +80,9 @@ def test_migration_assistant_workflow(test_cases: List[MATestBase]):
     control_test_case.stop_backfill_migration()
     run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_operations_after_backfill_migration())
     control_test_case.start_live_capture_migration()
-    run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_operations_during_live_capture_migration())
+    run_on_all_cases(test_cases=test_cases,
+                     operation=lambda case: case.perform_operations_during_live_capture_migration())
     control_test_case.stop_live_capture_migration()
-    run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_operations_after_live_capture_migration())
+    run_on_all_cases(test_cases=test_cases,
+                     operation=lambda case: case.perform_operations_after_live_capture_migration())
     run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_final_operations())
-

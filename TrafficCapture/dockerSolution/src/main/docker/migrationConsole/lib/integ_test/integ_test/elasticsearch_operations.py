@@ -1,11 +1,7 @@
-import json
-import os
 from typing import Dict
 
 from .cluster_version import ClusterVersion
 from .default_operations import DefaultOperationsLibrary
-
-from console_link.models.cluster import HttpMethod, Cluster
 
 
 def get_type_mapping_split_transformation(multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
@@ -28,7 +24,9 @@ def get_type_mapping_split_transformation(multi_type_index_name: str, doc_type_1
         }
     }
 
-def get_type_mapping_union_transformation(multi_type_index_name: str, doc_type_1: str, doc_type_2: str, cluster_version: ClusterVersion) -> Dict:
+
+def get_type_mapping_union_transformation(multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
+                                          cluster_version: ClusterVersion) -> Dict:
     return {
         "TypeMappingSanitizationTransformerProvider": {
             "staticMappings": {

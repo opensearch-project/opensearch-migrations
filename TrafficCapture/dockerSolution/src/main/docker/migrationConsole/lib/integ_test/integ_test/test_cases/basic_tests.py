@@ -1,9 +1,7 @@
 import logging
-from ..cluster_version import (ClusterVersion, ElasticsearchV6_X, ElasticsearchV7_X, OpensearchV1_X,
-                               OpensearchV2_X)
+from ..cluster_version import ElasticsearchV6_X, ElasticsearchV7_X, OpensearchV1_X, OpensearchV2_X
 from .ma_test_base import MATestBase
 from console_link.environment import Environment
-from console_link.models.command_result import CommandResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +23,14 @@ class Test0001SingleDocumentBackfill(MATestBase):
 
     def perform_initial_operations(self):
         # Create single document
-        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id)
+        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
+                                               doc_id=self.doc_id)
         self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name, doc_id=self.doc_id)
 
     def perform_operations_during_backfill_migration(self):
         # Validate single document exists on target
-        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name, doc_id=self.doc_id, max_attempts=10, delay=3.0)
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id, max_attempts=10, delay=3.0)
 
 
 class Test0002IndexWithNoDocumentsMetadataMigration(MATestBase):
@@ -68,4 +68,5 @@ class Test0002IndexWithNoDocumentsMetadataMigration(MATestBase):
 
     def perform_operations_after_metadata_migration(self):
         # Validate index exists on target
-        self.target_operations.get_index(cluster=self.target_cluster, index_name=self.index_name, max_attempts=5, delay=2.0)
+        self.target_operations.get_index(cluster=self.target_cluster, index_name=self.index_name, max_attempts=5,
+                                         delay=2.0)

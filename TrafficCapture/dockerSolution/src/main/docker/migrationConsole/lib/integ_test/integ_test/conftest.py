@@ -3,7 +3,6 @@ import pytest
 import uuid
 import logging
 from typing import List
-from .cluster_version import ClusterVersion
 from .test_cases.ma_test_base import ClusterVersionCombinationUnsupported
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
@@ -14,9 +13,9 @@ from console_link.environment import Environment
 logger = logging.getLogger(__name__)
 
 # Dynamically collect all test case classes that have been imported above
-ALL_TEST_CASES = [cls for cls in globals().values() if isinstance(cls, type)
-                  and cls.__module__.__contains__("integ_test.test_cases")
-                  and cls.__name__.startswith("Test")]
+ALL_TEST_CASES = [cls for cls in globals().values() if isinstance(cls, type) and
+                  cls.__module__.__contains__("integ_test.test_cases") and
+                  cls.__name__.startswith("Test")]
 
 
 def _split_test_ids(option_str: str):
@@ -78,7 +77,8 @@ def _generate_test_cases(console_config_path: str, console_link_env: Environment
     if aggregated_test_cases_to_run:
         isolated_test_cases_to_run.append(aggregated_test_cases_to_run)
     if unsupported_test_cases:
-        logger.info(f"The following tests are incompatible with the cluster version specified and will be skipped: {unsupported_test_cases}")
+        logger.info(f"The following tests are incompatible with the cluster version specified and will be "
+                    f"skipped: {unsupported_test_cases}")
     return isolated_test_cases_to_run
 
 

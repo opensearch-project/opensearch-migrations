@@ -23,10 +23,10 @@ class MATestBase:
                  allow_source_target_combinations=None, run_isolated=False, short_description="MA base test case"):
         self.allow_source_target_combinations = allow_source_target_combinations or []
         self.run_isolated = run_isolated
-        self.short_description=short_description
+        self.short_description = short_description
         self.console_link_env = console_link_env
         if ((not console_link_env.source_cluster or not console_link_env.target_cluster) or
-            (not console_link_env.source_cluster.version or not console_link_env.target_cluster.version)):
+                (not console_link_env.source_cluster.version or not console_link_env.target_cluster.version)):
             raise RuntimeError("Both a source cluster and target cluster must be defined for the console library and "
                                "include the version field")
         self.source_cluster = console_link_env.source_cluster
