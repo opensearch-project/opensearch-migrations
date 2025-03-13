@@ -192,16 +192,16 @@ export class SolutionsInfrastructureStack extends Stack {
 
             vpc.publicSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)
-                    .add("Name", `migration-assistant-${stageParameter.valueAsString}-public-subnet-${index + 1}`);
+                    .add("Name", `migration-assistant-public-subnet-${index + 1}-${stageParameter.valueAsString}`);
             });
             vpc.privateSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)
-                    .add("Name", `migration-assistant-${stageParameter.valueAsString}-private-subnet-${index + 1}`);
+                    .add("Name", `migration-assistant-private-subnet-${index + 1}-${stageParameter.valueAsString}`);
             });
             // No isolated subnets should be generated, including as a guardrail
             vpc.isolatedSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)
-                    .add("Name", `migration-assistant-${stageParameter.valueAsString}-isolated-subnet-${index + 1}`);
+                    .add("Name", `migration-assistant-isolated-subnet-${index + 1}-${stageParameter.valueAsString}`);
             });
 
             // S3 used for storage and retrieval of snapshot data for backfills
