@@ -27,7 +27,7 @@ import {
     IpAddresses,
     IpProtocol,
     SecurityGroup,
-    Vpc, SubnetType
+    Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {CfnDocument} from "aws-cdk-lib/aws-ssm";
 import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
@@ -183,37 +183,25 @@ export class SolutionsInfrastructureStack extends Stack {
         let vpc: IVpc;
         if (props.createVPC) {
             vpc = new Vpc(this, `Vpc`, {
-                // Using 10.212 to avoid default VPC range conflicts with VPC peering
+                // Using 10.212.0.0/16 to avoid default VPC CIDR range conflicts when using VPC peering
                 ipAddresses: IpAddresses.cidr('10.212.0.0/16'),
                 ipProtocol: IpProtocol.DUAL_STACK,
-                vpcName: `migration-assistant-vpc-${stackMarker}`,
+                vpcName: `migration-assistant-vpc-${stageParameter.valueAsString}`,
                 maxAzs: 2
-                // subnetConfiguration: [
-                //     // Outbound internet access for private subnets require a NAT Gateway which must live in
-                //     // a public subnet
-                //     {
-                //         name: "",
-                //         subnetType: SubnetType.PUBLIC,
-                //         cidrMask: 18,
-                //     },
-                //     {
-                //         name: "",
-                //         subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-                //         cidrMask: 18,
-                //     }
-                // ],
-
             });
 
             vpc.publicSubnets.forEach((subnet, index) => {
-                Tags.of(subnet).add("Name", `migration-assistant-${stackMarker}-public-subnet-${index + 1}`);
+                Tags.of(subnet)
+                    .add("Name", `migration-assistant-${stageParameter.valueAsString}-public-subnet-${index + 1}`);
             });
             vpc.privateSubnets.forEach((subnet, index) => {
-                Tags.of(subnet).add("Name", `migration-assistant-${stackMarker}-private-subnet-${index + 1}`);
+                Tags.of(subnet)
+                    .add("Name", `migration-assistant-${stageParameter.valueAsString}-private-subnet-${index + 1}`);
             });
-            // No isolated subnets should be generated
+            // No isolated subnets should be generated, including as a guardrail
             vpc.isolatedSubnets.forEach((subnet, index) => {
-                Tags.of(subnet).add("Name", `migration-assistant-${stackMarker}-isolated-subnet-${index + 1}`);
+                Tags.of(subnet)
+                    .add("Name", `migration-assistant-${stageParameter.valueAsString}-isolated-subnet-${index + 1}`);
             });
 
             // S3 used for storage and retrieval of snapshot data for backfills
