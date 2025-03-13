@@ -24,9 +24,10 @@ import {
     InstanceType,
     InterfaceVpcEndpoint,
     InterfaceVpcEndpointAwsService,
+    IpAddresses,
     IpProtocol,
     SecurityGroup,
-    Vpc
+    Vpc, SubnetType
 } from "aws-cdk-lib/aws-ec2";
 import {CfnDocument} from "aws-cdk-lib/aws-ssm";
 import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
@@ -182,7 +183,10 @@ export class SolutionsInfrastructureStack extends Stack {
         let vpc: IVpc;
         if (props.createVPC) {
             vpc = new Vpc(this, 'Vpc', {
-                ipProtocol: IpProtocol.DUAL_STACK
+                // Using 10.212 to avoid default VPC range conflicts with VPC peering
+                ipAddresses: IpAddresses.cidr('10.212.0.0/16'),
+                ipProtocol: IpProtocol.DUAL_STACK,
+                vpcName: `migration-assistant-vpc-${stackMarker}`,
             });
             // S3 used for storage and retrieval of snapshot data for backfills
             new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
