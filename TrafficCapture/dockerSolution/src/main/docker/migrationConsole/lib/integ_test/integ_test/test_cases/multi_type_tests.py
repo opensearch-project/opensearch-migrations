@@ -8,16 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class Test0004MultiTypeUnionMigration(MATestBase):
-    def __init__(self, source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
-                 console_link_env: Environment, unique_id: str):
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
-        super().__init__(source_version=source_version,
-                         target_version=target_version,
-                         console_config_path=console_config_path,
+        super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
                          allow_source_target_combinations=allow_combinations,
@@ -81,16 +78,13 @@ class Test0004MultiTypeUnionMigration(MATestBase):
 
 
 class Test0005MultiTypeSplitMigration(MATestBase):
-    def __init__(self, source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
-                 console_link_env: Environment, unique_id: str):
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
-        super().__init__(source_version=source_version,
-                         target_version=target_version,
-                         console_config_path=console_config_path,
+        super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
                          allow_source_target_combinations=allow_combinations,

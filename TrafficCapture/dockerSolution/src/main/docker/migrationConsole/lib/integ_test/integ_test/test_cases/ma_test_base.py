@@ -9,6 +9,7 @@ from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.models.metadata import Metadata
 
+
 class ClusterVersionCombinationUnsupported(Exception):
     def __init__(self, source_version, target_version, message="Cluster version combination is unsupported"):
         self.source_version = source_version
@@ -18,32 +19,34 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 
 class MATestBase:
-    def __init__(self, source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
-                 console_link_env: Environment, unique_id: str, allow_source_target_combinations=None,
-                 run_isolated=False, short_description="MA base test case"):
-        self.source_version = source_version
-        self.target_version = target_version
-
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str,
+                 allow_source_target_combinations=None, run_isolated=False, short_description="MA base test case"):
         self.allow_source_target_combinations = allow_source_target_combinations or []
         self.run_isolated = run_isolated
         self.short_description=short_description
+        self.console_link_env = console_link_env
+        if ((not console_link_env.source_cluster or not console_link_env.target_cluster) or
+            (not console_link_env.source_cluster.version or not console_link_env.target_cluster.version)):
+            raise RuntimeError("Both a source cluster and target cluster must be defined for the console library and "
+                               "include the version field")
+        self.source_cluster = console_link_env.source_cluster
+        self.target_cluster = console_link_env.target_cluster
+        self.source_version = ClusterVersion(version_str=self.source_cluster.version)
+        self.target_version = ClusterVersion(version_str=self.target_cluster.version)
 
         supported_combo = False
         for (allowed_source, allowed_target) in allow_source_target_combinations:
-            if (is_incoming_version_supported(allowed_source, source_version) and
-                    is_incoming_version_supported(allowed_target, target_version)):
+            if (is_incoming_version_supported(allowed_source, self.source_version) and
+                    is_incoming_version_supported(allowed_target, self.target_version)):
                 supported_combo = True
                 break
         if not supported_combo:
-            raise ClusterVersionCombinationUnsupported(source_version, target_version)
+            raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
 
-        self.source_operations = get_operations_library_by_version(source_version)
-        self.target_operations = get_operations_library_by_version(target_version)
+        self.source_operations = get_operations_library_by_version(self.source_version)
+        self.target_operations = get_operations_library_by_version(self.target_version)
         self.console_config_path = console_config_path
         self.unique_id = unique_id
-        self.console_link_env = console_link_env
-        self.source_cluster = console_link_env.source_cluster
-        self.target_cluster = console_link_env.target_cluster
         self.snapshot: Snapshot = console_link_env.snapshot
         self.backfill: Backfill = console_link_env.backfill
         self.metadata: Metadata = console_link_env.metadata
@@ -79,12 +82,12 @@ class MATestBase:
     def perform_operations_during_backfill_migration(self):
         pass
 
-    def perform_operations_after_backfill_migration(self):
-        pass
-
     def stop_backfill_migration(self):
         backfill_stop_result: CommandResult = self.backfill.stop()
         assert backfill_stop_result.success
+
+    def perform_operations_after_backfill_migration(self):
+        pass
 
     def start_live_capture_migration(self):
         replayer_start_result = self.replayer.start()

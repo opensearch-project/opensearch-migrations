@@ -88,6 +88,7 @@ class Cluster:
         if not v.validate({'cluster': config}):
             raise ValueError("Invalid config file for cluster", v.errors)
 
+        self.version = config["version"]
         self.endpoint = config["endpoint"]
         self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
             "https") else config.get("allow_insecure", True)

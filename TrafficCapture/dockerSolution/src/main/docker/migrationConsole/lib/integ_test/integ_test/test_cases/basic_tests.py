@@ -9,17 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 class Test0001SingleDocumentBackfill(MATestBase):
-    def __init__(self, source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
-                 console_link_env: Environment, unique_id: str):
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
             (ElasticsearchV6_X, OpensearchV1_X),
             (ElasticsearchV6_X, OpensearchV2_X),
             (ElasticsearchV7_X, OpensearchV1_X),
             (ElasticsearchV7_X, OpensearchV2_X),
         ]
-        super().__init__(source_version=source_version,
-                         target_version=target_version,
-                         console_config_path=console_config_path,
+        super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
                          allow_source_target_combinations=allow_combinations)
@@ -37,8 +34,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
 
 
 class Test0002IndexWithNoDocumentsMetadataMigration(MATestBase):
-    def __init__(self, source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
-                 console_link_env: Environment, unique_id: str):
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
             (ElasticsearchV6_X, OpensearchV1_X),
             (ElasticsearchV6_X, OpensearchV2_X),
@@ -46,9 +42,7 @@ class Test0002IndexWithNoDocumentsMetadataMigration(MATestBase):
             (ElasticsearchV7_X, OpensearchV2_X),
         ]
         run_isolated = True
-        super().__init__(source_version=source_version,
-                         target_version=target_version,
-                         console_config_path=console_config_path,
+        super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
                          allow_source_target_combinations=allow_combinations,
