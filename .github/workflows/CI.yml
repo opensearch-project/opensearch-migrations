@@ -126,7 +126,7 @@ jobs:
         run: |
           ./gradlew listTestTasksAsJson --stacktrace
           listTasks=$(./gradlew listTestTasksAsJson --quiet)
-          matrix=echo $listTasks | jq -c
+          matrix=$(echo "$listTasks" | jq -c)
           echo "Matrix is: $matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
