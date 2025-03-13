@@ -44,7 +44,7 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 data=json.dumps(data), headers=headers, **kwargs)
 
-    def create_and_verify_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type = "_doc", **kwargs):
+    def create_and_retrieve_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type = "_doc", **kwargs):
         self.create_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type, **kwargs)
         headers = {'Content-Type': 'application/json'}
         self.get_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type, headers=headers, **kwargs)
@@ -56,6 +56,13 @@ class DefaultOperationsLibrary:
     def delete_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type = "_doc", **kwargs):
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
+
+    def verify_index_mapping_properties(self, index_name: str, cluster: Cluster, expected_props: set, **kwargs):
+        response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}", **kwargs)
+        data = response.json()
+        mappings = data[index_name]["mappings"]["properties"]
+        if not all(prop in mappings for prop in expected_props):
+            raise AssertionError(f"Expected properties: {expected_props} not found in index mappings {list(mappings.keys())}")
 
     def index_matches_ignored_index(self, index_name: str, index_prefix_ignore_list: List[str]):
         for prefix in index_prefix_ignore_list:

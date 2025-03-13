@@ -66,7 +66,7 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
 
 def _generate_test_cases(source_version: ClusterVersion, target_version: ClusterVersion, console_config_path: str,
                          console_link_env: Environment, unique_id: str, test_ids_list: List[str]):
-    parallel_test_cases_to_run = []
+    aggregated_test_cases_to_run = []
     isolated_test_cases_to_run = []
     unsupported_test_cases = []
     cases = _filter_test_cases(test_ids_list)
@@ -78,13 +78,13 @@ def _generate_test_cases(source_version: ClusterVersion, target_version: Cluster
             if valid_case.run_isolated:
                 isolated_test_cases_to_run.append([valid_case])
             else:
-                parallel_test_cases_to_run.append(valid_case)
+                aggregated_test_cases_to_run.append(valid_case)
         except ClusterVersionCombinationUnsupported:
             unsupported_test_cases.append(test_case)
-    logger.info(f"Parallel test cases to run ({len(parallel_test_cases_to_run)}) - {parallel_test_cases_to_run}")
+    logger.info(f"Aggregated test cases to run ({len(aggregated_test_cases_to_run)}) - {aggregated_test_cases_to_run}")
     logger.info(f"Isolated test cases to run ({len(isolated_test_cases_to_run)}) - {isolated_test_cases_to_run}")
-    if parallel_test_cases_to_run:
-        isolated_test_cases_to_run.append(parallel_test_cases_to_run)
+    if aggregated_test_cases_to_run:
+        isolated_test_cases_to_run.append(aggregated_test_cases_to_run)
     if unsupported_test_cases:
         logger.info(f"The following tests are incompatible with the cluster version specified and will be skipped: {unsupported_test_cases}")
     return isolated_test_cases_to_run

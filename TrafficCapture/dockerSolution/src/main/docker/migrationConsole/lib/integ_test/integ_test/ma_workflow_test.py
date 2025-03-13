@@ -65,6 +65,8 @@ def test_migration_assistant_workflow(test_cases: List[MATestBase]):
     logger.info(f"Performing the following test cases: {test_cases}")
     control_test_case = test_cases[0]
 
+    #breakpoint()
+
     for case in test_cases:
         case.perform_initial_operations()
 
