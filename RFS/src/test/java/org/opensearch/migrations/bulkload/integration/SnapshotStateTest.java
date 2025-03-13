@@ -109,7 +109,7 @@ public class SnapshotStateTest {
         final var document1Id = "doc1-going-to-be-deleted";
         final var document1Body = "{\"foo\":\"bar\"}";
         operations.createDocument(indexName, document1Id, document1Body);
-        operations.deleteDocument(indexName, document1Id);
+        operations.deleteDocument(indexName, document1Id, null);
         final var snapshotName = "snapshot-delete-item";
         var repoName = "test-repo";
         operations.takeSnapshot(repoName, snapshotName, indexName);

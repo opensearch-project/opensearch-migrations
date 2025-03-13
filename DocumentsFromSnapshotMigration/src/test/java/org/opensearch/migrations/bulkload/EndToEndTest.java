@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
-import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -129,23 +128,16 @@ public class EndToEndTest extends SourceTestBase {
             final var clockJitter = new Random(1);
 
             // ExpectedMigrationWorkTerminationException is thrown on completion.
-            var expectedTerminationException = Assertions.assertTimeout(
-                Duration.ofSeconds(30),
-                () -> Assertions.assertThrows(
-                    ExpectedMigrationWorkTerminationException.class,
-                    () -> migrateDocumentsSequentially(
-                        sourceRepo,
-                        snapshotName,
-                        List.of(),
-                        targetCluster.getUrl(),
-                        runCounter,
-                        clockJitter,
-                        testDocMigrationContext,
-                        sourceCluster.getContainerVersion().getVersion(),
-                        targetCluster.getContainerVersion().getVersion()
-                    )
-                )
-            );
+            var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                sourceRepo,
+                snapshotName,
+                List.of(),
+                targetCluster,
+                runCounter,
+                clockJitter,
+                testDocMigrationContext,
+                sourceCluster.getContainerVersion().getVersion()
+            ));
 
             Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 
