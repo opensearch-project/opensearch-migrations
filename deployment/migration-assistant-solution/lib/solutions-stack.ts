@@ -182,12 +182,40 @@ export class SolutionsInfrastructureStack extends Stack {
 
         let vpc: IVpc;
         if (props.createVPC) {
-            vpc = new Vpc(this, 'Vpc', {
+            vpc = new Vpc(this, `Vpc`, {
                 // Using 10.212 to avoid default VPC range conflicts with VPC peering
                 ipAddresses: IpAddresses.cidr('10.212.0.0/16'),
                 ipProtocol: IpProtocol.DUAL_STACK,
                 vpcName: `migration-assistant-vpc-${stackMarker}`,
+                maxAzs: 2
+                // subnetConfiguration: [
+                //     // Outbound internet access for private subnets require a NAT Gateway which must live in
+                //     // a public subnet
+                //     {
+                //         name: "",
+                //         subnetType: SubnetType.PUBLIC,
+                //         cidrMask: 18,
+                //     },
+                //     {
+                //         name: "",
+                //         subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+                //         cidrMask: 18,
+                //     }
+                // ],
+
             });
+
+            vpc.publicSubnets.forEach((subnet, index) => {
+                Tags.of(subnet).add("Name", `migration-assistant-${stackMarker}-public-subnet-${index + 1}`);
+            });
+            vpc.privateSubnets.forEach((subnet, index) => {
+                Tags.of(subnet).add("Name", `migration-assistant-${stackMarker}-private-subnet-${index + 1}`);
+            });
+            // No isolated subnets should be generated
+            vpc.isolatedSubnets.forEach((subnet, index) => {
+                Tags.of(subnet).add("Name", `migration-assistant-${stackMarker}-isolated-subnet-${index + 1}`);
+            });
+
             // S3 used for storage and retrieval of snapshot data for backfills
             new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
                 service: GatewayVpcEndpointAwsService.S3,
