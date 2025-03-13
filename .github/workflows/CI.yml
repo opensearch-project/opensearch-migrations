@@ -50,7 +50,7 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
-        run: ./gradlew ${{matrix.tasks}}
+        run: gradle ${{matrix.tasks}}
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -124,8 +124,8 @@ jobs:
       - name: Generate matrix for test jobs
         id: set-matrix
         run: |
-          ./gradlew listTestTasksAsJson --stacktrace
-          listTasks=$(./gradlew listTestTasksAsJson --quiet)
+          gradle listTestTasksAsJson --stacktrace
+          listTasks=$(gradle listTestTasksAsJson --quiet)
           matrix=$(echo "$listTasks" | jq -c)
           echo "Matrix is: $matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -154,7 +154,7 @@ jobs:
           sanitized_name=$(echo "${{ matrix.task }}" | sed 's/[^a-zA-Z0-9]/_/g')
           echo "sanitized_name=$sanitized_name" >> "$GITHUB_OUTPUT"
       - name: Run Gradle task ${{ matrix.task }}
-        run: ./gradlew ${{ matrix.task }} -x spotlessCheck --stacktrace
+        run: gradle ${{ matrix.task }} -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Detect Memory Dumps
@@ -216,7 +216,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate aggregate JaCoCo report
-        run: ./gradlew jacocoAggregateReport -x spotlessCheck
+        run: gradle jacocoAggregateReport -x spotlessCheck
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -255,7 +255,7 @@ jobs:
           key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
           read-only: true
       - name: Start Docker Solution
-        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
+        run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Run E2E test script

@@ -60,7 +60,7 @@ jobs:
         echo "::add-mask::$SONAR_TOKEN"
         echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run Gradle Build
-      run: ./gradlew copyDependencies
+      run: gradle copyDependencies
     - name: Run SonarQube Scanner
       run: |
         curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
