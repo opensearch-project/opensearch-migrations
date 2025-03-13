@@ -182,6 +182,7 @@ subprojects {
             systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
             // Verify assertions in tests
             jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
+            systemProperty "junit.jupiter.execution.timeout.default", "5m"
             jacoco {
                 enabled = true
                 destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
