@@ -34,7 +34,8 @@ public class DocumentReindexer {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
-            .concatMapIterable(doc -> transformDocument(threadSafeTransformer, doc, indexName));
+            .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
+            .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
 
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
             .doFinally(s -> scheduler.dispose());
@@ -55,13 +56,16 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    List<RfsDocument> transformDocument(ThreadLocal<IJsonTransformer> transformerLocal, RfsLuceneDocument doc, String indexName) {
+    List<RfsDocument> transformDocumentBatch(ThreadLocal<IJsonTransformer> transformerLocal, List<RfsLuceneDocument> docs, String indexName) {
         var transformer = transformerLocal.get();
-        var originalDoc = RfsDocument.fromLuceneDocument(doc, indexName);
+
+        var originalDocs = docs.stream().map(doc ->
+                        RfsDocument.fromLuceneDocument(doc, indexName))
+                .collect(Collectors.toList());
         if (transformer != null) {
-            return RfsDocument.transform(transformer, originalDoc);
+            return RfsDocument.transform(transformer, originalDocs);
         }
-        return List.of(originalDoc);
+        return originalDocs;
     }
 
     /*

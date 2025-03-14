@@ -22,8 +22,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -157,31 +155,25 @@ public class CustomRfsTransformationTest extends SourceTestBase {
     // Create a simple Jolt transform which matches documents of a given index name in a snapshot and changes that
     // index name to a desired index name when migrated to the target cluster
     private static String createIndexNameTransformation(String existingIndexName, String newIndexName) {
-        JSONArray rootArray = new JSONArray();
-        JSONObject firstObject = new JSONObject();
-        JSONArray jsonConditionalTransformerProvider = new JSONArray();
-
-        // JsonJMESPathPredicateProvider object
-        JSONObject jsonJMESPathPredicateProvider = new JSONObject();
-        jsonJMESPathPredicateProvider.put("script", String.format("index._index == '%s'", existingIndexName));
-        JSONObject jsonJMESPathPredicateWrapper = new JSONObject();
-        jsonJMESPathPredicateWrapper.put("JsonJMESPathPredicateProvider", jsonJMESPathPredicateProvider);
-        jsonConditionalTransformerProvider.put(jsonJMESPathPredicateWrapper);
-
-        JSONArray transformerList = new JSONArray();
-
-        // First JsonJoltTransformerProvider
-        JSONObject firstJoltTransformer = new JSONObject();
-        JSONObject firstJoltScript = new JSONObject();
-        firstJoltScript.put("operation", "modify-overwrite-beta");
-        firstJoltScript.put("spec", new JSONObject().put("index", new JSONObject().put("\\_index", newIndexName)));
-        firstJoltTransformer.put("JsonJoltTransformerProvider", new JSONObject().put("script", firstJoltScript));
-        transformerList.put(firstJoltTransformer);
-
-        jsonConditionalTransformerProvider.put(transformerList);
-        firstObject.put("JsonConditionalTransformerProvider", jsonConditionalTransformerProvider);
-        rootArray.put(firstObject);
-        return rootArray.toString();
+        return "[\n" +
+                "  {\n" +
+                "    \"TypeMappingSanitizationTransformerProvider\": {\n" +
+                "      \"regexMappings\": [\n" +
+                "         {\n" +
+                "            \"sourceIndexPattern\": \"" + existingIndexName + "\",\n" +
+                "            \"sourceTypePattern\": \".*\",\n" +
+                "            \"targetIndexPattern\": \"" + newIndexName + "\"\n" +
+                "         }\n" +
+                "      ],\n" +
+                "      \"sourceProperties\": {\n" +
+                "        \"version\": {\n" +
+                "          \"major\": 7,\n" +
+                "          \"minor\": 10\n" +
+                "        }\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
+                "]";
     }
 
     private static void validateFinalClusterDocs(

@@ -1,9 +1,11 @@
 package org.opensearch.migrations.transform;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
@@ -52,6 +54,28 @@ class TypeMappingsSanitizationTransformerTest {
         indexTypeMappingRewriter = null;
     }
 
+    @Test
+    public void test_unit_retargetCommandParameters() throws Exception {
+        var script = TypeMappingsSanitizationTransformer.getScripts();
+        var functionToUnitTest = "retargetCommandParameters";
+
+        try (var function = new JavascriptTransformer(script + ";" + functionToUnitTest, null)) {
+            // Declare an inner function to run the script and return the result.
+            // Note: Checked exceptions are wrapped in a RuntimeException.
+            BiFunction<Map<String, Object>, String, Object> runAndGetResult = (input, index) -> {
+                try {
+                    return function.runScriptAsFuture(new HashMap<>(input), index).get();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            };
+
+            Assertions.assertEquals(Map.of(), runAndGetResult.apply(Map.of("_type", "toBeRemoved"), null));
+            Assertions.assertEquals(Map.of(), runAndGetResult.apply(Map.of("_type", "toBeRemoved", "_index", "existing"), null));
+            Assertions.assertEquals(Map.of("_index", "indexToAdd"), runAndGetResult.apply(Map.of("_type", "toBeRemoved"), "indexToAdd"));
+            Assertions.assertEquals(Map.of("_index", "newIndex"), runAndGetResult.apply(Map.of("_type", "toBeRemoved", "_index", "existing"), "newIndex"));
+        }
+    }
 
     @Test
     public void testPutDoc() throws Exception {

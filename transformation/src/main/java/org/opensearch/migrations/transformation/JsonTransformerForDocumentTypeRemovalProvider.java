@@ -1,6 +1,8 @@
 package org.opensearch.migrations.transformation;
 
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.IJsonTransformerProvider;
@@ -18,12 +20,23 @@ public class JsonTransformerForDocumentTypeRemovalProvider implements IJsonTrans
         @Override
         @SuppressWarnings("unchecked")
         public Object transformJson(Object incomingJson) {
-            @SuppressWarnings("unchecked")
-            var incomingJsonMap = ((Map<String, Object>) incomingJson);
-            if (incomingJsonMap.containsKey("index")) {
-                ((Map<String, Object>) ((Map<String, Object>) incomingJson).get("index")).remove("_type");
+            if (incomingJson instanceof Map) {
+                return transformMap(incomingJson);
+            } else if (incomingJson instanceof List) {
+                var list = (List<Object>) incomingJson;
+                return list.stream().map(this::transformMap).collect(Collectors.toList());
+            } else {
+                throw new IllegalArgumentException("Unsupported JSON type: " + incomingJson.getClass());
             }
-            return incomingJson;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Object transformMap(Object incomingJson) {
+            var incomingMap = (Map<String, Object>) incomingJson;
+            if (incomingMap.containsKey("index")) {
+                ((Map<String, Object>) incomingMap.get("index")).remove("_type");
+            }
+            return incomingMap;
         }
     }
 }

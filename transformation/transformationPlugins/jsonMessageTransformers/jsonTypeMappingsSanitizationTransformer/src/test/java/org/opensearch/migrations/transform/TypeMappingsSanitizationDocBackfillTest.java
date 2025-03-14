@@ -104,6 +104,41 @@ public class TypeMappingsSanitizationDocBackfillTest {
         }
     }
 
+    @Test
+    public void testAsBatch() throws Exception {
+        var testDocString = "{\n" +
+                "  \"index\": { \"_index\": \"test_e2e_0001_1234\", \"_id\": \"1\" },\n" +
+                "  \"source\": { \"field1\": \"value1\" }\n" +
+                "}";
+        var testString = "[" +
+                (testDocString + ",").repeat(5)
+                + testDocString + "]";
+
+        var expectedString =
+                testString.replaceAll("test_e2e_0001_1234", "test_e2e_0001_1234_transformed");
+
+        try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
+                List.of(
+                        Map.of(
+                                "sourceIndexPattern","(test_e2e_0001_.*)",
+                                "sourceTypePattern", ".*",
+                                "targetIndexPattern", "$1_transformed"
+                        ),
+                        Map.of(
+                                "sourceIndexPattern","(.*)",
+                                "sourceTypePattern", "(.*)",
+                                "targetIndexPattern", "$1"
+                        )
+                ),
+                new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
+            var docObj = OBJECT_MAPPER.readValue(testString, List.class);
+            var resultObj = indexTypeMappingRewriter.transformJson(docObj);
+            printObject(resultObj);
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+        }
+    }
+
+
 
     private static void printObject(Object object) {
         log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
