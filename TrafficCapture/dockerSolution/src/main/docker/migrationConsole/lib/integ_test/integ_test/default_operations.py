@@ -165,25 +165,21 @@ class DefaultOperationsLibrary:
     def convert_transformations_to_str(self, transform_list: List[Dict]) -> str:
         return json.dumps(transform_list)
 
-    def get_index_name_transformation(self, existing_index_name: str, target_index_name: str) -> Dict:
+    def get_index_name_transformation(self, existing_index_name: str, target_index_name: str,
+                                      source_major_version: int, source_minor_version: int) -> Dict:
         return {
-            "JsonConditionalTransformerProvider": [
-                {
-                    "JsonJMESPathPredicateProvider": {
-                        "script": f"name == '{existing_index_name}'"
+            "TypeMappingSanitizationTransformerProvider": {
+                "staticMappings": {
+                    f"{existing_index_name}": {
+                        "_doc": f"{target_index_name}"
                     }
                 },
-                [
-                    {
-                        "JsonJoltTransformerProvider": {
-                            "script": {
-                                "operation": "modify-overwrite-beta",
-                                "spec": {
-                                    "name": f"{target_index_name}"
-                                }
-                            }
-                        }
+                "sourceProperties": {
+                    "version": {
+                        "major": source_major_version,
+                        "minor": source_minor_version
                     }
-                ]
-            ]
+                }
+
+            }
         }
