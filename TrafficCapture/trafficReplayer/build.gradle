@@ -22,7 +22,7 @@ dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
-    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJinjavaTransformerProvider')
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
