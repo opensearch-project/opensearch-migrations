@@ -68,7 +68,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
         // Check for absence of intermediate type node
         // 1. <pre>{"mappings": {"properties": {...} }}</pre>
-        if (mappingNode.isObject() && mappingNode.get("properties") != null) {
+        if (mappingNode.isObject() && mappingNode.get(PROPERTIES_KEY) != null) {
             return CanApplyResult.NO;
         }
 
