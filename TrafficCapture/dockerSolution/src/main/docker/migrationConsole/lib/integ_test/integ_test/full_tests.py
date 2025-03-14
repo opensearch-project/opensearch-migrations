@@ -15,6 +15,7 @@ from console_link.models.snapshot import Snapshot
 from console_link.middleware.kafka import delete_topic
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
+from .common_utils import wait_for_running_replayer
 from .default_operations import DefaultOperationsLibrary
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,7 @@ class E2ETests(unittest.TestCase):
                             expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         replayer.start()
-        ops.wait_for_running_replayer(replayer=replayer)
+        wait_for_running_replayer(replayer=replayer)
 
         expected_source_docs[index_name] = {"count": 3}
         # TODO Replayer transformation needed to only have docs in the transformed index
