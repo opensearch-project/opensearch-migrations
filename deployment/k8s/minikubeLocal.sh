@@ -7,18 +7,28 @@ usage() {
   exit 1
 }
 
+kill_minikube_processes() {
+  mount_process_id=$(pgrep -f "minikube mount")
+  if [ -n "$mount_process_id" ]; then
+    kill "$mount_process_id"
+  fi
+}
+
 start() {
   helm repo add opensearch-operator https://opensearch-project.github.io/opensearch-k8s-operator/
   helm repo add strimzi https://strimzi.io/charts/
 
   minikube start
+  minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
 }
 
 pause() {
+  kill_minikube_processes
   minikube pause
 }
 
 delete() {
+  kill_minikube_processes
   minikube delete
 }
 

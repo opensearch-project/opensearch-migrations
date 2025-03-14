@@ -1,5 +1,6 @@
 {{ $envMountName := "env-vars" }}
 {{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
+{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,6 +39,10 @@ spec:
             - name: snapshot-volume
               mountPath: /snapshot
             {{- end }}
+            {{- if $sharedLogsVolumeEnabled }}
+            - name: shared-logs
+              mountPath: /shared-logs-output
+            {{- end }}
       volumes:
         - name: {{ $envMountName }}
           emptyDir: {}
@@ -45,4 +50,9 @@ spec:
         - name: snapshot-volume
           persistentVolumeClaim:
             claimName: {{ .Values.snapshotVolumePvc }}
+        {{- end }}
+        {{- if $sharedLogsVolumeEnabled  }}
+        - name: shared-logs
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedLogsPvc }}
         {{- end }}

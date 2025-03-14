@@ -12,3 +12,5 @@ exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules,.venv,*/cd
 
 # F401 - Unused imports -- this is the only way to have a file-wide rule exception
 per-file-ignores =
+    # We utilize * imports on test files here to dynamically collect test cases
+    conftest.py: F401,F403

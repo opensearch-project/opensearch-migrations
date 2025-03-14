@@ -13,6 +13,10 @@ dependencies:
     version: "0.1.0"
     repository: "file://../../sharedResources/snapshotVolume"
     condition: conditionalPackageInstalls.snapshotVolume
+  - name: logs-volume
+    version: "0.1.0"
+    repository: "file://../../sharedResources/logsVolume"
+    condition: conditionalPackageInstalls.logsVolume
 
   - name: migration-console
     condition: conditionalPackageInstalls.migrationConsole
