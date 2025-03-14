@@ -1,0 +1,33 @@
+{
+  "name": "js-module",
+  "version": "1.0.0",
+  "description": "JavaScript module for GraalJS integration",
+  "main": "src/index.js",
+  "keywords": [
+    "calculator",
+    "graaljs",
+    "java-integration"
+  ],
+  "files": [
+    "src/**/*.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/your-repo.git"
+  },
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
+    "serve": "http-server ./build/browser-test -o"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "eslint": "^8.38.0",
+    "http-server": "^14.1.1",
+    "jest-junit": "^16.0.0"
+  }
+}

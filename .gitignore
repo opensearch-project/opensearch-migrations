@@ -27,3 +27,6 @@ TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 
 # Directory used to temporarily store snapshots during testing
 DocumentsFromSnapshotMigration/docker/snapshots/
+transformation/standardJavascriptTransforms/coverage
+transformation/standardJavascriptTransforms/node_modules
+transformation/standardJavascriptTransforms/package-lock.json
