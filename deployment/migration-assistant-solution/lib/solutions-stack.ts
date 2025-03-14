@@ -198,11 +198,6 @@ export class SolutionsInfrastructureStack extends Stack {
                 Tags.of(subnet)
                     .add("Name", `migration-assistant-private-subnet-${index + 1}-${stageParameter.valueAsString}`);
             });
-            // No isolated subnets should be generated, including as a guardrail
-            vpc.isolatedSubnets.forEach((subnet, index) => {
-                Tags.of(subnet)
-                    .add("Name", `migration-assistant-isolated-subnet-${index + 1}-${stageParameter.valueAsString}`);
-            });
 
             // S3 used for storage and retrieval of snapshot data for backfills
             new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
