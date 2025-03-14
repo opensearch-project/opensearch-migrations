@@ -8,14 +8,21 @@ The snapshot the application extracts the documents from can be local or in S3. 
 
 ## How to use the tool
 
-You can kick off locally using Gradle.
+You can kick off locally using Gradle. These worker are designed to be run multiple times to fully migrate a cluster.
 
 ### S3 Snapshot
 
 From the root directory of the repo, run a CLI command like so:
 
 ```shell
-./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200'
+./gradlew DocumentsFromSnapshotMigration:run --args="\
+  --snapshot-name reindex-from-snapshot \
+  --s3-local-dir /tmp/s3_files \
+  --s3-repo-uri s3://your-s3-uri \
+  --s3-region us-fake-1 \
+  --lucene-dir /tmp/lucene_files \
+  --target-host http://hostname:9200" \
+  || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
 
 In order for this succeed, you'll need to make sure you have valid AWS Credentials in your key ring (~/.aws/credentials) with permission to operate on the S3 URI specified
@@ -25,7 +32,12 @@ In order for this succeed, you'll need to make sure you have valid AWS Credentia
 From the root directory of the repo, run a CLI command like so:
 
 ```shell
-./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --snapshot-local-dir /snapshot --lucene-dir /tmp/lucene_files --target-host http://hostname:9200'
+./gradlew DocumentsFromSnapshotMigration:run --args="\
+  --snapshot-name reindex-from-snapshot \
+  --snapshot-local-dir /snapshot \
+  --lucene-dir /tmp/lucene_files \
+  --target-host http://hostname:9200" \
+  || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
 
 ### Handling Auth
@@ -33,7 +45,16 @@ From the root directory of the repo, run a CLI command like so:
 If your target cluster has basic auth enabled on it, you can supply those credentials to the tool via the CLI:
 
 ```shell
-./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200 --target-username <user> --target-password <pass>'
+./gradlew DocumentsFromSnapshotMigration:run --args="\
+  --snapshot-name reindex-from-snapshot \
+  --s3-local-dir /tmp/s3_files \
+  --s3-repo-uri s3://your-s3-uri \
+  --s3-region us-fake-1 \
+  --lucene-dir /tmp/lucene_files \
+  --target-host http://hostname:9200 \
+  --target-username <user> \
+  --target-password <pass>" \
+  || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
 
 ### Limiting the amount of disk space used
@@ -42,9 +63,7 @@ In order to migrate documents from the snapshot, RFS first needs to have a local
 
 If you have some shards larger than the hosts running this tool can handle, you can set a maximum shard size as a CLI option.  In this case, the tool will reject shards larger than the specified size.  
 
-```shell
-./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200 --max-shard-size-bytes 50000000000'
-```
+Add `--max-shard-size-bytes 50000000000` to limit the size of the shards.
 
 To see the default shard size, use the `--help` CLI option:
 

@@ -118,7 +118,14 @@ Be sure to point it at the target cluster rather than the source cluster.
 Finally, you can migrate the documents:
 
 ```shell
-./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-repo-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://localhost:29200'
+./gradlew DocumentsFromSnapshotMigration:run --args="\
+  --snapshot-name reindex-from-snapshot \
+  --s3-local-dir /tmp/s3_files \
+  --s3-repo-uri s3://your-s3-uri \
+  --s3-region us-fake-1 \
+  --lucene-dir /tmp/lucene_files \
+  --target-host http://hostname:9200" \
+  || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
 
 Each execution of this last tool moves the documents from a single shard of the source snapshot before exiting.  To migrate all the shards of the source snapshot, keep running the tool until it throws a `NoWorkLeftException`.  You can also look at the work coordination metadata stored in a special index created on the target cluster, but that requires specialized knowledge.
