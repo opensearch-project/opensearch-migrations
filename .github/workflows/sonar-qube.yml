@@ -6,7 +6,7 @@ on:
 
 env:
   java-version: '17'
-  gradle-version: '8.0.2'
+  gradle-version: '8.12.1'
 
 jobs:
   sonar:
@@ -41,7 +41,7 @@ jobs:
         restore-keys: sonar-cache
     - uses: gradle/actions/setup-gradle@v4
       with:
-        gradle-version: 8.0.2
+        gradle-version: 8.12.1
         gradle-home-cache-cleanup: true
 
     - name: Generate SonarQube Token
@@ -60,7 +60,7 @@ jobs:
         echo "::add-mask::$SONAR_TOKEN"
         echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run Gradle Build
-      run: ./gradlew copyDependencies
+      run: gradle copyDependencies
     - name: Run SonarQube Scanner
       run: |
         curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip

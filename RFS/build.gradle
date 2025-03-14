@@ -4,15 +4,12 @@ plugins {
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
     id 'me.champeau.jmh'
-    id 'com.github.johnrengelman.shadow'
+    id 'com.gradleup.shadow'
 }
 
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'
-    luceneVersion6 = '6.6.6'
-    luceneVersion7 = '7.7.3'
-    luceneVersion9 = '9.11.1'
 }
 
 configurations {
@@ -66,26 +63,26 @@ dependencies {
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
-    implementation group: 'org.jcommander', name: 'jcommander'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
-    implementation group: 'io.netty', name: 'netty-codec-http'
-    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation libs.jcommander
+    implementation libs.jackson.databind
+    implementation libs.jackson.annotations
+    implementation libs.jackson.core
+    implementation libs.jackson.dataformat.smile
+    implementation libs.netty.codec.http
+    implementation libs.httpclient5
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
 
-    lucene6 "org.apache.lucene:lucene-core:${luceneVersion6}"
-    lucene6 "org.apache.lucene:lucene-backward-codecs:${luceneVersion6}"
+    lucene6 libs.lucene.v6.core
+    lucene6 libs.lucene.v6.backward.codecs
 
-    lucene7 "org.apache.lucene:lucene-core:${luceneVersion7}"
-    lucene7 "org.apache.lucene:lucene-backward-codecs:${luceneVersion7}"
+    lucene7 libs.lucene.v7.core
+    lucene7 libs.lucene.v7.backward.codecs
 
-    lucene9 "org.apache.lucene:lucene-core:${luceneVersion9}"
-    lucene9 "org.apache.lucene:lucene-analysis-common:${luceneVersion9}"
-    lucene9 "org.apache.lucene:lucene-backward-codecs:${luceneVersion9}"
+    lucene9 libs.lucene.v9.core
+    lucene9 libs.lucene.v9.analysis.common
+    lucene9 libs.lucene.v9.backward.codecs
 
     implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
@@ -99,59 +96,60 @@ dependencies {
     testFixturesImplementation shadowLucene7.outputs.files
     testFixturesImplementation shadowLucene9.outputs.files
 
-    implementation group: 'software.amazon.awssdk', name: 's3'
-    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
-    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
+    implementation libs.aws.crt
+    implementation libs.aws.s3
+    implementation libs.aws.s3.transfer.manager
 
-    implementation platform('io.projectreactor:reactor-bom:2023.0.5')
-    implementation 'io.projectreactor.netty:reactor-netty-core'
-    implementation 'io.projectreactor.netty:reactor-netty-http'
+    implementation libs.reactor.netty.core
+    implementation libs.reactor.netty.http
 
-    implementation group: 'software.amazon.awssdk', name: 's3'
-    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
-    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
+    implementation libs.aws.crt
+    implementation libs.aws.s3
+    implementation libs.aws.s3.transfer.manager
 
-    testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
-    testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
+    testImplementation libs.docker.java.core
+    testImplementation libs.docker.java.transport.httpclient5
 
     testImplementation testFixtures(project(path: ':RFS'))
-    testImplementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
-    testImplementation group: 'io.projectreactor', name: 'reactor-test'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
-    testImplementation group: 'org.mockito', name: 'mockito-core'
-    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
+    testImplementation libs.lucene.v9.backward.codecs
+    testImplementation libs.reactor.test
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
 
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     testRuntimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    testRuntimeOnly libs.junit.jupiter.engine
 
-    testImplementation group: 'org.openjdk.jmh', name: 'jmh-core'
+    testImplementation libs.jmh.core
 
     // Integration tests
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation group: 'org.testcontainers', name: 'testcontainers'
-    testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    testImplementation libs.testcontainers
+    testImplementation libs.hamcrest
+    testImplementation libs.junit.jupiter.api
+    testRuntimeOnly libs.junit.jupiter.engine
     // why are these under implementation with the above comment for integ tests?
-    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
+    implementation libs.httpclient5
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+    implementation libs.jackson.annotations
 
     testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))
-    testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
-    testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
-    testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'
-    testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testFixturesImplementation libs.docker.java
+    testFixturesImplementation libs.docker.java.core
+    testFixturesImplementation libs.docker.java.transport.httpclient5
+    testFixturesImplementation libs.testcontainers
 
-    testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testFixturesImplementation libs.hamcrest
+    testFixturesImplementation libs.guava
+    testFixturesImplementation libs.slf4j.api
 }
 
 jmh {

@@ -7,7 +7,7 @@ on:
       - "*"
 env:
   java-version: '17'
-  gradle-version: '8.0.2'
+  gradle-version: '8.12.1'
 
 permissions:
   id-token: write
@@ -46,7 +46,7 @@ jobs:
         # Preface Traffic Capture version with 0. to signal interface immaturity
         run: |
           wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
-          ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository
+          gradle publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository
       - name: Build Docker Images
         run: |
           ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }}
