@@ -57,10 +57,8 @@ class EndToEndTest extends BaseMigrationTest {
                         .toList().stream();
             });
         var opensearch2AsSourceAndTarget = Stream.of(
-                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.Http, TemplateType.Index),
-                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.SnapshotImage, TemplateType.Index),
-                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.Http, TemplateType.IndexAndComponent),
-                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.SnapshotImage, TemplateType.IndexAndComponent)
+                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.Http, Stream.of(TemplateType.Index, TemplateType.IndexAndComponent).toList()),
+                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.SnapshotImage, Stream.of(TemplateType.Index, TemplateType.IndexAndComponent).toList())
         );
         return Stream.concat(clusterMatrix, opensearch2AsSourceAndTarget);
     }
