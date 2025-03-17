@@ -37,30 +37,21 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        var clusterMatrix = SupportedClusters.sources().stream()
-            .flatMap(sourceCluster -> {
-                // Determine applicable template types based on source version
+        return SupportedClusters.supportedPairs(false).stream()
+            .flatMap(pair -> {
                 List<TemplateType> templateTypes = Stream.concat(
-                                Stream.of(TemplateType.Legacy),
-                                (sourceCluster.getVersion().getMajor() >= 7
-                                        ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
-                                        : Stream.empty()))
-                        .toList();
+                            (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
+                                    ? Stream.empty()
+                                    : Stream.of(TemplateType.Legacy)),
+                            (VersionMatchers.equalOrGreaterThanES_7_10.test(pair.source().getVersion())
+                                    ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
+                                    : Stream.empty()))
+                    .toList();
 
-                return SupportedClusters.targets().stream()
-                        .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
-                                .map(transferMedium -> Arguments.of(
-                                        sourceCluster,
-                                        targetCluster,
-                                        transferMedium,
-                                        templateTypes)))
+                return Arrays.stream(TransferMedium.values())
+                    .map(medium -> Arguments.of(pair.source(), pair.target(), medium, templateTypes))
                         .toList().stream();
             });
-        var opensearch2AsSourceAndTarget = Stream.of(
-                Arguments.of(SearchClusterContainer.OS_LATEST, SearchClusterContainer.OS_LATEST, TransferMedium.Http, Stream.of(TemplateType.Index, TemplateType.IndexAndComponent).toList()),
-                Arguments.of(SearchClusterContainer.OS_LATEST, SearchClusterContainer.OS_LATEST, TransferMedium.SnapshotImage, Stream.of(TemplateType.Index, TemplateType.IndexAndComponent).toList())
-        );
-        return Stream.concat(clusterMatrix, opensearch2AsSourceAndTarget);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
