@@ -12,7 +12,7 @@ ext {
     dataset = findProperty('dataset') ?: 'skip_dataset'
     luceneVersion6 = '6.6.6'
     luceneVersion7 = '7.7.3'
-    luceneVersion9 = '9.11.1'
+    luceneVersion9 = '9.12.1'
 }
 
 configurations {

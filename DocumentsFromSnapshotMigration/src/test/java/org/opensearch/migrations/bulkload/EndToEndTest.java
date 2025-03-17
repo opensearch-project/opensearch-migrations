@@ -42,6 +42,7 @@ public class EndToEndTest extends SourceTestBase {
                 scenarios.add(Arguments.of(sourceCluster, targetCluster));
             }
         }
+        scenarios.add(Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1));
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V6_8_23));
 
         return scenarios.build();
