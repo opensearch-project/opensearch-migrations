@@ -37,24 +37,20 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.sources().stream()
-            .flatMap(sourceCluster -> {
-                // Determine applicable template types based on source version
+        return SupportedClusters.supportedPairs(false).stream()
+            .flatMap(pair -> {
                 List<TemplateType> templateTypes = Stream.concat(
-                                Stream.of(TemplateType.Legacy),
-                                (sourceCluster.getVersion().getMajor() >= 7
-                                        ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
-                                        : Stream.empty()))
-                        .collect(Collectors.toList());
+                            (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
+                                    ? Stream.empty()
+                                    : Stream.of(TemplateType.Legacy)),
+                            (VersionMatchers.equalOrGreaterThanES_7_10.test(pair.source().getVersion())
+                                    ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
+                                    : Stream.empty()))
+                    .toList();
 
-                return SupportedClusters.targets().stream()
-                        .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
-                                .map(transferMedium -> Arguments.of(
-                                        sourceCluster,
-                                        targetCluster,
-                                        transferMedium,
-                                        templateTypes)))
-                        .collect(Collectors.toList()).stream();
+                return Arrays.stream(TransferMedium.values())
+                    .map(medium -> Arguments.of(pair.source(), pair.target(), medium, templateTypes))
+                        .toList().stream();
             });
     }
 
