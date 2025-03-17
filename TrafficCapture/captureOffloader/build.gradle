@@ -16,22 +16,22 @@ sourceSets {
     }
 }
 dependencies {
-    api group: 'io.netty', name: 'netty-buffer'
+    api libs.netty.buffer
 
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
-    implementation group: 'com.google.protobuf', name: 'protobuf-java'
-    implementation group: 'org.projectlombok', name: 'lombok'
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.protobuf.java
+    implementation libs.lombok
+    implementation libs.slf4j.api
 
     testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation project(':coreUtilities')
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    testImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testImplementation libs.slf4j.api
 
     testFixturesImplementation project(':TrafficCapture:captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
-    testFixturesImplementation group: 'com.google.protobuf', name: 'protobuf-java'
+    testFixturesImplementation libs.protobuf.java
 }

@@ -1,0 +1,8 @@
+[
+    {
+        "JsonJSTransformerProvider": {
+            "initializationScript": "function mapToPlainObjectReplacer(key, value) { if (value instanceof Map) { return Object.fromEntries(value); } return value; } function transform(document, context) { if (!document) { throw new Error(`No source_document was defined - nothing to transform!`); } let ret = replaceStringWithText(document); console.log(`Document: `, JSON.stringify(ret, mapToPlainObjectReplacer, 2)); return ret; } function replaceStringWithText(obj) { if (Array.isArray(obj)) { return obj.map(replaceStringWithText); } else if (typeof obj === `object` && obj !== null) { for (let key in obj) { if (key === `properties` && typeof obj[key] === `object`) { for (let field in obj[key]) { if (obj[key][field].type === `string`) { obj[key][field].type = `text`; obj[key][field].fields = { keyword: { type: `keyword`, ignore_above: 256, }, }; } } } else { obj[key] = replaceStringWithText(obj[key]); } } } return obj; } function main(context) { console.log( `Context: `, JSON.stringify(context, mapToPlainObjectReplacer, 2) ); return (document) => { if (Array.isArray(document)) { return document.flat().map((item) => transform(item, context)); } return transform(document, context); }; } (() => main)();",
+            "bindingsObject": "{}"
+        }
+    }
+]

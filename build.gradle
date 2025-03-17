@@ -4,10 +4,12 @@ plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "2.1.1"
     id "com.diffplug.spotless" version '7.0.2'
-    id 'io.freefair.lombok' version '8.6' apply false
+    id 'io.freefair.lombok' version '8.12' apply false
     id 'jacoco'
-    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
     id 'me.champeau.jmh' version '0.7.2' apply false
+    id 'com.gradleup.shadow' version '8.3.5' apply false
+    id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
+    id 'com.google.protobuf' version "0.9.4" apply false
 }
 
 allprojects {
@@ -24,26 +26,24 @@ ext.captureProxyDependencies = []
 gradle.projectsEvaluated {
     def captureProxyProject = rootProject.project(":TrafficCapture:trafficCaptureProxyServer")
     captureProxyDependencies = captureProxyProject.configurations.collectMany { configuration ->
-        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.dependencyProject.path }
+        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.path }
     }
     // Add the TrafficCaptureProxyServer project itself
     captureProxyDependencies << captureProxyProject.path
 }
 
 // Modify sourceCompatibility during the execution phase
-gradle.taskGraph.whenReady { taskGraph ->
+gradle.taskGraph.whenReady {
     allprojects {
         tasks.withType(JavaCompile).configureEach {
-            if (project.path in rootProject.captureProxyDependencies) {
-                sourceCompatibility = JavaVersion.VERSION_11
-                targetCompatibility = JavaVersion.VERSION_11
-            } else {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-            }
+            def jvmVersion = (project.path in rootProject.captureProxyDependencies) ? JavaVersion.VERSION_11 : JavaVersion.VERSION_17
+            sourceCompatibility = jvmVersion
+            targetCompatibility = jvmVersion
         }
     }
 }
+
+
 
 // Define version properties
 ext {
@@ -64,20 +64,6 @@ allprojects {
                 attributes(
                         'SPDX-License-Identifier': 'Apache-2.0'
                 )
-            }
-        }
-    }
-}
-
-subprojects { subproject ->
-    subproject.afterEvaluate {
-        if (subproject.plugins.hasPlugin('java') && subproject.name != 'commonDependencyVersionConstraints') {
-            subproject.dependencies {
-                implementation project(":commonDependencyVersionConstraints")
-                annotationProcessor project(":commonDependencyVersionConstraints")
-                if (subproject.plugins.hasPlugin('java-test-fixtures')) {
-                    testFixturesImplementation project(":commonDependencyVersionConstraints")
-                }
             }
         }
     }
@@ -124,6 +110,25 @@ subprojects {
     apply plugin: 'jacoco'
     apply plugin: 'java'
     apply plugin: 'maven-publish'
+
+    configurations.all {
+        resolutionStrategy {
+            // Force specific versions of transitive dependencies to handle CVEs
+            force 'net.minidev:json-smart:2.5.2'
+            force 'xalan:xalan:2.7.3'
+            force 'com.thoughtworks.xstream:xstream:1.4.21'
+            force 'commons-net:commons-net:3.9.0'
+            force 'org.jsoup:jsoup:1.15.3'
+            force 'org.apache.tika:tika-core:1.28.4'
+            force 'com.jayway.jsonpath:json-path:2.9.0'
+            force 'dnsjava:dnsjava:3.6.0'
+            force 'org.xerial.snappy:snappy-java:1.1.10.6'
+            force 'org.glassfish.jersey.core:jersey-common:2.34'
+            force 'org.apache.httpcomponents:httpclient:4.5.13'
+
+            preferProjectModules()
+        }
+    }
 
     java {
         toolchain {
@@ -177,6 +182,7 @@ subprojects {
             systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
             // Verify assertions in tests
             jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
+            systemProperty "junit.jupiter.execution.timeout.default", "5m"
             jacoco {
                 enabled = true
                 destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
@@ -304,7 +310,7 @@ subprojects {
             repositories {
                 maven { url = "${rootProject.buildDir}/repository"}
                 maven {
-                    url "https://aws.oss.sonatype.org/content/repositories/snapshots"
+                    url = "https://aws.oss.sonatype.org/content/repositories/snapshots"
                     name = 'staging'
                 }
             }
@@ -430,29 +436,31 @@ task listPublishedArtifacts {
     }
 }
 
-tasks.register("listTestTasksAsJson") {
-    doLast {
-        def testTasks = []
+// Define a provider for test tasks list
+def testTasksProvider = provider {
+    def testTasks = []
+    rootProject.subprojects.each { subproject ->
+        def projectPath = subproject.path
 
-        subprojects.each { subproject ->
-            def projectPath = subproject.path
-
-            // Collect test tasks without JaCoCo enabled
-            subproject.tasks.withType(Test).findAll {
-                !(it.extensions.findByType(JacocoTaskExtension)?.enabled ?: false)
-            }.each {
-                testTasks << "${projectPath}:${it.name}"
-            }
-
-            // Add jacocoTestReport if any test task has JaCoCo enabled
-            if (subproject.tasks.withType(Test).any {
-                it.extensions.findByType(JacocoTaskExtension)?.enabled ?: false
-            }) {
-                testTasks << "${projectPath}:jacocoTestReport"
+        subproject.tasks.withType(Test).configureEach { testTask ->
+            def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
+            if (!(jacocoExtension?.enabled ?: false)) {
+                testTasks << "${projectPath}:${testTask.name}"
             }
         }
 
-        // Print as a clean JSON list
-        println JsonOutput.prettyPrint(JsonOutput.toJson(testTasks))
+        if (subproject.tasks.withType(Test).any { testTask ->
+            def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
+            jacocoExtension?.enabled ?: false
+        }) {
+            testTasks << "${projectPath}:jacocoTestReport"
+        }
+    }
+    return testTasks
+}
+
+tasks.register("listTestTasksAsJson") {
+    doLast {
+        println JsonOutput.prettyPrint(JsonOutput.toJson(testTasksProvider.get()))
     }
 }

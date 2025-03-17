@@ -6,17 +6,17 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    api group: 'com.hubspot.jinjava', name: 'jinjava', version: "2.7.3"
+    api libs.jin.java
 
-    implementation group: 'com.google.guava', name: 'guava'
+    implementation libs.guava
+    implementation libs.slf4j.api
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
-    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
-    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-params'
-    testImplementation group: 'org.slf4j', name: 'slf4j-api'
-    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testRuntimeOnly libs.junit.jupiter.engine
 }
