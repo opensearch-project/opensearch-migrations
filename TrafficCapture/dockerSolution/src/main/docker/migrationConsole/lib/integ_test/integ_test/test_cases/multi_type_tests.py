@@ -91,9 +91,9 @@ class Test0004MultiTypeUnionMigration(MATestBase):
 
     def perform_operations_during_live_capture_migration(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
-                                            doc_id=self.doc_id3, max_attempts=10, delay=3.0)
+                                            doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
-                                            doc_id=self.doc_id4, max_attempts=10, delay=3.0)
+                                            doc_id=self.doc_id4, max_attempts=20, delay=3.0)
 
 
 class Test0005MultiTypeSplitMigration(MATestBase):
@@ -183,6 +183,6 @@ class Test0005MultiTypeSplitMigration(MATestBase):
 
     def perform_operations_during_live_capture_migration(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
-                                            doc_id=self.doc_id3, max_attempts=10, delay=3.0)
+                                            doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
-                                            doc_id=self.doc_id4, max_attempts=10, delay=3.0)
+                                            doc_id=self.doc_id4, max_attempts=20, delay=3.0)

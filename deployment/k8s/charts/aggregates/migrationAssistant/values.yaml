@@ -21,7 +21,7 @@ shared-configs:
         directEndpoint: "http://elasticsearch-master:9200"
         allowInsecure: true
         authType: "no_auth"
-        version: "5.6.16"
+        version: "ES_7.10"
     targetCluster:
       allowRuntimeOverride: true
       object:
@@ -32,7 +32,7 @@ shared-configs:
         basicAuthPassword: "myStrongPassword123!"
         # Should be in sync with above username/password
         basicAuthHeader: "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
-        version: "2.16.0"
+        version: "OS_2.16"
     kafkaBrokers:
       allowRuntimeOverride: false
       object:
@@ -51,7 +51,7 @@ shared-configs:
         minReplicas: 0
         metadataType: "from_snapshot"
         #otelEndpoint: "http://localhost:4317"
-        sourceClusterVersion: "ES_5.6"
+        sourceClusterVersion: "ES_7.10"
 #    metricsSource:
 #      allowRuntimeOverride: false
 #      object:
@@ -111,7 +111,7 @@ bulk-document-loader:
       configMapKey: "basicAuthPassword"
     sourceVersion:
       source: parameterConfig
-      value: "ES_5.6"
+      value: "ES_7.10"
       allowRuntimeOverride: true
     docTransformerConfigFile:
       source: parameterConfig

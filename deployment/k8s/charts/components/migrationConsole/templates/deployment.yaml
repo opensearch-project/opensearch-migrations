@@ -1,7 +1,8 @@
 {{ $mountName := "all-configs" }}
 {{ $envVarMountName := "env-vars" }}
-{{ $sharedLogsVolumeEnabled := false }}
+{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
 {{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
+{{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,9 +48,10 @@ spec:
               mountPath: /config
             - name: {{ $envVarMountName }}
               mountPath: /shared
-{{/*              Enable if developing the console library */}}
-{{/*            - name: local-console-link*/}}
-{{/*              mountPath: /root/lib/console_link*/}}
+            {{- if $developerModeEnabled }}
+            - name: local-console-libs
+              mountPath: /root/lib
+            {{- end }}
             {{- if $snapshotVolumeEnabled }}
             - name: snapshot-volume
               mountPath: /snapshot
@@ -59,10 +61,12 @@ spec:
           emptyDir: { }
         - name: merged-config
           emptyDir: { }
-{{/*        - name: local-console-link*/}}
-{{/*          hostPath:*/}}
-{{/*            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link*/}}
-{{/*            type: Directory*/}}
+        {{- if $developerModeEnabled  }}
+        - name: local-console-libs
+          hostPath:
+            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            type: Directory
+        {{- end }}
         {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:
