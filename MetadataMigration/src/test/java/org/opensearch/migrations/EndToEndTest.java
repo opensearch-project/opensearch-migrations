@@ -37,7 +37,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.sources().stream()
+        var clusterMatrix = SupportedClusters.sources().stream()
             .flatMap(sourceCluster -> {
                 // Determine applicable template types based on source version
                 List<TemplateType> templateTypes = Stream.concat(
@@ -45,7 +45,7 @@ class EndToEndTest extends BaseMigrationTest {
                                 (sourceCluster.getVersion().getMajor() >= 7
                                         ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
                                         : Stream.empty()))
-                        .collect(Collectors.toList());
+                        .toList();
 
                 return SupportedClusters.targets().stream()
                         .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
@@ -54,8 +54,15 @@ class EndToEndTest extends BaseMigrationTest {
                                         targetCluster,
                                         transferMedium,
                                         templateTypes)))
-                        .collect(Collectors.toList()).stream();
+                        .toList().stream();
             });
+        var opensearch2AsSourceAndTarget = Stream.of(
+                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.Http, TemplateType.Index),
+                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.SnapshotImage, TemplateType.Index),
+                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.Http, TemplateType.IndexAndComponent),
+                Arguments.of(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1, TransferMedium.SnapshotImage, TemplateType.IndexAndComponent)
+        );
+        return Stream.concat(clusterMatrix, opensearch2AsSourceAndTarget);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
