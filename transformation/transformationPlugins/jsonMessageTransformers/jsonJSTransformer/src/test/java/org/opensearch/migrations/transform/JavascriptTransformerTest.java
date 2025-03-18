@@ -15,16 +15,16 @@ import org.junit.jupiter.api.Test;
 public class JavascriptTransformerTest {
 
     private static final String INIT_SCRIPT = "((context) => (document) => ({docSize: Object.keys(document).length+2 }))";
-    private static final String INIT_SCRIPT_2 =
-            "function transformDoc(context, document) { " +
-                    "    return { docSize: Object.keys(document).length + 2 }; " +
-                    "} " +
-                    "function main(context) { " +
-                    "    return function(document) { " +
-                    "        return transformDoc(context, document); " +
-                    "    }; " +
-                    "}" +
-                    "main";
+    private static final String INIT_SCRIPT_2 = "\n" +
+        "function transformDoc(context, document) { " +
+        "    return { docSize: Object.keys(document).length + 2 }; " +
+        "} " +
+        "function main(context) { " +
+        "    return function(document) { " +
+        "        return transformDoc(context, document); " +
+        "    }; " +
+        "}" +
+        "main";
 
     @Test
     @SuppressWarnings("unchecked")
@@ -46,8 +46,8 @@ public class JavascriptTransformerTest {
                     count += ((Map<String, Object>) testTransformer.transformJson(testDoc)).size();
                 }
                 log.atInfo().setMessage("Run {}: {}")
-                        .addArgument(j)
-                        .addArgument(Duration.ofNanos(System.nanoTime() - start)).log();
+                    .addArgument(j)
+                    .addArgument(Duration.ofNanos(System.nanoTime() - start)).log();
             }
         }
     }
@@ -156,7 +156,7 @@ public class JavascriptTransformerTest {
         @HostAccess.Export
         public String foo = "bar";
     }
-    // JSON objects are usually represented as maps, but if they are native java objects, verify GraalJS behavior
+    // JSON objects are usually represented as maps, if they are native java objects, verify GraalJS behavior
     @Test
     public void testObjectOperations() throws Exception {
         var scriptCallsHas = "((obj) => (obj.has('foo')))";
