@@ -58,7 +58,12 @@ public class HttpJsonRequestWithFaultingPayload extends HttpJsonMessageWithFault
 
         if (headers instanceof ListKeyAdaptingCaseInsensitiveHeadersMap) {
             // No conversion needed
-        } else if (headers instanceof Map<?, ?>) {
+        } else if (headers instanceof StrictCaseInsensitiveHttpHeadersMap) {
+            response.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(
+                    (StrictCaseInsensitiveHttpHeadersMap) headers
+            ));
+        }
+        else if (headers instanceof Map<?, ?>) {
             response.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(
                 StrictCaseInsensitiveHttpHeadersMap.fromMap((Map<String, List<String>>) headers)));
         } else {

@@ -7,6 +7,7 @@ import java.util.Map;
 
 import lombok.extern.slf4j.Slf4j;
 import org.graalvm.polyglot.HostAccess;
+import org.graalvm.polyglot.PolyglotException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -137,6 +138,17 @@ public class JavascriptTransformerTest {
         try (var testTransformer = new JavascriptTransformer(scriptCallsGetWithoutKey, null)) {
             var result = testTransformer.transformJson(Map.of());
             Assertions.assertNull(result);
+        }
+
+        var scriptModifiesWithImmutableMap = "(map) => (map.set('foo', 'baz'))";
+        try (var testTransformer = new JavascriptTransformer(scriptModifiesWithImmutableMap, null)) {
+            var immutableMap = Map.of("foo", "baz");
+            PolyglotException exception = Assertions.assertThrows(PolyglotException.class, () -> {
+                testTransformer.transformJson(immutableMap);
+            });
+            // Verify that the cause is UnsupportedOperationException
+            Assertions.assertInstanceOf(UnsupportedOperationException.class, exception.asHostException(),
+                    "Expected cause to be UnsupportedOperationException, but got: " + exception.getCause());
         }
     }
 
