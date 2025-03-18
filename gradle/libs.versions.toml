@@ -1,0 +1,157 @@
+[versions]
+aws-crt = "0.29.18"
+aws-msk-iam-auth = "2.0.3"
+aws-sdk = "2.25.19"
+bouncycastle = "1.78"
+commons-collections = "4.4"
+commons-compress = "1.26.0"
+disruptor = "4.0.0"
+dockerapi = "3.3.6"
+errorprone = "2.32.0"
+graalvm = "24.1.1"
+groovy = "3.0.23"
+guava = "32.0.1-jre"
+hamcrest = "2.2"
+httpclient5 = "5.2.1"
+jackson = "2.16.2"
+jcommander = "1.85"
+jenkins-pipeline-unit = "1.23"
+jin-java = "2.7.3"
+jmespath-core = "0.6.0"
+jmeter = "5.6.3"
+jmh-core = "1.36"
+jolt-core = "0.1.7"
+json = "20240303"
+jupiter = "5.10.2"
+kafka-clients = "3.6.0"
+log4j = "2.23.1"
+lombok = "1.18.30"
+lucene6 = '6.6.6'
+lucene7 = '7.7.3'
+lucene9 = "9.12.1"
+mockito = "5.11.0"
+netty = "4.1.108.Final"
+opensearch-testcontainers = "2.0.1"
+opentelemetry = "1.34.1"
+opentelemetry-semconv = "1.23.1-alpha"
+protobuf = "3.25.5"
+reactor-netty = "1.1.18"
+reactor-test = "3.7.3"
+semver4j = "5.3.0"
+slf4j = "2.0.13"
+testcontainers = "1.19.7"
+toxiproxy = "2.1.7"
+
+[libraries]
+aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
+aws-auth = { module = "software.amazon.awssdk:auth", version.ref = "aws-sdk" }
+aws-crt = { module = "software.amazon.awssdk.crt:aws-crt", version.ref = "aws-crt" }
+aws-msk-iam-auth = { module = "software.amazon.msk:aws-msk-iam-auth", version.ref = "aws-msk-iam-auth" }
+aws-s3 = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
+aws-s3-transfer-manager = { module = "software.amazon.awssdk:s3-transfer-manager", version.ref = "aws-sdk" }
+aws-sdk-core = { module = "software.amazon.awssdk:sdk-core", version.ref = "aws-sdk" }
+aws-secretsmanager = { module = "software.amazon.awssdk:secretsmanager", version.ref = "aws-sdk" }
+
+bouncycastle-certs = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+
+commons-collections = { module = "org.apache.commons:commons-collections4", version.ref = "commons-collections" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
+
+disruptor = { module = "com.lmax:disruptor", version.ref = "disruptor" }
+
+docker-java = { module = "com.github.docker-java:docker-java", version.ref = "dockerapi" }
+docker-java-core = { module = "com.github.docker-java:docker-java-core", version.ref = "dockerapi" }
+docker-java-transport-httpclient5 = { module = "com.github.docker-java:docker-java-transport-httpclient5", version.ref = "dockerapi" }
+
+errorprone = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+
+groovy = { module = "org.codehaus.groovy:groovy-all", version.ref = "groovy" }
+
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+
+hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
+
+httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpclient5" }
+
+jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
+jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-dataformat-smile = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-smile", version.ref = "jackson" }
+jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml", version.ref = "jackson" }
+
+jcommander = { module = "org.jcommander:jcommander", version.ref = "jcommander" }
+
+jenkins-pipeline-unit = { module = "com.lesfurets:jenkins-pipeline-unit", version.ref = "jenkins-pipeline-unit" }
+
+jin-java = { module = "com.hubspot.jinjava:jinjava", version.ref = "jin-java" }
+
+jmespath-core = { module = "io.burt:jmespath-core", version.ref = "jmespath-core" }
+
+jmeter-config = { module = "org.apache.jmeter:ApacheJMeter_config", version.ref = "jmeter" }
+jmeter-core = { module = "org.apache.jmeter:ApacheJMeter_core", version.ref = "jmeter" }
+jmeter-http = { module = "org.apache.jmeter:ApacheJMeter_http", version.ref = "jmeter" }
+
+jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh-core" }
+
+jolt-core = { module = "com.bazaarvoice.jolt:jolt-core", version.ref = "jolt-core" }
+
+json = { module = "org.json:json", version.ref = "json" }
+
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jupiter" }
+junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "jupiter" }
+junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "jupiter" }
+junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "jupiter" }
+
+kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka-clients" }
+
+log4j-api = { module = "org.apache.logging.log4j:log4j-api", version.ref = "log4j" }
+log4j-core = { module = "org.apache.logging.log4j:log4j-core", version.ref = "log4j" }
+log4j-slf4j2-impl = { module = "org.apache.logging.log4j:log4j-slf4j2-impl", version.ref = "log4j" }
+
+lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
+
+lucene-v6-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene6" }
+lucene-v6-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene6" }
+lucene-v7-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene7" }
+lucene-v7-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene7" }
+lucene-v9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene9" }
+lucene-v9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
+lucene-v9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
+
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
+
+netty-all = { module = "io.netty:netty-all", version.ref = "netty" }
+netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
+netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "netty" }
+netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
+
+opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
+opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
+opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetry" }
+opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }
+opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semconv", version.ref = "opentelemetry-semconv" }
+
+polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
+polyglot-js-community = { module = "org.graalvm.polyglot:js-community", version.ref = "graalvm" }
+
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
+
+reactor-netty-core = {module = "io.projectreactor.netty:reactor-netty-core", version.ref = "reactor-netty" }
+reactor-netty-http = {module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactor-netty" }
+
+reactor-test = {module = "io.projectreactor:reactor-test", version.ref = "reactor-test" }
+
+semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
+
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+
+testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers" }
+testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
+testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
+
+toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }

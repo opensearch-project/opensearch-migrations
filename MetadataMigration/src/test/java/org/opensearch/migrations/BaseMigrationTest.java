@@ -1,9 +1,12 @@
 package org.opensearch.migrations;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Scanner;
 import java.util.concurrent.CompletableFuture;
 
+import org.opensearch.migrations.MigrateOrEvaluateArgs.MetadataCustomTransformationParams;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -143,5 +146,20 @@ abstract class BaseMigrationTest {
     protected void runSnapshotAndCopyData(FileSystemSnapshotCreator snapshotCreator, SearchClusterContainer cluster) {
         SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
         cluster.copySnapshotData(localDirectory.toString());
+    }
+
+    protected MetadataCustomTransformationParams useTransformationResource(String resourceName) {
+        return new MetadataCustomTransformationParams() {
+            public String getTransformerConfig() {
+                try (
+                    var inputStream = ClassLoader.getSystemResourceAsStream(resourceName);
+                    var scanner = new Scanner(inputStream, StandardCharsets.UTF_8.name()))
+                    {
+                    return scanner.useDelimiter("\\A").next();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
     }
 }

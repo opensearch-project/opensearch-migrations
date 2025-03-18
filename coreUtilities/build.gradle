@@ -9,13 +9,6 @@
  * GitHub history for details.
  */
 
-
-buildscript {
-    dependencies {
-        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
-    }
-}
-
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
@@ -24,37 +17,37 @@ plugins {
 }
 
 dependencies {
-    implementation group: "com.google.protobuf", name: "protobuf-java"
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.protobuf.java
+    implementation libs.slf4j.api
 
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
 
     // Log4j
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
 
     // JCommander
-    compileOnly group: 'org.jcommander', name: 'jcommander'
+    compileOnly libs.jcommander
 
     // OpenTelemetry core
-    api group: 'io.opentelemetry', name: 'opentelemetry-api'
-    api group: 'io.opentelemetry', name: 'opentelemetry-sdk'
-    implementation group: 'io.opentelemetry', name: 'opentelemetry-exporter-otlp'
-    implementation group: 'io.opentelemetry.semconv', name: 'opentelemetry-semconv'
+    api libs.opentelemetry.api
+    api libs.opentelemetry.sdk
+    implementation libs.opentelemetry.exporter.otlp
+    implementation libs.opentelemetry.semconv
 
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    testImplementation libs.jackson.databind
+    testImplementation libs.jackson.core
 
-    testImplementation group: 'org.mockito', name: 'mockito-core'
-    testImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testImplementation libs.mockito.core
+    testImplementation libs.hamcrest
 
-    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-api'
-    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk'
-    testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-api'
-    testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testFixturesApi libs.opentelemetry.api
+    testFixturesApi libs.opentelemetry.sdk
+    testFixturesApi libs.opentelemetry.sdk.testing
+    testFixturesImplementation libs.opentelemetry.sdk
+    testFixturesImplementation libs.opentelemetry.sdk.testing
+    testFixturesImplementation libs.slf4j.api
 }

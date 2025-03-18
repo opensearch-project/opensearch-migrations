@@ -377,7 +377,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
                     """
                             [{  "JsonJSTransformerProvider": {
                                 "initializationScript": "function transform(document, context) { throw new Error(\\"Error!\\"); }function main(context) { return (document) => { return transform(document, context); }; } (() => main)()",
-                                "bindingsObject": {}
+                                "bindingsObject": "{}"
                               }
                             }]"""
             ),

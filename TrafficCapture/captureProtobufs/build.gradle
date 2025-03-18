@@ -4,15 +4,15 @@
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id 'com.google.protobuf' version "0.9.2"
+    id 'com.google.protobuf'
 }
 
 dependencies {
-    api group: 'com.google.protobuf', name: 'protobuf-java'
+    api libs.protobuf.java
 }
 
 protobuf {
     protoc {
-        artifact = "com.google.protobuf:protoc:${rootProject.project("commonDependencyVersionConstraints").protobufVersion}"
+        artifact = "${libs.protobuf.protoc.get()}"
     }
 }
