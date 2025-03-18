@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.ObjectNodeUtils;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
@@ -146,6 +147,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return templatesToCreate.entrySet().stream().map(kvp -> {
             var templateName = kvp.getKey();
             var templateBody = kvp.getValue();
+
+            String[] problemSettings = { "settings.mapping.single_type", "settings.mapper.dynamic" };
+            for (var field : problemSettings) {
+                ObjectNodeUtils.removeFieldsByPath(templateBody, field);
+            }
+
             var creationResult = CreationResult.builder().name(templateName);
 
             if (skipCreation.test(templateName)) {
