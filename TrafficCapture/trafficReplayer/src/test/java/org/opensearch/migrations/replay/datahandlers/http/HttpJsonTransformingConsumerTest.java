@@ -371,16 +371,16 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
 
         var transformingHandler = new HttpJsonTransformingConsumer<>(
-            new TransformationLoader().getTransformerFactoryLoader(
-                HOST_NAME,
-                null,
-                    """
-                            [{  "JsonJSTransformerProvider": {
-                                "initializationScript": "function transform(document, context) { throw new Error(\\"Error!\\"); }function main(context) { return (document) => { return transform(document, context); }; } (() => main)()",
-                                "bindingsObject": "{}"
-                              }
-                            }]"""
-            ),
+                new TransformationLoader().getTransformerFactoryLoader(
+                        HOST_NAME,
+                        null,
+                        "[{  \"JsonJSTransformerProvider\": {" +
+                                "    \"initializationScript\": \"function transform(document, context) { throw new Error(\\\"Error!\\\"); }" +
+                                "function main(context) { return (document) => { return transform(document, context); }; } (() => main)()\"," +
+                                "    \"bindingsObject\": \"{}\"" +
+                                "  }" +
+                                "}]"
+                ),
             null,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)
