@@ -68,7 +68,8 @@ def test_migration_assistant_workflow(test_cases: List[MATestBase]):
     logger.info(f"Performing the following test cases: {test_cases}")
     control_test_case = test_cases[0]
 
-    breakpoint()
+    # Enable for stepping through workflows with Python debugger
+    #breakpoint()
 
     run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_initial_operations())
     control_test_case.perform_snapshot_create()
@@ -80,9 +81,7 @@ def test_migration_assistant_workflow(test_cases: List[MATestBase]):
     control_test_case.stop_backfill_migration()
     run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_operations_after_backfill_migration())
     control_test_case.start_live_capture_migration()
-    run_on_all_cases(test_cases=test_cases,
-                     operation=lambda case: case.perform_operations_during_live_capture_migration())
+    run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_operations_during_live_capture_migration())
     control_test_case.stop_live_capture_migration()
-    run_on_all_cases(test_cases=test_cases,
-                     operation=lambda case: case.perform_operations_after_live_capture_migration())
+    run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_operations_after_live_capture_migration())
     run_on_all_cases(test_cases=test_cases, operation=lambda case: case.perform_final_operations())
