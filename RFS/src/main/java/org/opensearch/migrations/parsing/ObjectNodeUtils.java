@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.common;
+package org.opensearch.migrations.parsing;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 

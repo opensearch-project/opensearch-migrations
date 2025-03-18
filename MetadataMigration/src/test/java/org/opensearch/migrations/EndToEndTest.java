@@ -142,7 +142,7 @@ class EndToEndTest extends BaseMigrationTest {
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters for ES 7.17 as we do not currently have transformations in place to support breaking
-        // changes from default templates and settings here
+        // changes from default templates and settings here: https://opensearch.atlassian.net/browse/MIGRATIONS-2447
         if (sourceCluster.getContainerVersion().getVersion().equals(Version.fromString("ES 7.17.22"))) {
             var dataFilterArgs = new DataFilterArgs();
             dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
