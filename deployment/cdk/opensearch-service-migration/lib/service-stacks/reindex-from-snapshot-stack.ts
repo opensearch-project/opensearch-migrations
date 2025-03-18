@@ -216,7 +216,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         });
 
         new MigrationDashboard(this, 'RFSDashboard', {
-            dashboardName: `MigrationAssistant_ReindexFromSnapshot_${props.stage}_Dashboard`,
+            dashboardName: `MigrationAssistant_ReindexFromSnapshot_Dashboard_${props.stage}`,
             stage: props.stage,
             account: this.account,
             region: this.region,

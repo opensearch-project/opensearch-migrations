@@ -19,7 +19,7 @@ import { ECSReplayerYaml } from "../migration-services-yaml";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
 import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import { CdkLogger } from "../cdk-logger";
-import * as CnRDashboard from '../components/migrationassistant-capture-replay-dashboard.json';
+import * as CaptureReplayDashboard from '../components/capture-replay-dashboard.json';
 import { MigrationDashboard } from '../constructs/migration-dashboard';
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -148,11 +148,11 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         this.replayerYaml.ecs.service_name = `migration-${props.stage}-traffic-replayer-${deployId}`;
 
         new MigrationDashboard(this, 'CnRDashboard', {
-            dashboardName: `MigrationAssistant_CaptureAndReplay_${props.stage}_Dashboard`,
+            dashboardName: `MigrationAssistant_CaptureAndReplay_Dashboard_${props.stage}`,
             stage: props.stage,
             account: this.account,
             region: this.region,
-            dashboardJson: CnRDashboard
+            dashboardJson: CaptureReplayDashboard
         });
     }
 }
