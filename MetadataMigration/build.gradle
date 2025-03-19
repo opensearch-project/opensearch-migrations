@@ -10,25 +10,25 @@ dependencies {
     implementation project(':transformation')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
 
-    implementation group: 'org.jcommander', name: 'jcommander'
-    implementation group: 'org.slf4j', name: 'slf4j-api'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation libs.jcommander
+    implementation libs.slf4j.api
+    implementation libs.log4j.slf4j2.impl
 
     testImplementation testFixtures(project(':RFS'))
     testImplementation testFixtures(project(':testHelperFixtures'))
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
-    testImplementation group: 'org.mockito', name: 'mockito-core'
-    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
-    testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers'
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
+    testImplementation libs.hamcrest
+    testImplementation libs.testcontainers
+    testImplementation libs.jackson.databind
 
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    testRuntimeOnly libs.junit.jupiter.engine
 }
 
 application {
-    mainClassName = 'org.opensearch.migrations.MetadataMigration'
+    mainClass.set('org.opensearch.migrations.MetadataMigration')
 }

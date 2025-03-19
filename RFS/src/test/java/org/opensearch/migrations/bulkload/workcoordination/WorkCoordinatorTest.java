@@ -128,6 +128,8 @@ public class WorkCoordinatorTest {
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 40;
         final var MAX_RUNS = 2;
+        final var EXPIRATION = Duration.ofSeconds(10);
+
         var executorService = Executors.newFixedThreadPool(NUM_DOCS);
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -141,7 +143,6 @@ public class WorkCoordinatorTest {
         for (int run = 0; run < MAX_RUNS; ++run) {
             final var seenWorkerItems = new ConcurrentHashMap<String, String>();
             var allFutures = new ArrayList<CompletableFuture<String>>();
-            final var expiration = Duration.ofSeconds(5);
             var markAsComplete = run + 1 == MAX_RUNS;
             for (int i = 0; i < NUM_DOCS; ++i) {
                 var label = run + "-" + i;
@@ -151,7 +152,7 @@ public class WorkCoordinatorTest {
                             testContext,
                             label,
                             seenWorkerItems,
-                            expiration,
+                            EXPIRATION,
                             true,
                             markAsComplete
                         ),
@@ -176,8 +177,7 @@ public class WorkCoordinatorTest {
                     .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
                     .log();
             }
-
-            Thread.sleep(expiration.multipliedBy(2).toMillis());
+            Thread.sleep(EXPIRATION.plusSeconds(1).toMillis());
         }
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));

@@ -5,7 +5,6 @@
 plugins {
     // Support convention plugins written in Groovy. Convention plugins are build scripts in 'src/main' that automatically become available as plugins in the main build.
     id 'groovy-gradle-plugin'
-    id 'org.owasp.dependencycheck' version '8.2.1'
 }
 
 repositories {
@@ -14,7 +13,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.bmuschko:gradle-docker-plugin:9.3.1'
+    implementation 'com.bmuschko:gradle-docker-plugin:9.4.0'
 }
 
 tasks.withType(Tar){

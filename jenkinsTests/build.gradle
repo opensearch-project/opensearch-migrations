@@ -17,10 +17,9 @@ sourceSets {
 }
 
 dependencies {
-    implementation 'org.codehaus.groovy:groovy-all:3.0.23'
-    testImplementation 'com.lesfurets:jenkins-pipeline-unit:1.23'
-    testImplementation platform('org.junit:junit-bom:5.10.2')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
+    implementation libs.groovy
+    testImplementation libs.jenkins.pipeline.unit
+    testImplementation libs.junit.jupiter
 }
 
 test {
