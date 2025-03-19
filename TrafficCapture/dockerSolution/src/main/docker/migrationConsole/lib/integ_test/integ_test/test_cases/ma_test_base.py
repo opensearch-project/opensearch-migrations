@@ -1,3 +1,5 @@
+from enum import Enum
+
 from ..common_utils import wait_for_running_replayer
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -9,6 +11,7 @@ from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.models.metadata import Metadata
 
+MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
 
 class ClusterVersionCombinationUnsupported(Exception):
     def __init__(self, source_version, target_version, message="Cluster version combination is unsupported"):
@@ -20,11 +23,13 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 class MATestBase:
     def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str,
+                 migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL, MigrationType.CAPTURE_AND_REPLAY],
                  allow_source_target_combinations=None, run_isolated=False, short_description="MA base test case"):
         self.allow_source_target_combinations = allow_source_target_combinations or []
         self.run_isolated = run_isolated
         self.short_description = short_description
         self.console_link_env = console_link_env
+        self.migrations_required = migrations_required
         if ((not console_link_env.source_cluster or not console_link_env.target_cluster) or
                 (not console_link_env.source_cluster.version or not console_link_env.target_cluster.version)):
             raise RuntimeError("Both a source cluster and target cluster must be defined for the console library and "
@@ -55,54 +60,71 @@ class MATestBase:
     def __repr__(self):
         return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
 
-    def perform_initial_operations(self):
+    def test_before(self):
         pass
 
-    def perform_snapshot_create(self):
-        snapshot_result: CommandResult = self.snapshot.create(wait=True)
-        assert snapshot_result.success
-
-    def perform_operations_after_snapshot(self):
+    def snapshot_before(self):
         pass
 
-    def perform_metadata_migration(self):
-        metadata_result: CommandResult = self.metadata.migrate()
-        assert metadata_result.success
+    def snapshot_create(self):
+        if any(migration in self.migrations_required for migration in (MigrationType.METADATA, MigrationType.BACKFILL)):
+            snapshot_result: CommandResult = self.snapshot.create(wait=True)
+            assert snapshot_result.success
 
-    def perform_operations_after_metadata_migration(self):
+    def snapshot_after(self):
         pass
 
-    def start_backfill_migration(self):
-        backfill_start_result: CommandResult = self.backfill.start()
-        assert backfill_start_result.success
-        # small enough to allow containers to be reused, big enough to test scaling out
-        backfill_scale_result: CommandResult = self.backfill.scale(units=2)
-        assert backfill_scale_result.success
-
-    def perform_operations_during_backfill_migration(self):
+    def metadata_before(self):
         pass
 
-    def stop_backfill_migration(self):
-        backfill_stop_result: CommandResult = self.backfill.stop()
-        assert backfill_stop_result.success
+    def metadata_migrate(self):
+        if MigrationType.METADATA in self.migrations_required:
+            metadata_result: CommandResult = self.metadata.migrate()
+            assert metadata_result.success
 
-    def perform_operations_after_backfill_migration(self):
+    def metadata_after(self):
         pass
 
-    def start_live_capture_migration(self):
-        replayer_start_result = self.replayer.start()
-        assert replayer_start_result.success
-        wait_for_running_replayer(replayer=self.replayer)
-
-    def perform_operations_during_live_capture_migration(self):
+    def backfill_before(self):
         pass
 
-    def stop_live_capture_migration(self):
-        replayer_stop_result = self.replayer.stop()
-        assert replayer_stop_result.success
+    def backfill_start(self):
+        if MigrationType.BACKFILL in self.migrations_required:
+            backfill_start_result: CommandResult = self.backfill.start()
+            assert backfill_start_result.success
+            backfill_scale_result: CommandResult = self.backfill.scale(units=1)
+            assert backfill_scale_result.success
 
-    def perform_operations_after_live_capture_migration(self):
+    def backfill_during(self):
         pass
 
-    def perform_final_operations(self):
+    def backfill_wait_for_stop(self):
+        if MigrationType.BACKFILL in self.migrations_required:
+            backfill_stop_result: CommandResult = self.backfill.stop()
+            assert backfill_stop_result.success
+
+    def backfill_after(self):
+        pass
+
+    def replay_before(self):
+        pass
+
+    def replay_start(self):
+        if MigrationType.CAPTURE_AND_REPLAY in self.migrations_required:
+            replayer_start_result = self.replayer.start()
+            assert replayer_start_result.success
+            wait_for_running_replayer(replayer=self.replayer)
+
+    def replay_during(self):
+        pass
+
+    def replay_wait_for_stop(self):
+        if MigrationType.CAPTURE_AND_REPLAY in self.migrations_required:
+            replayer_stop_result = self.replayer.stop()
+            assert replayer_stop_result.success
+
+    def replay_after(self):
+        pass
+
+    def test_after(self):
         pass

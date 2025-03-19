@@ -40,7 +40,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         }
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
-    def perform_initial_operations(self):
+    def test_before(self):
         union_transform = self.source_operations.get_type_mapping_union_transformation(
             multi_type_index_name=self.index_name,
             doc_type_1=self.doc_type1,
@@ -56,14 +56,12 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                                                             doc_id=self.doc_id2, doc_type=self.doc_type2,
                                                             data=self.sample_data2)
 
-    def perform_metadata_migration(self):
-        #console metadata migrate --multi-type-behavior UNION --index-template-allowlist 'test'
-        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test",
-                                                                           "--transformer-config-file",
+    def metadata_migrate(self):
+        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--transformer-config-file",
                                                                            self.transform_config_file])
         assert metadata_result.success
 
-    def perform_operations_after_metadata_migration(self):
+    def metadata_after(self):
         self.target_operations.get_index(cluster=self.target_cluster, index_name=self.index_name, max_attempts=3,
                                          delay=2.0)
         # Get all keys from sample data
@@ -71,17 +69,13 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         self.target_operations.verify_index_mapping_properties(cluster=self.target_cluster, index_name=self.index_name,
                                                                expected_props=expected_keys)
 
-    def start_backfill_migration(self):
-        backfill_scale_result: CommandResult = self.backfill.scale(units=1)
-        assert backfill_scale_result.success
-
-    def perform_operations_during_backfill_migration(self):
+    def backfill_during(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id1, max_attempts=10, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id2, max_attempts=10, delay=3.0)
 
-    def perform_operations_after_backfill_migration(self):
+    def backfill_after(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id3, doc_type=self.doc_type1,
                                                             data=self.sample_data1)
@@ -89,7 +83,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                                                             doc_id=self.doc_id4, doc_type=self.doc_type2,
                                                             data=self.sample_data2)
 
-    def perform_operations_during_live_capture_migration(self):
+    def replay_during(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
@@ -131,7 +125,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         }
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
-    def perform_initial_operations(self):
+    def test_before(self):
         split_transform = self.source_operations.get_type_mapping_split_transformation(
             multi_type_index_name=self.index_name,
             doc_type_1=self.doc_type1,
@@ -149,13 +143,12 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                                             doc_id=self.doc_id2, doc_type=self.doc_type2,
                                                             data=self.sample_data2)
 
-    def perform_metadata_migration(self):
-        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--index-template-allowlist", "test",
-                                                                           "--transformer-config-file",
+    def metadata_migrate(self):
+        metadata_result: CommandResult = self.metadata.migrate(extra_args=["--transformer-config-file",
                                                                            self.transform_config_file])
         assert metadata_result.success
 
-    def perform_operations_after_metadata_migration(self):
+    def metadata_after(self):
         self.target_operations.verify_index_mapping_properties(cluster=self.target_cluster,
                                                                index_name=self.split_index_name1,
                                                                expected_props=set(self.sample_data1.keys()))
@@ -163,17 +156,13 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                                                index_name=self.split_index_name2,
                                                                expected_props=set(self.sample_data2.keys()))
 
-    def start_backfill_migration(self):
-        backfill_scale_result: CommandResult = self.backfill.scale(units=1)
-        assert backfill_scale_result.success
-
-    def perform_operations_during_backfill_migration(self):
+    def backfill_during(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
                                             doc_id=self.doc_id1, max_attempts=10, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
                                             doc_id=self.doc_id2, max_attempts=10, delay=3.0)
 
-    def perform_operations_after_backfill_migration(self):
+    def backfill_after(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id3, doc_type=self.doc_type1,
                                                             data=self.sample_data1)
@@ -181,7 +170,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                                             doc_id=self.doc_id4, doc_type=self.doc_type2,
                                                             data=self.sample_data2)
 
-    def perform_operations_during_live_capture_migration(self):
+    def replay_during(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
                                             doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
