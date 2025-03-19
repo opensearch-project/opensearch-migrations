@@ -13,6 +13,7 @@ from console_link.models.metadata import Metadata
 
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
 
+
 class ClusterVersionCombinationUnsupported(Exception):
     def __init__(self, source_version, target_version, message="Cluster version combination is unsupported"):
         self.source_version = source_version
