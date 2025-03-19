@@ -15,7 +15,7 @@ export interface MigrationDashboardProps {
     readonly stage: string;
     readonly account: string;
     readonly region: string;
-    readonly dashboardJson: any;
+    readonly dashboardJson: DashboardBody;
 }
 
 export class MigrationDashboard extends Construct {
