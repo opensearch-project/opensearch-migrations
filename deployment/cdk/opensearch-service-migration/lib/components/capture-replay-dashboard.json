@@ -6,7 +6,7 @@
             "inputType": "input",
             "id": "REGION",
             "label": "Region",
-            "defaultValue": "us-east-1",
+            "defaultValue": "placeholder-region",
             "visible": false
         },
         {
@@ -32,7 +32,7 @@
             }
         },
         {
-            "height": 9,
+            "height": 10,
             "width": 12,
             "y": 1,
             "x": 0,
@@ -45,7 +45,7 @@
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "REGION",
-                "stat": "Average",
+                "stat": "Sum",
                 "period": 60,
                 "title": "Captured vs Replayed Bytes",
                 "yAxis": {
@@ -56,7 +56,7 @@
             }
         },
         {
-            "height": 9,
+            "height": 5,
             "width": 12,
             "y": 1,
             "x": 12,
@@ -65,7 +65,25 @@
                 "metrics": [
                     [ "OpenSearchMigrations", "activeTargetConnections", "OTelLib", "replayer" ],
                     [ "OpenSearchMigrations", "connectionsOpened", "OTelLib", "replayer" ],
-                    [ "OpenSearchMigrations", "connectionsClosedCount", "OTelLib", "replayer" ],
+                    [ "OpenSearchMigrations", "connectionsClosedCount", "OTelLib", "replayer" ]
+                ],
+                "sparkline": true,
+                "view": "singleValue",
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "title": "Active Replayer Connections",
+                "liveData": true
+            }
+        },
+        {
+            "height": 5,
+            "width": 12,
+            "y": 6,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
                     [ "OpenSearchMigrations", "activeConnection", "OTelLib", "captureProxy" ],
                     [ "OpenSearchMigrations", "gatheringRequestCount", "OTelLib", "captureProxy" ],
                     [ "OpenSearchMigrations", "gatheringResponseCount", "OTelLib", "captureProxy" ]
@@ -73,16 +91,16 @@
                 "sparkline": true,
                 "view": "singleValue",
                 "region": "REGION",
-                "stat": "Average",
+                "stat": "Sum",
                 "period": 60,
-                "title": "Active Capture Proxy & Replayer Connections",
+                "title": "Active Capture Proxy Connections",
                 "liveData": true
             }
         },
         {
             "height": 1,
             "width": 24,
-            "y": 10,
+            "y": 11,
             "x": 0,
             "type": "text",
             "properties": {
@@ -93,59 +111,32 @@
         {
             "height": 9,
             "width": 12,
-            "y": 11,
+            "y": 12,
             "x": 0,
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "blockingRequest", "OTelLib", "captureProxy", { "label": "Blocked Requests", "color": "#d13212" } ],
-                    [ ".", "removed", ".", ".", { "label": "Removed Connections", "color": "#ff7f0e" } ],
-                    [ ".", "unregistered", ".", ".", { "label": "Unregistered Connections", "color": "#2ca02c" } ],
-                    [ ".", "gatheringRequestCount", ".", ".", { "label": "Total Requests", "yAxis": "right" } ]
+                    [ "OpenSearchMigrations", "removed", "OTelLib", "captureProxy", { "label": "Removed Connections", "color": "#ff7f0e", "region": "REGION" } ],
+                    [ ".", "unregistered", ".", ".", { "label": "Unregistered Connections", "color": "#2ca02c", "region": "REGION", "visible": false } ],
+                    [ ".", "gatheringRequestCount", ".", ".", { "label": "Total Requests", "yAxis": "right", "region": "REGION", "color": "#1f77b4" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "REGION",
                 "stat": "Sum",
                 "period": 60,
-                "title": "CaptureProxy Connection Issues",
+                "title": "CaptureProxy Connections",
                 "yAxis": {
                     "left": {
-                        "label": "Error Count"
-                    },
-                    "right": {
                         "label": "Request Count"
                     }
                 }
             }
         },
         {
-            "height": 9,
-            "width": 12,
-            "y": 11,
-            "x": 12,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ { "expression": "(m1/(m1+m2))*100", "label": "Mismatch Percentage", "id": "e1" } ],
-                    [ "OpenSearchMigrations", "tupleComparison", "OTelLib", "replayer", "statusCodesMatch", "false", { "label": "Mismatched Status Code", "id": "m1" } ],
-                    [ "...", "true", { "label": "Matched Status Codes", "id": "m2" } ],
-                    [ ".", ".", ".", ".", ".", ".", { "label": "All Mismatches" } ],
-                    [ "...", ".", ".", ".", ".", { "label": "GET Mismatches" } ],
-                    [ "...", ".", ".", ".", ".", { "label": "PUT Mismatches" } ]
-                ],
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "REGION",
-                "stat": "Average",
-                "period": 60,
-                "title": "Status Code & HTTP Method-Specific Error Analysis"
-            }
-        },
-        {
             "height": 1,
             "width": 24,
-            "y": 20,
+            "y": 21,
             "x": 0,
             "type": "text",
             "properties": {
@@ -156,7 +147,7 @@
         {
             "height": 10,
             "width": 12,
-            "y": 21,
+            "y": 22,
             "x": 0,
             "type": "metric",
             "properties": {
@@ -177,29 +168,45 @@
         },
         {
             "height": 10,
-            "width": 12,
-            "y": 21,
+            "width": 7,
+            "y": 22,
             "x": 12,
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "(m2/m3)", "label": "Commit Success Ratio", "id": "e1" } ],
-                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "captureProxy", { "id": "m1" } ],
-                    [ "...", "replayer", { "id": "m2" } ],
-                    [ ".", "kafkaRecordsRead", ".", ".", { "visible": false, "id": "m3" } ]
+                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "replayer", { "id": "m2" } ],
+                    [ ".", "kafkaRecordsRead", ".", ".", { "id": "m3" } ]
                 ],
                 "sparkline": true,
                 "view": "singleValue",
                 "region": "REGION",
                 "period": 60,
                 "stat": "Sum",
-                "title": "Kafka Error Detection Monitor"
+                "title": "Kafka-Replayer Monitor"
+            }
+        },
+        {
+            "height": 10,
+            "width": 5,
+            "y": 22,
+            "x": 19,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "captureProxy", { "id": "m1" } ]
+                ],
+                "sparkline": true,
+                "view": "singleValue",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "title": "Kafka-CaptureProxy Monitor"
             }
         },
         {
             "height": 1,
             "width": 24,
-            "y": 31,
+            "y": 32,
             "x": 0,
             "type": "text",
             "properties": {
@@ -209,7 +216,7 @@
         {
             "height": 9,
             "width": 12,
-            "y": 32,
+            "y": 33,
             "x": 0,
             "type": "metric",
             "properties": {
@@ -233,7 +240,7 @@
         {
             "height": 9,
             "width": 12,
-            "y": 32,
+            "y": 33,
             "x": 12,
             "type": "metric",
             "properties": {
@@ -258,7 +265,7 @@
         {
             "height": 8,
             "width": 12,
-            "y": 41,
+            "y": 42,
             "x": 0,
             "type": "metric",
             "properties": {
@@ -279,7 +286,7 @@
         {
             "height": 8,
             "width": 12,
-            "y": 41,
+            "y": 42,
             "x": 12,
             "type": "metric",
             "properties": {
@@ -299,6 +306,28 @@
                 },
                 "stat": "Average",
                 "period": 60
+            }
+        },
+        {
+            "height": 9,
+            "width": 12,
+            "y": 12,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "sparkline": true,
+                "metrics": [
+                    [ "OpenSearchMigrations", "tupleComparison", "method", "PUT", "OTelLib", "replayer", { "label": "Replayer total PUTs" } ],
+                    [ "...", "GET", ".", ".", { "label": "Replayer total GETs" } ],
+                    [ "...", "sourceStatusCode", "400", ".", ".", { "label": "Total mismatches" } ],
+                    [ ".", ".", "targetStatusCode", "200", "method", "PUT", "sourceStatusCode", "200", "OTelLib", "replayer", "statusCodesMatch", "false", { "label": "Replayer PUT mismatch" } ],
+                    [ "...", "GET", ".", "400", ".", ".", ".", ".", { "label": "Replayer GET mismatch" } ]
+                ],
+                "view": "singleValue",
+                "region": "us-west-1",
+                "period": 60,
+                "stat": "Sum",
+                "title": "Replayer StatusCode Mismatches"
             }
         }
     ]
