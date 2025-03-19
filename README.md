@@ -56,16 +56,16 @@ The OpenSearch Migrations Engine is a comprehensive set of tools designed to fac
 | Elasticsearch 7.17          | OpenSearch 2.19                  |Supported|
 | OpenSearch 1.3              | OpenSearch 2.19                  |Supported|
 | OpenSearch 2.x              | OpenSearch 2.19                  |Supported|
-| Elasticsearch 8.x           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1071)|
 | Elasticsearch 2.3           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1069)|
-| Elasitcsearch 1.5           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1070)|
+| Elasticsearch 1.5           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1070)|
+| Elasticsearch 8.x           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1071)|
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
 ### Platforms
   - Self-managed (cloud provider hosted)
   - Self-managed (on-premises)
-  - Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
+  - Managed cloud offerings (e.g., Amazon OpenSearch)
 
 ### Performance Limitations
 A performance test was performed on 03/10/25 alongside [PR 1337](https://github.com/opensearch-project/opensearch-migrations/pull/1337)
