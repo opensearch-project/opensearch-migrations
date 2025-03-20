@@ -62,6 +62,16 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
 
+    def clear_index_templates(self, cluster: Cluster, **kwargs):
+        logger.warning(f"Clearing index templates has not been implemented for cluster version: {cluster.version}")
+        return
+
+    def get_all_composable_index_template_names(self, cluster: Cluster, **kwargs):
+        response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path="/_index_template", **kwargs)
+        data = response.json()
+        templates = data.get("index_templates", [])
+        return [tpl["name"] for tpl in templates]
+
     def verify_index_mapping_properties(self, index_name: str, cluster: Cluster, expected_props: set, **kwargs):
         response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}", **kwargs)
         data = response.json()

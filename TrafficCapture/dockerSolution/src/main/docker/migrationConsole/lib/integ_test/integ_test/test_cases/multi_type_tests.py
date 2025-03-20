@@ -69,13 +69,15 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         self.target_operations.verify_index_mapping_properties(cluster=self.target_cluster, index_name=self.index_name,
                                                                expected_props=expected_keys)
 
-    def backfill_during(self):
+    def backfill_wait_for_stop(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id1, max_attempts=10, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id2, max_attempts=10, delay=3.0)
+        backfill_stop_result: CommandResult = self.backfill.stop()
+        assert backfill_stop_result.success
 
-    def backfill_after(self):
+    def replay_before(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id3, doc_type=self.doc_type1,
                                                             data=self.sample_data1)
@@ -83,11 +85,13 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                                                             doc_id=self.doc_id4, doc_type=self.doc_type2,
                                                             data=self.sample_data2)
 
-    def replay_during(self):
+    def replay_wait_for_stop(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id4, max_attempts=20, delay=3.0)
+        replayer_stop_result = self.replayer.stop()
+        assert replayer_stop_result.success
 
 
 class Test0005MultiTypeSplitMigration(MATestBase):
@@ -156,13 +160,15 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                                                index_name=self.split_index_name2,
                                                                expected_props=set(self.sample_data2.keys()))
 
-    def backfill_during(self):
+    def backfill_wait_for_stop(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
                                             doc_id=self.doc_id1, max_attempts=10, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
                                             doc_id=self.doc_id2, max_attempts=10, delay=3.0)
+        backfill_stop_result: CommandResult = self.backfill.stop()
+        assert backfill_stop_result.success
 
-    def backfill_after(self):
+    def replayer_before(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id3, doc_type=self.doc_type1,
                                                             data=self.sample_data1)
@@ -170,7 +176,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                                             doc_id=self.doc_id4, doc_type=self.doc_type2,
                                                             data=self.sample_data2)
 
-    def replay_during(self):
+    def replay_wait_for_stop(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name1,
                                             doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,

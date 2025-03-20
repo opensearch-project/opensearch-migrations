@@ -4,7 +4,7 @@ import shutil
 from typing import Callable, List
 
 from .test_cases.ma_test_base import MATestBase
-from console_link.middleware.clusters import connection_check, clear_cluster, ConnectionResult
+from console_link.middleware.clusters import connection_check, clear_cluster, clear_indices, ConnectionResult
 from console_link.models.backfill_base import Backfill
 from console_link.models.replayer_base import Replayer
 from console_link.models.kafka import Kafka
@@ -35,7 +35,8 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
 
     # Clear cluster data
     clear_cluster(source_cluster)
-    clear_cluster(target_cluster)
+    clear_indices(target_cluster)
+    test_case.target_operations.clear_index_templates(cluster=target_cluster)
 
     # Delete existing Kafka topic to clear records
     delete_topic(kafka=kafka, topic_name="logging-traffic-topic")
