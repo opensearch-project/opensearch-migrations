@@ -1,14 +1,16 @@
 conditionalPackageInstalls:
-  bulkLoader: true
-  grafana: false
-  jaeger: false
-  kafka: true
-  migrationConsole: true
-  prometheus: false
-  proxy: true
-  replayer: true
   sharedConfigs: true
   snapshotVolume: true
+  migrationConsole: true
+  bulkLoader: true
+  proxy: true
+  kafka: true
+  replayer: true
+  argoWorkflows: true
+  gatekeeper: true
+  grafana: false
+  prometheus: false
+  jaeger: false
 
 
 shared-configs:
@@ -57,7 +59,6 @@ shared-configs:
 #        observabilityType: "prometheus"
 
 
-
 capture-proxy:
   parameters:
     destinationUri:
@@ -77,6 +78,7 @@ capture-proxy:
 migration-console:
   snapshotVolumeEnabled: true
   snapshotVolumePvc: "snapshot-volume-pvc"
+
 
 bulk-document-loader:
   snapshotVolumeEnabled: true
@@ -104,6 +106,7 @@ bulk-document-loader:
       configMapName: "target-cluster"
       configMapKey: "basicAuthPassword"
 
+
 replayer:
   parameters:
     kafkaTrafficBrokers:
@@ -124,6 +127,7 @@ replayer:
       configMapName: "target-cluster"
       configMapKey: "basicAuthHeader"
 
+
 captured-traffic-kafka-cluster:
   environment: test
 
@@ -136,6 +140,73 @@ captured-traffic-kafka-cluster:
   dedicatedController:
     replicas: 1
     storageSize: 10Gi
+
+
+argo-workflows:
+  fullnameOverride: "argo-workflows"
+
+  controller:
+    containerSecurityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+    clusterWorkflowTemplates:
+      enabled: false
+    metricsConfig: # to publish
+      enabled: true
+
+  server:
+    extraArgs:
+      - --auth-mode=server
+
+  serviceAccount:
+    create: true
+    name: argo-workflows-sa
+
+  singleNamespace: true
+
+  # Extra workflow configuration
+  workflow:
+    serviceAccount:
+      create: true
+      name: workflow-restricted-sa
+
+
+workflowService:
+  defaultEnvVars:
+    ENV_VAR1: "default-value-1"
+    ENV_VAR2: "default-value-2"
+
+  defaultReplicas: 1
+
+  monitorImage: "bitnami/kubectl:latest"
+
+  allowedRepos:
+    - "bitnami/"
+#    - "k8s.gcr.io/"
+#    - "docker.io/library/"
+
+
+gatekeeper:
+  auditInterval: 60
+  constraintViolationsLimit: 20
+  enableExternalData: true
+  audit:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  controllerManager:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
 
 jaeger:
   allInOne:

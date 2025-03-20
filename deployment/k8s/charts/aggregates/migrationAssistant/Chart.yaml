@@ -38,6 +38,18 @@ dependencies:
     version: "0.1.0"
     repository: "file://../../components/replayer"
 
+  # New dependency for Argo Workflows
+  - name: argo-workflows
+    condition: conditionalPackageInstalls.argoWorkflows
+    version: "0.45.11"
+    repository: "https://argoproj.github.io/argo-helm"
+
+  # OPA Gatekeeper dependency
+  - name: gatekeeper
+    condition: conditionalPackageInstalls.gatekeeper
+    version: "3.13.0"
+    repository: "https://open-policy-agent.github.io/gatekeeper/charts"
+
 #  - name: otel-collector
 #    version: 1.2.2
 #    repository:

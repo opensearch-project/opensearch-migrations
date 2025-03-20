@@ -1,0 +1,157 @@
+{{- if .Values.conditionalPackageInstalls.argoWorkflows }}
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: replicaset-workflow-template
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-weight: "5"  # Make sure this runs after the wait-for-crds job
+spec:
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: replicas
+        value: "{{ .Values.workflowService.defaultReplicas }}"
+      - name: image
+        value: "nginx:latest"
+      - name: env_var1
+        value: "{{ .Values.workflowService.defaultEnvVars.ENV_VAR1 }}"
+      - name: env_var2
+        value: "{{ .Values.workflowService.defaultEnvVars.ENV_VAR2 }}"
+    # Add other parameters your ReplicaSet needs
+
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: replicas
+          - name: image
+          - name: env_var1
+          - name: env_var2
+      dag:
+        tasks:
+          - name: deploy-and-monitor
+            template: deploy-and-monitor
+            arguments:
+              parameters:
+                - name: replicas
+                  value: "{{ "{{" }}inputs.parameters.replicas{{ "}}" }}"
+                - name: image
+                  value: "{{ "{{" }}inputs.parameters.image{{ "}}" }}"
+                - name: env_var1
+                  value: "{{ "{{" }}inputs.parameters.env_var1{{ "}}" }}"
+                - name: env_var2
+                  value: "{{ "{{" }}inputs.parameters.env_var2{{ "}}" }}"
+
+          - name: cleanup
+            dependencies: [deploy-and-monitor]
+            template: cleanup
+
+    - name: deploy-and-monitor
+      inputs:
+        parameters:
+          - name: replicas
+          - name: image
+          - name: env_var1
+          - name: env_var2
+      dag:
+        tasks:
+          - name: deploy-replicaset
+            template: deploy-replicaset
+            arguments:
+              parameters:
+                - name: replicas
+                  value: "{{ "{{" }}inputs.parameters.replicas{{ "}}" }}"
+                - name: image
+                  value: "{{ "{{" }}inputs.parameters.image{{ "}}" }}"
+                - name: env_var1
+                  value: "{{ "{{" }}inputs.parameters.env_var1{{ "}}" }}"
+                - name: env_var2
+                  value: "{{ "{{" }}inputs.parameters.env_var2{{ "}}" }}"
+
+          - name: monitor-replicaset
+            template: monitor-replicaset
+            dependencies: [deploy-replicaset]
+
+    - name: deploy-replicaset
+      inputs:
+        parameters:
+          - name: replicas
+          - name: image
+          - name: env_var1
+          - name: env_var2
+      resource:
+        action: create
+        manifest: |
+          apiVersion: apps/v1
+          kind: ReplicaSet
+          metadata:
+            name: workflow-created-rs-{{ "{{" }}workflow.name{{ "}}" }}
+            labels:
+              app: workflow-app
+              workflow: {{ "{{" }}workflow.name{{ "}}" }}
+              managed-by: migration-assistant
+          spec:
+            replicas: {{ "{{" }}inputs.parameters.replicas{{ "}}" }}
+            selector:
+              matchLabels:
+                app: workflow-app
+                workflow: {{ "{{" }}workflow.name{{ "}}" }}
+            template:
+              metadata:
+                labels:
+                  app: workflow-app
+                  workflow: {{ "{{" }}workflow.name{{ "}}" }}
+              spec:
+                containers:
+                - name: main-container
+                  image: {{ "{{" }}inputs.parameters.image{{ "}}" }}
+                  env:
+                  - name: ENV_VAR1
+                    value: "{{ "{{" }}inputs.parameters.env_var1{{ "}}" }}"
+                  - name: ENV_VAR2
+                    value: "{{ "{{" }}inputs.parameters.env_var2{{ "}}" }}"
+
+    - name: monitor-replicaset
+      script:
+        image: {{ .Values.workflowService.monitorImage }}
+        command: [bash]
+        source: |
+          #!/bin/bash
+
+          # Example monitoring logic
+          # Wait for all pods to be ready
+          while true; do
+            READY_COUNT=$(kubectl get pods -l app=workflow-app,workflow={{ "{{" }}workflow.name{{ "}}" }} -o jsonpath='{.items[*].status.containerStatuses[0].ready}' | tr -cd 't' | wc -c)
+            TOTAL_COUNT=$(kubectl get pods -l app=workflow-app,workflow={{ "{{" }}workflow.name{{ "}}" }} --no-headers | wc -l)
+
+            echo "Ready pods: $READY_COUNT/$TOTAL_COUNT"
+
+            if [ "$READY_COUNT" -eq "$TOTAL_COUNT" ] && [ "$TOTAL_COUNT" -gt 0 ]; then
+              echo "All pods are ready!"
+
+              # Add your monitoring logic here
+              # For example, wait for specific logs or conditions
+              # If you need to wait for a specific job to complete, add that logic here
+
+              echo "Work complete!"
+              break
+            fi
+
+            sleep 10
+          done
+
+    - name: cleanup
+      resource:
+        action: delete
+        flags: [--cascade=foreground]
+        manifest: |
+          apiVersion: apps/v1
+          kind: ReplicaSet
+          metadata:
+            name: workflow-created-rs-{{ "{{" }}workflow.name{{ "}}" }}
+            labels:
+              app: workflow-app
+              workflow: {{ "{{" }}workflow.name{{ "}}" }}
+{{- end }}

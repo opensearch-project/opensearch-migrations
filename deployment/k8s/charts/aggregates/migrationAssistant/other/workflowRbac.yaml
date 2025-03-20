@@ -1,0 +1,67 @@
+{{- if .Values.conditionalPackageInstalls.argoWorkflows }}
+# Role for Argo Workflows Controller
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argo-workflows-controller
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "cronworkflows", "clusterworkflowtemplates"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+# Role binding for Argo Workflows Controller
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argo-workflows-controller
+subjects:
+  - kind: ServiceAccount
+    name: {{ (index .Values "argo-workflows").serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: argo-workflows-controller
+  apiGroup: rbac.authorization.k8s.io
+---
+# Restricted ServiceAccount for Workflows to use
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workflow-restricted-sa
+  namespace: {{ .Release.Namespace }}
+---
+# Role for the restricted workflow service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-replicaset-manager
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+# Role binding for the restricted workflow service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-replicaset-binding
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: workflow-restricted-sa
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: workflow-replicaset-manager
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
