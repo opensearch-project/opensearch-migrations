@@ -26,18 +26,22 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
         if (!(msg instanceof HttpJsonRequestWithFaultingPayload)) {
             super.channelRead(ctx, msg);
         } else {
-            ctx.fireChannelRead(msg);
-
+            // Copy the payload before clearing it from the message
             var jsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
             var payload = jsonMessage.payload();
             jsonMessage.setPayloadFaultMap(null);
 
-            processInlineDocuments(ctx, payload);
+            var messageWithoutPayload = jsonMessage;
+            ctx.fireChannelRead(messageWithoutPayload);
+
+            parsePayloadAndAttachToChannel(ctx, payload);
+            
+            ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private void processInlineDocuments(ChannelHandlerContext ctx, Map<String, Object> payload) throws Exception {
+    private void parsePayloadAndAttachToChannel(ChannelHandlerContext ctx, Map<String, Object> payload) throws Exception {
         if (payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY)) {
             serializePayload(ctx, payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
         } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY)) {
@@ -57,7 +61,6 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
             body.writeCharSequence(bodyString, StandardCharsets.UTF_8);
             fireHttpContentOrRelease(ctx, body);
         }
-        ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
     }
 
     private void fireHttpContentOrRelease(ChannelHandlerContext ctx, ByteBuf buf) {
