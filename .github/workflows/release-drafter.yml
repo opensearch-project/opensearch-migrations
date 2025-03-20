@@ -51,27 +51,27 @@ jobs:
         run: |
           ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }}
       - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.17.7
+        uses: anchore/sbom-action@v0.18.0
         with:
           image: migrations/migration_console:latest
           output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.17.7
+        uses: anchore/sbom-action@v0.18.0
         with:
           image: migrations/traffic_replayer:latest
           output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.17.7
+        uses: anchore/sbom-action@v0.18.0
         with:
           image: migrations/capture_proxy:latest
           output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.17.7
+        uses: anchore/sbom-action@v0.18.0
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.17.7
+        uses: anchore/sbom-action@v0.18.0
         with:
           file: artifacts.tar.gz
           output-file: artifacts-sbom.spdx.json
@@ -97,7 +97,7 @@ jobs:
           echo "::add-mask::$DOCKERHUB_PASSWORD"
           echo "dockerhub-password=$DOCKERHUB_PASSWORD" >> $GITHUB_OUTPUT
       - name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
           password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
