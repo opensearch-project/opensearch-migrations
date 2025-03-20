@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
@@ -22,39 +23,45 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
-            var jsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
-            var payload = jsonMessage.payload();
-            jsonMessage.setPayloadFaultMap(null);
-            ctx.fireChannelRead(msg);
-            if (payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY)) {
-                serializePayload(ctx, payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
-            } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY)) {
-                serializePayloadList(ctx,
-                    (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY),
-                    !payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY) &&
-                        !payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
-            }
-            if (payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
-                var rawBody = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
-                if (rawBody.readableBytes() > 0) {
-                    ctx.fireChannelRead(new DefaultHttpContent(rawBody));
-                } else {
-                    ReferenceCountUtil.release(rawBody);
-                }
-            } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)) {
-                var bodyString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
-                ByteBuf body = ctx.alloc().buffer();
-                body.writeCharSequence(bodyString, StandardCharsets.UTF_8);
-                if (body.readableBytes() > 0) {
-                    ctx.fireChannelRead(new DefaultHttpContent(body));
-                } else {
-                    ReferenceCountUtil.release(body);
-                }
-            }
-            ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
-        } else {
+        if (!(msg instanceof HttpJsonRequestWithFaultingPayload)) {
             super.channelRead(ctx, msg);
+        }
+        ctx.fireChannelRead(msg);
+
+        var jsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
+        var payload = jsonMessage.payload();
+        jsonMessage.setPayloadFaultMap(null);
+
+        processInlineDocuments(ctx, payload);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void processInlineDocuments(ChannelHandlerContext ctx, Map<String, Object> payload) throws Exception {
+        if (payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY)) {
+            serializePayload(ctx, payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+        } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY)) {
+            var shouldAddLastNewline = !payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY) &&
+                !payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+            serializePayloadList(ctx,
+                (List<Object>) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY),
+                shouldAddLastNewline);
+        } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
+            var rawBody = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            fireHttpContentOrRelease(ctx, rawBody);
+        } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)) {
+            var bodyString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+            ByteBuf body = ctx.alloc().buffer();
+            body.writeCharSequence(bodyString, StandardCharsets.UTF_8);
+            fireHttpContentOrRelease(ctx, body);
+        }
+        ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
+    }
+
+    private void fireHttpContentOrRelease(ChannelHandlerContext ctx, ByteBuf buf) {
+        if (buf.readableBytes() > 0) {
+            ctx.fireChannelRead(new DefaultHttpContent(buf));
+        } else {
+            ReferenceCountUtil.release(buf);
         }
     }
 
