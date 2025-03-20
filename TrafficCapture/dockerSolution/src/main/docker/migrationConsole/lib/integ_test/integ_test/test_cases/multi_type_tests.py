@@ -168,7 +168,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         backfill_stop_result: CommandResult = self.backfill.stop()
         assert backfill_stop_result.success
 
-    def replayer_before(self):
+    def replay_before(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id3, doc_type=self.doc_type1,
                                                             data=self.sample_data1)
