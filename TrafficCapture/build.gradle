@@ -28,6 +28,7 @@ subprojects {
                 options.compilerArgs += [
                         "-XDcompilePolicy=simple",
                         "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:MustBeClosed:ERROR -XepDisableWarningsInGeneratedCode",
+                        "--should-stop=ifError=FLOW"
                 ]
             }
         }

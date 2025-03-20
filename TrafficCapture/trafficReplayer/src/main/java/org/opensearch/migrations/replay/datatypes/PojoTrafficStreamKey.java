@@ -4,7 +4,7 @@ import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
 import lombok.EqualsAndHashCode;
 
-@EqualsAndHashCode()
+@EqualsAndHashCode(callSuper = true)
 public abstract class PojoTrafficStreamKey extends ISourceTrafficChannelKey.PojoImpl implements ITrafficStreamKey {
     protected final int trafficStreamIndex;
 
