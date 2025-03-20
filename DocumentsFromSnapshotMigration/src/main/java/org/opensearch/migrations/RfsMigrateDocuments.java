@@ -403,7 +403,7 @@ public class RfsMigrateDocuments {
             return;
         }
         var workItemAndDuration = workItemRef.get();
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getDocId()).log();
+        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
@@ -524,11 +524,11 @@ public class RfsMigrateDocuments {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
         var workItem = workItemAndDuration.getWorkItem();
-        // Set successor as same last docId, this will ensure we process every document fully in cases where there is a 1:many doc split
-        var successorStartingDocId = progressCursor.getDocId();
+        // Set successor as same last checkpoint Num, this will ensure we process every document fully in cases where there is a 1:many doc split
+        var successorStartingCheckpointNum = progressCursor.getProgressCheckpointNum();
         var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
                 .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
-            successorStartingDocId);
+                successorStartingCheckpointNum);
         ArrayList<String> successorWorkItemIds = new ArrayList<>();
         successorWorkItemIds.add(successorWorkItem.toString());
         return successorWorkItemIds;

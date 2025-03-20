@@ -74,7 +74,7 @@ public class DocumentReindexer {
      */
     Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);
-        log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.luceneDocNumber).log();
+        log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.progressCheckpointNum).log();
 
         List<BulkDocSection> bulkDocSections = docsBatch.stream()
                 .map(rfsDocument -> rfsDocument.document)
@@ -92,7 +92,7 @@ public class DocumentReindexer {
                 .log())
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
             .onErrorResume(e -> Mono.empty())
-            .then(Mono.just(new WorkItemCursor(lastDoc.luceneDocNumber))
+            .then(Mono.just(new WorkItemCursor(lastDoc.progressCheckpointNum))
             .subscribeOn(scheduler));
     }
 

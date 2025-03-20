@@ -16,8 +16,8 @@ import lombok.AllArgsConstructor;
  */
 @AllArgsConstructor
 public class RfsDocument {
-    // The Lucene index doc number of the document (global over shard / lucene-index)
-    public final int luceneDocNumber;
+    // Originally set to the lucene index doc number, this number helps keeps track of progress over a work item
+    public final int progressCheckpointNum;
 
     // The Elasticsearch/OpenSearch document to be reindexed
     public final BulkDocSection document;
@@ -40,8 +40,8 @@ public class RfsDocument {
         var listOfDocMaps = docs.stream().map(doc -> doc.document.toMap())
                 .toList();
 
-        // Use the first luceneDocNumber in the batch to associate with all returned objects
-        var luceneDocNumber = docs.stream().findFirst().map(doc -> doc.luceneDocNumber).orElseThrow(
+        // Use the first progressCheckpointNum in the batch to associate with all returned objects
+        var progressCheckpointNum = docs.stream().findFirst().map(doc -> doc.progressCheckpointNum).orElseThrow(
                 () -> new IllegalArgumentException("Expected non-empty list of docs, but was empty.")
         );
 
@@ -50,7 +50,7 @@ public class RfsDocument {
             var transformedList = (List<Map<String, Object>>) transformedObject;
             return transformedList.stream()
                 .map(item -> new RfsDocument(
-                    luceneDocNumber,
+                    progressCheckpointNum,
                     BulkDocSection.fromMap(item)
                 ))
                 .collect(Collectors.toList());
