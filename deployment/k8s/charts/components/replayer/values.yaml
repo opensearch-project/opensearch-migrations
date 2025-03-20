@@ -1,3 +1,5 @@
+sharedLogsVolumeEnabled: false
+sharedLogsPvc: ""
 parameters:
   targetUri:
     postionalArgumentIndex: 0

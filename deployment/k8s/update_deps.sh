@@ -67,6 +67,11 @@ update_directories () {
 
 START_TIME=$(date +%s)
 
+# Allow executing this script from any dir
+script_abs_path=$(readlink -f "$0")
+script_dir_abs_path=$(dirname "$script_abs_path")
+cd "$script_dir_abs_path" || exit
+
 # Create hash file if it doesn't exist, create or clear temp file
 touch "$HASH_FILE"
 echo -n > "$TEMP_FILE"

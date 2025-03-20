@@ -1,64 +1,47 @@
-## E2E Integration Testing
-Developers can run a test script which will verify the end-to-end Docker Solution.
+## Migration Assistant E2E Integration Testing
+This library contains E2E integration tests to execute against a Migration Assistant deployment
 
-### Compatibility
-* Python >= 3.7
-
-### Pre-requisites
-
-* Have all containers from Docker solution running.
-
-To run the test script, users must navigate to this directory,
-install the required packages and then run the script:
-
+### Installing dependencies
+To install the required dependencies
 ```
-pip install -r requirements.txt
-pytest tests.py
+pipenv install
 ```
 
-### Running in Docker setup
+### Creating an E2E test case
+Test cases created within the `test_cases` directory are performed by the `ma_workflow_test.py` test structure. The link between these two are created in the pytest 
+configuration `conftest.py` file. Any test class created in an existing file within the `test_cases` directory will automatically be added to the list of test cases
+to attempt when the `ma_workflow_test.py` file is executed with pytest. The `conftest.py` file achieves this by collecting all test cases initially, and then filters
+out any test cases that don't apply to the given source and target clusters versions, as well as on filters that a user can provide such as `--test_ids`. Once the final
+list is determined, the `conftest.py` file will dynamically create a parameterized tag on the `ma_workflow_test.py` test, resulting in multiple executions of this test
+based on the final list of test cases to be executed. If a new test file is created within the `test_cases` directory it should be imported into the `conftest.py` file 
+like other test files.
 
-From the root of this repository bring up the Docker environment
+
+### Running tests in K8s setup
+
+Follow the quickstart guide [here](../../../../../../../../deployment/k8s/quickstart.md) to set up a Migration Assistant environment with source and
+target test clusters
+
+Access the migration console:
 ```shell
-./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
+kubectl exec --stdin --tty $(kubectl get pods -l app=ma-migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash
 ```
 
-The Docker compose file being used can be found [here](../../../docker-compose.yml)
-* The integ_test `lib` directory can be directly mounted as a volume on the migration console container to spe
-
-To run one of the integration test suites a command like below can be used:
+Perform pytest:
 ```shell
-docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/full_tests.py --unique_id="testindex" -s
+pytest ~/lib/integ_test/integ_test/ma_workflow_test.py
 ```
 
-To teardown, execute the following command at the root of this repository
-```shell
-./gradlew -p TrafficCapture dockerSolution:ComposeDown
-```
-
-#### Notes
-
-##### Ports Setup
-The test script, by default, uses the ports assigned to the containers in this
-[docker-compose file](../../../docker-compose.yml), so if the Docker solution in
-its current setup started with no issues, then the test script will run as is. If for any reason
-the user changed the ports in that file, they must also either, provide the following parameters variables:
-`proxy_endpoint`, `source_endpoint`, and `target_endpoint` respectively, or update the default value
- for them in [conftest.py](integ_test/conftest.py).
+To tear-down resources, follow the end of the quickstart guide [here](../../../../../../../../deployment/k8s/quickstart.md#cleanup)
 
 
-#### Script Parameters
+### Pytest parameters
 
-This script accepts various parameters to customize its behavior. Below is a list of available parameters along with their default values and acceptable choices:
+Pytest has been configured to accepts various parameters to customize its behavior. Below is a list of available parameters along with their default values and acceptable choices:
 
 - `--unique_id`: The unique identifier to apply to created indices/documents.
     - Default: Generated uuid
 - `--config_file_path`: The services yaml config file path for the console library.
     - Default: `/config/migration_services.yaml`
-
-
-#### Clean Up
-The test script is implemented with a setup and teardown functions that are ran after
-each and every test where additions made to the endpoints are deleted, *mostly* cleaning up after themselves, however,
-as we log all operations going through the proxy (which is capturing the traffic), those are only being
-deleted after the Docker solution is shut down.
+- `--test_ids`: Specify test IDs like `'0001,0003'` to filter tests to execute.
+    - Default: Attempt to execute all tests
