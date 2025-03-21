@@ -2,11 +2,13 @@ package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -22,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -53,9 +56,8 @@ public class WorkCoordinatorTest {
     
     static Stream<SearchClusterContainer.ContainerVersion> containerVersions() {
         return Stream.of(
-            // TODO: Fix For ES5 and 6 Support
-            // SearchClusterContainer.ES_V5_6_16,
-            // SearchClusterContainer.ES_V6_8_23,
+            SearchClusterContainer.ES_V5_6_16,
+            SearchClusterContainer.ES_V6_8_23,
             SearchClusterContainer.ES_V7_10_2,
             SearchClusterContainer.OS_V1_3_16,
             SearchClusterContainer.OS_V2_19_1
@@ -73,6 +75,17 @@ public class WorkCoordinatorTest {
                 .host(container.getUrl())
                 .build()
                 .toConnectionContext());
+        }
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (container != null) {
+            container.close();
+            container = null;
+        }
+        if (httpClientSupplier != null) {
+            httpClientSupplier = null;
         }
     }
     
@@ -152,85 +165,92 @@ public class WorkCoordinatorTest {
 
     @ParameterizedTest
     @MethodSource("containerVersions")
-    public void testAcquireLeaseForQuery(SearchClusterContainer.ContainerVersion version) throws Exception {
+    public void testAcquireLeaseForQueryInParallel(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // Setup test container and context
         setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
-        final var NUM_DOCS = 20;
-        final var MAX_RUNS = 2;
-        final var EXPIRATION = Duration.ofSeconds(15);
+        final int NUM_DOCS = 25;
+        final int MAX_RUNS = 2;
+        final Duration EXPIRATION = Duration.ofSeconds(10);
 
-        var executorService = Executors.newFixedThreadPool(NUM_DOCS);
+        // Make lease acquire calls in parallel across this many requests
+        var executor = Executors.newFixedThreadPool(5);
+
+        // Create unassigned work items
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
-            var allFutures = new ArrayList<CompletableFuture<Boolean>>();
-            for (var i = 0; i < NUM_DOCS; ++i) {
-                final var docId = "R__0__" + i;
-                allFutures.add(
-                        CompletableFuture.supplyAsync(
-                                () -> {
-                                    try {
-                                        return workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
-                                    } catch (IOException e) {
-                                        throw new RuntimeException(e);
-                                    }
+            List<CompletableFuture<Boolean>> creationFutures =
+                    IntStream.range(0, NUM_DOCS)
+                            .mapToObj(i -> CompletableFuture.supplyAsync(() -> {
+                                try {
+                                    return workCoordinator.createUnassignedWorkItem("R__0__" + i, testContext::createUnassignedWorkContext);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
                                 }
-                        )
-                );
-            }
-            CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
+                            }))
+                            .toList();
+            CompletableFuture.allOf(creationFutures.toArray(new CompletableFuture[0])).join();
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
 
-        for (int run = 0; run < MAX_RUNS; ++run) {
-            final var seenWorkerItems = new ConcurrentHashMap<String, String>();
-            var allFutures = new ArrayList<CompletableFuture<String>>();
-            var markAsComplete = run + 1 == MAX_RUNS;
-            for (int i = 0; i < NUM_DOCS; ++i) {
-                var label = run + "-" + i;
-                allFutures.add(
-                    CompletableFuture.supplyAsync(
-                        () -> getWorkItemAndVerify(
-                            testContext,
-                            label,
-                            seenWorkerItems,
-                            EXPIRATION,
-                            true,
-                            markAsComplete
-                        ),
-                        executorService
-                    )
+        // Process work items in multiple runs
+        for (int run = 0; run < MAX_RUNS; run++) {
+            var seenWorkerItems = new ConcurrentHashMap<String, String>();
+            List<CompletableFuture<String>> acquisitionFutures = new ArrayList<>();
+            boolean markAsComplete = (run == MAX_RUNS - 1);
+            Instant runStart = Instant.now();
+
+            for (int i = 0; i < NUM_DOCS; i++) {
+                String label = run + "-" + i;
+                acquisitionFutures.add(
+                        CompletableFuture.supplyAsync(() ->
+                                        getWorkItemAndVerify(testContext, label, seenWorkerItems, EXPIRATION, true, markAsComplete),
+                                executor
+                        )
                 );
             }
-            CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
-            Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
+            // Complete future failing if it takes longer than our expiration
+            // If a timeout occurs, the expiration may need to be increased to run on this setup
+            CompletableFuture.allOf(acquisitionFutures.toArray(new CompletableFuture[0])).get(
+                    EXPIRATION.toMillis(), TimeUnit.MILLISECONDS
+            );
+            Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size(), "Not all work items were processed");
 
-            try (
-                var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "NONE")
-            ) {
-                var nextWorkItem = workCoordinator.acquireNextWorkItem(
-                    EXPIRATION,
-                    testContext::createAcquireNextItemContext
-                );
+            // Validate that no further work is available
+            try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "NONE")) {
+                var nextWorkItem = workCoordinator.acquireNextWorkItem(EXPIRATION, testContext::createAcquireNextItemContext);
                 log.atInfo().setMessage("Next work item picked={}").addArgument(nextWorkItem).log();
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
-                log.atError().setCause(e).setMessage("Unexpected clock drift error.  Got response: {}")
-                    .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
-                    .log();
+                log.atError().setCause(e)
+                        .setMessage("Unexpected clock drift error. Got response: {}")
+                        .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
+                        .log();
                 throw new AssertionError("Unexpected clock drift error.", e);
             }
-            if (run + 1 < MAX_RUNS) {
-                var durationForAllWorkItemExpiration = EXPIRATION.plusSeconds(1);
-                log.atInfo().setMessage("Sleeping for {}").addArgument(durationForAllWorkItemExpiration).log();
-                Thread.sleep(durationForAllWorkItemExpiration.toMillis());
+
+            // Check elapsed time does not exceed the expiration duration
+            Instant runEnd = Instant.now();
+            Duration elapsed = Duration.between(runStart, runEnd);
+            Assertions.assertFalse(elapsed.compareTo(EXPIRATION) > 0,
+                    String.format("Test run elapsed duration %s exceeded EXPIRATION %s. Increase expiration duration.", elapsed, EXPIRATION));
+            log.atInfo().setMessage("Test run duration {} with Expiration {}").addArgument(elapsed).addArgument(EXPIRATION).log();
+            // Sleep between runs if needed, to elapse expiration
+            if (run < MAX_RUNS - 1) {
+                var sleepBetweenRuns = EXPIRATION.plus(Duration.ofSeconds(1));
+                log.atInfo().setMessage("Sleeping for {}").addArgument(sleepBetweenRuns).log();
+                Thread.sleep(sleepBetweenRuns.toMillis());
             }
         }
+
+        // Final verification: all work items should be complete
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
+
         var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         Assertions.assertNotEquals(0,
-            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
+                InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
     }
 
     @ParameterizedTest
@@ -361,8 +381,9 @@ public class WorkCoordinatorTest {
             var client = httpClientSupplier.get();
             // Add the list of successors to the work item
             var body = "{\"doc\": {\"successor_items\": \"" + String.join(",", successorItems) + "\"}}";
-            var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + initialWorkItem, null, body);
-            Assertions.assertEquals(200, response.getStatusCode());
+            var updatePath = workCoordinator.getPathForUpdates(initialWorkItem);
+            var response = client.makeJsonRequest("POST", updatePath, null, body);
+            Assertions.assertEquals(200, response.getStatusCode(), "Unexpected response " + response.toDiagnosticString());
             // Create a successor item and then claim it with a long lease.
             workCoordinator.createUnassignedWorkItem(successorItems.get(0), testContext::createUnassignedWorkContext);
             // Now, we should be able to claim the first successor item with a different worker id
@@ -419,8 +440,9 @@ public class WorkCoordinatorTest {
             // Add an INCORRECT list of successors to the work item
             var incorrectSuccessors = "successor_99,successor_98,successor_97";
             var body = "{\"doc\": {\"successor_items\": \"" + incorrectSuccessors + "\"}}";
-            var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + initialWorkItem, null, body);
-            Assertions.assertEquals(200, response.getStatusCode());
+            var updatePath = workCoordinator.getPathForUpdates(initialWorkItem);
+            var response = client.makeJsonRequest("POST", updatePath, null, body);
+            Assertions.assertEquals(200, response.getStatusCode(), "Unexpected response " + response.toDiagnosticString());
 
             // Now attempt to go through with the correct successor item list
             Assertions.assertThrows(IllegalStateException.class,

@@ -480,7 +480,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         + response.toDiagnosticString()
                 );
             }
-            refresh(ctx::getRefreshContext);
         }
     }
 
@@ -892,7 +891,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     e -> ctx.addTraceException(e, true)
             );
-            refresh(ctx::getRefreshContext);
         }
     }
 
@@ -1018,7 +1016,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             doUntil("refresh", 100, MAX_REFRESH_RETRIES, contextSupplier::get, () -> {
                 try {
                     return httpClient.makeJsonRequest(
-                        AbstractedHttpClient.GET_METHOD,
+                        AbstractedHttpClient.POST_METHOD,
                         INDEX_NAME + "/_refresh",
                         null,
                         null
@@ -1039,7 +1037,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
      *                      the method spends retrying.
      * @return NoAvailableWorkToBeDone if all of the work items are being held by other processes or if all
      * work has been completed.  An additional check to workItemsArePending() is required to disambiguate.
-     * @throws IOException thrown if the initial refresh or update threw.  If there was a chance of work
+     * @throws IOException thrown if the update threw.  If there was a chance of work
      * item assignment, IOExceptions will be retried for the remainder of the leaseDuration.
      * @throws InterruptedException if the sleep() call that is waiting for the next retry is interrupted.
      */
@@ -1049,7 +1047,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         throws RetriesExceededException, IOException, InterruptedException
     {
         try (var ctx = contextSupplier.get()) {
-            refresh(ctx::getRefreshContext);
             final var leaseChecker = new LeaseChecker(leaseDuration, System.nanoTime());
             int driftRetries = 0;
             while (true) {

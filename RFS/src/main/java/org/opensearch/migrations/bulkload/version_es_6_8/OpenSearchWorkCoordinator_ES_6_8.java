@@ -26,12 +26,14 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
             super(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
         }
 
+        // Seeing inconsistent results with 1 replica so setting to 0
         protected String getCoordinationIndexSettingsBody(){
             return "{\n"
             + "  \"settings\": {\n"
             + "   \"index\": {"
             + "    \"number_of_shards\": 1,\n"
-            + "    \"number_of_replicas\": 1\n"
+            + "    \"number_of_replicas\": 1,\n"
+            + "    \"refresh_interval\": \"30s\"\n"
             + "   }\n"
             + "  },\n"
             + "  \"mappings\": {\n"
@@ -61,11 +63,11 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
             + "}\n";
         }
         protected String getPathForUpdates(String workItemId) {
-            return INDEX_NAME + "/doc/" + workItemId + "/_update";
+            return INDEX_NAME + "/doc/" + workItemId + "/_update?refresh=true";
         }
 
         protected String getPathForBulkUpdates() {
-            return INDEX_NAME + "/doc/_bulk";
+            return INDEX_NAME + "/doc/_bulk?refresh=true";
         }
 
         protected String getPathForSingleDocumentUpdateByQuery() { return INDEX_NAME + "/_update_by_query?refresh=true&size=1"; }
