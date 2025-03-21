@@ -1,12 +1,12 @@
 from enum import Enum
 
-from ..common_utils import wait_for_running_replayer
+from ..common_utils import wait_for_service_status
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
 
-from console_link.models.backfill_base import Backfill
+from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.environment import Environment
-from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.models.metadata import Metadata
@@ -95,6 +95,8 @@ class MATestBase:
             assert backfill_start_result.success
             backfill_scale_result: CommandResult = self.backfill.scale(units=1)
             assert backfill_scale_result.success
+            wait_for_service_status(status_func=lambda: self.backfill.get_status(),
+                                    desired_status=BackfillStatus.RUNNING)
 
     def backfill_during(self):
         pass
@@ -103,6 +105,8 @@ class MATestBase:
         if MigrationType.BACKFILL in self.migrations_required:
             backfill_stop_result: CommandResult = self.backfill.stop()
             assert backfill_stop_result.success
+            wait_for_service_status(status_func=lambda: self.backfill.get_status(),
+                                    desired_status=BackfillStatus.STOPPED)
 
     def backfill_after(self):
         pass
@@ -114,7 +118,7 @@ class MATestBase:
         if MigrationType.CAPTURE_AND_REPLAY in self.migrations_required:
             replayer_start_result = self.replayer.start()
             assert replayer_start_result.success
-            wait_for_running_replayer(replayer=self.replayer)
+            wait_for_service_status(status_func=lambda: self.replayer.get_status(), desired_status=ReplayStatus.RUNNING)
 
     def replay_during(self):
         pass
@@ -123,6 +127,7 @@ class MATestBase:
         if MigrationType.CAPTURE_AND_REPLAY in self.migrations_required:
             replayer_stop_result = self.replayer.stop()
             assert replayer_stop_result.success
+            wait_for_service_status(status_func=lambda: self.replayer.get_status(), desired_status=ReplayStatus.STOPPED)
 
     def replay_after(self):
         pass

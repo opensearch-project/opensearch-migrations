@@ -152,7 +152,7 @@ class K8sRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
         logger.info("Getting status of RFS backfill")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
@@ -166,6 +166,8 @@ class K8sRFSBackfill(RFSBackfill):
                 shard_status = None
             if shard_status:
                 status_str += f"\n{shard_status}"
+        if deployment_status.terminating > 0 and deployment_status.desired == 0:
+            return CommandResult(True, (BackfillStatus.TERMINATING, status_str))
         if deployment_status.running > 0:
             return CommandResult(True, (BackfillStatus.RUNNING, status_str))
         if deployment_status.pending > 0:
@@ -209,7 +211,7 @@ class ECSRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
         if not instance_statuses:

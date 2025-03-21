@@ -8,14 +8,14 @@ from http import HTTPStatus
 from console_link.middleware.clusters import connection_check, clear_cluster, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
-from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.models.kafka import Kafka
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.middleware.kafka import delete_topic
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
-from .common_utils import wait_for_running_replayer
+from .common_utils import wait_for_service_status
 from .default_operations import DefaultOperationsLibrary
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ class E2ETests(unittest.TestCase):
                             expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         replayer.start()
-        wait_for_running_replayer(replayer=replayer)
+        wait_for_service_status(status_func=lambda: replayer.get_status(), desired_status=ReplayStatus.RUNNING)
 
         expected_source_docs[index_name] = {"count": 3}
         # TODO Replayer transformation needed to only have docs in the transformed index

@@ -46,7 +46,7 @@ SCHEMA = {
 }
 
 
-ReplayStatus = Enum("ReplayStatus", ["NOT_STARTED", "STARTING", "RUNNING", "STOPPED", "FAILED"])
+ReplayStatus = Enum("ReplayStatus", ["NOT_STARTED", "STARTING", "RUNNING", "TERMINATING", "STOPPED", "FAILED"])
 
 
 class Replayer(ABC):
