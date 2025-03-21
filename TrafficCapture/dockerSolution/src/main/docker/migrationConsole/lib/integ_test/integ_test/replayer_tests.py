@@ -8,14 +8,14 @@ import time
 from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
-from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.middleware.kafka import delete_topic
 from console_link.models.kafka import Kafka
 from console_link.middleware.clusters import connection_check, clear_cluster, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 
-from .common_utils import execute_api_call, wait_for_running_replayer, EXPECTED_BENCHMARK_DOCS
+from .common_utils import execute_api_call, wait_for_service_status, EXPECTED_BENCHMARK_DOCS
 from .default_operations import DefaultOperationsLibrary
 from .metric_operations import assert_metrics_present
 
@@ -51,7 +51,7 @@ def setup_replayer(request):
     logger.info("Starting replayer...")
     # TODO provide support for actually starting/stopping Replayer in Docker
     replayer.start()
-    wait_for_running_replayer(replayer=replayer)
+    wait_for_service_status(status_func=lambda: replayer.get_status(), desired_status=ReplayStatus.RUNNING)
 
 
 @pytest.fixture(scope="session", autouse=True)
