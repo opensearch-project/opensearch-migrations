@@ -20,6 +20,7 @@ from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 
+
 @pytest.fixture(autouse=True)
 def mock_kube_config(monkeypatch):
     # Prevent actual config loading
