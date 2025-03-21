@@ -1,12 +1,13 @@
 package org.opensearch.migrations.bulkload.version_es_5_6;
 
-import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class OpenSearchClient_ES_5_6 extends OpenSearchClient {

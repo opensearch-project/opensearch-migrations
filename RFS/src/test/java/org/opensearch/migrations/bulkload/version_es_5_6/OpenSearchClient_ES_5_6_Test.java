@@ -1,5 +1,19 @@
 package org.opensearch.migrations.bulkload.version_es_5_6;
 
+import java.util.List;
+
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.BulkDocSection;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
+import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -12,21 +26,7 @@ import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.common.http.HttpResponse;
-import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
-import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
-import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchClient_ES_6_8;
-import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;

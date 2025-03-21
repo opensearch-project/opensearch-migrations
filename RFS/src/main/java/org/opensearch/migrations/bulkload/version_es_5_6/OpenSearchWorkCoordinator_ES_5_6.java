@@ -1,11 +1,12 @@
 package org.opensearch.migrations.bulkload.version_es_5_6;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import java.time.Clock;
+import java.util.function.Consumer;
+
 import org.opensearch.migrations.bulkload.workcoordination.AbstractedHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 
-import java.time.Clock;
-import java.util.function.Consumer;
+import com.fasterxml.jackson.databind.JsonNode;
 
 public class OpenSearchWorkCoordinator_ES_5_6 extends OpenSearchWorkCoordinator {    
         public OpenSearchWorkCoordinator_ES_5_6(
