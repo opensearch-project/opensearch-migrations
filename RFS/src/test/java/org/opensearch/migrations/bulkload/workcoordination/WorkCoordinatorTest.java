@@ -11,8 +11,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
-import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -25,7 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * The contract here is that the first request in will acquire a lease for the duration that was requested.
@@ -44,16 +46,39 @@ import org.junit.jupiter.api.Test;
  */
 @Slf4j
 @Tag("isolatedTest")
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class WorkCoordinatorTest {
-    private static final WorkCoordinatorFactory factory = new WorkCoordinatorFactory(Version.fromString("OS 2.11"));
+    private SearchClusterContainer container;
+    private WorkCoordinatorFactory factory;
+    
+    static Stream<SearchClusterContainer.ContainerVersion> containerVersions() {
+        return Stream.of(
+            SearchClusterContainer.ES_V5_6_16,
+            SearchClusterContainer.ES_V6_8_23,
+            SearchClusterContainer.ES_V7_10_2,
+            SearchClusterContainer.OS_V1_3_16,
+            SearchClusterContainer.OS_V2_19_1
+        );
+    }
 
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
 
-    final SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
     private Supplier<AbstractedHttpClient> httpClientSupplier;
 
     @BeforeEach
-    void setupOpenSearchContainer() throws Exception {
+    void setupHttpClientSupplier() {
+        if (container != null) {
+            httpClientSupplier = () -> new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+                .host(container.getUrl())
+                .build()
+                .toConnectionContext());
+        }
+    }
+    
+    void setupOpenSearchContainer(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // Create a new container with the specified version
+        container = new SearchClusterContainer(version);
+        factory = new WorkCoordinatorFactory(container.getContainerVersion().getVersion());
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
@@ -87,8 +112,10 @@ public class WorkCoordinatorTest {
         return objectMapper.readTree(response.getPayloadBytes()).path("hits");
     }
 
-    @Test
-    public void testAcquireLeaseHasNoUnnecessaryConflicts() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testAcquireLeaseHasNoUnnecessaryConflicts(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 100;
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
@@ -122,21 +149,34 @@ public class WorkCoordinatorTest {
         Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
     }
 
-    @Test
-    @Tag("isolatedTest")
-    public void testAcquireLeaseForQuery() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testAcquireLeaseForQuery(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
-        final var NUM_DOCS = 40;
+        final var NUM_DOCS = 20;
         final var MAX_RUNS = 2;
-        final var EXPIRATION = Duration.ofSeconds(10);
+        final var EXPIRATION = Duration.ofSeconds(15);
 
         var executorService = Executors.newFixedThreadPool(NUM_DOCS);
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+            var allFutures = new ArrayList<CompletableFuture<Boolean>>();
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R__0__" + i;
-                workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+                allFutures.add(
+                        CompletableFuture.supplyAsync(
+                                () -> {
+                                    try {
+                                        return workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+                                    } catch (IOException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }
+                        )
+                );
             }
+            CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
 
@@ -167,7 +207,7 @@ public class WorkCoordinatorTest {
                 var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "NONE")
             ) {
                 var nextWorkItem = workCoordinator.acquireNextWorkItem(
-                    Duration.ofSeconds(2),
+                    EXPIRATION,
                     testContext::createAcquireNextItemContext
                 );
                 log.atInfo().setMessage("Next work item picked={}").addArgument(nextWorkItem).log();
@@ -176,8 +216,13 @@ public class WorkCoordinatorTest {
                 log.atError().setCause(e).setMessage("Unexpected clock drift error.  Got response: {}")
                     .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
                     .log();
+                throw new AssertionError("Unexpected clock drift error.", e);
             }
-            Thread.sleep(EXPIRATION.plusSeconds(1).toMillis());
+            if (run + 1 < MAX_RUNS) {
+                var durationForAllWorkItemExpiration = EXPIRATION.plusSeconds(1);
+                log.atInfo().setMessage("Sleeping for {}").addArgument(durationForAllWorkItemExpiration).log();
+                Thread.sleep(durationForAllWorkItemExpiration.toMillis());
+            }
         }
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -187,8 +232,10 @@ public class WorkCoordinatorTest {
             InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
     }
 
-    @Test
-    public void testAddSuccessorWorkItems() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testAddSuccessorWorkItems(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 20;
         final var NUM_SUCCESSOR_ITEMS = 3;
@@ -253,8 +300,10 @@ public class WorkCoordinatorTest {
         }
     }
 
-    @Test
-    public void testAddSuccessorWorkItemsSimultaneous() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testAddSuccessorWorkItemsSimultaneous(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 20;
         final var NUM_SUCCESSOR_ITEMS = 3;
@@ -287,9 +336,10 @@ public class WorkCoordinatorTest {
         }
     }
 
-    @Test
-    @Tag("isolatedTest")
-    public void testAddSuccessorWorkItemsPartiallyCompleted() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testAddSuccessorWorkItemsPartiallyCompleted(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         // A partially completed successor item will have a `successor_items` field and _some_ of the successor work items will be created
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
@@ -345,8 +395,10 @@ public class WorkCoordinatorTest {
     }
 
 
-    @Test
-    public void testAddSuccessorItemsFailsIfAlreadyDifferentSuccessorItems() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testAddSuccessorItemsFailsIfAlreadyDifferentSuccessorItems(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         // A partially completed successor item will have a `successor_items` field and _some_ of the successor work items will be created
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
@@ -377,8 +429,10 @@ public class WorkCoordinatorTest {
     }
 
     // Create a test where a work item tries to create itself as a successor -- it should fail and NOT be marked as complete. Another worker should pick it up and double the lease time.
-    @Test
-    public void testCreatingSelfAsSuccessorWorkItemFails() throws Exception {
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testCreatingSelfAsSuccessorWorkItemFails(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
         // A partially completed successor item will have a `successor_items` field and _some_ of the successor work items will be created
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();

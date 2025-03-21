@@ -195,6 +195,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     protected abstract String getPathForUpdates(String workItemId);
 
+    protected abstract String getPathForBulkUpdates();
+
     protected abstract String getPathForSingleDocumentUpdateByQuery();
 
     protected abstract String getPathForGets(String workItemId);
@@ -812,7 +814,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 .addArgument(String.join(", ", workItemIds)).log();
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
-                INDEX_NAME + "/_bulk",
+                getPathForBulkUpdates(),
                 null,
                 body.toString()
         );
@@ -823,7 +825,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                             + String.join(", ", workItemIds)
                             + "returned an unexpected status code "
                             + statusCode
-                            + " instead of 200"
+                            + " instead of 200. With message" +
+                            response.toDiagnosticString()
             );
         }
         // parse the response body and if any of the writes failed with anything EXCEPT a version conflict, throw an exception
