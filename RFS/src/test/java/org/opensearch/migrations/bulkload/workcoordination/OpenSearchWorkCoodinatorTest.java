@@ -6,7 +6,6 @@ import java.util.AbstractMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
@@ -29,10 +28,13 @@ import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 class OpenSearchWorkCoodinatorTest {
 
     public static final String THROTTLE_RESULT_VALUE = "slow your roll, dude";
-    public static List<Version> testedVersions = SupportedClusters.targets().stream().map(ContainerVersion::getVersion).collect(Collectors.toList());
+    public static List<Version> testedVersions = SupportedClusters.supportedTargets(true)
+                    .stream()
+                    .map(ContainerVersion::getVersion)
+                    .toList();
 
     static Stream<Arguments> provideTestedVersions() {
-        return Stream.concat(testedVersions.stream(), Stream.of(Version.fromString("ES 6.8"))).map(Arguments::of);
+        return testedVersions.stream().map(Arguments::of);
     }
 
     @AllArgsConstructor

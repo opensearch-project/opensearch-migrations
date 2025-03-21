@@ -26,7 +26,6 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
             super(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
         }
 
-        // Seeing inconsistent results with 1 replica so setting to 0
         protected String getCoordinationIndexSettingsBody(){
             return "{\n"
             + "  \"settings\": {\n"

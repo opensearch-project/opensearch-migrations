@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -55,13 +56,7 @@ public class WorkCoordinatorTest {
     private WorkCoordinatorFactory factory;
     
     static Stream<SearchClusterContainer.ContainerVersion> containerVersions() {
-        return Stream.of(
-            SearchClusterContainer.ES_V5_6_16,
-            SearchClusterContainer.ES_V6_8_23,
-            SearchClusterContainer.ES_V7_10_2,
-            SearchClusterContainer.OS_V1_3_16,
-            SearchClusterContainer.OS_V2_19_1
-        );
+        return SupportedClusters.supportedSources(true).stream();
     }
 
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
