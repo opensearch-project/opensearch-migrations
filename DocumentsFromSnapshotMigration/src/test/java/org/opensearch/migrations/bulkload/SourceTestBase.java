@@ -275,7 +275,7 @@ public class SourceTestBase {
             });
 
 
-            var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(
+            var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
                     Optional.ofNullable(transformationConfig).orElse(
                             RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG
                     ));
@@ -299,7 +299,7 @@ public class SourceTestBase {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> defaultDocTransformer),
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),

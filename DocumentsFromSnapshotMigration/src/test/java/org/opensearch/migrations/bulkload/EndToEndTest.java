@@ -36,17 +36,8 @@ public class EndToEndTest extends SourceTestBase {
     private File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        var scenarios = Stream.<Arguments>builder();
-        for (var migrationPair : SupportedClusters.supportedPairs(true)) {
-            scenarios.add(Arguments.of(migrationPair.source(), migrationPair.target()));
-        }
-
-        // Experimental Reindex-From-Snapshot Only support for same version migrations
-        scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V5_6_16));
-        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V6_8_23));
-        scenarios.add(Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.ES_V7_10_2));
-
-        return scenarios.build();
+        return SupportedClusters.supportedPairs(true).stream()
+                .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
     }
 
     @ParameterizedTest(name = "Source {0} to Target {1}")

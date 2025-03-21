@@ -41,13 +41,13 @@ public class LeaseExpirationTest extends SourceTestBase {
     public static final String TARGET_DOCKER_HOSTNAME = "target";
 
     private static Stream<Arguments> testParameters() {
-        return Stream.of(
-                Arguments.of(false, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V5_6_16),
-                Arguments.of(false, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V6_8_23),
-                Arguments.of(false, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.ES_V7_10_2),
-                Arguments.of(false, SearchClusterContainer.OS_V1_3_16, SearchClusterContainer.OS_V1_3_16),
-                Arguments.of(false, SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1),
-                Arguments.of(true, SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1)
+        return Stream.concat(
+                // Test with all pairs with forceMoreSegments=false
+                SupportedClusters.supportedPairs(true).stream()
+                        .map(migrationPair ->
+                                Arguments.of(false, migrationPair.source(), migrationPair.target())),
+                // Add test for ES 7 -> OS 2 with forceMoreSegments=true
+                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1))
         );
     }
 
