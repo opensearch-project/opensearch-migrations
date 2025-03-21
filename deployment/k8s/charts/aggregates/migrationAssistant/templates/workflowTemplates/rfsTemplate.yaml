@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bulk-loader-template
+  labels:
+    {{- include "migration-assistant-chart.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: bulk-loader
+  templates:
+    - name: bulk-loader
+      inputs:
+        parameters:
+          - name: replicas
+            default: 1
+          - name: image
+            default: "migrations/reindex_from_snapshot:latest"
+          - name: app-name
+            default: "bulk-document-loader"
+
+          - name: target-host # required
+
+          - name: documents-per-bulk-request
+            default: ""
+          - name: lease-duration
+            default: ""
+          - name: lucene-dir
+            default: "/tmp"
+          - name: snapshot-local-dir
+            default: "/snapshot"
+          - name: snapshot-name
+            default: ""
+          - name: target-insecure
+            default: ""
+          - name: target-username
+            default: ""
+          - name: target-password
+            default: ""
+      resource:
+        action: create
+        manifest: |
+          {{- include "generateRfsDeployment" . | nindent 10 }}

@@ -7,7 +7,7 @@ conditionalPackageInstalls:
   kafka: true
   replayer: true
   argoWorkflows: true
-  gatekeeper: true
+  gatekeeper: false
   grafana: false
   prometheus: false
   jaeger: false
@@ -143,8 +143,7 @@ captured-traffic-kafka-cluster:
 
 
 argo-workflows:
-  fullnameOverride: "argo-workflows"
-
+  fullnameOverride: "argo"
   controller:
     containerSecurityContext:
       runAsNonRoot: true
@@ -153,33 +152,25 @@ argo-workflows:
       enabled: false
     metricsConfig: # to publish
       enabled: true
-
   server:
     extraArgs:
       - --auth-mode=server
-
   serviceAccount:
     create: true
-    name: argo-workflows-sa
-
   singleNamespace: true
-
   # Extra workflow configuration
   workflow:
     serviceAccount:
-      create: true
-      name: workflow-restricted-sa
+      create: false
+      name: argo-workflow-executor
 
 
 workflowService:
   defaultEnvVars:
     ENV_VAR1: "default-value-1"
     ENV_VAR2: "default-value-2"
-
   defaultReplicas: 1
-
   monitorImage: "bitnami/kubectl:latest"
-
   allowedRepos:
     - "bitnami/"
 #    - "k8s.gcr.io/"
