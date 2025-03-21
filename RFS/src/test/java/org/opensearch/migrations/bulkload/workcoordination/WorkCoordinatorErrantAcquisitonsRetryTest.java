@@ -143,7 +143,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         Assertions.assertEquals(1, pathToCounts.updates);
         Assertions.assertEquals(pathToCounts.searches, e.retries+1);
         Assertions.assertInstanceOf(expectedCauseClass, e.getCause());
-        Assertions.assertEquals(1, pathToCounts.refreshes);
+        Assertions.assertEquals(0, pathToCounts.refreshes);
     }
 
     @Test

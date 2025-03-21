@@ -95,7 +95,9 @@ public class UpgradeTest extends SourceTestBase {
                                           counter,
                                           clockJitter,
                                           testDocMigrationContext,
-                                          sourceCluster.getContainerVersion().getVersion()));
+                                          sourceVersion.getVersion(),
+                                          targetVersion.getVersion(),
+                        null));
             assertThat("5 shards + 1 nothing to do worker shoul d spin up", result.numRuns, equalTo(6));
 
             var targetOperations = new ClusterOperations(targetCluster);

@@ -41,21 +41,22 @@ public class SupportedClusters {
         public ContainerVersion source() { return source; }
         public ContainerVersion target() { return target; }
 
-        // equals, hashCode, and toString methods
     }
-    public static List<MigrationPair> supportedPairs(boolean supports_6_8_target) {
-        // Most of our source/target pairs can be determined by crossing the arrays, but there are a few special cases
-        // that don't fit into that framework because a given source or target is only compatible with specific partners.
-        // In particular, ES 6.8 can be a target _only_ for migrations from ES 6.8, and OS 2.x can be a source _only_
-        // for migrations to OS 2.x (i.e. no downgrades).
+    public static List<MigrationPair> supportedPairs(boolean includeRFSOnly) {
         var matrix = new java.util.ArrayList<>(sources().stream()
                 .flatMap(source -> targets().stream()
                         .map(target -> new MigrationPair(source, target)))
                 .toList());
+
+        // Individual Pairs
         matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1));
-        if (supports_6_8_target) {
-            matrix.add(new MigrationPair(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V2_19_1));
+
+        if (includeRFSOnly) {
+            matrix.add(new MigrationPair(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V5_6_16));
+            matrix.add(new MigrationPair(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V6_8_23));
+            matrix.add(new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.ES_V7_10_2));
         }
+
         return matrix;
     }
 }

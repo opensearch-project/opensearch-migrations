@@ -54,7 +54,9 @@ public class WorkloadGenerator {
                     .addArgument(indexName)
                     .addArgument(doc::toString).log();
                 var docId = docIdCounter.incrementAndGet();
-                return new BulkDocSection(indexName + "_" + docId, indexName, null, doc.toString(), null);
+                var type = options.getDefaultDocType();
+                var routing = options.getDefaultDocRouting();
+                return new BulkDocSection(indexName + "_" + docId, indexName, type, doc.toString(), routing);
             })
             .collect(Collectors.toList());
 
