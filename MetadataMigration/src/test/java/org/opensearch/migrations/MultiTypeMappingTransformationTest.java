@@ -32,6 +32,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_LATEST));
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_LATEST));
         return scenarios.build();
     }
@@ -83,6 +84,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var arguments = prepareSnapshotMigrationArgs(updatedSnapshotName);
 
             configureDataFilters(originalIndexName, arguments);
+            arguments.metadataCustomTransformationParams = useTransformationResource("es2-transforms.json");
 
             var result = executeMigration(arguments, MetadataCommands.MIGRATE);
             checkResult(result, originalIndexName);

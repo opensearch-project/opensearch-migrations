@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.opensearch.migrations.transform.jsProxyObjects.MapProxyObject;
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.google.common.io.Resources;
@@ -52,7 +51,7 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
                     )
             );
 
-        return new MapProxyObject(Map.of(
+        return Map.of(
             "index_mappings", indexMappings,
             "regex_mappings", regexMappings,
             "featureFlags", featureFlags,
@@ -61,10 +60,10 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
                 Map.of("version",
                     Map.of("major", sourceProperties.getVersion().getMajor(),
                         "minor", sourceProperties.getVersion().getMinor())
-                )));
+                ));
     }
 
-    private static String getScripts() throws IOException {
+    public static String getScripts() throws IOException {
         return Resources.toString(Resources.getResource(INIT_SCRIPT_RESOURCE_NAME), StandardCharsets.UTF_8);
     }
 }

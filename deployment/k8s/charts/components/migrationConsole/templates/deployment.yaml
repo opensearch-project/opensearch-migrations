@@ -1,7 +1,8 @@
 {{ $mountName := "all-configs" }}
 {{ $envVarMountName := "env-vars" }}
-{{ $sharedLogsVolumeEnabled := false }}
+{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
 {{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
+{{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,6 +35,9 @@ spec:
             - "-c"
             - |
               source /shared/vars.sh
+              {{- if .Values.developerModeEnabled }}
+              source /.venv/bin/activate && pipenv install -e ~/lib/console_link
+              {{- end }}
               export START_API_COMMAND="pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt"
               export WAIT_AND_DO_NOTHING_COMMAND="tail -f /dev/null"
               migrationEnabled=$(echo "$@" | grep -o -- "--migrationApiEnabled" | wc -l); if [ "$migrationEnabled" -gt 0 ]; then $START_API_COMMAND; else $WAIT_AND_DO_NOTHING_COMMAND; fi > run.sh
@@ -47,9 +51,10 @@ spec:
               mountPath: /config
             - name: {{ $envVarMountName }}
               mountPath: /shared
-{{/*              Enable if developing the console library */}}
-{{/*            - name: local-console-link*/}}
-{{/*              mountPath: /root/lib/console_link*/}}
+            {{- if $developerModeEnabled }}
+            - name: local-console-libs
+              mountPath: /root/lib
+            {{- end }}
             {{- if $snapshotVolumeEnabled }}
             - name: snapshot-volume
               mountPath: /snapshot
@@ -59,10 +64,12 @@ spec:
           emptyDir: { }
         - name: merged-config
           emptyDir: { }
-{{/*        - name: local-console-link*/}}
-{{/*          hostPath:*/}}
-{{/*            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link*/}}
-{{/*            type: Directory*/}}
+        {{- if $developerModeEnabled  }}
+        - name: local-console-libs
+          hostPath:
+            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            type: Directory
+        {{- end }}
         {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:

@@ -36,14 +36,9 @@ public class EndToEndTest extends SourceTestBase {
 
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
-
-        for (var sourceCluster : SupportedClusters.sources()) {
-            for (var targetCluster : SupportedClusters.targets()) {
-                scenarios.add(Arguments.of(sourceCluster, targetCluster));
-            }
+        for (var migrationPair : SupportedClusters.supportedPairs(true)) {
+            scenarios.add(Arguments.of(migrationPair.source(), migrationPair.target()));
         }
-        scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V6_8_23));
-
         return scenarios.build();
     }
 

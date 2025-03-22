@@ -16,8 +16,8 @@ import lombok.AllArgsConstructor;
  */
 @AllArgsConstructor
 public class RfsDocument {
-    // The Lucene index doc number of the document (global over shard / lucene-index)
-    public final int luceneDocNumber;
+    // Originally set to the lucene index doc number, this number helps keeps track of progress over a work item
+    public final int progressCheckpointNum;
 
     // The Elasticsearch/OpenSearch document to be reindexed
     public final BulkDocSection document;
@@ -36,19 +36,21 @@ public class RfsDocument {
     }
 
     @SuppressWarnings("unchecked")
-    public static List<RfsDocument> transform(IJsonTransformer transformer, RfsDocument doc) {
-        var transformedObject = transformer.transformJson(doc.document.toMap());
-        if (transformedObject instanceof Map) {
-            Map<String, Object> transformedMap = (Map<String, Object>) transformedObject;
-            return List.of(new RfsDocument(
-                doc.luceneDocNumber,
-                BulkDocSection.fromMap(transformedMap)
-            ));
-        } else if (transformedObject instanceof List) {
+    public static List<RfsDocument> transform(IJsonTransformer transformer, List<RfsDocument> docs) {
+        var listOfDocMaps = docs.stream().map(doc -> doc.document.toMap())
+                .toList();
+
+        // Use the first progressCheckpointNum in the batch to associate with all returned objects
+        var progressCheckpointNum = docs.stream().findFirst().map(doc -> doc.progressCheckpointNum).orElseThrow(
+                () -> new IllegalArgumentException("Expected non-empty list of docs, but was empty.")
+        );
+
+        var transformedObject = transformer.transformJson(listOfDocMaps);
+        if (transformedObject instanceof List) {
             var transformedList = (List<Map<String, Object>>) transformedObject;
             return transformedList.stream()
                 .map(item -> new RfsDocument(
-                    doc.luceneDocNumber,
+                    progressCheckpointNum,
                     BulkDocSection.fromMap(item)
                 ))
                 .collect(Collectors.toList());

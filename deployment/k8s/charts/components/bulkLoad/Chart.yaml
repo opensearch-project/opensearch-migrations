@@ -7,6 +7,3 @@ dependencies:
   - name: helm-common
     repository: file://../../sharedResources/helmCommon
     version: 0.1.0
-  - name: logs-volume
-    version: "0.1.0"
-    repository: "file://../../sharedResources/logsVolume"

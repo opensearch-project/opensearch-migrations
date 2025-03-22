@@ -33,7 +33,7 @@ public class TransformFunctions {
             if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(dimensionality);
             }
-            if (VersionMatchers.isOS_1_X.test(sourceVersion)) {
+            if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(dimensionality);
             }
         }

@@ -192,11 +192,12 @@ public class RfsMigrateDocuments {
         public String getTransformerConfigParameterArgPrefix() {
             return DOC_CONFIG_PARAMETER_ARG_PREFIX;
         }
-        private static final String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc-";
+        private static final String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc";
 
         @Parameter(
                 required = false,
-                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+                names = { "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "-transformer-config-base64",
+                        "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "TransformerConfigBase64" },
                 arity = 1,
                 description = "Configuration of doc transformers.  The same contents as --doc-transformer-config but " +
                         "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
@@ -204,7 +205,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(
                 required = false,
-                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
+                names = { "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "-transformer-config",
+                        "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "TransformerConfig" },
                 arity = 1,
                 description = "Configuration of doc transformers.  Either as a string that identifies the "
                         + "transformer that should be run (with default settings) or as json to specify options "
@@ -215,7 +217,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(
                 required = false,
-                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
+                names = { "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "-transformer-config-file",
+                        "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "TransformerConfigFile" },
                 arity = 1,
                 description = "Path to the JSON configuration file of doc transformers.")
         private String transformerConfigFile;
@@ -403,7 +406,7 @@ public class RfsMigrateDocuments {
             return;
         }
         var workItemAndDuration = workItemRef.get();
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getDocId()).log();
+        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
@@ -524,11 +527,11 @@ public class RfsMigrateDocuments {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
         var workItem = workItemAndDuration.getWorkItem();
-        // Set successor as same last docId, this will ensure we process every document fully in cases where there is a 1:many doc split
-        var successorStartingDocId = progressCursor.getDocId();
+        // Set successor as same last checkpoint Num, this will ensure we process every document fully in cases where there is a 1:many doc split
+        var successorStartingCheckpointNum = progressCursor.getProgressCheckpointNum();
         var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
                 .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
-            successorStartingDocId);
+                successorStartingCheckpointNum);
         ArrayList<String> successorWorkItemIds = new ArrayList<>();
         successorWorkItemIds.add(successorWorkItem.toString());
         return successorWorkItemIds;

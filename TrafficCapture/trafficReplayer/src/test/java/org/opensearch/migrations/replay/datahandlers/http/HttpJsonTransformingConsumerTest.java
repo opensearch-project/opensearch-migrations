@@ -25,7 +25,6 @@ import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.utils.TrackedFuture;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
@@ -372,14 +371,16 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
 
         var transformingHandler = new HttpJsonTransformingConsumer<>(
-            new TransformationLoader().getTransformerFactoryLoader(
-                HOST_NAME,
-                null,
-                new ObjectMapper().writeValueAsString(List.of(
-                    Map.of("JsonJinjavaTransformerProvider", Map.of(
-                        "template", "{%- throw \"intentional exception\" -%}"
-                    ))
-                ))),
+                new TransformationLoader().getTransformerFactoryLoader(
+                        HOST_NAME,
+                        null,
+                        "[{  \"JsonJSTransformerProvider\": {" +
+                                "    \"initializationScript\": \"function transform(document, context) { throw new Error(\\\"Error!\\\"); }" +
+                                "function main(context) { return (document) => { return transform(document, context); }; } (() => main)()\"," +
+                                "    \"bindingsObject\": \"{}\"" +
+                                "  }" +
+                                "}]"
+                ),
             null,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)

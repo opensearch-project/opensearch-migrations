@@ -10,21 +10,21 @@ plugins {
 dependencies {
     implementation project(':TrafficCapture:captureOffloader')
     implementation project(':coreUtilities')
-    api            group: 'io.netty', name: 'netty-buffer'
-    api            group: 'io.netty', name: 'netty-codec-http'
-    api            group: 'io.netty', name: 'netty-handler'
+    api            libs.netty.buffer
+    api            libs.netty.codec.http
+    api            libs.netty.handler
 
-    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation libs.slf4j.api
 
     testImplementation project(':TrafficCapture:captureProtobufs')
-    testImplementation group: 'com.google.guava', name: 'guava'
-    testImplementation group: 'com.google.protobuf', name: 'protobuf-java'
-    testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    testImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testImplementation libs.guava
+    testImplementation libs.protobuf.java
+    testImplementation libs.opentelemetry.sdk.testing
+    testImplementation libs.httpclient5
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testImplementation libs.slf4j.api
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))

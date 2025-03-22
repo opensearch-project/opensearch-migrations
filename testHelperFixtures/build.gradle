@@ -12,12 +12,6 @@ import org.opensearch.migrations.common.CommonUtils
  */
 
 
-buildscript {
-    dependencies {
-        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
-    }
-}
-
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
@@ -25,23 +19,23 @@ plugins {
 }
 
 dependencies {
-    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    testFixturesImplementation group: 'com.google.guava', name: 'guava'
-    testFixturesImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all'
-    testFixturesImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
-    testFixturesImplementation group: 'org.bouncycastle', name: 'bcprov-jdk18on'
-    testFixturesImplementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on'
-    testFixturesImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
-    testFixturesApi group: 'org.testcontainers', name: 'testcontainers'
-    testFixturesApi group: 'org.testcontainers', name: 'toxiproxy'
+    testFixturesImplementation libs.jackson.databind
+    testFixturesImplementation libs.guava
+    testFixturesImplementation libs.toxiproxy
+    testFixturesImplementation libs.netty.all
+    testFixturesImplementation libs.httpclient5
+    testFixturesImplementation libs.bouncycastle.provider
+    testFixturesImplementation libs.bouncycastle.certs
+    testFixturesImplementation libs.junit.jupiter.api
+    testFixturesImplementation libs.hamcrest
+    testFixturesImplementation libs.slf4j.api
+    testFixturesApi libs.testcontainers
+    testFixturesApi libs.testcontainers.toxiproxy
 
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-    testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation libs.log4j.api
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testFixturesImplementation libs.log4j.api
+    testFixturesImplementation libs.log4j.core
+    testFixturesImplementation libs.log4j.slf4j2.impl
 }

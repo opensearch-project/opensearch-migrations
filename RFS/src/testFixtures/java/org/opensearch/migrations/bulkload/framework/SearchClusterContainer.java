@@ -114,7 +114,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public void copySnapshotData(final String directory) {
         try {
             // Execute command to list all files in the directory
-            final var result = this.execInContainer("sh", "-c", "find " + CLUSTER_SNAPSHOT_DIR + " -type f");
+            // `find` is not available on some versions of the containers, in which case it falls back to a ls/grep loop.
+            final var result = this.execInContainer("sh", "-c", "find " + CLUSTER_SNAPSHOT_DIR + " -type f" + " || " +
+                    "for dir in $(ls -1 -R " + CLUSTER_SNAPSHOT_DIR + " | grep ':' | sed 's/://g'); do for file in $(ls -1 $dir); do if [ -f \"$dir/$file\" ]; then echo \"$dir/$file\"; fi; done; done");
             log.debug("Process Exit Code: " + result.getExitCode());
             log.debug("Standard Output: " + result.getStdout());
             log.debug("Standard Error : " + result.getStderr());
