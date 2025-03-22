@@ -19,9 +19,10 @@ public final class TransformerConfigUtils {
                 isConfigured(params.getTransformerConfig());
         if (configuredCount > 1) {
             System.err.println("Specify only one of " +
-                    "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-base64" + ", " +
-                    "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config" + ", or " +
-                    "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-file" + ".");
+                    "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config-base64" + ", " +
+                    "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config" + ", or " +
+                    "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config-file" +
+                    ". Both Kebab case and lower Camel case are supported.");
             System.exit(4);
         }
 

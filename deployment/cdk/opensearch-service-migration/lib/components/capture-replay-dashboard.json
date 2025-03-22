@@ -1,0 +1,334 @@
+{
+    "variables": [
+        {
+            "type": "property",
+            "property": "region",
+            "inputType": "input",
+            "id": "REGION",
+            "label": "Region",
+            "defaultValue": "placeholder-region",
+            "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_STAGE",
+            "inputType": "input",
+            "id": "MA_STAGE",
+            "label": "Migration Stage",
+            "defaultValue": "placeholder-stage",
+            "visible": false
+        }
+    ],
+    "widgets": [
+        {
+            "height": 1,
+            "width": 24,
+            "y": 0,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Traffic Capture",
+                "background": "transparent"
+            }
+        },
+        {
+            "height": 10,
+            "width": 12,
+            "y": 1,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "bytesWrittenToTarget", "OTelLib", "replayer", { "region": "REGION", "id": "m1", "label": "Replayed on T" } ],
+                    [ ".", "bytesRead", ".", "captureProxy", { "label": "Captured from S", "region": "REGION", "id": "m2" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "title": "Captured vs Replayed Bytes",
+                "yAxis": {
+                    "left": {
+                        "label": "Bytes"
+                    }
+                }
+            }
+        },
+        {
+            "height": 5,
+            "width": 12,
+            "y": 1,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "activeTargetConnections", "OTelLib", "replayer" ],
+                    [ "OpenSearchMigrations", "connectionsOpened", "OTelLib", "replayer" ],
+                    [ "OpenSearchMigrations", "connectionsClosedCount", "OTelLib", "replayer" ]
+                ],
+                "sparkline": true,
+                "view": "singleValue",
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "title": "Active Replayer Connections",
+                "liveData": true
+            }
+        },
+        {
+            "height": 5,
+            "width": 12,
+            "y": 6,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "activeConnection", "OTelLib", "captureProxy" ],
+                    [ "OpenSearchMigrations", "gatheringRequestCount", "OTelLib", "captureProxy" ],
+                    [ "OpenSearchMigrations", "gatheringResponseCount", "OTelLib", "captureProxy" ]
+                ],
+                "sparkline": true,
+                "view": "singleValue",
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "title": "Active Capture Proxy Connections",
+                "liveData": true
+            }
+        },
+        {
+            "height": 1,
+            "width": 24,
+            "y": 11,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Error Analysis",
+                "background": "transparent"
+            }
+        },
+        {
+            "height": 9,
+            "width": 12,
+            "y": 12,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "removed", "OTelLib", "captureProxy", { "label": "Removed Connections", "color": "#ff7f0e", "region": "REGION" } ],
+                    [ ".", "unregistered", ".", ".", { "label": "Unregistered Connections", "color": "#2ca02c", "region": "REGION", "visible": false } ],
+                    [ ".", "gatheringRequestCount", ".", ".", { "label": "Total Requests", "yAxis": "right", "region": "REGION", "color": "#1f77b4" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "title": "CaptureProxy Connections",
+                "yAxis": {
+                    "left": {
+                        "label": "Request Count"
+                    }
+                }
+            }
+        },
+        {
+            "height": 1,
+            "width": 24,
+            "y": 21,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Kafka Integration",
+                "background": "transparent"
+            }
+        },
+        {
+            "height": 10,
+            "width": 12,
+            "y": 22,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "replayer" ],
+                    [ ".", "kafkaCommitDuration", ".", ".", { "stat": "Average" } ],
+                    [ "AWS/Kafka", "MessagesInPerSec", "Cluster Name", "migration-msk-cluster-MA_STAGE", "Broker ID", "1" ],
+                    [ "...", "2" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Kafka Message Commit Rate",
+                "region": "REGION",
+                "stat": "Average",
+                "period": 60,
+                "setPeriodToTimeRange": true
+            }
+        },
+        {
+            "height": 10,
+            "width": 7,
+            "y": 22,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "replayer", { "id": "m2" } ],
+                    [ ".", "kafkaRecordsRead", ".", ".", { "id": "m3" } ]
+                ],
+                "sparkline": true,
+                "view": "singleValue",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "title": "Kafka-Replayer Monitor"
+            }
+        },
+        {
+            "height": 10,
+            "width": 5,
+            "y": 22,
+            "x": 19,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "captureProxy", { "id": "m1" } ]
+                ],
+                "sparkline": true,
+                "view": "singleValue",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "title": "Kafka-CaptureProxy Monitor"
+            }
+        },
+        {
+            "height": 1,
+            "width": 24,
+            "y": 32,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Replayer Performance"
+            }
+        },
+        {
+            "height": 9,
+            "width": 12,
+            "y": 33,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ECS", "MemoryUtilization", "ServiceName", "migration-MA_STAGE-traffic-replayer-default", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "label": "Memory Min" } ],
+                    [ ".", ".", ".", ".", ".", ".", { "stat": "Maximum", "label": "Memory Max" } ],
+                    [ ".", ".", ".", ".", ".", ".", { "stat": "Average", "label": "Memory Avg" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Replayer Memory Utilization",
+                "region": "${REGION}",
+                "period": 60,
+                "yAxis": {
+                    "left": {
+                        "label": "Memory %"
+                    }
+                }
+            }
+        },
+        {
+            "height": 9,
+            "width": 12,
+            "y": 33,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-traffic-replayer-default", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "label": "CPU Min" } ],
+                    [ ".", ".", ".", ".", ".", ".", { "stat": "Maximum", "label": "CPU Max" } ],
+                    [ ".", ".", ".", ".", ".", ".", { "stat": "Average", "label": "CPU Avg" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Replayer CPU Utilization",
+                "region": "REGION",
+                "stat": "Average",
+                "period": 60,
+                "yAxis": {
+                    "left": {
+                        "label": "CPU Utilization %"
+                    }
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 42,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "OpenSearchMigrations", "transformedJsonSucceeded", "OTelLib", "replayer", { "label": "JSON Transformations Succeeded" } ],
+                    [ ".", "transformedTextSucceeded", ".", ".", { "label": "Text Transformations Succeeded" } ]
+                ],
+                "view": "singleValue",
+                "stacked": false,
+                "title": "Transformation Success Counts",
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "sparkline": true,
+                "singleValueFullPrecision": true
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 42,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "m1/1000000", "label": "Source/Target Request Lag (sec)", "region": "REGION", "stat": "Average", "period": 60, "id": "m3" } ],
+                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "OTelLib", "replayer", { "id": "m1", "visible": false, "region": "REGION" } ],
+                    [ { "expression": "m2/1000000", "label": "Schedule Lag (sec)", "region": "REGION", "stat": "Average", "period": 60, "id": "m4" } ],
+                    [ "OpenSearchMigrations", "scheduleLag", "OTelLib", "replayer", { "id": "m2", "visible": false, "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "title": "Replayer Performance Analysis",
+                "region": "REGION",
+                "yAxis": {
+                    "left": {
+                        "label": "Lag (seconds)"
+                    }
+                },
+                "stat": "Average",
+                "period": 60
+            }
+        },
+        {
+            "height": 9,
+            "width": 12,
+            "y": 12,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "sparkline": true,
+                "metrics": [
+                    [ "OpenSearchMigrations", "tupleComparison", "method", "PUT", "OTelLib", "replayer", { "label": "Replayer total PUTs" } ],
+                    [ "...", "GET", ".", ".", { "label": "Replayer total GETs" } ],
+                    [ "...", "sourceStatusCode", "400", ".", ".", { "label": "Total mismatches" } ],
+                    [ ".", ".", "targetStatusCode", "200", "method", "PUT", "sourceStatusCode", "200", "OTelLib", "replayer", "statusCodesMatch", "false", { "label": "Replayer PUT mismatch" } ],
+                    [ "...", "GET", ".", "400", ".", ".", ".", ".", { "label": "Replayer GET mismatch" } ]
+                ],
+                "view": "singleValue",
+                "region": "us-west-1",
+                "period": 60,
+                "stat": "Sum",
+                "title": "Replayer StatusCode Mismatches"
+            }
+        }
+    ]
+}

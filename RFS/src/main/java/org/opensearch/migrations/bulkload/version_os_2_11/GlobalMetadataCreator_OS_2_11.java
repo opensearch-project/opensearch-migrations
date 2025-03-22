@@ -15,6 +15,7 @@ import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.GlobalMetadataCreator;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.IClusterMetadataContext;
+import org.opensearch.migrations.parsing.ObjectNodeUtils;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
@@ -146,6 +147,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return templatesToCreate.entrySet().stream().map(kvp -> {
             var templateName = kvp.getKey();
             var templateBody = kvp.getValue();
+
+            String[] problemSettings = { "settings.mapping.single_type", "settings.mapper.dynamic" };
+            for (var field : problemSettings) {
+                ObjectNodeUtils.removeFieldsByPath(templateBody, field);
+            }
+
             var creationResult = CreationResult.builder().name(templateName);
 
             if (skipCreation.test(templateName)) {

@@ -6,13 +6,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-
-import org.opensearch.migrations.transform.jsProxyObjects.ArrayProxyObject;
-import org.opensearch.migrations.transform.jsProxyObjects.ListProxyArray;
-import org.opensearch.migrations.transform.jsProxyObjects.MapProxyObject;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -56,21 +50,28 @@ public class JavascriptTransformer implements IJsonTransformer {
         var builder = Context.newBuilder()
             .engine(engine)
             .allowHostAccess(HostAccess.newBuilder()
+                .allowAccessAnnotatedBy(HostAccess.Export.class)
                 .allowArrayAccess(true)
                 .allowMapAccess(true)
                 .allowListAccess(true)
                 .allowIterableAccess(true)
                 .allowBufferAccess(true) // Support replayer binary data buffer
                 .build());
-            var jsLogger = LoggerFactory.getLogger(JS_TRANSFORM_LOGGER_NAME);
-            this.infoStream = new LoggingOutputStream(jsLogger, Level.INFO);
-            this.errorStream = new LoggingOutputStream(jsLogger, Level.ERROR);
-            this.polyglotContext = builder
+        var jsLogger = LoggerFactory.getLogger(JS_TRANSFORM_LOGGER_NAME);
+        this.infoStream = new LoggingOutputStream(jsLogger, Level.INFO);
+        this.errorStream = new LoggingOutputStream(jsLogger, Level.ERROR);
+        this.polyglotContext = builder
                 .out(infoStream)
                 .err(errorStream)
                 .build();
-            this.mainJavascriptTransformFunction = this.polyglotContext.eval(sourceCode).execute(context);
+        var sourceCodeValue = this.polyglotContext.eval(sourceCode);
+        if (context != null) {
+            var convertedContextObject = convertObject(context, this.polyglotContext);
+            this.mainJavascriptTransformFunction = sourceCodeValue.execute(convertedContextObject);
+        } else {
+            this.mainJavascriptTransformFunction = sourceCodeValue;
         }
+    }
 
     @Override
     public void close() throws Exception {
@@ -82,7 +83,7 @@ public class JavascriptTransformer implements IJsonTransformer {
 
     @SneakyThrows
     public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
-        return runScriptAsFuture(mainJavascriptTransformFunction, incomingJson);
+        return runScriptAsFuture(incomingJson);
     }
 
     @Override
@@ -110,68 +111,63 @@ public class JavascriptTransformer implements IJsonTransformer {
                 out.flush();
                 if (baos.size() > 0) {
                     logger.atLevel(level).setMessage("{}")
-                        .addArgument(() -> baos.toString(StandardCharsets.UTF_8))
-                        .log();
+                            .addArgument(() -> baos.toString(StandardCharsets.UTF_8))
+                            .log();
                     baos.reset();
                 }
             }
         }
     }
 
-    @SuppressWarnings("unchecked")
-    static Value runScript(Value jsCallableObject, Object... args) {
+    private Value runScript(Value jsCallableObject, Object... args) {
         var convertedArgs = Arrays.stream(args)
-            .map(o -> {
-                if (o instanceof Map<?, ?>) {
-                    return new MapProxyObject((Map<String, Object>) o);
-                } else if (o instanceof List<?>) {
-                    return new ListProxyArray((List<Object>) o);
-                } else if (o instanceof Object[]) {
-                    return new ArrayProxyObject((Object[]) o);
-                } else if (isPrimitiveOrWrapper(o)) {
-                    return o;
-                }
-                throw new IllegalArgumentException("Unsupported argument type: " + o.getClass());
-            }).toArray();
+                .map(o -> convertObject(o, this.polyglotContext)).toArray();
         var rval = jsCallableObject.execute(convertedArgs);
         log.atTrace().setMessage("rval={}").addArgument(rval).log();
         return rval;
     }
 
-    private static boolean isPrimitiveOrWrapper(Object o) {
-        return o instanceof Integer || o instanceof Double || o instanceof Boolean
-            || o instanceof Character || o instanceof Byte || o instanceof Short
-            || o instanceof Float || o instanceof Long || o == null;
+    private static Object convertObject(Object o, Context context) {
+        return context.asValue(o);
     }
 
-    static <T> CompletableFuture<T> runScriptAsFuture(Value jsCallableObject, Object... args) {
-        return fromPromise(runScript(jsCallableObject, args));
+    public <T> CompletableFuture<T> runScriptAsFuture(Object... args) {
+        return fromPromise(runScript(mainJavascriptTransformFunction, args));
     }
 
-    @SuppressWarnings("Unchecked")
-    static <T> CompletableFuture<T> fromPromise(Value value) {
+    @SuppressWarnings("unchecked")
+    <T> CompletableFuture<T> fromPromise(Value value) {
         CompletableFuture<T> future = new CompletableFuture<>();
-
         if (value.canInvokeMember("then")) {
             // It's a Promise - handle with then()
             // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/then
             value.invokeMember("then",
                 (ProxyExecutable) onFulfilledArg -> {
-                    T result = (T) onFulfilledArg[0].as(Object.class);
+                    T result = (T) jsValueToJavaObject(onFulfilledArg[0]);
                     future.complete(result);
                     return null;
                 },
                 (ProxyExecutable) failureArgs -> {
-                    Throwable error = new RuntimeException(failureArgs[0].toString());
+                    Throwable error = new RuntimeException(jsValueToJavaObject(failureArgs[0]).toString());
                     future.completeExceptionally(error);
                     return null;
                 }
             );
         } else {
             // It's a direct value - complete immediately
-            T result = (T) value.as(Object.class);
+            T result = (T) jsValueToJavaObject(value);
             future.complete(result);
         }
         return future;
+    }
+
+    private static Object jsValueToJavaObject(Value val) {
+        if (val.isHostObject()) {
+            return val.asHostObject();
+        } else if (val.isProxyObject()) {
+            return val.asProxyObject();
+        } else {
+            return val.as(Object.class);
+        }
     }
 }

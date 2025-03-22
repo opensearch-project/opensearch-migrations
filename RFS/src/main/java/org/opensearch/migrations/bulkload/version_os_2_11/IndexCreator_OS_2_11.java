@@ -9,6 +9,7 @@ import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.CreationResult.CreationResultBuilder;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
+import org.opensearch.migrations.parsing.ObjectNodeUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -34,7 +35,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         String[] problemSettings = { "creation_date", "provided_name", "uuid", "version", "index.mapping.single_type", "index.mapper.dynamic" };
         for (var field : problemSettings) {
-            settings.remove(field);
+            ObjectNodeUtils.removeFieldsByPath(settings, field);
         }
 
         // Assemble the request body
@@ -85,31 +86,11 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 }
 
                 var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
-                removeFieldsByPath(settings, shortenedIllegalArgument);
+                ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
             }
 
             log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
             client.createIndex(index.getName(), body, context);
         }
-    }
-
-    private void removeFieldsByPath(ObjectNode node, String path) {
-        var pathParts = path.split("\\.");
-
-        if (pathParts.length == 1) {
-            node.remove(pathParts[0]);
-            return;
-        }
-
-        var currentNode = node;
-        for (int i = 0; i < pathParts.length - 1; i++) {
-            var nextNode = currentNode.get(pathParts[i]);
-            if (nextNode != null && nextNode.isObject()) {
-                currentNode = (ObjectNode) nextNode;
-            } else {
-                return;
-            }
-        }
-        currentNode.remove(pathParts[pathParts.length - 1]);
     }
 }

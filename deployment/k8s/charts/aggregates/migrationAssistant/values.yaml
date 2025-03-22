@@ -1,6 +1,7 @@
 conditionalPackageInstalls:
   sharedConfigs: true
   snapshotVolume: true
+  logsVolume: true
   migrationConsole: true
   bulkLoader: true
   proxy: true
@@ -18,10 +19,11 @@ shared-configs:
     sourceCluster:
       allowRuntimeOverride: true
       object:
-        endpoint: "http://elasticsearch-master:9200"
+        endpoint: "http://ma-capture-proxy:9200"
+        directEndpoint: "http://elasticsearch-master:9200"
         allowInsecure: true
         authType: "no_auth"
-        version: "7.10.2"
+        version: "ES_7.10"
     targetCluster:
       allowRuntimeOverride: true
       object:
@@ -32,7 +34,7 @@ shared-configs:
         basicAuthPassword: "myStrongPassword123!"
         # Should be in sync with above username/password
         basicAuthHeader: "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
-        version: "2.16.0"
+        version: "OS_2.16"
     kafkaBrokers:
       allowRuntimeOverride: false
       object:
@@ -64,7 +66,7 @@ capture-proxy:
     destinationUri:
       source: otherConfig
       configMapName: "source-cluster"
-      configMapKey: "endpoint"
+      configMapKey: "directEndpoint"
     insecureDestination:
       source: otherConfig
       configMapName: "source-cluster"
@@ -78,11 +80,15 @@ capture-proxy:
 migration-console:
   snapshotVolumeEnabled: true
   snapshotVolumePvc: "snapshot-volume-pvc"
+  sharedLogsVolumeEnabled: true
+  sharedLogsPvc: "shared-logs-pvc"
 
 
 bulk-document-loader:
   snapshotVolumeEnabled: true
   snapshotVolumePvc: "snapshot-volume-pvc"
+  sharedLogsVolumeEnabled: true
+  sharedLogsPvc: "shared-logs-pvc"
   parameters:
     snapshotName:
       source: otherConfig
@@ -105,9 +111,19 @@ bulk-document-loader:
       source: otherConfig
       configMapName: "target-cluster"
       configMapKey: "basicAuthPassword"
+    sourceVersion:
+      source: parameterConfig
+      value: "ES_7.10"
+      allowRuntimeOverride: true
+    docTransformerConfigFile:
+      source: parameterConfig
+      value: "/shared-logs-output/test-transformations/transformation.json"
+      allowRuntimeOverride: true
 
 
 replayer:
+  sharedLogsVolumeEnabled: true
+  sharedLogsPvc: "shared-logs-pvc"
   parameters:
     kafkaTrafficBrokers:
       source: otherConfig  # eventually this will become a list from a shared config
@@ -126,6 +142,14 @@ replayer:
       source: otherConfig
       configMapName: "target-cluster"
       configMapKey: "basicAuthHeader"
+    speedupFactor:
+      source: parameterConfig
+      value: 10
+      allowRuntimeOverride: true
+    transformerConfigFile:
+      source: parameterConfig
+      value: "/shared-logs-output/test-transformations/transformation.json"
+      allowRuntimeOverride: true
 
 
 captured-traffic-kafka-cluster:

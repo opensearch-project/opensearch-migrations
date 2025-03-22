@@ -6,6 +6,10 @@ elasticsearch:
   protocol: http
   replicas: 3 # Set replicas to the number of nodes you want in the cluster
   createCert: false
+  clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+  readinessProbe:
+    failureThreshold: 5
+    successThreshold: 2
   esConfig:
     elasticsearch.yml: |
       bootstrap.system_call_filter: false

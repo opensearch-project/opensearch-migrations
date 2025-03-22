@@ -27,7 +27,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.hasItems;
 
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster.
@@ -141,13 +141,16 @@ class EndToEndTest extends BaseMigrationTest {
         }
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
-        // Set up data filters
-        var dataFilterArgs = new DataFilterArgs();
-        dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
-            Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
-        dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
-        dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
-        arguments.dataFilterArgs = dataFilterArgs;
+        // Set up data filters for ES 7.17 as we do not currently have transformations in place to support breaking
+        // changes from default templates and settings here: https://opensearch.atlassian.net/browse/MIGRATIONS-2447
+        if (sourceCluster.getContainerVersion().getVersion().equals(Version.fromString("ES 7.17.22"))) {
+            var dataFilterArgs = new DataFilterArgs();
+            dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
+                    Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
+            dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
+            dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
+            arguments.dataFilterArgs = dataFilterArgs;
+        }
 
         targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 
@@ -179,17 +182,17 @@ class EndToEndTest extends BaseMigrationTest {
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
-            containsInAnyOrder(testData.templateNames.toArray(new String[0])));
+            hasItems(testData.templateNames.toArray(new String[0])));
         assertThat(getNames(getSuccessfulResults(migratedItems.getComponentTemplates())),
-            containsInAnyOrder(testData.componentTemplateNames.toArray(new String[0])));
+            hasItems(testData.componentTemplateNames.toArray(new String[0])));
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())),
-            containsInAnyOrder(Stream.concat(testData.blogIndexNames.stream(),
-                Stream.of(testData.movieIndexName)).toArray()));
+            hasItems(Stream.concat(testData.blogIndexNames.stream(),
+                Stream.of(testData.movieIndexName)).toArray(String[]::new)));
         assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
                 CreationResult.CreationFailureType.ALREADY_EXISTS)),
-            containsInAnyOrder(testData.indexThatAlreadyExists));
+            hasItems(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
-            containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
+            hasItems(testData.aliasNames.toArray(new String[0])));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
