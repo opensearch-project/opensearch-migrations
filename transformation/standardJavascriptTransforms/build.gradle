@@ -22,7 +22,7 @@ task installDependencies(type: NpmTask) {
     args = ['install']
 }
 
-task jsTest(type: NpmTask) {
+task test(type: NpmTask) {
     description = "Run JavaScript tests with coverage"
     args = ['run', 'test']
     dependsOn installDependencies
@@ -43,11 +43,11 @@ task packageJs(type: Copy) {
 task createNpmPackage(type: NpmTask) {
     description = "Create local npm package (.tgz file)"
     args = ['pack']
-    dependsOn jsTest
+    dependsOn test
 }
 
 assemble.dependsOn packageJs
-check.dependsOn jsTest
+check.dependsOn test
 
 configurations {
     jsResources

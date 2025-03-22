@@ -3,6 +3,7 @@
  */
 
 plugins {
+    id 'java'
     id 'org.opensearch.migrations.java-library-conventions'
     id 'com.google.protobuf'
 }
