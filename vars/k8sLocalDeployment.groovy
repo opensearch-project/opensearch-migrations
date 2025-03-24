@@ -1,4 +1,8 @@
 def call(Map config = [:]) {
+    def jobName = config.jobName
+    if (jobName == null || jobName.isEmpty()) {
+        throw new RuntimeException("The jobName argument must be provided to k8sLocalDeployment()");
+    }
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -11,6 +15,20 @@ def call(Map config = [:]) {
         options {
             timeout(time: 1, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
+        }
+
+        triggers {
+            GenericTrigger(
+                    genericVariables: [
+                            [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
+                            [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'job_name', value: '$.job_name']
+                    ],
+                    tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
+                    causeString: 'Triggered by PR on opensearch-migrations repository',
+                    regexpFilterExpression: "^$jobName\$",
+                    regexpFilterText: "\$job_name",
+            )
         }
 
         stages {
@@ -39,14 +57,25 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('libraries/testAutomation') {
                             script {
-                                sh "sudo pipenv run app"
+                                sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
+                                sh "sudo pipenv run app --skip-delete"
                             }
                         }
                     }
                 }
             }
-
-
+        }
+        post {
+            always {
+                timeout(time: 15, unit: 'MINUTES') {
+                    dir('libraries/testAutomation') {
+                        script {
+                            sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
+                            sh "sudo pipenv run app --delete-only"
+                        }
+                    }
+                }
+            }
         }
     }
 }

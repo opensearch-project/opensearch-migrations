@@ -6,4 +6,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 // Shared library function (location from root: vars/k8sLocalDeployment.groovy)
-k8sLocalDeployment()
+elasticsearch5xK8sLocalTest()
