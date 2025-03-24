@@ -310,8 +310,7 @@ public class ActiveContextMonitor implements Runnable {
     }
 
     private String activityToString(OrderedWorkerTracker.TimeKeyAndFuture<Void> tkaf) {
-        var timeStr = "age=" + getAge(tkaf.nanoTimeKey);
-        return INDENT + timeStr + " " + formatWorkItem.apply(tkaf.future);
+        return INDENT + "age=" + getAge(tkaf.nanoTimeKey) + " " + formatWorkItem.apply(tkaf.future);
     }
 
     private String activityToString(IScopedInstrumentationAttributes context, int depthToInclude) {
