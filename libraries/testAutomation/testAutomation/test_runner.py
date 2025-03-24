@@ -188,7 +188,7 @@ class K8sService:
             logger.info(f"Helm release {release_name} already exists, skipping install")
             return True
         logger.info(f"Installing {release_name} from {chart_path} with values {values_file}")
-        command = ["helm", "install", release_name, chart_path, "-n", self.namespace]
+        command = ["helm", "install", release_name, chart_path, "-n", self.namespace, "--create-namespace"]
         if values_file:
             command.extend(["-f", values_file])
         return self.run_command(command)

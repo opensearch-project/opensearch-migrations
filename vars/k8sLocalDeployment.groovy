@@ -85,8 +85,8 @@ def call(Map config = [:]) {
                 timeout(time: 15, unit: 'MINUTES') {
                     dir('libraries/testAutomation') {
                         script {
-                            sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
-                            sh "sudo pipenv run app --delete-only"
+                            sh "sudo -u ec2-user pipenv install --deploy --ignore-pipfile"
+                            sh "sudo -u ec2-user run app --delete-only"
                         }
                     }
                 }
