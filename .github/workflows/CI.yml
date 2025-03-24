@@ -11,6 +11,11 @@ env:
   node-version: '18.x'
   gradle-test-parallelization: '30'
 
+# Prevent multiple simultaneous runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   workflow-info:
     runs-on: ubuntu-latest
