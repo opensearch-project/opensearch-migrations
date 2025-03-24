@@ -20,7 +20,6 @@ import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 import io.netty.buffer.Unpooled;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -29,6 +28,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.record.AbstractRecords;
 import org.apache.kafka.common.record.CompressionType;
+import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Assertions;
@@ -58,6 +58,7 @@ public class KafkaCaptureFactoryTest {
         int maxAllowableMessageSize = 1024 * 1024;
         MockProducer<String, byte[]> producer = new MockProducer<>(
             true,
+            null,
             new StringSerializer(),
             new ByteArraySerializer()
         );
@@ -95,7 +96,7 @@ public class KafkaCaptureFactoryTest {
     /**
      * This size calculation is based off the KafkaProducer client request size validation check done when Producer
      * records are sent. This validation appears to be consistent for several versions now, here is a reference to
-     * version 3.5 at the time of writing this: https://github.com/apache/kafka/blob/3.5/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1030-L1032.
+     * version 3.5 at the time of writing this: https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1002-L1003.
      * It is, however, subject to change which may make this test scenario more suited for an integration test where
      * a KafkaProducer does not need to be mocked.
      */
@@ -105,11 +106,10 @@ public class KafkaCaptureFactoryTest {
         String recordKey = recordKeySubstitute == null ? record.key() : recordKeySubstitute;
         byte[] serializedKey = stringSerializer.serialize(record.topic(), record.headers(), recordKey);
         byte[] serializedValue = byteArraySerializer.serialize(record.topic(), record.headers(), record.value());
-        ApiVersions apiVersions = new ApiVersions();
         stringSerializer.close();
         byteArraySerializer.close();
         return AbstractRecords.estimateSizeInBytesUpperBound(
-            apiVersions.maxUsableProduceMagic(),
+            RecordBatch.CURRENT_MAGIC_VALUE,
             CompressionType.NONE,
             serializedKey,
             serializedValue,

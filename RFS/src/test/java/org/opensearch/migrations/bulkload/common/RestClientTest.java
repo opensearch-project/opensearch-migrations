@@ -22,6 +22,12 @@ import reactor.netty.resources.ConnectionProvider;
 
 class RestClientTest {
 
+    private static final int SEND_CREATE_GET_SNAPSHOT_SIZE = 82;
+    private static final int SEND_CREATE_SNAPSHOT_SIZE = 139;
+    private static final int SEND_TOTAL_SIZE = SEND_CREATE_GET_SNAPSHOT_SIZE + SEND_CREATE_SNAPSHOT_SIZE;
+    private static final int READ_RESPONSE_SIZE = 66;
+    private static final int READ_TOTAL_SIZE = READ_RESPONSE_SIZE + READ_RESPONSE_SIZE;
+
     private static HttpClient makeSingleConnectionHttpClient() {
         var provider = ConnectionProvider.builder("singleConnection").maxConnections(1).build();
         return HttpClient.create(provider);
@@ -46,11 +52,11 @@ class RestClientTest {
 
         for (var kvp : Map.of(
             "createGetSnapshotContext",
-            new long[] { 101, 66 },
+            new long[] { SEND_CREATE_GET_SNAPSHOT_SIZE, READ_RESPONSE_SIZE },
             "createSnapshotContext",
-            new long[] { 139, 66 },
+            new long[] { SEND_CREATE_SNAPSHOT_SIZE, READ_RESPONSE_SIZE },
             "",
-            new long[] { 240, 132 }
+            new long[] { SEND_TOTAL_SIZE, READ_TOTAL_SIZE }
         ).entrySet()) {
             long bytesSent = allMetricData.stream()
                 .filter(md -> md.getName().startsWith("bytesSent"))
@@ -109,7 +115,7 @@ class RestClientTest {
             .sorted(Comparator.comparing(SpanData::getEndEpochNanos))
             .collect(Collectors.toList());
         int i = 0;
-        for (var expectedBytes : List.of(new long[] { 139, 66 }, new long[] { 101, 66 })) {
+        for (var expectedBytes : List.of(new long[] { SEND_CREATE_SNAPSHOT_SIZE, READ_RESPONSE_SIZE }, new long[] { SEND_CREATE_GET_SNAPSHOT_SIZE, READ_RESPONSE_SIZE })) {
             var span = httpRequestSpansByTime.get(i++);
             long bytesSent = span.getAttributes().get(RfsContexts.GenericRequestContext.BYTES_SENT_ATTR);
             long bytesRead = span.getAttributes().get(RfsContexts.GenericRequestContext.BYTES_READ_ATTR);
