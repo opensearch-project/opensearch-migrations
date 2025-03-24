@@ -160,6 +160,10 @@ subprojects {
         dependsOn project.javadoc
     }
     if (!sourceSets.test.allSource.files.isEmpty()) {
+        dependencies {
+            // Add dependency on testHelperFixtures for all projects with tests
+            testImplementation(testFixtures(project(":testHelperFixtures")))
+        }
         tasks.withType(Test) {
             testLogging {
                 events "passed", "skipped", "failed"
@@ -180,12 +184,31 @@ subprojects {
             //  Disable parallel test execution, see MIGRATIONS-1666
             systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
             systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
+
+            // Register BucketTestExtension for all tests to enable test striping
+            // Test striping allows distributing test execution across multiple runs
+            // Usage: ./gradlew test -Dtest.striping.total=N -Dtest.striping.index=I
+            //   where N is the total number of buckets (e.g., 3)
+            //   and I is the current bucket index (0 to N-1)
+            // Example: To run 1/3 of tests in first bucket:
+            //   ./gradlew test -Dtest.striping.total=3 -Dtest.striping.index=0
+            def total = System.getProperty("test.striping.total")
+            def index = System.getProperty("test.striping.index")
+
+            if (total != null) {
+                systemProperty "test.striping.total", total
+            }
+            if (index != null) {
+                systemProperty "test.striping.index", index
+            }
+
+            systemProperty 'junit.jupiter.extensions.autodetection.enabled', true
             // Verify assertions in tests
             jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
             systemProperty "junit.jupiter.execution.timeout.default", "5m"
             jacoco {
-                enabled = true
-                destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
+                    enabled = true
+                    destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
             }
         }
         // Mutually exclusive tests to avoid duplication
@@ -204,7 +227,7 @@ subprojects {
             }
         }
 
-        tasks.register('isolatedTest', Test) {
+                tasks.register('isolatedTest', Test) {
             maxParallelForks = 1
             useJUnitPlatform {
                 includeTags 'isolatedTest'

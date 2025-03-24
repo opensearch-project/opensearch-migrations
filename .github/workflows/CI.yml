@@ -9,6 +9,7 @@ env:
   java-version: '17'
   gradle-version: '8.12.1'
   node-version: '18.x'
+  gradle-test-parallelization: '12'
 
 jobs:
   workflow-info:
@@ -105,39 +106,27 @@ jobs:
           name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
           path: ${{ env.WORKING_DIR }}/coverage.xml
 
-  generate-project-test-matrix:
+  generate-test-matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: "corretto"
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-
-      - name: Generate matrix for test jobs
-        id: set-matrix
+      - id: set-matrix
         run: |
-          gradle listTestTasksAsJson --stacktrace
-          listTasks=$(gradle listTestTasksAsJson --quiet)
-          matrix=$(echo "$listTasks" | jq -c)
-          echo "Matrix is: $matrix"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          # Generate a JSON array from 0 to gradle-test-parallelization-1
+          indices=()
+          for i in $(seq 0 $((${{ env.gradle-test-parallelization }}-1))); do
+            indices+=($i)
+          done
+          echo "matrix=$(IFS=,; echo "[${indices[*]}]")" >> $GITHUB_OUTPUT
 
   gradle-tests:
-    needs:
-      - generate-project-test-matrix
+    needs: [generate-test-matrix]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        task: ${{ fromJson(needs.generate-project-test-matrix.outputs.matrix) }}
+        index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -148,13 +137,8 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
-      - name: Sanitize task name
-        id: sanitize-name
-        run: |
-          sanitized_name=$(echo "${{ matrix.task }}" | sed 's/[^a-zA-Z0-9]/_/g')
-          echo "sanitized_name=$sanitized_name" >> "$GITHUB_OUTPUT"
-      - name: Run Gradle task ${{ matrix.task }}
-        run: gradle ${{ matrix.task }} -x spotlessCheck --stacktrace
+      - name: Run Gradle tests with striping
+        run: gradle allTests -Dtest.striping.total=${{ env.gradle-test-parallelization }} -Dtest.striping.index=${{ matrix.index }} -x spotlessCheck --stacktrace --continue
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Detect Memory Dumps
@@ -171,24 +155,24 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: warn
-          name: memory-dumps-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
+          name: memory-dumps-gradle-tests-stripe-${{ matrix.index }}
           path: ./**/*.hprof
 
-      - name: Upload test reports for ${{ matrix.task }}
-        if: always() && contains(matrix.task, 'jacoco')
+      - name: Upload test reports for stripe ${{ matrix.index }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: test-reports-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
+          name: test-reports-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/reports/tests/
 
-      - name: Publish Jacoco report artifact for ${{ matrix.task }}
-        if: always() && contains(matrix.task, 'jacoco')
+      - name: Publish Jacoco report artifact for stripe ${{ matrix.index }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: coverage-exec-artifacts-gradle-tests-${{ steps.sanitize-name.outputs.sanitized_name }}
+          name: coverage-exec-artifacts-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/jacoco/*.exec
 
