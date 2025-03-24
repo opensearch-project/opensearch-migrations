@@ -40,6 +40,16 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Start Minikube') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        script {
+                            sh "minikube start"
+                        }
+                    }
+                }
+            }
+
             stage('Build Docker Images (Minikube)') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
