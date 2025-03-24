@@ -207,8 +207,9 @@ subprojects {
             jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
             systemProperty "junit.jupiter.execution.timeout.default", "5m"
             jacoco {
-                    enabled = true
-                    destinationFile = layout.buildDirectory.file("jacoco/${project.path.replace(':', '-')}-${project.name}-${name}.exec").get().asFile
+                enabled = true
+                def stripingSuffix = (total != null && index != null) ? "-${index}-of-${total}" : ""
+                destinationFile = layout.buildDirectory.file("jacoco/${project.name}-${name}${stripingSuffix}.exec").get().asFile
             }
         }
         // Mutually exclusive tests to avoid duplication
