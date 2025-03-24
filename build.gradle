@@ -4,10 +4,10 @@ plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "2.1.1"
     id "com.diffplug.spotless" version '7.0.2'
-    id 'io.freefair.lombok' version '8.12' apply false
+    id 'io.freefair.lombok' version '8.13' apply false
     id 'jacoco'
-    id 'me.champeau.jmh' version '0.7.2' apply false
-    id 'com.gradleup.shadow' version '8.3.5' apply false
+    id 'me.champeau.jmh' version '0.7.3' apply false
+    id 'com.gradleup.shadow' version '8.3.6' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.google.protobuf' version "0.9.4" apply false
 }
@@ -117,14 +117,14 @@ subprojects {
             force 'net.minidev:json-smart:2.5.2'
             force 'xalan:xalan:2.7.3'
             force 'com.thoughtworks.xstream:xstream:1.4.21'
-            force 'commons-net:commons-net:3.9.0'
-            force 'org.jsoup:jsoup:1.15.3'
-            force 'org.apache.tika:tika-core:1.28.4'
+            force 'commons-net:commons-net:3.11.1'
+            force 'org.jsoup:jsoup:1.19.1'
+            force 'org.apache.tika:tika-core:3.1.0'
             force 'com.jayway.jsonpath:json-path:2.9.0'
-            force 'dnsjava:dnsjava:3.6.0'
-            force 'org.xerial.snappy:snappy-java:1.1.10.6'
-            force 'org.glassfish.jersey.core:jersey-common:2.34'
-            force 'org.apache.httpcomponents:httpclient:4.5.13'
+            force 'dnsjava:dnsjava:3.6.3'
+            force 'org.xerial.snappy:snappy-java:1.1.10.7'
+            force 'org.glassfish.jersey.core:jersey-common:3.1.10'
+            force 'org.apache.httpcomponents:httpclient:4.5.14'
 
             preferProjectModules()
         }
