@@ -1,5 +1,8 @@
 package org.opensearch.migrations.testutils;
 
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -7,9 +10,6 @@ import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolver;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 @ExtendWith(BucketTestExtensionTest.ExtensionContextParameterResolver.class)
 public class BucketTestExtensionTest {
