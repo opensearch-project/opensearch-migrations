@@ -60,7 +60,7 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/k8s') {
                             script {
-                                sh "sudo ./buildDockerImagesMini.sh"
+                                sh "sudo -u ec2-user ./buildDockerImagesMini.sh"
                             }
                         }
                     }
