@@ -9,7 +9,7 @@ env:
   java-version: '17'
   gradle-version: '8.12.1'
   node-version: '18.x'
-  gradle-test-parallelization: '12'
+  gradle-test-parallelization: '30'
 
 jobs:
   workflow-info:
