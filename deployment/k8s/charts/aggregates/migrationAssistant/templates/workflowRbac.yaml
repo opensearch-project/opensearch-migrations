@@ -11,8 +11,19 @@ metadata:
   name: workflow-deployer-role
   namespace: ma
 rules:
+  # Existing permissions for deployments and replicasets
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Add permissions for Argo workflows
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Add permissions for pods and pod logs (needed for Argo workflow execution)
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

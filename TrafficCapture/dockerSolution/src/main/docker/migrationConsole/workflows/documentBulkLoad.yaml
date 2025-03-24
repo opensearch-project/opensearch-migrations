@@ -1,0 +1,233 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: bulk-load
+  # add labels later w/ patch
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: run-bulk-load
+
+  templates:
+    - name: run-bulk-load
+      inputs:
+        parameters:
+          # Required parameters (no default names)
+          - name: name
+            description: "Unique identifier for this bulk load job (required)"
+          - name: target-host
+            description: "Target host URL (required)"
+          - name: snapshot-name
+            description: "Name of the snapshot to use (required)"
+
+          # Parameters with defaults - split into input and default pairs
+          - name: replicas
+            value: ""
+            description: "Number of replicas to create"
+          - name: default-replicas
+            value: "1"
+            description: "Default number of replicas"
+
+          - name: image
+            value: ""
+            description: "Container image to use"
+          - name: default-image
+            value: "migrations/reindex_from_snapshot:latest"
+            description: "Default container image"
+
+          - name: documents-per-bulk-request
+            value: ""
+            description: "Number of documents per bulk request"
+
+          - name: lease-duration
+            value: ""
+            description: "Initial lease duration"
+
+          - name: lucene-dir
+            value: ""
+            description: "Directory on the host for Lucene files - not sure why this would matter"
+          - name: default-lucene-dir
+            value: "/tmp"
+            description: "Default directory for Lucene files"
+
+          - name: snapshot-local-dir
+            value: ""
+            description: "Local directory for snapshots"
+          - name: default-snapshot-local-dir
+            value: "/snapshot"
+            description: "Default local directory for snapshots"
+
+          - name: target-insecure
+            value: ""
+            description: "Flag for insecure target connections"
+
+          - name: target-username
+            value: ""
+            description: "Username for target authentication"
+
+          - name: target-password
+            value: ""
+            description: "Password for target authentication"
+
+      steps:
+        - - name: create-replicaset
+            template: create-rs
+            arguments:
+              parameters:
+                # Required parameters - pass directly
+                - name: name
+                  value: "{{=inputs.parameters.name}}"
+                - name: target-host
+                  value: "{{=inputs.parameters['target-host']}}"
+                - name: snapshot-name
+                  value: "{{=inputs.parameters['snapshot-name']}}"
+                - name: replicas
+                  value: "{{=inputs.parameters.replicas == '' ? inputs.parameters['default-replicas'] : inputs.parameters.replicas}}"
+                - name: image
+                  value: "{{=inputs.parameters.image == '' ? inputs.parameters['default-image'] : inputs.parameters.image}}"
+                - name: documents-per-bulk-request
+                  value: "{{=inputs.parameters['documents-per-bulk-request']}}"
+                - name: lease-duration
+                  value: "{{=inputs.parameters['lease-duration']}}"
+                - name: lucene-dir
+                  value: "{{=inputs.parameters['lucene-dir'] == '' ? inputs.parameters['default-lucene-dir'] : inputs.parameters['lucene-dir']}}"
+                - name: snapshot-local-dir
+                  value: "{{=inputs.parameters['snapshot-local-dir'] == '' ? inputs.parameters['default-snapshot-local-dir'] : inputs.parameters['snapshot-local-dir']}}"
+                - name: target-insecure
+                  value: "{{=inputs.parameters['target-insecure']}}"
+                - name: target-username
+                  value: "{{=inputs.parameters['target-username']}}"
+                - name: target-password
+                  value: "{{=inputs.parameters['target-password']}}"
+
+        - - name: wait-for-completion
+            template: check-completion
+            arguments:
+              parameters:
+                - name: name
+                  value: "{{inputs.parameters.name}}"
+
+        - - name: cleanup-replicaset
+            template: delete-rs
+            arguments:
+              parameters:
+                - name: name
+                  value: "{{inputs.parameters.name}}"
+
+
+    - name: create-rs
+      inputs:
+        parameters:
+          - name: name
+          - name: target-host
+          - name: snapshot-name
+          - name: replicas
+          - name: image
+          - name: documents-per-bulk-request
+          - name: lease-duration
+          - name: lucene-dir
+          - name: snapshot-local-dir
+          - name: target-insecure
+          - name: target-username
+          - name: target-password
+      resource:
+        action: create
+        manifest: |
+          apiVersion: apps/v1
+          kind: ReplicaSet
+          metadata:
+            name: "bulk-loader-{{inputs.parameters.name}}"
+          spec:
+            replicas: {{inputs.parameters.replicas}}
+            selector:
+              matchLabels:
+                app: bulk-loader-{{inputs.parameters.name}}
+            template:
+              metadata:
+                labels:
+                  app: bulk-loader-{{inputs.parameters.name}}
+              spec:
+                containers:
+                - name: bulk-loader
+                  image: {{inputs.parameters.image}}
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: TARGET_HOST
+                      value: "{{inputs.parameters.target-host}}"
+                    - name: SNAPSHOT_NAME
+                      value: "{{inputs.parameters.snapshot-name}}"
+                    - name: DOCUMENTS_PER_BULK_REQUEST
+                      value: "{{inputs.parameters.documents-per-bulk-request}}"
+                    - name: LEASE_DURATION
+                      value: "{{inputs.parameters.lease-duration}}"
+                    - name: LUCENE_DIR
+                      value: "{{inputs.parameters.lucene-dir}}"
+                    - name: SNAPSHOT_LOCAL_DIR
+                      value: "{{inputs.parameters.snapshot-local-dir}}"
+                    - name: TARGET_INSECURE
+                      value: "{{inputs.parameters.target-insecure}}"
+                    - name: TARGET_USERNAME
+                      value: "{{inputs.parameters.target-username}}"
+                    - name: TARGET_PASSWORD
+                      value: "{{inputs.parameters.target-password}}"
+                  command:
+                    - "/bin/sh"
+                    - "-c"
+                    - |
+                      set -e
+                      ARGS=""
+                      ARGS="${ARGS}${DOCUMENTS_PER_BULK_REQUEST:+ --documentsPerBulkRequest $DOCUMENTS_PER_BULK_REQUEST}"
+                      ARGS="${ARGS}${INITIAL_LEASE_DURATION:+ --initialLeaseDuration $INITIAL_LEASE_DURATION}"
+                      ARGS="${ARGS}${LUCENE_DIR:+ --luceneDir $LUCENE_DIR}"
+                      ARGS="${ARGS}${SNAPSHOT_LOCAL_DIR:+ --snapshotLocalDir $SNAPSHOT_LOCAL_DIR}"
+                      ARGS="${ARGS}${SNAPSHOT_NAME:+ --snapshotName $SNAPSHOT_NAME}"
+                      ARGS="${ARGS}${TARGET_HOST:+ --targetHost $TARGET_HOST}"
+                      ARGS="${ARGS}${TARGET_PASSWORD:+ --targetPassword $TARGET_PASSWORD}"
+                      ARGS="${ARGS}${TARGET_USERNAME:+ --targetUsername $TARGET_USERNAME}"
+          
+                      # Special handling for boolean flag
+                      if [ "$TARGET_INSECURE" = "true" ] || [ "$TARGET_INSECURE" = "1" ]; then
+                          ARGS="${ARGS} --targetInsecure"
+                      fi
+          
+                      export RFS_COMMAND="/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $ARGS"
+                      exec /rfs-app/entrypoint.sh
+                  volumeMounts:
+                    - name: snapshot-volume
+                      mountPath: /snapshot
+                volumes:
+                  - name: snapshot-volume
+                    persistentVolumeClaim:
+                      claimName: snapshot-volume-pvc
+
+    - name: check-completion
+      inputs:
+        parameters:
+          - name: name
+      container:
+        image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args: # dummy check for now
+          - |
+            sleep 10 
+            if [[ "SUCCESS" == "SUCCESS" ]]; then
+              echo "Work for {{inputs.parameters.name}} completed successfully"
+              exit 0
+            else
+              echo "Work not yet complete (state: $state), retrying..."
+              exit 1  # This will trigger a retry
+            fi
+
+
+    - name: delete-rs
+      inputs:
+        parameters:
+          - name: name
+      resource:
+        action: delete
+        flags: ["--ignore-not-found"]
+        manifest: |
+          apiVersion: apps/v1
+          kind: ReplicaSet
+          metadata:
+            name: "bulk-loader-{{inputs.parameters.name}}"

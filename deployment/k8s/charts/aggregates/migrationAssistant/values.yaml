@@ -3,10 +3,10 @@ conditionalPackageInstalls:
   snapshotVolume: true
   logsVolume: true
   migrationConsole: true
-  bulkLoader: true
+  bulkLoader: false
   proxy: true
-  kafka: true
-  replayer: true
+  kafka: false
+  replayer: false
   argoWorkflows: true
   gatekeeper: false
   grafana: false

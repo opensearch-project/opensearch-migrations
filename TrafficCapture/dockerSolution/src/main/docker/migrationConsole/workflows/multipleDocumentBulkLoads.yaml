@@ -1,0 +1,57 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: multiple-bulk-loads
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: run-bulk-loaders
+  arguments:
+    parameters:
+      - name: variant-runs
+        default: '[]'
+  templates:
+    - name: run-bulk-loaders
+      inputs:
+        parameters:
+          - name: variant-runs
+      steps:
+        - - name: process-bulk-loads
+            templateRef:
+              name: bulk-load
+              template: run-bulk-load
+            withParam: "{{inputs.parameters.variant-runs}}"
+            arguments:
+              parameters:
+                - name: name
+                  value: "{{item.name}}"
+                - name: target-host
+                  value: "{{item.target-host}}"
+                - name: snapshot-name
+                  value: "{{item.snapshot-name}}"
+                - name: replicas
+                  value: "{{=item.replicas ?? \"\"}}"
+                - name: image
+                  value: "{{=item['image'] ?? \"\"}}"
+                - name: documents-per-bulk-request
+                  value: "{{=item['documents-per-bulk-request'] ?? \"\"}}"
+                - name: lease-duration
+                  value: "{{=item['lease-duration'] ?? \"\"}}"
+                - name: lucene-dir
+                  value: "{{=item['lucene-dir'] ?? \"\"}}"
+                - name: snapshot-local-dir
+                  value: "{{=item['snapshot-local-dir'] ?? \"\"}}"
+                - name: target-insecure
+                  value: "{{=item['target-insecure'] ?? \"\"}}"
+                - name: target-username
+                  value: "{{=item['target-username'] ?? \"\"}}"
+                - name: target-password
+                  value: "{{=item['target-password'] ?? \"\"}}"
+                - name: status-endpoint
+                  value: "{{=item['status-endpoint'] ?? \"\"}}"
+                - name: completion-pattern
+                  value: "{{=item['completion-pattern'] ?? \"\"}}"
+                - name: poll-interval-seconds
+                  value: "{{=item['poll-interval-seconds'] ?? \"\"}}"
+                - name: timeout-minutes
+                  value: "{{=item['timeout-minutes'] ?? \"\"}}"
+

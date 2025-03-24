@@ -1,0 +1,115 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: create-snapshot
+  # add labels later w/ patch
+spec:
+  arguments:
+    parameters:
+      - name: snapshot-name
+        value: "migration-assistant-snapshot"
+      - name: source-host
+        value: "http://ma-capture-proxy:9200"
+      - name: source-insecure
+        value: "true"
+      - name: repo-args
+        value: "--file-system-repo-path /snapshot"
+
+  entrypoint: snapshot-workflow
+  templates:
+    - name: snapshot-workflow
+      steps:
+        - - name: create-snapshot
+            template: create-snapshot-template
+            arguments:
+              parameters:
+                - name: snapshot-name
+                  value: "{{workflow.parameters.snapshot-name}}"
+                - name: source-host
+                  value: "{{workflow.parameters.source-host}}"
+                - name: source-insecure
+                  value: "{{workflow.parameters.source-insecure}}"
+                - name: repo-args
+                  value: "{{workflow.parameters.repo-args}}"
+        - - name: check-snapshot-status
+            template: check-snapshot-status-template
+            arguments:
+              parameters:
+                - name: snapshot-name
+                  value: "{{workflow.parameters.snapshot-name}}"
+                - name: source-host
+                  value: "{{workflow.parameters.source-host}}"
+                - name: source-insecure
+                  value: "{{workflow.parameters.source-insecure}}"
+
+    - name: create-snapshot-template
+      inputs:
+        parameters:
+          - name: snapshot-name
+          - name: source-host
+          - name: source-insecure
+          - name: repo-args
+      container:
+        image: migrations/migration_console:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            INSECURE_FLAG=""
+            if [ "{{inputs.parameters.source-insecure}}" = "true" ]; then
+              INSECURE_FLAG="--source-insecure"
+            fi
+
+            /root/createSnapshot/bin/CreateSnapshot \
+              --snapshot-name {{inputs.parameters.snapshot-name}} \
+              --source-host {{inputs.parameters.source-host}} \
+              $INSECURE_FLAG \
+              {{inputs.parameters.repo-args}}
+
+    - name: check-snapshot-status-template
+      inputs:
+        parameters:
+          - name: snapshot-name
+          - name: source-host
+          - name: source-insecure
+      retryStrategy:
+        limit: "200"
+        retryPolicy: "Always"
+        backoff:
+          duration: "30"
+          factor: 2
+          maxDuration: "300"
+      container:
+        image: migrations/migration_console:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            # Ensure jq is available (some images might not have it pre-installed)
+            if ! command -v jq &> /dev/null; then
+              echo "jq is required but not found. Attempting to install..."
+              apt-get update && apt-get install -y jq || apk add --no-cache jq
+            fi
+
+            CURL_INSECURE=""
+            if [ "{{inputs.parameters.source-insecure}}" = "true" ]; then
+              CURL_INSECURE="--insecure"
+            fi
+
+            # Form the URL using the source-host parameter
+            SNAPSHOT_URL="{{inputs.parameters.source-host}}/_snapshot/_all/{{inputs.parameters.snapshot-name}}"
+            echo "Checking snapshot status from: $SNAPSHOT_URL"
+
+            # Perform the curl request and parse the JSON response using jq
+            response=$(curl -s $CURL_INSECURE $SNAPSHOT_URL)
+            echo "Response received"
+
+            # Extract the state value using jq (proper JSON parsing)
+            state=$(echo $response | jq -r '.snapshots[0].state')
+            echo "Current snapshot state: $state"
+
+            if [[ "$state" == "SUCCESS" ]]; then
+              echo "Snapshot {{inputs.parameters.snapshot-name}} completed successfully"
+              exit 0
+            else
+              echo "Snapshot not yet complete (state: $state), retrying..."
+              exit 1  # This will trigger a retry
+            fi
