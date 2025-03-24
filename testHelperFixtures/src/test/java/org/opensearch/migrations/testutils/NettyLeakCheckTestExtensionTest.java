@@ -27,20 +27,21 @@ class NettyLeakCheckTestExtensionTest {
     @AfterEach
     public void afterTest() {
         // testCase may be null if extension skips beforeEach
-        if (testCase != null) {
-            var observedTestDuration = Duration.ofNanos(System.nanoTime()-startTimeNanos);
-            switch (testCase) {
-                case "testMaxTimeSupercedesReps":
-                    Assertions.assertTrue(counter < 20, "counter=" + counter);
-                    Assertions.assertTrue(Duration.ofMillis(100).minus(observedTestDuration).isNegative());
-                    break;
-                case "testMinTimeSupercedesReps":
-                    Assertions.assertTrue(counter > 1, "counter=" + counter);
-                    Assertions.assertTrue(Duration.ofMillis(100).minus(observedTestDuration).isNegative());
-                    break;
-                default:
-                    Assertions.fail("unknown test case: " + testCase);
-            }
+        if (testCase == null) {
+            return;
+        }
+        var observedTestDuration = Duration.ofNanos(System.nanoTime()-startTimeNanos);
+        switch (testCase) {
+            case "testMaxTimeSupercedesReps":
+                Assertions.assertTrue(counter < 20, "counter=" + counter);
+                Assertions.assertTrue(Duration.ofMillis(100).minus(observedTestDuration).isNegative());
+                break;
+            case "testMinTimeSupercedesReps":
+                Assertions.assertTrue(counter > 1, "counter=" + counter);
+                Assertions.assertTrue(Duration.ofMillis(100).minus(observedTestDuration).isNegative());
+                break;
+            default:
+                Assertions.fail("unknown test case: " + testCase);
         }
     }
 

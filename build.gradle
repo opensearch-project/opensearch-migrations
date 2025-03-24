@@ -160,10 +160,6 @@ subprojects {
         dependsOn project.javadoc
     }
     if (!sourceSets.test.allSource.files.isEmpty()) {
-        dependencies {
-            // Add dependency on testHelperFixtures for all projects with tests
-            testImplementation(testFixtures(project(":testHelperFixtures")))
-        }
         tasks.withType(Test) {
             testLogging {
                 events "passed", "skipped", "failed"
