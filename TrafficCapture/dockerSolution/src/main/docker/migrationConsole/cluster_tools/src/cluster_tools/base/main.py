@@ -69,7 +69,7 @@ def setup_parser(parser):
                 message = f"The tool '{tool_name}' does not have a 'define_arguments' function. \
                         Please add one to specify its arguments."
                 logger.error(message)
-                raise Exception(message)
+                raise ValueError(message)
             tool_parser.set_defaults(func=tool_module.main)  # Set the main function as the handler
         except Exception as e:
             logger.error(f"An error occurred while importing the tool '{tool_name}': {e}")
