@@ -117,7 +117,7 @@ function rewriteBulk(match, context) {
             defaultType,
             context.index_mappings,
             context.regex_mappings);
-        const patternToReplace = /^.*\/(.*\/)?_bulk/;
+        const patternToReplace = /^.+\/(?:[^/]+\/)?_bulk/;
         // Replace the pattern in the URI with the converted target index, if available.
         // If no valid conversion is found, remove the source index/type segment and default to '/_bulk'.
         context.request.URI = defaultTargetIndex
