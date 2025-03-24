@@ -435,32 +435,3 @@ task listPublishedArtifacts {
         }
     }
 }
-
-// Define a provider for test tasks list
-def testTasksProvider = provider {
-    def testTasks = []
-    rootProject.subprojects.each { subproject ->
-        def projectPath = subproject.path
-
-        subproject.tasks.withType(Test).configureEach { testTask ->
-            def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            if (!(jacocoExtension?.enabled ?: false)) {
-                testTasks << "${projectPath}:${testTask.name}"
-            }
-        }
-
-        if (subproject.tasks.withType(Test).any { testTask ->
-            def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            jacocoExtension?.enabled ?: false
-        }) {
-            testTasks << "${projectPath}:jacocoTestReport"
-        }
-    }
-    return testTasks
-}
-
-tasks.register("listTestTasksAsJson") {
-    doLast {
-        println JsonOutput.prettyPrint(JsonOutput.toJson(testTasksProvider.get()))
-    }
-}
