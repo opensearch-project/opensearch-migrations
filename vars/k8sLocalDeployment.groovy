@@ -40,11 +40,16 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Start Minikube') {
+            stage('Check Minikube Status') {
                 steps {
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 1, unit: 'MINUTES') {
                         script {
-                            sh "minikube start"
+                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+                            if (status == "Running") {
+                                echo "✅ Minikube is running"
+                            } else {
+                                error("❌ Minikube is NOT running")
+                            }
                         }
                     }
                 }
@@ -67,8 +72,8 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('libraries/testAutomation') {
                             script {
-                                sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
-                                sh "sudo pipenv run app --skip-delete"
+                                sh "sudo -u ec2-user pipenv install --deploy --ignore-pipfile"
+                                sh "sudo -u ec2-user pipenv run app --skip-delete"
                             }
                         }
                     }
