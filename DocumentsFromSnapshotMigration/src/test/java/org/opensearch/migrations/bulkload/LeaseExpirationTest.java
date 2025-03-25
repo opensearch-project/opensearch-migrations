@@ -9,6 +9,7 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
+import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -40,17 +41,21 @@ public class LeaseExpirationTest extends SourceTestBase {
     public static final String TARGET_DOCKER_HOSTNAME = "target";
 
     private static Stream<Arguments> testParameters() {
-        List<Boolean> forceMoreSegmentsValues = List.of(false, true);
-        List<SearchClusterContainer.ContainerVersion> sourceClusterVersions = List.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2);
-
-        return forceMoreSegmentsValues.stream()
-            .flatMap(force -> sourceClusterVersions.stream()
-                .map(version -> Arguments.of(force, version)));
+        return Stream.concat(
+                // Test with all pairs with forceMoreSegments=false
+                SupportedClusters.supportedPairs(true).stream()
+                        .map(migrationPair ->
+                                Arguments.of(false, migrationPair.source(), migrationPair.target())),
+                // Add test for ES 7 -> OS 2 with forceMoreSegments=true
+                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_1))
+        );
     }
 
-    @ParameterizedTest(name = "forceMoreSegments={0}, sourceClusterVersion={1}")
+    @ParameterizedTest(name = "forceMoreSegments={0}, sourceClusterVersion={1}, targetClusterVersion={2}")
     @MethodSource("testParameters")
-    public void testProcessExitsAsExpected(boolean forceMoreSegments, SearchClusterContainer.ContainerVersion sourceClusterVersion) {
+    public void testProcessExitsAsExpected(boolean forceMoreSegments,
+                                           SearchClusterContainer.ContainerVersion sourceClusterVersion,
+                                           SearchClusterContainer.ContainerVersion targetClusterVersion) {
         // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
         // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
@@ -63,16 +68,20 @@ public class LeaseExpirationTest extends SourceTestBase {
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments, sourceClusterVersion,
-            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, sourceClusterVersion
-            ));
+                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
+                sourceClusterVersion,
+                targetClusterVersion,
+                d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer,
+                        sourceClusterVersion, targetClusterVersion));
     }
 
     @SneakyThrows
     private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
                                               int shards, int indexDocCount,
-                                              boolean forceMoreSegments, SearchClusterContainer.ContainerVersion sourceClusterVersion,
+                                              boolean forceMoreSegments,
+                                              SearchClusterContainer.ContainerVersion sourceClusterVersion,
+                                              SearchClusterContainer.ContainerVersion targetClusterVersion,
                                               Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
@@ -83,7 +92,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             var esSourceContainer = new SearchClusterContainer(sourceClusterVersion)
                     .withAccessToHost(true);
             var network = Network.newNetwork();
-            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
+            var osTargetContainer = new SearchClusterContainer(targetClusterVersion)
                     .withAccessToHost(true)
                     .withNetwork(network)
                     .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
@@ -129,6 +138,9 @@ public class LeaseExpirationTest extends SourceTestBase {
             // Segments will be created on each refresh which tests segment ordering logic
             workloadOptions.setRefreshAfterEachWrite(forceMoreSegments);
             workloadOptions.setMaxBulkBatchSize(forceMoreSegments ? 10 : 1000);
+            if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_6_X).test(sourceClusterVersion.getVersion())) {
+                workloadOptions.setDefaultDocType("myType");
+            }
             generator.generate(workloadOptions);
 
             // Create the snapshot from the source cluster
@@ -149,12 +161,8 @@ public class LeaseExpirationTest extends SourceTestBase {
             do {
                 exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
                 runs++;
-                if (exitCode == expectedInitialExitCode) {
-                    initialExitCodeCount++;
-                }
-                if (exitCode == expectedEventualExitCode) {
-                    finalExitCodeCount++;
-                }
+                initialExitCodeCount += exitCode == expectedInitialExitCode ? 1 : 0;
+                finalExitCodeCount += exitCode == expectedEventualExitCode ? 1 : 0;
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
                 deleteTree(tempDirLucene);
@@ -192,7 +200,8 @@ public class LeaseExpirationTest extends SourceTestBase {
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer,
-        SearchClusterContainer.ContainerVersion sourceClusterVersion
+        SearchClusterContainer.ContainerVersion sourceClusterVersion,
+        SearchClusterContainer.ContainerVersion targetClusterVersion
     ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();

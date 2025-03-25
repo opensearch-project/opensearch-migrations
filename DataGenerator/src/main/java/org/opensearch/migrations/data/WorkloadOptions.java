@@ -21,6 +21,10 @@ public class WorkloadOptions {
     @Parameter(names = { "--max-bulk-request-batch-count" }, description = "The maximum batch count for bulk requests")
     private int maxBulkBatchSize = 50;
 
+    private String defaultDocType = null;
+
+    private String defaultDocRouting = null;
+
     private final IndexOptions index = new IndexOptions();
 
     private boolean refreshAfterEachWrite = false;

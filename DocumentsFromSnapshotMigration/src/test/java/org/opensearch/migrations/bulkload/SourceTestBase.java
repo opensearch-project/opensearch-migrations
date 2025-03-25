@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -185,7 +186,9 @@ public class SourceTestBase {
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
-        Version sourceVersion
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
@@ -197,7 +200,8 @@ public class SourceTestBase {
                     clockJitter,
                     testContext,
                     sourceVersion,
-                    target.getContainerVersion().getVersion()
+                    targetVersion,
+                    transformationConfig
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -230,7 +234,8 @@ public class SourceTestBase {
         Random clockJitter,
         DocumentMigrationTestContext context,
         Version sourceVersion,
-        Version targetVersion
+        Version targetVersion,
+        String transformationConfig
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -269,7 +274,11 @@ public class SourceTestBase {
                 return reader;
             });
 
-            var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+
+            var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
+                    Optional.ofNullable(transformationConfig).orElse(
+                            RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG
+                    ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
@@ -290,7 +299,7 @@ public class SourceTestBase {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> defaultDocTransformer),
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),
