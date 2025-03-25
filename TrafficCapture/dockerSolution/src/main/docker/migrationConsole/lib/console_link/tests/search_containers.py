@@ -22,7 +22,7 @@ IMAGE_MAPPINGS = {
     Version(elastic, 5, 6, 16): "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
     Version(elastic, 6, 8, 23): "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
     Version(elastic, 7, 10, 2): "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
-    Version(opensearch, 1, 3, 0): "opensearchproject/opensearch:1.3.0",
+    Version(opensearch, 1, 3, 16): "opensearchproject/opensearch:1.3.16",
     Version(opensearch, 2, 19, 1): "opensearchproject/opensearch:2.19.1"
 }
 

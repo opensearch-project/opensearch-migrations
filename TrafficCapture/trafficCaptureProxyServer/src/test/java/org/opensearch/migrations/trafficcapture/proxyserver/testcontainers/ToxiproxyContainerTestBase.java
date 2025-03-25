@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentSkipListSet;
 
+import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+
 import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
 import org.testcontainers.containers.GenericContainer;
@@ -11,7 +13,7 @@ import org.testcontainers.containers.ToxiproxyContainer;
 
 public class ToxiproxyContainerTestBase extends TestContainerTestBase<ToxiproxyContainer> {
 
-    private static final ToxiproxyContainer toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:latest")
+    private static final ToxiproxyContainer toxiproxy = new ToxiproxyContainer(ToxiProxyWrapper.TOXIPROXY_IMAGE_NAME)
         .withAccessToHost(true);
 
     final ConcurrentSkipListSet<Integer> toxiproxyUnusedExposedPorts = new ConcurrentSkipListSet<>();

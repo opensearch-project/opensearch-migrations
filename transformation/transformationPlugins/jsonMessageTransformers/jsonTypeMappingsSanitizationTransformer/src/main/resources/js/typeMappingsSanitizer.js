@@ -253,7 +253,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
 
     const newProperties = {}
     for (const [sourceType,] of targetIndicesMap) {
-        for (fieldName of oldMappings[sourceType].properties.keys()) {
+        for (const fieldName of oldMappings[sourceType].properties.keys()) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
                 const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];
