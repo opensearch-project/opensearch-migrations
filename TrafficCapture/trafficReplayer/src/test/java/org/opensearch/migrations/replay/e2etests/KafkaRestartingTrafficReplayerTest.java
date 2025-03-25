@@ -40,14 +40,14 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-@Tag("requiresDocker")
+@Tag("isolatedTest")
 public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     public static final int INITIAL_STOP_REPLAYER_REQUEST_COUNT = 1;
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
@@ -64,7 +64,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
     @Container
     // see
     // https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private final KafkaContainer embeddedKafkaBroker = new KafkaContainer(SharedDockerImageNames.KAFKA);
+    private final ConfluentKafkaContainer embeddedKafkaBroker = new ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
 
     private static class CounterLimitedReceiverFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {
         AtomicInteger nextStopPointRef = new AtomicInteger(INITIAL_STOP_REPLAYER_REQUEST_COUNT);
@@ -87,7 +87,6 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource(value = { "3,false", "-1,false", "3,true", "-1,true", })
-    @Tag("longTest")
     @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
