@@ -52,7 +52,6 @@ class Test0004MultiTypeUnionMigration(MATestBase):
             doc_type_2=self.doc_type2,
             cluster_version=self.source_version
         )
-        #raise Exception("now")
         self.source_operations.create_transformation_json_file(transform_config_data=[union_transform],
                                                                file_path_to_create=self.transform_config_file)
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
