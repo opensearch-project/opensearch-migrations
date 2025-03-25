@@ -187,35 +187,36 @@ def parse_tuple(line: str, line_no: int) -> dict:
         is_bulk_path = BULK_URI_PATH in get_element(URI_PATH, initial_tuple, raise_on_error=True)
     except DictionaryPathException as e:
         logger.error(f"`{URI_PATH}` on line {line_no} could not be loaded: {e} "
-                     f"Skipping parsing tuple.")
+                     "Skipping parsing tuple.")
         return initial_tuple
 
-    for component in SINGLE_COMPONENTS:
-        if component in initial_tuple:
-            tuple_component = TupleComponent(component, initial_tuple[component], line_no, is_bulk_path)
+    def process_value(label: str, value, update_fn) -> None:
+        tc = TupleComponent(label, value, line_no, is_bulk_path)
+        processed = tc.b64decode().decode_utf8().parse_as_json()
+        if processed.error:
+            logger.error(processed.error)
         else:
+            update_fn(processed.final_value)
+
+    for component in SINGLE_COMPONENTS:
+        if component not in initial_tuple:
             logger.info(f"`{component}` was not present on line {line_no}. Skipping component.")
             continue
-
-        processed_tuple = tuple_component.b64decode().decode_utf8().parse_as_json()
-        final_value = processed_tuple.final_value
-        if not processed_tuple.error:
-            set_element(component + ".body", initial_tuple, final_value)
-        else:
-            logger.error(processed_tuple.error)
+        process_value(
+            component,
+            initial_tuple[component],
+            lambda final: set_element(f"{component}.body", initial_tuple, final)
+        )
 
     for component in LIST_COMPONENTS:
         if component not in initial_tuple:
             logger.info(f"`{component}` was not present on line {line_no}. Skipping component.")
             continue
         for i, item in enumerate(initial_tuple[component]):
-            tuple_component = TupleComponent(f"{component} item {i}", item, line_no, is_bulk_path)
+            process_value(
+                f"{component} item {i}",
+                item,
+                lambda final, itm=item: set_element("body", itm, final)
+            )
 
-            processed_tuple = tuple_component.b64decode().decode_utf8().parse_as_json()
-            final_value = processed_tuple.final_value
-            if not processed_tuple.error:
-                set_element("body", item, final_value)
-            else:
-                logger.error(processed_tuple.error)
-    
     return initial_tuple

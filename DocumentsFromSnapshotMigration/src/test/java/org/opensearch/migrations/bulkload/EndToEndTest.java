@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -35,11 +36,8 @@ public class EndToEndTest extends SourceTestBase {
     private File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        var scenarios = Stream.<Arguments>builder();
-        for (var migrationPair : SupportedClusters.supportedPairs(true)) {
-            scenarios.add(Arguments.of(migrationPair.source(), migrationPair.target()));
-        }
-        return scenarios.build();
+        return SupportedClusters.supportedPairs(true).stream()
+                .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
     }
 
     @ParameterizedTest(name = "Source {0} to Target {1}")
@@ -120,18 +118,25 @@ public class EndToEndTest extends SourceTestBase {
 
             // === ACTION: Migrate the documents ===
             var runCounter = new AtomicInteger();
-            final var clockJitter = new Random(1);
+            var clockJitter = new Random(1);
+
+            var transformationConfig = VersionMatchers.isES_5_X.or(VersionMatchers.isES_6_X)
+                        .test(targetCluster.getContainerVersion().getVersion()) ?
+                    "[{\"NoopTransformerProvider\":{}}]" // skip transformations including doc type removal
+                    : null;
 
             // ExpectedMigrationWorkTerminationException is thrown on completion.
             var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
-                sourceRepo,
-                snapshotName,
-                List.of(),
-                targetCluster,
-                runCounter,
-                clockJitter,
-                testDocMigrationContext,
-                sourceCluster.getContainerVersion().getVersion()
+                    sourceRepo,
+                    snapshotName,
+                    List.of(),
+                    targetCluster,
+                    runCounter,
+                    clockJitter,
+                    testDocMigrationContext,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion(),
+                    transformationConfig
             ));
 
             Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);

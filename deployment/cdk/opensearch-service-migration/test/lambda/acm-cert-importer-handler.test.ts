@@ -129,7 +129,7 @@ describe('ACM Certificate Importer Handler', () => {
       ResourceProperties: {
         ServiceToken: 'mockServiceToken'
       },
-      OldResourceProperties: {}
+      OldResourceProperties: { ServiceToken: 'fake-token' }
     };
 
     const result = await handler(mockEvent, mockContext);

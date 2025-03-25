@@ -10,6 +10,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.version_es_5_6.OpenSearchClient_ES_5_6;
 import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchClient_ES_6_8;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
@@ -66,11 +67,12 @@ public class OpenSearchClientFactory {
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
         if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
-        } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
+        } else if (VersionMatchers.isES_6_X.test(version)) {
             return OpenSearchClient_ES_6_8.class;
-        } else {
-            throw new IllegalArgumentException("Unsupported version: " + version);
+        } else if (VersionMatchers.isES_5_X.test(version)) {
+            return OpenSearchClient_ES_5_6.class;
         }
+        throw new IllegalArgumentException("Unsupported version: " + version);
     }
 
     /** Amazon OpenSearch Serverless cluster don't have a version number, but
