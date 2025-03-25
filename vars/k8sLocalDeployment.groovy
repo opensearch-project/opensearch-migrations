@@ -86,7 +86,7 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "sudo -u ec2-user pipenv install --deploy --ignore-pipfile"
-                            sh "sudo -u ec2-user run app --delete-only"
+                            sh "sudo -u ec2-user pipenv run app --delete-only"
                         }
                     }
                 }
