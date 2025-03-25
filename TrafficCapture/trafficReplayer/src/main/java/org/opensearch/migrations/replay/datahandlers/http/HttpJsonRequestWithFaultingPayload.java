@@ -32,10 +32,12 @@ public class HttpJsonRequestWithFaultingPayload extends HttpJsonMessageWithFault
         this.put(JsonKeysForHttpMessage.URI_KEY, value);
     }
 
+    @Override
     public String protocol() {
         return (String) this.get(JsonKeysForHttpMessage.PROTOCOL_KEY);
     }
 
+    @Override
     public void setProtocol(String value) {
         this.put(JsonKeysForHttpMessage.PROTOCOL_KEY, value);
     }

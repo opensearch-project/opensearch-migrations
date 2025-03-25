@@ -1,4 +1,5 @@
 import json
+from kubernetes import config
 import os
 import pathlib
 from unittest.mock import ANY
@@ -18,6 +19,13 @@ from tests.utils import create_valid_cluster
 
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
+
+
+@pytest.fixture(autouse=True)
+def mock_kube_config(monkeypatch):
+    # Prevent actual config loading
+    monkeypatch.setattr(config, "load_incluster_config", lambda: None)
+    monkeypatch.setattr(config, "load_kube_config", lambda: None)
 
 
 @pytest.fixture

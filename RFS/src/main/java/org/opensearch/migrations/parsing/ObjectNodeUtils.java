@@ -3,6 +3,7 @@ package org.opensearch.migrations.parsing;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class ObjectNodeUtils {
+    private ObjectNodeUtils() {}
 
     public static void removeFieldsByPath(ObjectNode node, String path) {
         var pathParts = path.split("\\.");

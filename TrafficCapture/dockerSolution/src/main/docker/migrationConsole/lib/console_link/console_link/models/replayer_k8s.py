@@ -32,6 +32,8 @@ class K8sReplayer(Replayer):
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for Replayer")
         status_str = str(deployment_status)
+        if deployment_status.terminating > 0 and deployment_status.desired == 0:
+            return CommandResult(True, (ReplayStatus.TERMINATING, status_str))
         if deployment_status.running > 0:
             return CommandResult(True, (ReplayStatus.RUNNING, status_str))
         if deployment_status.desired > 0:

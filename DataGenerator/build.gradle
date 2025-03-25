@@ -1,6 +1,5 @@
 plugins {
-    id 'application'
-    id 'java'
+    id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
 }
 
@@ -27,6 +26,7 @@ dependencies {
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.hamcrest
     testImplementation libs.testcontainers
+    testImplementation project(':transformation')
 
     testRuntimeOnly libs.junit.jupiter.engine
 }

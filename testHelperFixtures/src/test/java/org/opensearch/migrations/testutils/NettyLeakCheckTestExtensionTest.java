@@ -26,6 +26,10 @@ class NettyLeakCheckTestExtensionTest {
 
     @AfterEach
     public void afterTest() {
+        // testCase may be null if extension skips beforeEach
+        if (testCase == null) {
+            return;
+        }
         var observedTestDuration = Duration.ofNanos(System.nanoTime()-startTimeNanos);
         switch (testCase) {
             case "testMaxTimeSupercedesReps":
