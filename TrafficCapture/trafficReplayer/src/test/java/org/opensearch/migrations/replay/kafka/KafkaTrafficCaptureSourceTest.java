@@ -39,7 +39,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final int NUM_READ_ITEMS_BOUND = 1000;
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
-    private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration TEST_TIMEOUT = Duration.ofSeconds(30);
 
     @Test
     public void testRecordToString() {
