@@ -65,7 +65,7 @@ class K8sService:
             logger.debug(f"Error executing {' '.join(command)}: {e.stderr}")
             return None
 
-    def wait_for_all_healthy_pods(self, timeout=120):
+    def wait_for_all_healthy_pods(self, timeout=180):
         """Waits for all pods in the namespace to be in a ready state, failing after the specified timeout in seconds."""
         logger.info("Waiting for pods to become ready...")
         start_time = time.time()
