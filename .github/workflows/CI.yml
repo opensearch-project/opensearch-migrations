@@ -70,10 +70,13 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install flake8
-      - name: Analysing the code with flake8
+          python3 -m pip install flake8 flake8-annotations
+      - name: Analysing the code with flake8 (excluding type hint annotations)
         run: |
-          flake8 $(git ls-files '*.py')
+          flake8 $(git ls-files '*.py') --ignore=ANN
+      - name: Run flake8 annotation checks on enabled libraries
+        run: |
+          flake8 $(git ls-files '*.py' | grep '^libraries/testAutomation') --select=ANN
 
   python-tests:
     runs-on: ubuntu-latest
