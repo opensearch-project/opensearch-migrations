@@ -52,32 +52,26 @@ class TestRunner:
         self.test_cluster_environments = test_cluster_environments
 
     def _print_summary_table(self, reports: list):
-        test_cases = {test['name'] for report in reports for test in report['tests']}
-        test_cases = sorted(test_cases)
-        table_rows = []
-        # Generate test matrix table
+        all_test_names = sorted({test['name'] for report in reports for test in report['tests']})
+
+        # Build the test matrix rows
+        matrix_rows = []
         for report in reports:
-            version = f"{report['summary']['source_version']} -> {report['summary']['target_version']}"
-            row = {"Version": version}
-            # Initialize all test columns with an empty string.
-            for case in test_cases:
-                row[case] = ""
+            version_label = f"{report['summary']['source_version']} -> {report['summary']['target_version']}"
+            row = {"Version": version_label, **{name: "" for name in all_test_names}}
             for test in report['tests']:
                 row[test['name']] = "✓" if test['result'] == "passed" else "X"
-            table_rows.append(row)
-        # Generate test description table
-        unique_tests = {}
-        for report in reports:
-            for case in report["tests"]:
-                name = case["name"]
-                description = case["description"]
-                if name not in unique_tests:
-                    unique_tests[name] = description
-        # Convert the dictionary to a list of lists for tabulate.
-        description_table = [[name, desc] for name, desc in unique_tests.items()]
+            matrix_rows.append(row)
 
-        # Create a pandas DataFrame and print
-        df = pd.DataFrame(table_rows).set_index("Version")
+        # Build test description rows
+        test_descriptions = {}
+        for report in reports:
+            for test in report["tests"]:
+                test_descriptions.setdefault(test["name"], test["description"])
+
+        df = pd.DataFrame(matrix_rows).set_index("Version")
+        description_table = [[name, test_descriptions[name]] for name in all_test_names]
+
         print("\nTest Matrix:")
         print(tabulate(df, headers="keys", tablefmt="fancy_grid"))
         print("\nDetailed Test Case Information:")
@@ -86,27 +80,26 @@ class TestRunner:
     def run_tests(self):
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
-        return False
-        # self.k8s_service.exec_migration_console_cmd(["pipenv",
-        #                                              "run",
-        #                                              "pytest",
-        #                                              "/root/lib/integ_test/integ_test/ma_workflow_test.py",
-        #                                              f"--unique_id={self.unique_id}",
-        #                                              f"--test_ids={','.join(self.test_ids)}"])
-        # output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
-        # logger.info(f"Retrieving test report at {output_file_path}")
-        # cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
-        #                                                            unbuffered=False)
-        # test_data = ast.literal_eval(cmd_response)
-        # logger.debug(f"Received the following test data: {test_data}")
-        # tests_passed = int(test_data['summary']['passed'])
-        # tests_failed = int(test_data['summary']['failed'])
-        # print(f"Test cases passed: {tests_passed}")
-        # print(f"Test cases failed: {tests_failed}")
-        # self._print_summary_table(reports=[test_data])
-        # if tests_passed == 0 or tests_failed > 0:
-        #     return False
-        # return True
+        self.k8s_service.exec_migration_console_cmd(["pipenv",
+                                                     "run",
+                                                     "pytest",
+                                                     "/root/lib/integ_test/integ_test/ma_workflow_test.py",
+                                                     f"--unique_id={self.unique_id}",
+                                                     f"--test_ids={','.join(self.test_ids)}"])
+        output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
+        logger.info(f"Retrieving test report at {output_file_path}")
+        cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
+                                                                   unbuffered=False)
+        test_data = ast.literal_eval(cmd_response)
+        logger.debug(f"Received the following test data: {test_data}")
+        tests_passed = int(test_data['summary']['passed'])
+        tests_failed = int(test_data['summary']['failed'])
+        print(f"Test cases passed: {tests_passed}")
+        print(f"Test cases failed: {tests_failed}")
+        self._print_summary_table(reports=[test_data])
+        if tests_passed == 0 or tests_failed > 0:
+            return False
+        return True
 
     def cleanup_deployment(self):
         self.k8s_service.helm_uninstall(release_name=SOURCE_RELEASE_NAME)
@@ -173,18 +166,18 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Process inputs for test automation runner"
     )
-    parser.add_argument(
-        "--source-version",
-        default="ES_5.6",
-        type=str,
-        help="Source version e.g. ES_5.6"
-    )
-    parser.add_argument(
-        "--target-version",
-        default="OS_2.17",
-        type=str,
-        help="Target version e.g. OS_2.x"
-    )
+    # parser.add_argument(
+    #     "--source-version",
+    #     default="ES_5.6",
+    #     type=str,
+    #     help="Source version e.g. ES_5.6"
+    # )
+    # parser.add_argument(
+    #     "--target-version",
+    #     default="OS_2.17",
+    #     type=str,
+    #     help="Target version e.g. OS_2.x"
+    # )
     parser.add_argument(
         "--skip-delete",
         action="store_true",
@@ -220,16 +213,17 @@ def main():
     elasticsearch_cluster_chart_path = f"{helm_charts_base_path}/components/elasticsearchCluster"
     opensearch_cluster_chart_path = f"{helm_charts_base_path}/components/opensearchCluster"
 
-    # Currently utilizes a single test cluster environment, but should be expanded to allow a matrix of cases
+    # Currently utilizes a single test cluster environment, but should be expanded to allow a matrix of cases based
+    # on provided source and target version
     ma_chart_values_path = "es-5-values.yaml"
     es_5_6_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
                      f"environments/es-5-6-single-node-cluster.yaml")
     os_2_17_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
                       f"environments/os-2-latest-single-node-cluster.yaml")
-    test_cluster_env = TestClusterEnvironment(source_version=args.source_version,
+    test_cluster_env = TestClusterEnvironment(source_version="ES_5.6",
                                               source_helm_values_path=es_5_6_values,
                                               source_chart_path=elasticsearch_cluster_chart_path,
-                                              target_version=args.target_version,
+                                              target_version="OS_2.16",
                                               target_helm_values_path=os_2_17_values,
                                               target_chart_path=opensearch_cluster_chart_path)
 
