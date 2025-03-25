@@ -5,6 +5,7 @@ from console_link.environment import Environment
 
 logger = logging.getLogger(__name__)
 
+
 # This test case is subject to removal, as its value looks limited
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
@@ -35,6 +36,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
         # Validate single document exists on target
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
                                             doc_id=self.doc_id, max_attempts=10, delay=3.0)
+
 
 # This test case is subject to removal, as its value looks limited
 class Test0002IndexWithNoDocumentsMetadataMigration(MATestBase):
