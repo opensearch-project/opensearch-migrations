@@ -10,7 +10,7 @@ from console_link.environment import Environment
 @pytest.fixture(scope="function")
 def env():
     # Spin up the OpenSearch container and wait until it's healthy
-    container = OpenSearchContainer("opensearchproject/opensearch:2.14.0")
+    container = OpenSearchContainer("opensearchproject/opensearch:2.19.1")
     container.with_env("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "myStrongPassword123!")
     container.start()
     wait_for_logs(container, ".*recovered .* indices into cluster_state.*")
