@@ -10,7 +10,12 @@ To install the library for development purposes, create a virtual env and instal
 pipenv install
 ```
 
-To run `*.py` locally, a command like below can be used:
+To run the test automation library, a command like below can be used:
 ```shell
-pipenv run ...
+pipenv run app
+```
+
+Or to execute a specific test
+```shell
+pipenv run app --test-ids=0004
 ```
