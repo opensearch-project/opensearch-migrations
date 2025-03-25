@@ -205,7 +205,7 @@ def parse_tuple(line: str, line_no: int) -> dict:
         process_value(
             component,
             initial_tuple[component],
-            lambda final: set_element(f"{component}.body", initial_tuple, final)
+            lambda final, comp=component: set_element(f"{comp}.body", initial_tuple, final)
         )
 
     for component in LIST_COMPONENTS:
