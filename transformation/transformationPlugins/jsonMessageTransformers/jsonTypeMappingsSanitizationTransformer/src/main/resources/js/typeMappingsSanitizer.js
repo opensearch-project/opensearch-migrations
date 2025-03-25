@@ -94,13 +94,15 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-function getDefaultIndices(match) {
+function getDefaultIndicesBulk(match) {
     let defaultSourceIndex = null;
     let defaultType = "_doc";
     if (match.length === 3) {
+        // Case: /{index}/{type}/_bulk
         defaultSourceIndex = match[1];
         defaultType = match[2];
     } else if (match.length === 2) {
+        // Case: /{index}/_bulk
         defaultSourceIndex = match[1];
     }
     return { defaultSourceIndex, defaultType };
@@ -142,7 +144,7 @@ function rewriteBulk(match, context) {
     const newLines = [];
     let ndi = 0;
 
-    const { defaultSourceIndex, defaultType } = getDefaultIndices(match);
+    const { defaultSourceIndex, defaultType } = getDefaultIndicesBulk(match);
 
     let defaultTargetIndex = null;
     if (defaultSourceIndex) {
