@@ -30,6 +30,10 @@ class KubectlCommandFailed(Exception):
     pass
 
 
+class TestsFailed(Exception):
+    pass
+
+
 class TestClusterEnvironment:
     def __init__(self, source_version: str,
                  source_helm_values_path: str,
@@ -268,7 +272,7 @@ class TestRunner:
         print(f"Test cases passed: {tests_passed}")
         print(f"Test cases failed: {tests_failed}")
         self._print_summary_table(reports=[test_data])
-        if tests_failed > 0:
+        if tests_passed == 0 or tests_failed > 0:
             return False
         return True
 
@@ -304,7 +308,7 @@ class TestRunner:
                 tests_passed = self.run_tests(clusters)
 
                 if not tests_passed:
-                    logger.warning(f"Tests failed for upgrade from {clusters.source_version} to {clusters.target_version}.")
+                    raise TestsFailed(f"Tests failed (or no tests executed) for upgrade from {clusters.source_version} to {clusters.target_version}.")
                 else:
                     logger.info(f"Tests passed successfully for upgrade from {clusters.source_version} to {clusters.target_version}.")
             except HelmCommandFailed as helmError:
