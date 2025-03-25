@@ -86,26 +86,27 @@ class TestRunner:
     def run_tests(self):
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
-        self.k8s_service.exec_migration_console_cmd(["pipenv",
-                                                     "run",
-                                                     "pytest",
-                                                     "/root/lib/integ_test/integ_test/ma_workflow_test.py",
-                                                     f"--unique_id={self.unique_id}",
-                                                     f"--test_ids={','.join(self.test_ids)}"])
-        output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
-        logger.info(f"Retrieving test report at {output_file_path}")
-        cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
-                                                                   unbuffered=False)
-        test_data = ast.literal_eval(cmd_response)
-        logger.debug(f"Received the following test data: {test_data}")
-        tests_passed = int(test_data['summary']['passed'])
-        tests_failed = int(test_data['summary']['failed'])
-        print(f"Test cases passed: {tests_passed}")
-        print(f"Test cases failed: {tests_failed}")
-        self._print_summary_table(reports=[test_data])
-        if tests_passed == 0 or tests_failed > 0:
-            return False
-        return True
+        return False
+        # self.k8s_service.exec_migration_console_cmd(["pipenv",
+        #                                              "run",
+        #                                              "pytest",
+        #                                              "/root/lib/integ_test/integ_test/ma_workflow_test.py",
+        #                                              f"--unique_id={self.unique_id}",
+        #                                              f"--test_ids={','.join(self.test_ids)}"])
+        # output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
+        # logger.info(f"Retrieving test report at {output_file_path}")
+        # cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
+        #                                                            unbuffered=False)
+        # test_data = ast.literal_eval(cmd_response)
+        # logger.debug(f"Received the following test data: {test_data}")
+        # tests_passed = int(test_data['summary']['passed'])
+        # tests_failed = int(test_data['summary']['failed'])
+        # print(f"Test cases passed: {tests_passed}")
+        # print(f"Test cases failed: {tests_failed}")
+        # self._print_summary_table(reports=[test_data])
+        # if tests_passed == 0 or tests_failed > 0:
+        #     return False
+        # return True
 
     def cleanup_deployment(self):
         self.k8s_service.helm_uninstall(release_name=SOURCE_RELEASE_NAME)
