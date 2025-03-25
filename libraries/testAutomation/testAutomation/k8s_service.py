@@ -6,6 +6,7 @@ from kubernetes.stream.ws_client import WSClient
 import logging
 import subprocess
 import time
+from typing import List
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class K8sService:
         config.load_kube_config()
         self.k8s_client = client.CoreV1Api()
 
-    def run_command(self, command: list,
+    def run_command(self, command: List,
                     stdout: int | None = subprocess.PIPE,
                     stderr: int | None = subprocess.PIPE,
                     ignore_errors: bool = False) -> CompletedProcess | None:
@@ -75,7 +76,7 @@ class K8sService:
         console_pod_id = pods[-1].metadata.name
         return console_pod_id
 
-    def exec_migration_console_cmd(self, command_list: list, unbuffered: bool = True) -> str | WSClient:
+    def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
         console_pod_id = self.get_migration_console_pod_id()
         logger.info(f"Executing command in pod: {console_pod_id}")
