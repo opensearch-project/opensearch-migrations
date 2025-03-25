@@ -14,13 +14,13 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
-@Tag("requiresDocker")
+@Tag("isolatedTest")
 public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
 
     public static final int TEST_RECORD_COUNT = 10;
@@ -30,7 +30,7 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
     @Container
     // see
     // https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private final KafkaContainer embeddedKafkaBroker = new KafkaContainer(SharedDockerImageNames.KAFKA);
+    private final ConfluentKafkaContainer embeddedKafkaBroker = new ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
 
     @Test
     @Tag("isolatedTest")

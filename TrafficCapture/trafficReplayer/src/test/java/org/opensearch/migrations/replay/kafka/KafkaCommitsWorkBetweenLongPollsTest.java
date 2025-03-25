@@ -18,13 +18,13 @@ import org.apache.kafka.clients.producer.Producer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
-@Tag("requiresDocker")
+@Tag("isolatedTest")
 public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
     private static final long DEFAULT_POLL_INTERVAL_MS = 1000;
     private static final int NUM_RUNS = 5;
@@ -32,7 +32,7 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
     @Container
     // see
     // https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private final KafkaContainer embeddedKafkaBroker = new KafkaContainer(SharedDockerImageNames.KAFKA);
+    private final ConfluentKafkaContainer embeddedKafkaBroker = new ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
 
     @SneakyThrows
     private KafkaConsumer<String, byte[]> buildKafkaConsumer() {
@@ -49,7 +49,6 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
     }
 
     @Test
-    @Tag("longTest")
     public void testThatCommitsAndReadsKeepWorking() throws Exception {
         var kafkaSource = new KafkaTrafficCaptureSource(
             rootContext,
