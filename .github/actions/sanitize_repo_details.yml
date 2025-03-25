@@ -1,0 +1,25 @@
+name: "Sanitize Github Repo Details"
+
+outputs:
+  branch_name:
+    description: "Sanitized branch name"
+  pr_repo_url:
+    description: "Sanitized repo URL"
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        branch="${{ inputs.branch_name || github.event.pull_request.head.ref || github.ref_name }}"
+        repo="${{ inputs.repo_base || github.event.pull_request.head.repo.full_name || github.repository }}"
+
+        clean_branch_name=$(echo "$branch" | tr -cd '[:alnum:]_\-\./')
+        clean_repo_base=$(echo "$repo" | tr -cd '[:alnum:]_\-\./')
+        clean_repo_url="https://github.com/$clean_repo_base.git"
+
+        echo "Sanitized repo: $clean_repo_url"
+        echo "Sanitized branch: $clean_branch_name"
+
+        echo "branch_name=$clean_branch_name" >> $GITHUB_OUTPUT
+        echo "pr_repo_url=$clean_repo_url" >> $GITHUB_OUTPUT

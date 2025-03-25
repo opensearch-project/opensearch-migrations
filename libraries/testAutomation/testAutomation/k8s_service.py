@@ -1,4 +1,8 @@
+from subprocess import CompletedProcess
+
 from kubernetes import client, config, stream
+from kubernetes.client import V1Pod
+from kubernetes.stream.ws_client import WSClient
 import logging
 import subprocess
 import time
@@ -12,12 +16,15 @@ class HelmCommandFailed(Exception):
 
 
 class K8sService:
-    def __init__(self, namespace: str = "ma"):
+    def __init__(self, namespace: str = "ma") -> None:
         self.namespace = namespace
         config.load_kube_config()
         self.k8s_client = client.CoreV1Api()
 
-    def run_command(self, command: list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, ignore_errors=False):
+    def run_command(self, command: list,
+                    stdout: int | None = subprocess.PIPE,
+                    stderr: int | None = subprocess.PIPE,
+                    ignore_errors: bool = False) -> CompletedProcess | None:
         """Runs a command using subprocess."""
         logger.info(f"Performing command: {' '.join(command)}")
         try:
@@ -30,7 +37,7 @@ class K8sService:
             logger.debug(f"Error executing {' '.join(command)}: {e.stderr}")
             return None
 
-    def wait_for_all_healthy_pods(self, timeout=180):
+    def wait_for_all_healthy_pods(self, timeout: int = 180) -> bool:
         """Waits for all pods in the namespace to be in a ready state, fails after the specified timeout in seconds."""
         logger.info("Waiting for pods to become ready...")
         start_time = time.time()
@@ -40,20 +47,20 @@ class K8sService:
             unhealthy_pods = [pod.metadata.name for pod in pods if not self._is_pod_ready(pod)]
             if not unhealthy_pods:
                 logger.info("All pods are healthy.")
-                return
+                return True
             time.sleep(3)
 
         raise TimeoutError(f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
                            f"Unhealthy pods: {', '.join(unhealthy_pods)}")
 
-    def _is_pod_ready(self, pod):
+    def _is_pod_ready(self, pod: V1Pod) -> bool:
         """Checks if a pod is in a Ready state."""
         for condition in pod.status.conditions or []:
             if condition.type == "Ready" and condition.status == "True":
                 return True
         return False
 
-    def get_migration_console_pod_id(self):
+    def get_migration_console_pod_id(self) -> str:
         logger.debug("Retrieving the latest migration console pod...")
         pods = self.k8s_client.list_namespaced_pod(
             namespace=self.namespace,
@@ -68,7 +75,7 @@ class K8sService:
         console_pod_id = pods[-1].metadata.name
         return console_pod_id
 
-    def exec_migration_console_cmd(self, command_list: list, unbuffered=True):
+    def exec_migration_console_cmd(self, command_list: list, unbuffered: bool = True) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
         console_pod_id = self.get_migration_console_pod_id()
         logger.info(f"Executing command in pod: {console_pod_id}")
@@ -97,7 +104,7 @@ class K8sService:
                     print(resp.read_stderr(), end="")
         return resp
 
-    def delete_all_pvcs(self):
+    def delete_all_pvcs(self) -> None:
         """Deletes all PersistentVolumeClaims (PVCs) in the namespace."""
         logger.info(f"Removing all PVCs in '{self.namespace}' namespace")
         pvcs = self.k8s_client.list_namespaced_persistent_volume_claim(self.namespace).items
@@ -128,25 +135,26 @@ class K8sService:
             logger.info(f"Waiting for PVCs to be deleted. Remaining: {[pvc.metadata.name for pvc in remaining_pvcs]}")
             time.sleep(poll_interval)
 
-    def check_helm_release_exists(self, release_name):
+    def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
         check_command = ["helm", "status", release_name, "-n", self.namespace]
         status_result = self.run_command(check_command, ignore_errors=True)
         return True if status_result and status_result.returncode == 0 else False
 
-    def helm_upgrade(self, chart_path: str, release_name: str, values_file: str = None):
+    def helm_upgrade(self, chart_path: str, release_name: str, values_file: str = None) -> CompletedProcess:
         logger.info(f"Upgrading {release_name} from {chart_path} with values {values_file}")
         command = ["helm", "upgrade", release_name, chart_path, "-n", self.namespace]
         if values_file:
             command.extend(["-f", values_file])
         return self.run_command(command)
 
-    def helm_dependency_update(self, script_path: str):
+    def helm_dependency_update(self, script_path: str) -> CompletedProcess:
         logger.info("Updating Helm dependencies")
         command = [script_path]
         return self.run_command(command, stdout=None, stderr=None)
 
-    def helm_install(self, chart_path: str, release_name: str, values_file: str = None):
+    def helm_install(self, chart_path: str, release_name: str,
+                     values_file: str = None) -> CompletedProcess | bool:
         helm_release_exists = self.check_helm_release_exists(release_name=release_name)
         if helm_release_exists:
             logger.info(f"Helm release {release_name} already exists, skipping install")
@@ -157,7 +165,7 @@ class K8sService:
             command.extend(["-f", values_file])
         return self.run_command(command)
 
-    def helm_uninstall(self, release_name):
+    def helm_uninstall(self, release_name: str) -> CompletedProcess | bool:
         helm_release_exists = self.check_helm_release_exists(release_name=release_name)
         if not helm_release_exists:
             logger.info(f"Helm release {release_name} doesn't exist, skipping uninstall")

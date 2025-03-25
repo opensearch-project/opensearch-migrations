@@ -1,0 +1,48 @@
+name: Jenkins
+
+on:
+  push:
+    branches-ignore:
+      - 'backport/**'
+      - 'dependabot/**'
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+env:
+  python-version: '3.11'
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  get-require-approval:
+    uses: ./.github/workflows/require-approval.yml
+
+  sanitize-input:
+    uses: ./.github/actions/sanitize_repo_details.yml
+
+  full-es68-e2e-aws-test:
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Jenkins Job Trigger and Monitor
+        uses: lewijacn/jenkins-trigger@1.0.4
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "full-es68source-e2e-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
+
+  elasticsearch-5x-k8s-local-test:
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Jenkins Job Trigger and Monitor
+        uses: lewijacn/jenkins-trigger@1.0.4
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "elasticsearch-5x-k8s-local-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
