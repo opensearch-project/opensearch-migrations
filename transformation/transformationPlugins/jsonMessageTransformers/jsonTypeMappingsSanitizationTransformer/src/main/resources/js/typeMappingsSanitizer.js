@@ -94,7 +94,6 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-
 function rewriteBulk(match, context) {
     const lines = context.request.payload.inlinedJsonSequenceBodies;
     const newLines = [];
@@ -117,12 +116,11 @@ function rewriteBulk(match, context) {
             defaultType,
             context.index_mappings,
             context.regex_mappings);
-        const patternToReplace = /^.*\/(.*\/)?_bulk/;
-        // Replace the pattern in the URI with the converted target index, if available.
+            // Replace the pattern in the URI with the converted target index, if available.
         // If no valid conversion is found, remove the source index/type segment and default to '/_bulk'.
         context.request.URI = defaultTargetIndex
-            ? context.request.URI.replace(patternToReplace, `/${defaultTargetIndex}/_bulk`)
-            : context.request.URI.replace(patternToReplace, "/_bulk");
+            ? context.request.URI.replace(BULK_URI_INDEX_PATTERN_REGEX, `/${defaultTargetIndex}/_bulk`)
+            : context.request.URI.replace(BULK_URI_INDEX_PATTERN_REGEX, "/_bulk");
     }
 
     while (ndi < lines.length) {
@@ -281,6 +279,7 @@ const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
 const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^/]*)/;
 const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/_bulk/;
 const INDEX_TYPE_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/([^/]+)\/_bulk/;
+const BULK_URI_INDEX_PATTERN_REGEX = /^.+\/(?:[^/]+\/)?_bulk/;
 
 function processMetadataRequest(document, context) {
     let mappings = document?.body?.mappings;
