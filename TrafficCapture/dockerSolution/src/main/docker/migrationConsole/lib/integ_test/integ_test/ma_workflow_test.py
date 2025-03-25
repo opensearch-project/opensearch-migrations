@@ -3,10 +3,11 @@ import pytest
 import shutil
 from typing import Callable, List
 
+from .common_utils import wait_for_service_status
 from .test_cases.ma_test_base import MATestBase
 from console_link.middleware.clusters import connection_check, clear_cluster, clear_indices, ConnectionResult
-from console_link.models.backfill_base import Backfill
-from console_link.models.replayer_base import Replayer
+from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.models.kafka import Kafka
 from console_link.middleware.kafka import delete_topic
 
@@ -49,11 +50,13 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
     try:
         backfill: Backfill = test_case.console_link_env.backfill
         backfill.stop()
+        wait_for_service_status(status_func=lambda: backfill.get_status(), desired_status=BackfillStatus.STOPPED)
     except Exception as e:
         logger.error(f"Error encountered when stopping backfill, resources may not have been cleaned up: {e}")
     try:
         replayer: Replayer = test_case.console_link_env.replay
         replayer.stop()
+        wait_for_service_status(status_func=lambda: replayer.get_status(), desired_status=ReplayStatus.STOPPED)
     except Exception as e:
         logger.error(f"Error encountered when stopping replayer, resources may not have been cleaned up: {e}")
 
