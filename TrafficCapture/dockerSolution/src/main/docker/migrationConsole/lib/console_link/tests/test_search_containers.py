@@ -48,7 +48,7 @@ def env_with_source_container(request):
                          [(Version("ELASTICSEARCH", 5, 6, 16), "5.6.16"),
                           (Version("ELASTICSEARCH", 6, 8, 23), "6.8.23"),
                           (Version("ELASTICSEARCH", 7, 10, 2), "7.10.2"),
-                          (Version("OPENSEARCH", 1, 3, 0), "1.3.0"),
+                          (Version("OPENSEARCH", 1, 3, 16), "1.3.16"),
                           (Version("OPENSEARCH", 2, 19, 1), "2.19.1")],
                          indirect=["env_with_source_container"])
 def test_get_version_searchcontainer(env_with_source_container, version_string):
