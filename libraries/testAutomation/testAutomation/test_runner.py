@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 import datetime
 from k8s_service import K8sService, HelmCommandFailed
 import logging
-import pandas as pd
 import random
 import string
 import sys
@@ -92,9 +91,10 @@ class TestRunner:
         matrix_rows = []
         for report in reports:
             version_label = f"{report.summary.source_version} -> {report.summary.target_version}"
-            row = {"Version": version_label, **{name: "" for name in all_test_names}}
-            for test in report.tests:
-                row[test.name] = "✓" if test.result == "passed" else "X"
+            row = [version_label]
+            test_results = {test.name: "✓" if test.result == "passed" else "X" for test in report.tests}
+            for name in all_test_names:
+                row.append(test_results.get(name, ""))
             matrix_rows.append(row)
 
         # Build test description rows
@@ -103,13 +103,17 @@ class TestRunner:
             for test in report.tests:
                 test_descriptions.setdefault(test.name, test.description)
 
-        df = pd.DataFrame(matrix_rows).set_index("Version")
-        description_table = [[name, test_descriptions[name]] for name in all_test_names]
-
+        # Print Test Matrix
+        headers = ["Version"] + all_test_names
         print("\nTest Matrix:")
-        print(tabulate(df, headers="keys", tablefmt="fancy_grid"))
+        print(tabulate(matrix_rows, headers=headers, tablefmt="fancy_grid"))
+
+        # Print Test Case Information
+        description_table = [[name, test_descriptions[name]] for name in all_test_names]
         print("\nTest Case Information:")
         print(tabulate(description_table, headers=["Test Name", "Description"], tablefmt="fancy_grid"))
+
+        # Print Test Stats
         print("\nTest Stats:")
         for report in reports:
             print(f"===== {report.summary.source_version} -> {report.summary.target_version} =====")
@@ -208,18 +212,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process inputs for test automation runner"
     )
-    # parser.add_argument(
-    #     "--source-version",
-    #     default="ES_5.6",
-    #     type=str,
-    #     help="Source version e.g. ES_5.6"
-    # )
-    # parser.add_argument(
-    #     "--target-version",
-    #     default="OS_2.17",
-    #     type=str,
-    #     help="Target version e.g. OS_2.x"
-    # )
     parser.add_argument(
         "--skip-delete",
         action="store_true",
@@ -260,13 +252,13 @@ def main() -> None:
     ma_chart_values_path = "es-5-values.yaml"
     es_5_6_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
                      f"environments/es-5-6-single-node-cluster.yaml")
-    os_2_17_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
+    os_2_19_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
                       f"environments/os-2-latest-single-node-cluster.yaml")
     test_cluster_env = TestClusterEnvironment(source_version="ES_5.6",
                                               source_helm_values_path=es_5_6_values,
                                               source_chart_path=elasticsearch_cluster_chart_path,
-                                              target_version="OS_2.16",
-                                              target_helm_values_path=os_2_17_values,
+                                              target_version="OS_2.19",
+                                              target_helm_values_path=os_2_19_values,
                                               target_chart_path=opensearch_cluster_chart_path)
 
     test_runner = TestRunner(k8s_service=k8s_service,
