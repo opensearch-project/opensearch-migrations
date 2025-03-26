@@ -5,15 +5,12 @@ metadata:
 spec:
   serviceAccountName: argo-workflow-executor
   entrypoint: run-bulk-loaders
-  arguments:
-    parameters:
-      - name: variant-runs
-        default: '[]'
   templates:
     - name: run-bulk-loaders
       inputs:
         parameters:
           - name: variant-runs
+            default: '[]'
       steps:
         - - name: process-bulk-loads
             templateRef:
@@ -46,12 +43,4 @@ spec:
                   value: "{{=item['target-username'] ?? \"\"}}"
                 - name: target-password
                   value: "{{=item['target-password'] ?? \"\"}}"
-                - name: status-endpoint
-                  value: "{{=item['status-endpoint'] ?? \"\"}}"
-                - name: completion-pattern
-                  value: "{{=item['completion-pattern'] ?? \"\"}}"
-                - name: poll-interval-seconds
-                  value: "{{=item['poll-interval-seconds'] ?? \"\"}}"
-                - name: timeout-minutes
-                  value: "{{=item['timeout-minutes'] ?? \"\"}}"
 

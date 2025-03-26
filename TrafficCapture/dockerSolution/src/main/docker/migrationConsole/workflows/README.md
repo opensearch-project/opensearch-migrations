@@ -107,42 +107,46 @@ flowchart
 
 ```
 {
-  "source": {
-    "endpoint": "URI",
-    "auth": { ... }
-  },
   "target": {
     "endpoint": "URI",
     "auth": { ... }
   },
-  "static-migration-configs": [
+  "source-migration-configurations": [
     {
-      // when this is present, this stage (THIS static migration config) will NOT create a new snapshot, 
-      // but from the top-level, the snapshot may be refresh it a replayer is set to happen
-      "existingSnapshot": { ... },
-      "indices": {
-        "names": "index1,index2...",
-        "mode": "include|exclude"
+      "source": {
+        "endpoint": "URI",
+        "auth": { ... }
       },
-      "metadata": {
-        "transforms": "..."
-      },
-      "documentBackfillConfigs": [
+      "static-migration-configs": [
         {
-          // These indices should be a subset of the parent ones
+          // when this is present, this stage (THIS static migration config) will NOT create a new snapshot, 
+          // but from the top-level, the snapshot may be refresh it a replayer is set to happen
+          "existingSnapshot": { ... },
           "indices": {
             "names": "index1,index2...",
             "mode": "include|exclude"
           },
-          "transforms": "..."
+          "metadata": {
+            "transforms": "..."
+          },
+          "documentBackfillConfigs": [
+            {
+              // These indices should be a subset of the parent ones
+              "indices": {
+                "names": "index1,index2...",
+                "mode": "include|exclude"
+              },
+              "transforms": "..."
+            }
+          ]
         }
-      ]
+      ],
+      "replayer-config": {
+        "maxSpeedupFactor": 2.0,
+        "maxThroughputMbps": 1000,
+        "transforms": "..."
+      }
     }
-  ],
-  "replayer-config": {
-    "maxSpeedupFactor": 2.0,
-    "maxThroughputMbps": 1000,
-    "transforms": "..."
-  }
+  ]
 }
 ```

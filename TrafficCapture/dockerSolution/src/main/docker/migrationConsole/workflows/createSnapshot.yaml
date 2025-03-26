@@ -4,43 +4,42 @@ metadata:
   name: create-snapshot
   # add labels later w/ patch
 spec:
-  arguments:
-    parameters:
-      - name: snapshot-name
-        value: "migration-assistant-snapshot"
-      - name: source-host
-        value: "http://ma-capture-proxy:9200"
-      - name: source-insecure
-        value: "true"
-      - name: repo-args
-        value: "--file-system-repo-path /snapshot"
-
   entrypoint: snapshot-workflow
   templates:
     - name: snapshot-workflow
+      inputs:
+        parameters:
+          - name: snapshot-name
+            value: "migration-assistant-snapshot"
+          - name: source-host
+            value: "http://ma-capture-proxy:9200"
+          - name: source-insecure
+            value: "true"
+          - name: repo-args
+            value: "--file-system-repo-path /snapshot"
       steps:
         - - name: create-snapshot
             template: create-snapshot-template
             arguments:
               parameters:
-                - name: snapshot-name
-                  value: "{{workflow.parameters.snapshot-name}}"
                 - name: source-host
-                  value: "{{workflow.parameters.source-host}}"
+                  value: "{{inputs.parameters.source-host}}"
+                - name: snapshot-name
+                  value: "{{inputs.parameters.snapshot-name}}"
                 - name: source-insecure
-                  value: "{{workflow.parameters.source-insecure}}"
+                  value: "{{inputs.parameters.source-insecure}}"
                 - name: repo-args
-                  value: "{{workflow.parameters.repo-args}}"
+                  value: "{{inputs.parameters.repo-args}}"
         - - name: check-snapshot-status
             template: check-snapshot-status-template
             arguments:
               parameters:
                 - name: snapshot-name
-                  value: "{{workflow.parameters.snapshot-name}}"
+                  value: "{{inputs.parameters.snapshot-name}}"
                 - name: source-host
-                  value: "{{workflow.parameters.source-host}}"
+                  value: "{{inputs.parameters.source-host}}"
                 - name: source-insecure
-                  value: "{{workflow.parameters.source-insecure}}"
+                  value: "{{inputs.parameters.source-insecure}}"
 
     - name: create-snapshot-template
       inputs:

@@ -68,6 +68,14 @@ spec:
             value: ""
             description: "Password for target authentication"
 
+          - name: doc-transformer-base64
+            value: ""
+            description: "Encoded transformer configuration"
+
+          - name: index-allowlist
+            value: ""
+            description: "Indices to migrate"
+
       steps:
         - - name: create-replicaset
             template: create-rs
@@ -98,6 +106,10 @@ spec:
                   value: "{{=inputs.parameters['target-username']}}"
                 - name: target-password
                   value: "{{=inputs.parameters['target-password']}}"
+                - name: doc-transformer-base64
+                  value: "{{=inputs.parameters['doc-transformer-base64']}}"
+                - name: index-allowlist
+                  value: "{{=inputs.parameters['index-allowlist']}}"
 
         - - name: wait-for-completion
             template: check-completion
@@ -129,6 +141,8 @@ spec:
           - name: target-insecure
           - name: target-username
           - name: target-password
+          - name: doc-transformer-base64
+          - name: index-allowlist
       resource:
         action: create
         manifest: |
@@ -169,6 +183,10 @@ spec:
                       value: "{{inputs.parameters.target-username}}"
                     - name: TARGET_PASSWORD
                       value: "{{inputs.parameters.target-password}}"
+                    - name: DOC_TRANSFORMER_BASE64
+                      value: "{{inputs.parameters.doc-transformer-base64}}"
+                    - name: INDEX_ALLOW_LIST
+                      value: "{{inputs.parameters.index-allowlist}}"
                   command:
                     - "/bin/sh"
                     - "-c"
@@ -183,6 +201,8 @@ spec:
                       ARGS="${ARGS}${TARGET_HOST:+ --targetHost $TARGET_HOST}"
                       ARGS="${ARGS}${TARGET_PASSWORD:+ --targetPassword $TARGET_PASSWORD}"
                       ARGS="${ARGS}${TARGET_USERNAME:+ --targetUsername $TARGET_USERNAME}"
+                      ARGS="${ARGS}${DOC_TRANSFORMER_BASE64}:+ --docTransformerConfigBase64 $DOC_TRANSFORMER_BASE64"
+                      ARGS="${ARGS}${INDEX_ALLOW_LIST}:+ --indexAllowList $INDEX_ALLOW_LIST"
           
                       # Special handling for boolean flag
                       if [ "$TARGET_INSECURE" = "true" ] || [ "$TARGET_INSECURE" = "1" ]; then
