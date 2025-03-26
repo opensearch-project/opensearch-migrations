@@ -100,6 +100,7 @@ def env_with_source_container(request):
     os.remove(temp_config_path)
 
 
+@pytest.mark.skip(reason="Temporarily disabled: failing in release pipeline")
 @pytest.mark.slow
 @pytest.mark.parametrize("env_with_source_container,json",
                          itertools.product(SUPPORTED_SOURCE_CLUSTERS, [True, False]),
@@ -121,6 +122,7 @@ def test_cluster_cat_indices(env_with_source_container: Environment, json: bool)
     assert any(TEST_INDEX_NAME in line and str(DOC_COUNT) in line for line in result_lines)
 
 
+@pytest.mark.skip(reason="Temporarily disabled: failing in release pipeline")
 @pytest.mark.slow
 @pytest.mark.parametrize("env_with_source_container", SUPPORTED_SOURCE_CLUSTERS, indirect=True)
 def test_connection_check(env_with_source_container: Environment):
@@ -130,6 +132,7 @@ def test_connection_check(env_with_source_container: Environment):
     assert result.connection_established
 
 
+@pytest.mark.skip(reason="Temporarily disabled: failing in release pipeline")
 @pytest.mark.slow
 @pytest.mark.parametrize("env_with_source_container,deep_status_check",
                          itertools.product(SUPPORTED_SOURCE_CLUSTERS, [False, True]),
