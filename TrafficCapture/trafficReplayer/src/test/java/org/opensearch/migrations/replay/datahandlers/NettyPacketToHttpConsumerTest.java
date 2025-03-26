@@ -449,8 +449,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ParameterizedTest
     @Tag("longTest")
     @CsvSource({ "false", "true" })
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
-        var responseTimeout = Duration.ofMillis(100);
+        var responseTimeout = Duration.ofSeconds(1);
         var timeBetweenRequests = responseTimeout.plus(Duration.ofMillis(10));
         log.atInfo().setMessage("Running testTimeBetweenRequestsLongerThanResponseTimeout with responseTimeout {}" +
                 " and timeBetweenRequests {}")
