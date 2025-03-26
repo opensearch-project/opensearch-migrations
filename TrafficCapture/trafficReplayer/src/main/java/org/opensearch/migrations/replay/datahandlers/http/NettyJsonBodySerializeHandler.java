@@ -41,7 +41,7 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
     }
 
     @SuppressWarnings("unchecked")
-    private void parsePayloadAndAttachToChannel(ChannelHandlerContext ctx, Map<String, Object> payload) throws Exception {
+    private void parsePayloadAndAttachToChannel(ChannelHandlerContext ctx, Map<String, Object> payload) throws IOException {
         if (payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY)) {
             serializePayload(ctx, payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
         } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY)) {
@@ -95,7 +95,7 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
         }
     }
 
-    private void serializePayload(ChannelHandlerContext ctx, Object payload) throws IOException{
+    private void serializePayload(ChannelHandlerContext ctx, Object payload) throws IOException {
         try (var jsonEmitter = new JsonEmitter(ctx.alloc())) {
             var pac = jsonEmitter.getChunkAndContinuations(payload, NUM_BYTES_TO_ACCUMULATE_BEFORE_FIRING);
             while (true) {

@@ -429,37 +429,51 @@ public class RfsMigrateDocuments {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
-        if (progressCursorRef.get() != null) {
-            log.atWarn().setMessage("Progress cursor set, cancelling active doc migration").log();
-            cancellationRunnable.run();
-            // Get a new progressCursor after cancellation for most up-to-date checkpoint
-            var progressCursor = progressCursorRef.get();
-            log.atWarn().setMessage("Progress cursor: {}")
-                    .addArgument(progressCursor).log();
-            var workItemAndDuration = workItemRef.get();
-            if (workItemAndDuration == null) {
-                throw new IllegalStateException("Unexpected state with progressCursor set without a" +
-                        "work item");
+        try {
+            if (progressCursorRef.get() != null) {
+                log.atWarn().setMessage("Progress cursor set, cancelling active doc migration").log();
+                cancellationRunnable.run();
+                // Get a new progressCursor after cancellation for most up-to-date checkpoint
+                var progressCursor = progressCursorRef.get();
+                log.atWarn().setMessage("Progress cursor: {}")
+                        .addArgument(progressCursor).log();
+                var workItemAndDuration = workItemRef.get();
+                if (workItemAndDuration == null) {
+                    throw new IllegalStateException("Unexpected state with progressCursor set without a" +
+                            "work item");
+                }
+                log.atWarn().setMessage("Work Item and Duration: {}").addArgument(workItemAndDuration)
+                        .log();
+                log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
+                        .log();
+                var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
+                if (successorWorkItemIds.size() == 1 && workItemId.equals(successorWorkItemIds.get(0))) {
+                    log.atWarn().setMessage("No real progress was made for work item: {}. Will retry with larger timeout").addArgument(workItemId).log();
+                } else {
+                    log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
+                            .log();
+                    var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
+                    coordinator.createSuccessorWorkItemsAndMarkComplete(
+                            workItemId,
+                            successorWorkItemIds,
+                            successorNextAcquisitionLeaseExponent,
+                            contextSupplier
+                    );
+                }
+            } else {
+                log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
+                        "downloading and unpacking shard takes longer than the lease").log();
+                log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
+                        .log();
             }
-            log.atWarn().setMessage("Work Item and Duration: {}").addArgument(workItemAndDuration)
-                    .log();
-            log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
-                    .log();
-            var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
-            log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
-                    .log();
-            var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
-            coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemId,
-                successorWorkItemIds,
-                successorNextAcquisitionLeaseExponent,
-                contextSupplier
-            );
-        } else {
-            log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
-                    "downloading and unpacking shard takes longer than the lease").log();
-            log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
-                    .log();
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.atError().setMessage("Exception during exit on lease timeout, clean shutdown failed")
+                    .setCause(e).log();
+            cleanShutdownCompleted.set(false);
+            System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
         }
         cleanShutdownCompleted.set(true);
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);

@@ -143,7 +143,13 @@ jobs:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
       - name: Run Gradle tests with striping
-        run: gradle allTests -Dtest.striping.total=${{ env.gradle-test-parallelization }} -Dtest.striping.index=${{ matrix.index }} -x spotlessCheck --stacktrace --continue
+        run: |
+          MAX_WORKERS=$(( $(nproc) - 1 ))
+          gradle allTests \
+          --max-workers $MAX_WORKERS \
+          -Dtest.striping.total=${{ env.gradle-test-parallelization }} \
+          -Dtest.striping.index=${{ matrix.index }} \
+          -x spotlessCheck --stacktrace --continue
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Detect Memory Dumps

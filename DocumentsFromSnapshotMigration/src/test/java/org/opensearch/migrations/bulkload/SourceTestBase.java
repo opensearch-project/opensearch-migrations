@@ -76,6 +76,8 @@ public class SourceTestBase {
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.PIPE);
         var process = processBuilder.start();
 
         log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
