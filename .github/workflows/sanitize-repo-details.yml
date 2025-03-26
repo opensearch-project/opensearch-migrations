@@ -1,0 +1,34 @@
+---
+name: Sanitize Github Repo Details
+on:
+  workflow_call:
+    outputs:
+      branch_name:
+        description: "Branch name"
+        value: ${{ jobs.sanitize.outputs.branch_name }}
+      pr_repo_url:
+        description: "PR repository URL"
+        value: ${{ jobs.sanitize.outputs.pr_repo_url }}
+
+jobs:
+  sanitize:
+    runs-on: ubuntu-latest
+    outputs:
+      branch_name: ${{ steps.sanitize.outputs.branch_name }}
+      pr_repo_url: ${{ steps.sanitize.outputs.pr_repo_url }}
+    steps:
+      - name: Sanitize repo and branch
+        id: sanitize
+        run: |
+          branch="${{ github.event.pull_request.head.ref || github.ref_name }}"
+          repo="${{ github.event.pull_request.head.repo.full_name || github.repository }}"
+
+          clean_branch_name=$(echo "$branch" | tr -cd '[:alnum:]_\-\./')
+          clean_repo_base=$(echo "$repo" | tr -cd '[:alnum:]_\-\./')
+          clean_repo_url="https://github.com/$clean_repo_base.git"
+
+          echo "Sanitized repo: $clean_repo_url"
+          echo "Sanitized branch: $clean_branch_name"
+
+          echo "branch_name=$clean_branch_name" >> $GITHUB_OUTPUT
+          echo "pr_repo_url=$clean_repo_url" >> $GITHUB_OUTPUT
