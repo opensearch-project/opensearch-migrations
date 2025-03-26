@@ -17,9 +17,11 @@ class Test0004MultiTypeUnionMigration(MATestBase):
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
+        description = "Performs metadata, backfill, and replayer migrations with a multi-type union transformation."
         super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
+                         description=description,
                          allow_source_target_combinations=allow_combinations,
                          run_isolated=run_isolated)
         self.index_name = f"test_0004_{self.unique_id}"
@@ -106,9 +108,11 @@ class Test0005MultiTypeSplitMigration(MATestBase):
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
+        description = "Performs metadata, backfill, and replayer migrations with a multi-type split transformation."
         super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
+                         description=description,
                          allow_source_target_combinations=allow_combinations,
                          run_isolated=run_isolated)
         self.index_name = f"test_0005_{self.unique_id}"

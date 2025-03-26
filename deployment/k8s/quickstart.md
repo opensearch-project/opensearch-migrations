@@ -129,7 +129,7 @@ helm install tc -n ma charts/aggregates/testClusters
 Open a shell to the Migration Console pod
 
 ```shell
-kubectl -n ma exec --stdin --tty ma-migration-console-<pod_id> -- /bin/bash
+kubectl -n ma exec --stdin --tty $(kubectl -n ma get pods -l app=ma-migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash
 ```
 
 The `<id>` here can easily be replaced with autocomplete or retrieved from the pod name when executing:
@@ -218,10 +218,11 @@ After exiting the Migration Console
 migration-console (~) -> exit
 ```
 
-To remove both our Migration Assistant and Test Clusters Helm deployments:
+To remove both our Migration Assistant and Test Clusters Helm deployments, as well as any created volumes:
 
 ```shell
 helm uninstall -n ma ma tc
+kubectl -n ma delete pvc --all
 ```
 
 To remove the Minikube container:
