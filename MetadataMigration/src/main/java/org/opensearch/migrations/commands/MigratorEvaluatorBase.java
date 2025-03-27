@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransforme
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
+import org.opensearch.migrations.bulkload.version_universal.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
 import org.opensearch.migrations.bulkload.worker.IndexRunner;
 import org.opensearch.migrations.bulkload.worker.MetadataRunner;
@@ -35,6 +36,7 @@ public abstract class MigratorEvaluatorBase {
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
+    static final int INCOMPATIBLE_REPLICA_COUNT_CODE = 777;
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
@@ -81,7 +83,7 @@ public abstract class MigratorEvaluatorBase {
         return compositeTransformer;
     }
 
-    protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
+    protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) throws IncompatibleReplicaCountException {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
@@ -118,7 +120,7 @@ public abstract class MigratorEvaluatorBase {
         return metadataResults;
     }
 
-    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
+    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) throws IncompatibleReplicaCountException {
         var indexRunner = new IndexRunner(
             arguments.snapshotName,
             clusters.getSource().getIndexMetadata(),

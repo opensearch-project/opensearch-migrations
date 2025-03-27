@@ -4,6 +4,7 @@ import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.version_universal.IncompatibleReplicaCountException;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.CreationResult.CreationResultBuilder;
@@ -26,7 +27,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         IndexMetadata index,
         MigrationMode mode,
         ICreateIndexContext context
-    ) {
+    ) throws IncompatibleReplicaCountException {
         var result = CreationResult.builder().name(index.getName());
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
@@ -46,6 +47,8 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         try {
             createInner(index, mode, context, result, settings, body);
+        } catch (IncompatibleReplicaCountException e) {
+            throw e;
         } catch (Exception e) {
             result.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
             result.exception(e);
@@ -58,7 +61,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                              ICreateIndexContext context,
                              CreationResultBuilder result,
                              ObjectNode settings,
-                             ObjectNode body) {
+                             ObjectNode body) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
         try {
             var alreadyExists = false;
@@ -72,6 +75,13 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 result.failureType(CreationFailureType.ALREADY_EXISTS);
             }
         } catch (InvalidResponse invalidResponse) {
+            var potentialAwarenessAttributeException = invalidResponse.containsAwarenessAttributeException();
+            if (potentialAwarenessAttributeException.isPresent()) {
+                log.warn("Index creation failed due to awareness attribute exception: " + potentialAwarenessAttributeException.get());
+                throw new IncompatibleReplicaCountException(potentialAwarenessAttributeException.get(), invalidResponse);
+
+            }
+
             var illegalArguments = invalidResponse.getIllegalArguments();
 
             if (illegalArguments.isEmpty()) {
