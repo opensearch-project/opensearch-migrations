@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
@@ -46,6 +47,9 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         try {
             createInner(index, mode, context, result, settings, body);
+        } catch (IncompatibleReplicaCountException e) {
+            result.failureType(CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE);
+            result.exception(e);
         } catch (Exception e) {
             result.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
             result.exception(e);
@@ -58,7 +62,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                              ICreateIndexContext context,
                              CreationResultBuilder result,
                              ObjectNode settings,
-                             ObjectNode body) {
+                             ObjectNode body) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
         try {
             var alreadyExists = false;
@@ -72,6 +76,13 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 result.failureType(CreationFailureType.ALREADY_EXISTS);
             }
         } catch (InvalidResponse invalidResponse) {
+            var potentialAwarenessAttributeException = invalidResponse.containsAwarenessAttributeException();
+            if (potentialAwarenessAttributeException.isPresent()) {
+                log.warn("Index creation failed due to awareness attribute exception: " + potentialAwarenessAttributeException.get());
+                throw new IncompatibleReplicaCountException(potentialAwarenessAttributeException.get(), invalidResponse);
+
+            }
+
             var illegalArguments = invalidResponse.getIllegalArguments();
 
             if (illegalArguments.isEmpty()) {

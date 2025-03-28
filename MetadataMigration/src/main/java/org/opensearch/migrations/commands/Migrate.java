@@ -31,9 +31,9 @@ public class Migrate extends MigratorEvaluatorBase {
         } catch (ParameterException pe) {
             log.atError().setCause(pe).setMessage("Invalid parameter").log();
             migrateResult
-                .exitCode(INVALID_PARAMETER_CODE)
-                .errorMessage("Invalid parameter: " + pe.getMessage())
-                .build();
+                    .exitCode(INVALID_PARAMETER_CODE)
+                    .errorMessage("Invalid parameter: " + pe.getMessage())
+                    .build();
         } catch (Throwable e) {
             log.atError().setCause(e).setMessage("Unexpected failure").log();
             migrateResult
