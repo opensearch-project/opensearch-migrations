@@ -5,7 +5,7 @@
 2. [Problem Statement](#problem-statement)
 3. [Current State Analysis](#current-state-analysis)
 4. [Solution Approach](#solution-approach)
-5. [User Experience Flow](#user-experience-flow)
+5. [Requirements](#requirements)
 6. [Appendix](#appendix)
 
 ## Key Terminology
@@ -74,9 +74,9 @@ The Migration Assistant is primarily interacted with through its command-line co
 
 2. Initiate point-in-time snapshots of selected indices from the source cluster using `console snapshot create`. These snapshots establish a baseline for data migration.
 
-3. Perform a non-destructive scan of the source cluster to identify all items eligible for migration. This step helps detect potential issues before transferring data.
+3. `console metadata evaluate` performs a non-destructive scan of the source cluster to identify all items eligible for migration. This step helps detect potential issues before transferring data.
 
-4. Use `console metadata migrate` to transfer index configurations, mappings, and settings to the target OpenSearch cluster. The console provides options to review and approve modifications required for compatibility.
+4. Use `console metadata evaluate` to assess and `console metadata migrate` to transfer index configurations, mappings, and settings to the target OpenSearch cluster. The console provides options to review and approve modifications required for compatibility.
 
 5. The `console backfill start` command transfers documents from source snapshots to target indices with configurable parallelism. Dynamically adjust worker counts (`console backfill scale`) based on system performance requirements.
 
@@ -104,117 +104,132 @@ graph TD
     C --> D
 ```
 
-[4] refer to this for more details on the architecture of migration assistant.
+[Appendix [4]](#appendix) refer to this for more details on the architecture of migration assistant.
 
-### Solution Approach
+---
 
-The proposed user experience for dashboard migration aims to streamline the process by integrating it seamlessly into the Migration Assistant workflow. Here’s an overview of how users will interact with the system:
+## Solution Approach
 
-1. **Metadata Evaluation**: Perform console metadata evaluate, which now includes .kibana as a candidate for migration, providing detailed insights into dashboard components.
+The Migration Assistant now offers enhanced capabilities for seamlessly migrating dashboard content from Elasticsearch to OpenSearch, addressing an important component of the overall migration process. Here’s an overview of how users will interact with the system:
 
-```bash
-console metadata evaluate
-...
-(along with existing metadata evaluation output)
+### Dashboard Migration Command Integration
 
-System indices identified:
-- .kibana (contains 17 visualization components)
-  - 8 visualizations
-  - 1 index pattern
-  - 1 config setting
-  - 7 other dashboard-related objects
-...
-```
+The solution enhances the Migration Assistant workflow by integrating dashboard migration capabilities through two new commands: console dashboards evaluate and console dashboards migrate. These commands enable seamless transfer of dashboard-related content (visualizations, index patterns, dashboards, and other saved objects) from the source Elasticsearch cluster to the target OpenSearch cluster.
 
-2. **Dashboard Migration**: Execute console dashboards migrate, which handles the transformation and preparation of dashboard objects for migration.
+Dashboard migration is positioned strategically within the existing workflow - after snapshot creation (console snapshot create) and before metadata migration (console metadata evaluate). This placement ensures that dashboard components are evaluated and migrated while maintaining the integrity of both source and target environments. Unlike other migration commands, dashboard migration operates directly on the system indices containing saved objects rather than utilizing snapshots created under `console snapshot create`.
+
+1. **Dashboards Evaluation**: This command performs a non-destructive analysis of dashboard components in the source cluster, specifically targeting the .kibana system index where saved objects are stored. This evaluation process identifies all dashboard-related saved objects in the source cluster, categorizing them by type and ensuring users have full visibility into what will be migrated before committing to any changes.
 
 ```bash
-console dashboards migrate 
-...
-Estimated duration: 4 minutes (ES 5.6 → OS 2.19)
-Proceed? [y/N]: y
+(21:03:15) migration-console (~) -> console dashboards evaluate
 
-Uploading to target cluster...
-- Importing dashboard components
-Success: Dashboards available after metadata migrate
+Starting Dashboard Evaluation
+Clusters:
+   Source:
+      Remote Cluster: ELASTICSEARCH 7.10.0 ConnectionContext(...)
+
+   Target:
+      Remote Cluster: AMAZON_MANAGED_OPENSEARCH 2.17.0 ConnectionContext(...)
+
+Migration Candidates:
+   System Indices Analysis:
+      .kibana (contains 23 dashboard-related objects)
+      - 9 visualizations
+      - 2 index patterns
+      - 1 config setting
+      - 11 dashboard objects
+
+Results:
+   0 critical issue(s) detected
+   WARN - Dashboards will show empty visualizations until data migration completes
+   NOTICE - 23 dashboard components identified for processing
+
+Command executed successfully
 ```
 
-3. **Dashboard Upload**: The `console dashboards upload` command imports the migrated dashboard content into the target OpenSearch cluster.
+2. **Dashboard Migration**: After evaluation, users can proceed with the actual migration using the `console dashboards migrate` command. This command handles the extraction, transformation, and migration of dashboard components from the source to target cluster.
 
 ```bash
-console dashboards upload --auth-type saml --role DashboardAdmin
-...
-Uploading to target cluster...
-- Importing dashboard components
-Success: Dashboards available after metadata migrate
-...
+(21:03:25) migration-console (~) -> console dashboards migrate
+
+Starting Dashboard Migration
+Estimated processing time: 4 minutes (ES 7.10 → OS 2.17)
+
+Clusters:
+   Source:
+      Remote Cluster: ELASTICSEARCH 7.10.0 ConnectionContext(...)
+
+   Target:
+      Remote Cluster: AMAZON_MANAGED_OPENSEARCH 2.17.0 ConnectionContext(...)
+
+Migrated Items:
+   System Indices:
+      .kibana → .opensearch_dashboards
+      - Processing 23 saved objects
+      - Transforming object schema for compatibility
+      - Resolving index pattern references
+   
+   Compatibility Adjustments:
+      - Updated visualization references to match OpenSearch format
+      - Resolved index pattern mappings
+
+Results:
+   Migration complete: 23 objects processed
+   0 issue(s) detected
+   NOTICE - Dashboard visualizations will remain empty until backfill completes
+
+Command executed successfully
 ```
 
-4. **Standard Migration Flow**: Proceed with `console metadata migrate` and `console backfill start` to complete the data migration.
+### Next steps - Existing migration workflow
 
-```bash
-...
-console metadata migrate
-...
-console backfill start
-...
-```
+Following the successful execution of `console dashboards migrate`, the target cluster will contain migrated saved objects, including index patterns, visualizations, and dashboards displayed during `console dashboards evaluate`. However, these visualizations will initially appear blank due to the absence of underlying data. 
 
-```mermaid
-graph TD
-    A[Start Migration] --> B{Source Version Detection}
-    B -->|For example, ES 5.6| C["Create Custom Snapshot\n(.kibana + limited data indices)"]
-    C --> D[Restore in ES 5.6 Cluster]
-    D --> E[Reindex to ES 6.x Cluster]
-    E --> F[Snapshot ES 6.x State]
-    
-    F --> G[Restore in ES 7.x Cluster]
-    G --> H[Snapshot ES 7.x State]
-    
-    H --> I[Restore in OS 1.x Cluster]
-    I --> J[Snapshot OS 1.x State]
-    
-    J --> K[Restore in OS 2.x Cluster]
-    K --> L[Export .kibana as export.json]
-    L --> M[Cleanup All Temporary Resources]
-    
-    subgraph DashboardMigration[Dashboard Migration Process]
-        N[console metadata evaluate] --> O[console dashboards migrate]
-        O --> P[console dashboards upload]
-        P --> Q[console metadata migrate]
-    end
-    
-    O -->|Orchestration| C
-    M --> P
-    
-    classDef critical fill:#ffebee,stroke:#ff5252,stroke-width:2px;
-    class E critical
-```
+To complete the migration, users should proceed with metadata migration (`console metadata evaluate` and `console metadata migrate`) and the backfill process (`console backfill start`), which utilize the snapshot created earlier in `console snapshot create`. These steps ensure that the data indices are populated with transformed documents, allowing visualizations to display correctly.
 
-Only the ES 5.x →ES 6.x transition requires reindexing, while subsequent upgrades use snapshot/restore. Refer to [Appendix [8]](#appendix) for more details.
+This workflow does not interfere with live traffic capture and replay, allowing users to seamlessly integrate dashboard migration into their existing workflow.
+
+![Design Diagram](diagrams/DashboardsMigrationFlow.png)
 
 ---
 
 ## Requirements
 
-To implement the dashboard migration feature effectively, the following requirements must be met:
+To implement effective dashboard migration within the Migration Assistant, the following requirements will be met:
 
-With the introduction of `console dashboards migrate` and `console dashboards upload` to handle dashboard transformation, preparation, and upload. The `console dashboards migrate` command initiates the entire process of dashboards migration by orchestrating the upgrade functionality. Whereas, the `console dashboards upload` command uploads the NDJSON file to the user's production target OpenSearch cluster.
+With the introduction of `console dashboards evaluate` and `console dashboards migrate` to handle dashboard transformation, preparation, and upload. The `console dashboards migrate` command initiates the entire process of dashboards migration by orchestrating the upgrade functionality and the upload functionality as well as cleaning up all resources utilized. Whereas, the `console dashboards evaluate` command simply writes out the recognized dashboard components from the source cluster.
+
+#### Console commands
+
+1. **console dashboards evaluate**: 
+   - Perform non-destructive analysis of dashboard components in the source cluster
+   - Target the .kibana system index for saved objects
+   - Categorize and list all dashboard-related saved objects
+   - Provide a summary of migration candidates and potential issues
+
+2. **console dashboards migrate**: 
+   - Initiate and orchestrate the entire dashboard migration process
+   - Handle both upgrade and upload functionalities
+   - Manage resource creation, utilization, and cleanup
+
+### Orchestration Management
+
+A dashboards migration orchestrator is responsible for managing the entire migration process, that includes the upgrade and upload functionality. This component ensures smooth execution of the `console dashboards migrate` command.
 
 #### Upgrade Functionality
 
-The upgrade functionality is a critical component of the `console dashboards migrate` command. There is a need for an orchestration strategy here to make this 'upgrade' functionality work on a user's deployment of Migration Assistant. It involves:
+The upgrade functionality is a critical component of the `console dashboards migrate` command. It involves:
 
-- Source Version Detection: Identify the source Elasticsearch version (e.g., ES 5.6).
+- Source Version Detection: Identify the source Elasticsearch version (e.g., ES 5.6) and determine the necessary upgrade path. This step is curcial as only the ES 5.x → ES 6.x transition requires reindexing, while subsequent upgrades use snapshot/restore. Refer to [Appendix [8]](#appendix) for more details.
 
-- Custom Snapshot: The tool should create a custom snapshot of the user's production source cluster that contains all .kibana content, and minimum content from other data indices. This snapshot will be saved in a new S3 Repository of the user's AWS Account.
+- Custom Snapshot: The tool should create a custom snapshot of the user's production source cluster that contains all .kibana content, and minimum content from other data indices. This snapshot will be stored in a new S3 Repository of the user's AWS Account.
 
 - Orchestration Strategy:
   - Intermediate Cluster Deployment in the background: Launching intermediate clusters for each major version upgrade after source version has been detected.
-  - Snapshots Creation: Create full snapshots of these intermediate clusters.
-  - Snapshot Restoration: Restore snapshots in intermediate clusters to ensure compatibility.
+  - Snapshot and Restoration: Create full snapshots and restore them in the next major version cluster during these intermediate.
   - Only performs reindexing when absolutely required (ES 5→6 transition), uses direct snapshot/restore for subsequent version upgrades
-  - Index Alias Update: Update index aliases to reflect new cluster configurations.
+  - Index Alias Update and Launch Kibana: Update index aliases when Kibana is stopped. Relaunching Kibana to reflect new cluster configurations for the next snapshot.
+  - Estimated execution time calculation: Based on the upgrade path, an ETA will be displayed on the console output during this step.
 
 - Transformation Pipeline: Transform dashboard components to ensure compatibility with OpenSearch Dashboards.
 
@@ -229,6 +244,16 @@ The upgrade functionality is a critical component of the `console dashboards mig
 - Include valid opensearch-dashboards Authentication to make a secure upload for a managed service cluster.
 
 Refer to [Appendix [7]](#appendix) for more details on the OpenSearch Dashboards saved objects API.
+
+#### Process Management
+
+- Monitoring: Log all significant events and actions for auditing purposes
+
+- Error Handling: Provide clear error messages and suggested remediation steps.
+
+- Interruption Handling: Develop a fallback strategy for user interruptions or system failures that provides clear messages.
+
+- Ensure proper cleanup of all created resources in case of any interruptions.
 
 ---
 
