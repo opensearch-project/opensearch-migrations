@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -7,7 +8,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterWithZoneAwarenessContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
-import org.opensearch.migrations.metadata.CreationResult;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -46,11 +46,14 @@ public class ReplicaCountWithAZsTest extends BaseMigrationTest{
             // Create indices on source cluster with specified shard and replica counts
             // Shard count is 1 or 5, replica count is 0 through 3
             AtomicInteger createdIndexCount = new AtomicInteger();
+            var indexNames = new ArrayList<String>();
             List.of(1, 5).forEach(
                     shardCount -> {
                         List.of(0, 1, 2, 3).forEach(replicaCount -> {
+                            var name = "index_" + shardCount + "_" + replicaCount;
                             var body = "{\"settings\": {\"index\": {\"number_of_replicas\": "+ replicaCount +", \"number_of_shards\": "+ shardCount + "}}}";
-                            sourceOperations.createIndex("index_" + shardCount + "_" + replicaCount, body);
+                            sourceOperations.createIndex(name, body);
+                            indexNames.add(name);
                             createdIndexCount.getAndIncrement();
                         });
                     }
@@ -63,7 +66,14 @@ public class ReplicaCountWithAZsTest extends BaseMigrationTest{
             MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
             assertThat(result.getExitCode(), equalTo(0));
             // Ensure that the same number of indices were created (successfully) on the target cluster
-            assertThat(result.getItems().getIndexes().stream().filter(CreationResult::wasSuccessful).count(), equalTo((long) createdIndexCount.get()));
+            verifyIndexesExistOnTargetCluster(indexNames);
+        }
+    }
+
+    void verifyIndexesExistOnTargetCluster(List<String> indexNames) {
+        for (String indexName : indexNames) {
+            var res = targetOperations.get("/" + indexName);
+            assertThat(res.getValue(), res.getKey(), equalTo(200));
         }
     }
 }
