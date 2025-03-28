@@ -2,7 +2,6 @@ package org.opensearch.migrations.metadata;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
 public interface IndexCreator {

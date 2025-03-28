@@ -9,7 +9,6 @@ import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransforme
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
-import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
 import org.opensearch.migrations.bulkload.worker.IndexRunner;
 import org.opensearch.migrations.bulkload.worker.MetadataRunner;

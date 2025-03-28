@@ -1,8 +1,7 @@
 package org.opensearch.migrations.bulkload.framework;
 
-import org.opensearch.migrations.Version;
-
 import java.util.Map;
+
 
 public class SearchClusterWithZoneAwarenessContainer extends SearchClusterContainer {
     static SearchClusterContainer.ContainerVersion version = SearchClusterContainer.OS_LATEST;
