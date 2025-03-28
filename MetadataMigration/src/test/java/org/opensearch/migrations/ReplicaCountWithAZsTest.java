@@ -17,7 +17,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 
-@Tag("longTest")
+@Tag("isolatedTest")
 public class ReplicaCountWithAZsTest extends BaseMigrationTest{
 
     private static final SearchClusterContainer.ContainerVersion SOURCE_VERSION = SearchClusterContainer.ES_V7_10_2;
