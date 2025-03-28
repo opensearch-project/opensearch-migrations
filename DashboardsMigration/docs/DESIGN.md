@@ -74,7 +74,7 @@ The Migration Assistant is primarily interacted with through its command-line co
 
 2. Initiate point-in-time snapshots of selected indices from the source cluster using `console snapshot create`. These snapshots establish a baseline for data migration.
 
-3. `console metadata evaluate` performs a non-destructive scan of the source cluster to identify all items eligible for migration. This step helps detect potential issues before transferring data.
+3. `console metadata evaluate` performs a scan of the source cluster to identify all items eligible for migration. This step helps detect potential issues before transferring data.
 
 4. Use `console metadata evaluate` to assess and `console metadata migrate` to transfer index configurations, mappings, and settings to the target OpenSearch cluster. The console provides options to review and approve modifications required for compatibility.
 
@@ -118,7 +118,7 @@ The solution enhances the Migration Assistant workflow by integrating dashboard 
 
 Dashboard migration is positioned strategically within the existing workflow - after snapshot creation (console snapshot create) and before metadata migration (console metadata evaluate). This placement ensures that dashboard components are evaluated and migrated while maintaining the integrity of both source and target environments. Unlike other migration commands, dashboard migration operates directly on the system indices containing saved objects rather than utilizing snapshots created under `console snapshot create`.
 
-1. **Dashboards Evaluation**: This command performs a non-destructive analysis of dashboard components in the source cluster, specifically targeting the .kibana system index where saved objects are stored. This evaluation process identifies all dashboard-related saved objects in the source cluster, categorizing them by type and ensuring users have full visibility into what will be migrated before committing to any changes.
+1. **Dashboards Evaluation**: This command performs analysis of dashboard components in the source cluster, specifically targeting the .kibana system index where saved objects are stored. This evaluation process identifies all dashboard-related saved objects in the source cluster, categorizing them by type and ensuring users have full visibility into what will be migrated before committing to any changes.
 
 ```bash
 (21:03:15) migration-console (~) -> console dashboards evaluate
@@ -189,7 +189,7 @@ To complete the migration, users should proceed with metadata migration (`consol
 
 This workflow does not interfere with live traffic capture and replay, allowing users to seamlessly integrate dashboard migration into their existing workflow.
 
-![Design Diagram](diagrams/DashboardsMigrationFlow.png)
+![Design Diagram](/diagrams/dashboardsmigrationflow.svg)
 
 ---
 
@@ -202,7 +202,7 @@ With the introduction of `console dashboards evaluate` and `console dashboards m
 #### Console commands
 
 1. **console dashboards evaluate**: 
-   - Perform non-destructive analysis of dashboard components in the source cluster
+   - Perform analysis of dashboard components in the source cluster
    - Target the .kibana system index for saved objects
    - Categorize and list all dashboard-related saved objects
    - Provide a summary of migration candidates and potential issues
