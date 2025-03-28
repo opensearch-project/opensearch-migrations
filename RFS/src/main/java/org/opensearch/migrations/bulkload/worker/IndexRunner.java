@@ -9,7 +9,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.IndexTransformationException;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
-import org.opensearch.migrations.bulkload.version_universal.IncompatibleReplicaCountException;
+import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.IndexCreator;
@@ -28,7 +28,7 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
 
-    public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) throws IncompatibleReplicaCountException {
+    public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
         var results = IndexMetadataResults.builder();
         var skipCreation = FilterScheme.filterByAllowList(indexAllowlist).negate();
@@ -45,11 +45,7 @@ public class IndexRunner {
                         .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
                         .build());
             } else {
-                try {
-                    creationResults = createIndex(index.getName(), mode, context);
-                } catch (IncompatibleReplicaCountException e) {
-                    throw e;
-                }
+                creationResults = createIndex(index.getName(), mode, context);
             }
 
             creationResults.forEach(results::index);
@@ -66,7 +62,7 @@ public class IndexRunner {
         return results.build();
     }
 
-    private List<CreationResult> createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) throws IncompatibleReplicaCountException {
+    private List<CreationResult> createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) {
         var originalIndexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
         var indexMetadata = originalIndexMetadata.deepCopy();
         List<CreationResult> creationResults = new ArrayList<>();
@@ -75,10 +71,6 @@ public class IndexRunner {
             for (IndexMetadata transformedMetadata : transformedMetadataList) {
                 creationResults.add(createInner(indexName, mode, context, transformedMetadata));
             }
-        } catch (IncompatibleReplicaCountException e) {
-            // rethrow the error so that it makes it to the top level
-            log.warn("Incompatible Replica Count Exception is being propogated up.");
-            throw e;
         } catch (Exception e) {
             creationResults.add(CreationResult.builder()
                 .name(indexName)
@@ -92,11 +84,9 @@ public class IndexRunner {
     private CreationResult createInner(String indexName,
                                        MigrationMode mode,
                                        ICreateIndexContext context,
-                                       IndexMetadata transformedMetadata) throws IncompatibleReplicaCountException {
+                                       IndexMetadata transformedMetadata) {
         try {
             return indexCreator.create(transformedMetadata, mode, context);
-        } catch (IncompatibleReplicaCountException e) {
-            throw e;
         } catch (Exception e) {
             return CreationResult.builder()
                 .name(indexName)

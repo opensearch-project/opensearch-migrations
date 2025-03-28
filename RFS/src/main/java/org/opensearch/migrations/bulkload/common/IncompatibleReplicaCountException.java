@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.version_universal;
+package org.opensearch.migrations.bulkload.common;
 
 public class IncompatibleReplicaCountException extends Exception {
     public IncompatibleReplicaCountException(String message, Throwable cause) {

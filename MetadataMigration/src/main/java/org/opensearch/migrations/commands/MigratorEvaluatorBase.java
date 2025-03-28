@@ -9,7 +9,7 @@ import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransforme
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
-import org.opensearch.migrations.bulkload.version_universal.IncompatibleReplicaCountException;
+import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
 import org.opensearch.migrations.bulkload.worker.IndexRunner;
 import org.opensearch.migrations.bulkload.worker.MetadataRunner;
@@ -36,7 +36,8 @@ public abstract class MigratorEvaluatorBase {
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
-    static final int INCOMPATIBLE_REPLICA_COUNT_CODE = 777;
+
+    static final int MAX_REPLICA_ADJUSTMENT_LOOPS = 4;
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
@@ -70,12 +71,12 @@ public abstract class MigratorEvaluatorBase {
         return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
-    protected Transformer selectTransformer(Clusters clusters) {
+    protected Transformer selectTransformer(Clusters clusters, int presumedClusterDimensionality) {
         var versionTransformer = TransformFunctions.getTransformer(
-            clusters.getSource().getVersion(),
-            clusters.getTarget().getVersion(),
-            arguments.minNumberOfReplicas,
-            arguments.metadataTransformationParams
+                clusters.getSource().getVersion(),
+                clusters.getTarget().getVersion(),
+                presumedClusterDimensionality,
+                arguments.metadataTransformationParams
         );
         var customTransformer = getCustomTransformer();
         var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
@@ -83,7 +84,11 @@ public abstract class MigratorEvaluatorBase {
         return compositeTransformer;
     }
 
-    protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) throws IncompatibleReplicaCountException {
+    protected Transformer selectTransformer(Clusters clusters) {
+        return selectTransformer(clusters, arguments.minNumberOfReplicas);
+    }
+
+    protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
@@ -120,16 +125,33 @@ public abstract class MigratorEvaluatorBase {
         return metadataResults;
     }
 
-    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) throws IncompatibleReplicaCountException {
-        var indexRunner = new IndexRunner(
-            arguments.snapshotName,
-            clusters.getSource().getIndexMetadata(),
-            clusters.getTarget().getIndexCreator(),
-            transformer,
-            arguments.dataFilterArgs.indexAllowlist
-        );
-        var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
-        log.info("Index copy complete.");
-        return indexResults;
+    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer initalTransformer, RootMetadataMigrationContext context) {
+        int presumedClusterDimensionality = arguments.minNumberOfReplicas;
+        var transformer = initalTransformer;
+        while (true) {
+            var indexRunner = new IndexRunner(
+                    arguments.snapshotName,
+                    clusters.getSource().getIndexMetadata(),
+                    clusters.getTarget().getIndexCreator(),
+                    transformer,
+                    arguments.dataFilterArgs.indexAllowlist
+            );
+            var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
+            // Check whether any indices failed with an incompatibleReplicaCount
+            boolean incompatibleReplicaCountSeen = indexResults.getIndexes().stream().anyMatch(result -> result.wasFatal() && result.getFailureType().equals(CreationResult.CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE));
+            if (incompatibleReplicaCountSeen) {
+                if (presumedClusterDimensionality >= arguments.minNumberOfReplicas + MAX_REPLICA_ADJUSTMENT_LOOPS) {
+                    log.atWarn().setMessage("Incompatible replica count seen after max adjustment attempts ({}). Max replica count attempted: {}")
+                            .addArgument(MAX_REPLICA_ADJUSTMENT_LOOPS).addArgument(presumedClusterDimensionality - 1).log();
+                    return indexResults;
+                }
+                presumedClusterDimensionality++;
+                log.warn("Incompatible replica count seen for the cluster dimensionality. Retrying with an assumed cluster dimensionality of {}", presumedClusterDimensionality);
+                transformer = selectTransformer(clusters, presumedClusterDimensionality);
+                continue;
+            }
+            log.info("Index copy complete.");
+            return indexResults;
+        }
     } 
 }

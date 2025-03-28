@@ -4,7 +4,7 @@ import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.version_universal.IncompatibleReplicaCountException;
+import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.CreationResult.CreationResultBuilder;
@@ -27,7 +27,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         IndexMetadata index,
         MigrationMode mode,
         ICreateIndexContext context
-    ) throws IncompatibleReplicaCountException {
+    ) {
         var result = CreationResult.builder().name(index.getName());
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
@@ -48,7 +48,8 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         try {
             createInner(index, mode, context, result, settings, body);
         } catch (IncompatibleReplicaCountException e) {
-            throw e;
+            result.failureType(CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE);
+            result.exception(e);
         } catch (Exception e) {
             result.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
             result.exception(e);
