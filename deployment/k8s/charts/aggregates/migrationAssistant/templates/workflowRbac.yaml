@@ -18,7 +18,7 @@ rules:
 
   # Add permissions for Argo workflows
   - apiGroups: ["argoproj.io"]
-    resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers"]
+    resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Add permissions for pods and pod logs (needed for Argo workflow execution)

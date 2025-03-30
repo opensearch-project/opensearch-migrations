@@ -21,29 +21,43 @@ spec:
                            fromJSON(inputs.parameters['indices'])['mode'] + ':' + 
                            join(sort(split(fromJSON(inputs.parameters['indices'])['names'],',')), ',')"
 
-#
+
 #    - name: run-full-migrations
 #      inputs:
-#        parameters:
-#          - name: source-migration-configurations
-#            description: "List of JSON objects from source endpoints through their migration pipelines"
-#          - name: target-endpoint
-#            description: "Where the source clusters should be replicated to."
+#        - parameters:
+#            - name: targets
+#              description: "List of targets to run the migration to.  Must be non-empty."
+#            - name: source-migration-configurations
+#              description: "List of JSON objects from source endpoints through their migration pipelines"
 #      steps:
-#        - - name: run-full-migration-step
-#            template: run-full-migration
-#            when: "{{=inputs.parameters.source-migration-configurations.length > 0}}"
-#            withParam: "{{inputs.parameters.source-migration-configurations}}"
-#            arguments:
-#              parameters:
-#                - name: source-endpoint
-#                  value: "{{=item['source'] ?? \"\"}}"
-#                - name: target-endpoint
-#                  value: "{{inputs.parameters.target-endpoint}}"
-#                - name: source-pipeline-configurations
-#                  value: "{{=item['static-migration-configurations'] ?? \"\"}}"
-#                - name: replayer-config
-#                  value: "{{=item['replayer-config'] ?? \"\"}}"
+#        - - name: run-single-target-migration-from-snapshot
+#            withParam: "{{inputs.parameters.targets}}"
+
+
+
+    - name: run-single-target-migration-from-snapshot
+      inputs:
+        parameters:
+          - name: target-endpoint
+            description: "Where the source clusters should be replicated to."
+          - name: source-migration-configurations
+            description: "List of JSON objects from source endpoints through their migration pipelines"
+      steps:
+        - - name: run-full-migration-step
+            template: run-full-migration
+            when: "{{=inputs.parameters.source-migration-configurations.length > 0}}"
+            withParam: "{{inputs.parameters.source-migration-configurations}}"
+            arguments:
+              parameters:
+                - name: source-endpoint
+                  value: "{{=item['source'] ?? \"\"}}"
+                - name: target-endpoint
+                  value: "{{inputs.parameters.target-endpoint}}"
+                - name: source-pipeline-configurations
+                  value: "{{=item['static-migration-configurations'] ?? \"\"}}"
+                - name: replayer-config
+                  value: "{{=item['replayer-config'] ?? \"\"}}"
+
 
     - name: run-full-migration
       inputs:
@@ -57,12 +71,38 @@ spec:
           - name: replayer-config
             description: "JSON configuration for the replayer"
       steps:
+        - - name: run-full-migration-per-source-config-step
+            template: run-full-migration-per-source-config
+            withParam: "{{inputs.parameters.static-migration-configurations}}"
+            arguments:
+              parameters:
+                - name: source-endpoint
+                  value: "{{inputs.parameters.source-endpoint}}"
+                - name: target-endpoint
+                  value: "{{inputs.parameters.target-endpoint}}"
+                - name: static-migration-configuration
+                  value: "{{item}}"
+                - name: replayer-config
+                  value: "{{inputs.parameters.replayer-config}}"
+
+    - name: run-full-migration-per-source-config
+      inputs:
+        parameters:
+          - name: source-endpoint
+            description: "The source cluster to be migrated.  May be excluded if the static-migration-configuration specifies an existing snapshot and no replay is configured."
+          - name: target-endpoint
+            description: "Where the source clusters should be replicated to."
+          - name: static-migration-configuration
+            description: "JSON object that defines the migration configuration for metadata and documents from a source cluster"
+          - name: replayer-config
+            description: "JSON configuration for the replayer"
+      steps:
         - - name: compute-snapshot-name-step
             template: compute-snapshot-name
             arguments:
               parameters:
                 - name: indices
-                  value: "{{=get(fomJSON(inputs.parameters['static-migration-configurations']), 'indices') ?? '{}'}}"
+                  value: "{{=get(fromJSON(inputs.parameters['static-migration-configuration']), 'indices') ?? '{}'}}"
 
         - - name: create-snapshot-step
             templateRef:
@@ -81,7 +121,7 @@ spec:
             templateRef:
               name: bulk-load
               template: run-bulk-load
-            withParam: "{{inputs.parameters.static-migration-configurations}}"
+            withParam: "{{=get(fromJSON(inputs.parameters['static-migration-configuration']), 'documentBackfillConfigs')}}"
             arguments:
               parameters:
                 - name: name

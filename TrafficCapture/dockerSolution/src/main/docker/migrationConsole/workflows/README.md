@@ -51,6 +51,32 @@ This workflow represents one where the user has done granular migrations, one sn
 
 In the diagram below, the gray nodes are represent those cloned directly from the workflow for target 1 and are kept in sync.
 
+Simple Multi-Source/Multi-Target Migration
+```mermaid
+flowchart
+    start_capture_s1 --> create_snapshot_s1
+    start_capture_s1 --> setup_shared_kafka --> create_snapshot_s1
+    
+    create_snapshot_s1 --> metadata_t1
+
+    metadata_t1 --> rfs_t1
+    
+    create_snapshot_s2 --> metadata_t1
+    
+    rfs_t1 --> replayer_target_t1
+
+
+    create_snapshot_s1 --> metadata_t2
+
+    start_capture_s2 --> create_snapshot_s2
+    start_capture_s2 --> setup_shared_kafka --> create_snapshot_s2
+    
+    create_snapshot_s2 --> metadata_t2
+    metadata_t2 --> rfs_t2
+
+    rfs_t2 --> replayer_target_t2
+```
+
 ```mermaid
 flowchart
     start_capture_1["start capture for source A\n(if not started)"] --> create_snapshot_1
@@ -103,14 +129,16 @@ flowchart
     style replayer_target_t2 fill:#ddd,stroke:#333,stroke-width:4px
 ```
 
-## Top-Level Configuration
+e## Top-Level Configuration
 
 ```
 {
-  "target": {
-    "endpoint": "URI",
-    "auth": { ... }
-  },
+  "targets": [
+    {
+      "endpoint": "URI",
+      "auth": { ... }
+    }
+  ],
   "source-migration-configurations": [
     {
       "source": {
@@ -148,5 +176,69 @@ flowchart
       }
     }
   ]
+}
+```
+
+Sample single-target
+```
+{
+  "target": {
+    "endpoint": "http://elasticsearch-master-headless:9200/"
+  },
+  "source-migration-configurations": [
+    {
+      "source": {
+        "endpoint": "http://opensearch-master-headless:9200/"
+      },
+      "static-migration-configs": [
+        {
+          "indices_toIgnore": {
+            "names": "index1,index2",
+            "mode": "include"
+          },
+          "metadata": { "No keys are necessary to do this step": true },
+          "documentBackfillConfigs": [
+            {
+                "No keys are necessary to do this step": true
+            }
+          ]
+        }
+      ],
+      "replayer-config": {
+        "maxSpeedupFactor": 2.0,
+        "maxThroughputMbps": 1000
+      }
+    }
+  ]
+}
+```
+
+Sample Single
+```
+{
+  "target": {
+    "endpoint": "http://elasticsearch-master-headless:9200/"
+  },
+  "source": {
+    "endpoint": "http://opensearch-master-headless:9200/"
+  },
+  "static-migration-configs": [
+    {
+      "indices_toIgnore": {
+        "names": "index1,index2",
+        "mode": "include"
+      },
+      "metadata": { "No keys are necessary to do this step": true },
+      "documentBackfillConfigs": [
+        {
+            "No keys are necessary to do this step": true
+        }
+      ]
+    }
+  ],
+  "replayer-config": {
+    "maxSpeedupFactor": 2.0,
+    "maxThroughputMbps": 1000
+  }
 }
 ```

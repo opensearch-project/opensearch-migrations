@@ -50,6 +50,7 @@ spec:
           - name: repo-args
       container:
         image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -79,6 +80,7 @@ spec:
           maxDuration: "300"
       container:
         image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
           - |
