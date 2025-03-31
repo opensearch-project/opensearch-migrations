@@ -79,4 +79,15 @@ COPY *.py /root/
 RUN chmod ug+x /root/*.sh
 RUN chmod ug+x /root/*.py
 
+# Create virtual environments for each tool
+RUN python3.11 -m venv /opt/venv-opensearch && \
+    . /opt/venv-opensearch/bin/activate && \
+    pip install opensearch-benchmark && \
+    deactivate
+
+RUN python3.11 -m venv /opt/venv-esrally-1 && \
+    . /opt/venv-esrally-1/bin/activate && \
+    pip install markupsafe==2.0.1 esrally==1.4.0 && \
+    deactivate
+
 CMD tail -f /dev/null
