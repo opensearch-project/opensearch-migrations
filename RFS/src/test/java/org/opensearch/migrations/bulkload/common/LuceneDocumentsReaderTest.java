@@ -365,6 +365,45 @@ public class LuceneDocumentsReaderTest {
         }
     }
 
+    @Test
+    public void SegmentNameForSoftDelete_AsExpected() throws Exception {
+        // This snapshot has 2 segments, one with soft-deleted rows and one without.
+        // SoftDeletesDirectoryReaderWrapper returns SegmentReader wrapped in FilterCodecReader
+        // if there is any soft deleted rows in that segment.
+        var snapshot = TestResources.SNAPSHOT_OS_2_11_W_SOFT_MULTI_SEG;
+        var version = Version.fromString("OS 2.11");
+
+        final var repo = new FileSystemRepo(snapshot.dir);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test-index", 0);
+
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+            repoAccessor,
+            tempDirectory,
+            shardMetadata,
+            Integer.MAX_VALUE
+        );
+        Path luceneDir = unpacker.unpack();
+
+        var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
+        var leaves = reader.getReader().leaves();
+
+        Assertions.assertEquals(leaves.size(), 2);
+
+        var segmentNames = leaves.stream()
+            .map(l -> l.reader().getSegmentName())
+            .collect(Collectors.toSet());
+
+        // _0 segment has soft-deleted rows.
+        // _1 segment doesnt have soft-deleted rows.
+        Assertions.assertTrue(segmentNames.contains("_0"),
+            () -> "SegmentName '_0' is missing. SegmentNames Found: " + segmentNames);
+        Assertions.assertTrue(segmentNames.contains("_1"),
+            () -> "SegmentName '_1' is missing. SegmentNames Found: " + segmentNames);
+    }
+
     protected void assertDocsEqual(String expectedId, String actualId, String expectedType,
                                    String actualType, String expectedSource, String actualSource) {
         try {

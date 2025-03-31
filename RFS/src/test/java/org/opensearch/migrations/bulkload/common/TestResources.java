@@ -18,6 +18,7 @@ public class TestResources {
     public static final Snapshot SNAPSHOT_ES_7_10_BWC_CHECK;
     public static final Snapshot SNAPSHOT_ES_7_10_W_SOFT;
     public static final Snapshot SNAPSHOT_ES_7_10_WO_SOFT;
+    public static final Snapshot SNAPSHOT_OS_2_11_W_SOFT_MULTI_SEG;
 
     private static final Path RFS_BASE_DIR;
 
@@ -51,6 +52,11 @@ public class TestResources {
 
         SNAPSHOT_ES_7_10_WO_SOFT = new Snapshot(
             RFS_BASE_DIR.resolve(Paths.get("test-resources", "snapshots", "ES_7_10_Updates_Deletes_wo_Soft")),
+            "rfs_snapshot"
+        );
+
+        SNAPSHOT_OS_2_11_W_SOFT_MULTI_SEG = new Snapshot(
+            RFS_BASE_DIR.resolve(Paths.get("test-resources", "snapshots", "OS_2_11_Deletes_w_Soft_Multi_Seg")),
             "rfs_snapshot"
         );
     }

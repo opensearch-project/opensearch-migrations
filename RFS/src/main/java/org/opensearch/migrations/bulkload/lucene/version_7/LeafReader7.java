@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.AllArgsConstructor;
+import shadow.lucene7.org.apache.lucene.index.FilterCodecReader;
 import shadow.lucene7.org.apache.lucene.index.LeafReader;
 import shadow.lucene7.org.apache.lucene.index.SegmentCommitInfo;
 import shadow.lucene7.org.apache.lucene.index.SegmentReader;
@@ -32,9 +33,19 @@ public class LeafReader7 implements LuceneLeafReader {
     }
 
     private Optional<SegmentReader> getSegmentReader() {
-        if (wrapped instanceof SegmentReader) {
-            return Optional.of(((SegmentReader)wrapped));
+        LeafReader reader = wrapped;
+
+        // We wrap DirectoryReader with SoftDeletesDirectoryReaderWrapper when soft delete is possible.
+        // If soft deletes are present on the segment, then SoftDeletesDirectoryReaderWrapper will
+        // wrap SegmentReader in a FilterCodecReader, so we need to unwrap it first to access SegmentReader.
+        if (reader instanceof FilterCodecReader) {
+            reader =  FilterCodecReader.unwrap((FilterCodecReader) wrapped);
         }
+
+        if (reader instanceof SegmentReader) {
+            return Optional.of(((SegmentReader) reader));
+        }
+
         return Optional.empty();
     }
 

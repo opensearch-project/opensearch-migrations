@@ -471,6 +471,67 @@ curl -X PUT "localhost:19200/_snapshot/test_repository/rfs-snapshot" -H "Content
 }'
 ```
 
+#### OS_2_11_Deletes_w_Soft_Multi_Seg
+
+OS 2.11 snapshot with soft deletes enabled and having multiple segments. This creates two segments one with soft-delete
+and one without soft-delete.
+
+```
+curl -X PUT "localhost:29200/test-index" -H "Content-Type: application/json" -d '
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "index.soft_deletes.enabled": true,
+    "merge.policy.max_merge_at_once": 2,
+    "merge.policy.segments_per_tier": 1000,
+    "refresh_interval": "-1"
+  }
+}'
+
+curl -X POST "localhost:29200/test-index/_bulk" -H "Content-Type: application/x-ndjson" -d '
+{ "index": { "_id": "1" } }
+{ "field": "value 1" }
+{ "index": { "_id": "2" } }
+{ "field": "value 2" }
+{ "index": { "_id": "3" } }
+{ "field": "value 3" }
+'
+
+curl -X POST "localhost:29200/test-index/_flush" -H "Content-Type: application/json"
+
+curl -X POST "localhost:29200/test-index/_bulk" -H "Content-Type: application/x-ndjson" -d '
+{ "index": { "_id": "4" } }
+{ "field": "value 4" }
+{ "index": { "_id": "5" } }
+{ "field": "value 5" }
+'
+
+curl -X POST "localhost:29200/test-index/_flush" -H "Content-Type: application/json"
+
+curl -X DELETE "localhost:29200/test-index/_doc/2" -H "Content-Type: application/json"
+
+curl -X POST "localhost:29200/test-index/_flush" -H "Content-Type: application/json"
+
+curl -X POST "localhost:29200/test-index/_refresh" -H "Content-Type: application/json"
+
+curl -X PUT "localhost:29200/_snapshot/test_repository" -H "Content-Type: application/json" -d '
+{
+  "type": "fs",
+  "settings": {
+    "location": "/snapshots-os",
+    "compress": false
+  }
+}'
+
+curl -X PUT "localhost:29200/_snapshot/test_repository/rfs_snapshot" -H "Content-Type: application/json" -d '
+{
+  "indices": "test-index",
+  "include_global_state": false
+}'
+
+```
+
 ### SSL Certs
 
 Sample certs for testing mutual TLS with RestClient.
