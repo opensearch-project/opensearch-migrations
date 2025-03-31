@@ -33,7 +33,7 @@
     "typescript-eslint": "^8.28.0"
   },
   "dependencies": {
-    "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.179.0-alpha.0",
+    "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.186.0-alpha.0",
     "@jest/globals": "^29.7.0",
     "cdk": "2.1006.0",
     "globals": "^16.0.0",
