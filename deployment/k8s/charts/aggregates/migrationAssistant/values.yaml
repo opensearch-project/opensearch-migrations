@@ -1,8 +1,9 @@
 conditionalPackageInstalls:
   sharedConfigs: true
   snapshotVolume: true
-  logsVolume: true
+  logsVolume: false
   migrationConsole: true
+
   bulkLoader: false
   proxy: true
   kafka: false
@@ -13,6 +14,47 @@ conditionalPackageInstalls:
   prometheus: false
   jaeger: false
 
+  etcd: true
+
+etcd:
+  replicaCount: 1
+  auth:
+    rbac:
+      rootPassword: password
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  persistence:
+    enabled: false
+#    storageClass: "standard"
+#    size: 10Gi
+  service:
+    type: ClusterIP
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  extraEnvVars:
+    - name: ETCD_AUTO_COMPACTION_RETENTION
+      value: "1"
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "8589934592" # 8GB
+    - name: ETCD_HEARTBEAT_INTERVAL
+      value: "100"
+    - name: ETCD_ELECTION_TIMEOUT
+      value: "1000"
+  startFromSnapshot:
+    enabled: false
+  serviceAccount:
+    create: true
+
+  podSecurityContext:
+    fsGroup: 1001
+    runAsUser: 1001
 
 shared-configs:
   globalParameters:

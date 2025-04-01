@@ -23,11 +23,6 @@ dependencies:
     version: "0.1.0"
     repository: "file://../../components/migrationConsole"
 
-#  - name: bulk-document-loader
-#    condition: conditionalPackageInstalls.bulkLoader
-#    version: "0.1.0"
-#    repository: "file://../../components/bulkLoad"
-
   - name: capture-proxy
     condition: conditionalPackageInstalls.proxy
     version: "0.1.0"
@@ -37,26 +32,24 @@ dependencies:
     condition: conditionalPackageInstalls.kafka
     version: "0.1.0"
     repository: "file://../../sharedResources/baseKafkaCluster"
-  - name: replayer
-    condition: conditionalPackageInstalls.replayer
-    version: "0.1.0"
-    repository: "file://../../components/replayer"
 
-  # New dependency for Argo Workflows
+
   - name: argo-workflows
     condition: conditionalPackageInstalls.argoWorkflows
     version: "0.45.11"
     repository: "https://argoproj.github.io/argo-helm"
 
-  # OPA Gatekeeper dependency
+  # OPA Gatekeeper dependency to lock down what images we can spin up
   - name: gatekeeper
     condition: conditionalPackageInstalls.gatekeeper
     version: "3.13.0"
     repository: "https://open-policy-agent.github.io/gatekeeper/charts"
 
-#  - name: otel-collector
-#    version: 1.2.2
-#    repository:
+  # Coordinate workflows, maybe RFS, maybe more
+  - name: etcd
+    condition: conditionalPackageInstalls.etcd
+    version: "11.2.1"
+    repository: "https://charts.bitnami.com/bitnami"
 
   - name: grafana
     condition: conditionalPackageInstalls.grafana

@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: migration-workflow-template-with-steps
+  name: migration-workflow-template-pipeline
 spec:
   serviceAccountName: argo-workflow-executor
   templates:
@@ -96,9 +96,25 @@ spec:
                 - name: migration-config
                   value: "{{inputs.parameters.migration_config}}"
 
-          # Process each source in parallel
-          - name: s02-process-source
-            template: source-subflow
+          # Extract source-index-target combinations for pipeline
+          - name: s00-extract-pipeline-tasks
+            template: extract-pipeline-tasks
+            arguments:
+              parameters:
+                - name: migration-config
+                  value: "{{inputs.parameters.migration_config}}"
+
+          # Extract targets for replayer step
+          - name: s00-extract-targets
+            template: extract-targets
+            arguments:
+              parameters:
+                - name: migration-config
+                  value: "{{inputs.parameters.migration_config}}"
+
+          # Start capture for each source and create snapshot
+          - name: s02-source-captures
+            template: source-capture-and-snapshot
             arguments:
               parameters:
                 - name: source-config
@@ -108,35 +124,47 @@ spec:
             dependencies: ["s01-setup-shared-kafka", "s00-extract-sources"]
             withParam: "{{tasks.s00-extract-sources.outputs.parameters.sources}}"
 
-          # Collect all snapshots
-          - name: s03-collect-snapshots
-            template: collect-snapshots
+          # Process all source-index-target combinations in pipeline by source
+          - name: s03-process-pipeline-by-source
+            template: process-pipeline-for-source
             arguments:
               parameters:
-                - name: source-configs
-                  value: "{{tasks.s00-extract-sources.outputs.parameters.sources}}"
-            dependencies: ["s02-process-source"]
+                - name: source-snapshot
+                  value: "{{item}}"
+                - name: all-pipeline-tasks
+                  value: "{{tasks.s00-extract-pipeline-tasks.outputs.parameters.tasks}}"
+            dependencies: ["s00-extract-pipeline-tasks", "s02-source-captures"]
+            withParam: "{{tasks.s02-source-captures.outputs.parameters.result}}"
 
-          # Extract targets for easier workflow navigation
-          - name: s00-extract-targets
-            template: extract-targets
+          # Store results in shared ConfigMap
+          - name: s03a-store-results
+            template: store-results-to-configmap
             arguments:
               parameters:
-                - name: migration-config
-                  value: "{{inputs.parameters.migration_config}}"
+                - name: process-result
+                  value: "{{item.result}}"
+                - name: process-id
+                  value: "{{item.id}}"
+            dependencies: ["s03-process-pipeline-by-source"]
+            withParam: "{{tasks.s03-process-pipeline-by-source.outputs.parameters.result-with-id}}"
 
-          # Process each target in parallel (now sequential subflow)
-          - name: s04-process-target
-            template: target-subflow
+          # Aggregate results from ConfigMap
+          - name: s03b-aggregate-results
+            template: aggregate-results-from-configmap
+            dependencies: ["s03a-store-results"]
+
+          # Aggregate RFS results per target and run replayer
+          - name: s04-aggregate-and-replay
+            template: aggregate-and-replay
             arguments:
               parameters:
                 - name: target-config
                   value: "{{item}}"
-                - name: all-source-snapshots
-                  value: "{{tasks.s03-collect-snapshots.outputs.parameters.result}}"
+                - name: all-rfs-results
+                  value: "{{tasks.s03b-aggregate-results.outputs.parameters.all-results}}"
                 - name: migration-config
                   value: "{{inputs.parameters.migration_config}}"
-            dependencies: ["s03-collect-snapshots", "s00-extract-targets"]
+            dependencies: ["s03b-aggregate-results", "s00-extract-targets"]
             withParam: "{{tasks.s00-extract-targets.outputs.parameters.targets}}"
 
     # Helper template to extract sources from configuration
@@ -153,22 +181,11 @@ spec:
         source: |
           import json, sys, os
 
-          # Add debugging to see what's happening
-          print("Debug - Environment variables:")
-          for key, value in os.environ.items():
-              if key == 'MIGRATION_CONFIG':
-                  print(f"MIGRATION_CONFIG found, length: {len(value) if value else 'None'}")
-
-          # Get the config with better error handling
           config_str = os.environ.get('MIGRATION_CONFIG')
           if not config_str:
               print("ERROR: MIGRATION_CONFIG environment variable is not set or empty")
-              # Fallback to using the parameter directly as a workaround
-              print("Attempting fallback method...")
               try:
-                  # This assumes the parameter is passed in correctly through inputs.parameters
                   config_str = '''{{inputs.parameters.migration-config}}'''
-                  print(f"Using fallback value with length: {len(config_str)}")
               except Exception as e:
                   print(f"Fallback failed: {e}")
                   sys.exit(1)
@@ -176,12 +193,20 @@ spec:
           try:
               config = json.loads(config_str)
               sources = config.get('source-migration-configurations', [])
+          
+              # Extract just the source configurations
+              source_configs = []
+              for source_config in sources:
+                  source_configs.append({
+                      "source": source_config.get("source"),
+                      "replayer-config": source_config.get("replayer-config", {})
+                  })
 
               # Write the sources to output file
               with open('/tmp/sources.json', 'w') as f:
-                  f.write(json.dumps(sources))
+                  f.write(json.dumps(source_configs))
 
-              print(f"Extracted {len(sources)} sources")
+              print(f"Extracted {len(source_configs)} sources")
           except json.JSONDecodeError as e:
               print(f"ERROR: Failed to parse JSON: {e}")
               print(f"First 100 chars of input: {config_str[:100] if config_str else 'None'}")
@@ -194,6 +219,275 @@ spec:
           - name: sources
             valueFrom:
               path: /tmp/sources.json
+
+    # Extract pipeline tasks - each source-index-target combination
+    - name: extract-pipeline-tasks
+      inputs:
+        parameters:
+          - name: migration-config
+      script:
+        image: python:3.9-alpine
+        env:
+          - name: MIGRATION_CONFIG
+            value: "{{inputs.parameters.migration-config}}"
+        command: [python]
+        source: |
+          import json, sys, os
+          
+          config_str = os.environ.get('MIGRATION_CONFIG')
+          if not config_str:
+              print("ERROR: MIGRATION_CONFIG environment variable is not set or empty")
+              try:
+                  config_str = '''{{inputs.parameters.migration-config}}'''
+              except Exception as e:
+                  print(f"Fallback failed: {e}")
+                  sys.exit(1)
+          
+          try:
+              config = json.loads(config_str)
+              targets = config.get('targets', [])
+              sources = config.get('source-migration-configurations', [])
+          
+              # Generate all source-index-target combinations
+              pipeline_tasks = []
+          
+              for source_config in sources:
+                  source = source_config.get('source', {})
+                  source_id = source.get('id')
+          
+                  for static_config in source_config.get('static-migration-configs', []):
+                      indices = static_config.get('indices', [])
+                      metadata = static_config.get('metadata', {})
+          
+                      # Create metadata tasks for each index for each target
+                      for index in indices:
+                          for target in targets:
+                              target_id = target.get('id')
+          
+                              task = {
+                                  "source_id": source_id,
+                                  "index": index,
+                                  "target_id": target_id,
+                                  "metadata": metadata
+                              }
+          
+                              # Find corresponding backfill config
+                              for backfill in static_config.get('documentBackfillConfigs', []):
+                                  if index in backfill.get('indices', []):
+                                      task["backfill_query"] = backfill.get('query', {'match_all': {}})
+                                      break
+          
+                              if "backfill_query" not in task:
+                                  # Add default query if no specific one was found
+                                  task["backfill_query"] = {'match_all': {}}
+          
+                              pipeline_tasks.append(task)
+          
+              # Write tasks to output file
+              with open('/tmp/pipeline_tasks.json', 'w') as f:
+                  f.write(json.dumps(pipeline_tasks))
+          
+              print(f"Generated {len(pipeline_tasks)} pipeline tasks")
+          except json.JSONDecodeError as e:
+              print(f"ERROR: Failed to parse JSON: {e}")
+              print(f"First 100 chars of input: {config_str[:100] if config_str else 'None'}")
+              sys.exit(1)
+          except Exception as e:
+              print(f"ERROR: Unexpected error: {e}")
+              sys.exit(1)
+      outputs:
+        parameters:
+          - name: tasks
+            valueFrom:
+              path: /tmp/pipeline_tasks.json
+
+    # Template to process all tasks for a specific source
+    - name: process-pipeline-for-source
+      inputs:
+        parameters:
+          - name: source-snapshot
+          - name: all-pipeline-tasks
+      dag:
+        tasks:
+          - name: filter-tasks
+            template: filter-tasks-for-source
+            arguments:
+              parameters:
+                - name: source-snapshot
+                  value: "{{inputs.parameters.source-snapshot}}"
+                - name: all-pipeline-tasks
+                  value: "{{inputs.parameters.all-pipeline-tasks}}"
+
+          - name: process-source-tasks
+            template: process-pipeline-task
+            arguments:
+              parameters:
+                - name: task-with-snapshot
+                  value: "{{item}}"
+            dependencies: ["filter-tasks"]
+            withParam: "{{tasks.filter-tasks.outputs.parameters.filtered-tasks}}"
+      outputs:
+        parameters:
+          - name: result
+            valueFrom:
+              parameter: "{{tasks.process-source-tasks.outputs.parameters.result}}"
+          - name: result-with-id
+            valueFrom:
+              expression: "'{{=JSON.stringify({\"id\": JSON.parse(inputs.parameters.source-snapshot).source_id, \"result\": tasks.process-source-tasks.outputs.parameters.result})}}'"
+
+    # Store results in shared ConfigMap
+    - name: store-results-to-configmap
+      inputs:
+        parameters:
+          - name: process-result
+          - name: process-id
+      script:
+        image: python:3.9-alpine
+        command: [python]
+        source: |
+          import json, os, time
+          from kubernetes import client, config
+          
+          # Get the process ID and result
+          process_id = os.environ.get('PROCESS_ID')
+          process_result = os.environ.get('PROCESS_RESULT')
+          
+          print(f"Storing results for process {process_id}: {process_result[:100]}...")
+          
+          # Simulate storing to storage or ConfigMap
+          result_file = f"/tmp/results_{process_id}.json"
+          with open(result_file, 'w') as f:
+              f.write(process_result)
+          
+          # Write success marker
+          with open('/tmp/store_success.txt', 'w') as f:
+              f.write('success')
+        env:
+          - name: PROCESS_RESULT
+            value: "{{inputs.parameters.process-result}}"
+          - name: PROCESS_ID
+            value: "{{inputs.parameters.process-id}}"
+      outputs:
+        parameters:
+          - name: status
+            valueFrom:
+              path: /tmp/store_success.txt
+
+    # Aggregate results from ConfigMap
+    - name: aggregate-results-from-configmap
+      script:
+        image: python:3.9-alpine
+        command: [python]
+        source: |
+          import json, os, glob, time
+          
+          # Simulate reading from storage or ConfigMap
+          all_results = []
+          
+          # In a real implementation, this would read from ConfigMap or storage
+          # For demo, just list directories where results would be stored
+          print("Reading all stored results...")
+          
+          # Demo: create some results for testing
+          demo_results = [
+              {"source_id": "sourceA", "target_id": "target1", "index": "index_1", "rfs_result": "rfs-index_1-target1"},
+              {"source_id": "sourceA", "target_id": "target1", "index": "index_2", "rfs_result": "rfs-index_2-target1"},
+              {"source_id": "sourceB", "target_id": "target1", "index": "index_3", "rfs_result": "rfs-index_3-target1"},
+              {"source_id": "sourceB", "target_id": "target1", "index": "index_4", "rfs_result": "rfs-index_4-target1"},
+              {"source_id": "sourceA", "target_id": "target2", "index": "index_1", "rfs_result": "rfs-index_1-target2"},
+              {"source_id": "sourceA", "target_id": "target2", "index": "index_2", "rfs_result": "rfs-index_2-target2"},
+              {"source_id": "sourceB", "target_id": "target2", "index": "index_3", "rfs_result": "rfs-index_3-target2"},
+              {"source_id": "sourceB", "target_id": "target2", "index": "index_4", "rfs_result": "rfs-index_4-target2"}
+          ]
+          all_results.extend(demo_results)
+          
+          # Try to find any real results stored in files
+          result_files = glob.glob("/tmp/results_*.json")
+          print(f"Found {len(result_files)} result files")
+          
+          for file_path in result_files:
+              try:
+                  with open(file_path, 'r') as f:
+                      file_content = f.read()
+                      result = json.loads(file_content)
+                      if isinstance(result, list):
+                          all_results.extend(result)
+                      else:
+                          all_results.append(result)
+              except Exception as e:
+                  print(f"Error reading result file {file_path}: {str(e)}")
+          
+          print(f"Aggregated {len(all_results)} results in total")
+          
+          # Write to output file
+          with open('/tmp/all_results.json', 'w') as f:
+              f.write(json.dumps(all_results))
+      outputs:
+        parameters:
+          - name: all-results
+            valueFrom:
+              path: /tmp/all_results.json
+
+    # Helper template to filter tasks for a specific source
+    - name: filter-tasks-for-source
+      inputs:
+        parameters:
+          - name: source-snapshot
+          - name: all-pipeline-tasks
+      script:
+        image: python:3.9-alpine
+        env:
+          - name: SOURCE_SNAPSHOT
+            value: "{{inputs.parameters.source-snapshot}}"
+          - name: ALL_PIPELINE_TASKS
+            value: "{{inputs.parameters.all-pipeline-tasks}}"
+        command: [python]
+        source: |
+          import json, sys, os, ast
+          
+          # Parse inputs
+          try:
+              source_snapshot = json.loads(os.environ.get('SOURCE_SNAPSHOT'))
+          except:
+              try:
+                  source_snapshot = ast.literal_eval(os.environ.get('SOURCE_SNAPSHOT'))
+              except:
+                  print("Error parsing source snapshot")
+                  sys.exit(1)
+          
+          try:
+              all_tasks = json.loads(os.environ.get('ALL_PIPELINE_TASKS'))
+          except:
+              try:
+                  all_tasks = ast.literal_eval(os.environ.get('ALL_PIPELINE_TASKS'))
+              except:
+                  print("Error parsing pipeline tasks")
+                  sys.exit(1)
+          
+          # Get source_id from snapshot
+          source_id = source_snapshot.get('source_id')
+          
+          # Filter tasks for this source_id only
+          filtered_tasks = []
+          for task in all_tasks:
+              if task.get('source_id') == source_id:
+                  # Create the combined task-with-snapshot object
+                  combined = {
+                      'task': task,
+                      'snapshot': source_snapshot
+                  }
+                  filtered_tasks.append(combined)
+          
+          print(f"Found {len(filtered_tasks)} tasks for source {source_id}")
+          
+          # Write to output file
+          with open('/tmp/filtered_tasks.json', 'w') as f:
+              f.write(json.dumps(filtered_tasks))
+      outputs:
+        parameters:
+          - name: filtered-tasks
+            valueFrom:
+              path: /tmp/filtered_tasks.json
 
     # Helper template to extract targets from configuration
     - name: extract-targets
@@ -212,7 +506,6 @@ spec:
           config_str = os.environ.get('MIGRATION_CONFIG')
           if not config_str:
               print("ERROR: MIGRATION_CONFIG environment variable is not set or empty")
-              # Fallback to using the parameter directly as a workaround
               try:
                   config_str = '''{{inputs.parameters.migration-config}}'''
               except Exception as e:
@@ -262,53 +555,15 @@ spec:
             valueFrom:
               path: /tmp/endpoint.txt
 
-    # Helper template to collect snapshots from all sources into a single list
-    - name: collect-snapshots
-      inputs:
-        parameters:
-          - name: source-configs
-      script:
-        image: python:3.9-alpine
-        env:
-          - name: SOURCE_CONFIGS
-            value: "{{inputs.parameters.source-configs}}"
-        command: [python]
-        source: |
-          import json, sys, os
-          
-          source_configs = json.loads(os.environ.get('SOURCE_CONFIGS'))
-          
-          # In a real workflow, this would access all the snapshot files from outputs
-          # For this example, we'll simulate the snapshots
-          snapshots = []
-          for source_config in source_configs:
-              source_id = source_config.get('source', {}).get('id')
-              snapshots.append({
-                  "source_id": source_id,
-                  "snapshot": f"snapshot-{source_id}"
-              })
-          
-          # Write to the file expected by the output parameter
-          with open('/tmp/collect-snapshots.json', 'w') as f:
-              f.write(json.dumps(snapshots))
-          
-          # Also print to stdout for debugging
-          print(json.dumps(snapshots))
-      outputs:
-        parameters:
-          - name: result
-            valueFrom:
-              path: /tmp/collect-snapshots.json
-
-    # Subworkflow to process a single source (capture -> snapshot)
-    - name: source-subflow
+    # Combined template for source capture and snapshot
+    - name: source-capture-and-snapshot
       inputs:
         parameters:
           - name: source-config
           - name: kafka-endpoint
-      dag:
-        tasks:
-          - name: s01-start-capture
+      steps:
+        # Start capture
+        - - name: s01-start-capture
             template: start-capture
             arguments:
               parameters:
@@ -317,21 +572,22 @@ spec:
                 - name: kafka-endpoint
                   value: "{{inputs.parameters.kafka-endpoint}}"
 
-          - name: s02-create-snapshot
+        # Create snapshot
+        - - name: s02-create-snapshot
             template: create-snapshot
             arguments:
               parameters:
                 - name: source-config
                   value: "{{inputs.parameters.source-config}}"
                 - name: capture-id
-                  value: "{{tasks.s01-start-capture.outputs.parameters.result}}"
-            dependencies: ["s01-start-capture"]
+                  value: "{{steps.s01-start-capture.outputs.parameters.result}}"
       outputs:
         parameters:
           - name: result
             valueFrom:
-              parameter: "{{tasks.s02-create-snapshot.outputs.parameters.result}}"
+              parameter: "{{steps.s02-create-snapshot.outputs.parameters.result}}"
 
+    # Start capture template
     - name: start-capture
       inputs:
         parameters:
@@ -351,8 +607,9 @@ spec:
           source_config = json.loads(os.environ.get('SOURCE_CONFIG'))
           kafka_endpoint = os.environ.get('KAFKA_ENDPOINT')
           
-          source_id = source_config.get('source', {}).get('id')
-          endpoint = source_config.get('source', {}).get('endpoint')
+          source = source_config.get('source', {})
+          source_id = source.get('id')
+          endpoint = source.get('endpoint')
           
           print(f"Starting capture for source {source_id} ({endpoint}) using Kafka at {kafka_endpoint}")
           
@@ -366,6 +623,7 @@ spec:
             valueFrom:
               path: /tmp/output.txt
 
+    # Create snapshot template
     - name: create-snapshot
       inputs:
         parameters:
@@ -385,9 +643,15 @@ spec:
           source_config = json.loads(os.environ.get('SOURCE_CONFIG'))
           capture_id = os.environ.get('CAPTURE_ID')
           
-          source_id = source_config.get('source', {}).get('id')
+          source = source_config.get('source', {})
+          source_id = source.get('id')
           
           print(f"Creating snapshot for source {source_id} from capture {capture_id}")
+          
+          sleep_duration = random.randint(0, 60)
+          print(f"Sleeping for {sleep_duration} seconds to simulate snapshot creation time...")
+          time.sleep(sleep_duration)
+          print(f"Finished sleeping after {sleep_duration} seconds")
           
           # Return snapshot details
           result = {
@@ -403,235 +667,78 @@ spec:
             valueFrom:
               path: /tmp/output.json
 
-    # Target subflow converted from DAG to sequential steps
-    - name: target-subflow
+    # Process a single pipeline task (source-index-target combination)
+    - name: process-pipeline-task
       inputs:
         parameters:
-          - name: target-config
-          - name: all-source-snapshots
-          - name: migration-config
+          - name: task-with-snapshot
       steps:
-        # Extract indices for this target
-        - - name: s00-extract-indices
-            template: extract-indices-for-target
-            arguments:
-              parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: migration-config
-                  value: "{{inputs.parameters.migration-config}}"
-
-        # Process each metadata index sequentially
+        # Process metadata for the index-target combination
         - - name: s01-process-metadata
-            template: metadata-processing-wrapper
-            arguments:
-              parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: all-indices
-                  value: "{{steps.s00-extract-indices.outputs.parameters.indices}}"
-                - name: all-source-snapshots
-                  value: "{{inputs.parameters.all-source-snapshots}}"
-
-        # Process each RFS task sequentially
-        - - name: s02-process-rfs
-            template: rfs-processing-wrapper
-            arguments:
-              parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: all-backfill-configs
-                  value: "{{steps.s00-extract-indices.outputs.parameters.backfill_configs}}"
-                - name: metadata-results
-                  value: "{{steps.s01-process-metadata.outputs.parameters.result}}"
-
-        # Final replayer step
-        - - name: s03-replayer-target
-            template: replayer-target
-            arguments:
-              parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: rfs-results
-                  value: "{{steps.s02-process-rfs.outputs.parameters.result}}"
-                - name: migration-config
-                  value: "{{inputs.parameters.migration-config}}"
-      outputs:
-        parameters:
-          - name: result
-            valueFrom:
-              parameter: "{{steps.s03-replayer-target.outputs.parameters.result}}"
-
-    # Helper template to extract indices and backfill configs for a target
-    - name: extract-indices-for-target
-      inputs:
-        parameters:
-          - name: target-config
-          - name: migration-config
-      script:
-        image: python:3.9-alpine
-        env:
-          - name: TARGET_CONFIG
-            value: "{{inputs.parameters.target-config}}"
-          - name: MIGRATION_CONFIG
-            value: "{{inputs.parameters.migration-config}}"
-        command: [python]
-        source: |
-          import json, sys, os
-          
-          target_config = json.loads(os.environ.get('TARGET_CONFIG'))
-          migration_config = json.loads(os.environ.get('MIGRATION_CONFIG'))
-          
-          target_id = target_config.get('id')
-          
-          # Extract all indices from source configs for this target
-          all_indices = []
-          all_backfill_configs = []
-          
-          for source_config in migration_config.get('source-migration-configurations', []):
-              source_id = source_config.get('source', {}).get('id')
-          
-              for static_config in source_config.get('static-migration-configs', []):
-                  # Process each index
-                  for index in static_config.get('indices', []):
-                      all_indices.append({
-                          'source_id': source_id,
-                          'target_id': target_id,
-                          'index': index,
-                          'metadata': static_config.get('metadata', {})
-                      })
-          
-                  # Process each backfill config
-                  for backfill in static_config.get('documentBackfillConfigs', []):
-                      for index in backfill.get('indices', []):
-                          all_backfill_configs.append({
-                              'source_id': source_id,
-                              'target_id': target_id,
-                              'index': index,
-                              'query': backfill.get('query', {'match_all': {}})
-                          })
-          
-          # Write results to output files
-          with open('/tmp/indices.json', 'w') as f:
-              f.write(json.dumps(all_indices))
-          
-          with open('/tmp/backfill_configs.json', 'w') as f:
-              f.write(json.dumps(all_backfill_configs))
-          
-          print(f"Extracted {len(all_indices)} indices and {len(all_backfill_configs)} backfill configs for target {target_id}")
-      outputs:
-        parameters:
-          - name: indices
-            valueFrom:
-              path: /tmp/indices.json
-          - name: backfill_configs
-            valueFrom:
-              path: /tmp/backfill_configs.json
-
-    # Wrapper template to process all metadata indices
-    - name: metadata-processing-wrapper
-      inputs:
-        parameters:
-          - name: target-config
-          - name: all-indices
-          - name: all-source-snapshots
-      steps:
-        # Process each index in parallel
-        - - name: s01-process-one-index
             template: metadata-processing
             arguments:
               parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: index-config
-                  value: "{{item}}"
-                - name: all-source-snapshots
-                  value: "{{inputs.parameters.all-source-snapshots}}"
-            withParam: "{{inputs.parameters.all-indices}}"
+                - name: task-with-snapshot
+                  value: "{{inputs.parameters.task-with-snapshot}}"
 
-        # Aggregate all results into a single output parameter
-        - - name: s02-aggregate-results
-            template: aggregate-metadata
-            arguments:
-              parameters:
-                - name: results
-                  value: "{{steps.s01-process-one-index.outputs.parameters.result}}"
-      outputs:
-        parameters:
-          - name: result
-            valueFrom:
-              parameter: "{{steps.s02-aggregate-results.outputs.parameters.combined_results}}"
-
-    # Wrapper template to process all RFS configs
-    - name: rfs-processing-wrapper
-      inputs:
-        parameters:
-          - name: target-config
-          - name: all-backfill-configs
-          - name: metadata-results
-      steps:
-        # Process each backfill config in parallel
-        - - name: s01-process-one-backfill
+        # Process RFS for the index-target combination
+        - - name: s02-process-rfs
             template: rfs-processing
             arguments:
               parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: backfill-config
-                  value: "{{item}}"
-                - name: metadata-results
-                  value: "{{inputs.parameters.metadata-results}}"
-            withParam: "{{inputs.parameters.all-backfill-configs}}"
-
-        # Aggregate all results into a single output parameter
-        - - name: s02-aggregate-results
-            template: aggregate-rfs
-            arguments:
-              parameters:
-                - name: results
-                  value: "{{steps.s01-process-one-backfill.outputs.parameters.result}}"
+                - name: pipeline-task
+                  value: "{{inputs.parameters.task-with-snapshot}}"
+                - name: metadata-result
+                  value: "{{steps.s01-process-metadata.outputs.parameters.result}}"
       outputs:
         parameters:
           - name: result
             valueFrom:
-              parameter: "{{steps.s02-aggregate-results.outputs.parameters.combined_results}}"
+              parameter: "{{steps.s02-process-rfs.outputs.parameters.result}}"
 
     # Metadata processing template
     - name: metadata-processing
       inputs:
         parameters:
-          - name: target-config
-          - name: index-config
-          - name: all-source-snapshots
+          - name: task-with-snapshot
       script:
         image: python:3.9-alpine
         env:
-          - name: TARGET_CONFIG
-            value: "{{inputs.parameters.target-config}}"
-          - name: INDEX_CONFIG
-            value: "{{inputs.parameters.index-config}}"
-          - name: ALL_SOURCE_SNAPSHOTS
-            value: "{{inputs.parameters.all-source-snapshots}}"
+          - name: TASK_WITH_SNAPSHOT
+            value: "{{inputs.parameters.task-with-snapshot}}"
         command: [python]
         source: |
           import json, sys, os, random, time
           
-          target_config = json.loads(os.environ.get('TARGET_CONFIG'))
-          index_config = json.loads(os.environ.get('INDEX_CONFIG'))
-          snapshots = json.loads(os.environ.get('ALL_SOURCE_SNAPSHOTS'))
+          # Get the pipeline task from the combined object
+          task_with_snapshot = json.loads(os.environ.get('TASK_WITH_SNAPSHOT'))
+          pipeline_task = task_with_snapshot.get('task', {})
+          snapshot = task_with_snapshot.get('snapshot', {})
           
-          target_id = target_config.get('id')
-          index_name = index_config.get('index')
-          source_id = index_config.get('source_id')
+          source_id = pipeline_task.get('source_id', 'unknown')
+          index = pipeline_task.get('index', 'unknown')
+          target_id = pipeline_task.get('target_id', 'unknown')
+          metadata = pipeline_task.get('metadata', {})
           
-          print(f"Processing metadata for index {index_name} from source {source_id} to target {target_id}")
+          # Get the snapshot information
+          source_snapshot = snapshot.get('snapshot', f"snapshot-{source_id}")
+          
+          print(f"Processing metadata for index {index} from source {source_id} to target {target_id}")
+          print(f"Using snapshot: {source_snapshot}")
+          
+          # Add some simulated processing time
+          sleep_duration = random.randint(1, 10)
+          print(f"Metadata processing for {index} - sleeping for {sleep_duration} seconds...")
+          time.sleep(sleep_duration)
+          print(f"Metadata processing for {index} completed after {sleep_duration} seconds")
           
           # Return metadata processing result
           result = {
-              "target_id": target_id,
               "source_id": source_id,
-              "index": index_name,
-              "metadata_result": f"metadata-{index_name}-{target_id}"
+              "target_id": target_id,
+              "index": index,
+              "snapshot": source_snapshot,
+              "metadata_result": f"metadata-{index}-{target_id}"
           }
           with open('/tmp/output.json', 'w') as f:
               f.write(json.dumps(result))
@@ -645,202 +752,178 @@ spec:
     - name: rfs-processing
       inputs:
         parameters:
-          - name: target-config
-          - name: backfill-config
-          - name: metadata-results
+          - name: pipeline-task
+          - name: metadata-result
       script:
         image: python:3.9-alpine
+        env:
+          - name: PIPELINE_TASK
+            value: "{{inputs.parameters.pipeline-task}}"
+          - name: METADATA_RESULT
+            value: "{{inputs.parameters.metadata-result}}"
         command: [python]
         source: |
           import json, sys, os, random, time
-
-          target_config = json.loads(os.environ.get('TARGET_CONFIG'))
-          backfill_config = json.loads(os.environ.get('BACKFILL_CONFIG'))
-
-          # Parse metadata_results only once as an array
-          metadata_results_str = os.environ.get('METADATA_RESULTS')
-          metadata_results = json.loads(metadata_results_str)
-
-          target_id = target_config.get('id')
-          index_name = backfill_config.get('index')
-          source_id = backfill_config.get('source_id')
-          query = backfill_config.get('query')
-
-          print(f"Processing RFS for index {index_name} from source {source_id} to target {target_id}")
-          print(f"Using query: {json.dumps(query)}")
-
-          # Find corresponding metadata result - no need to parse each result again
-          metadata_result = None
-          for result in metadata_results:
-              if (result.get('index') == index_name and 
-                  result.get('source_id') == source_id and
-                  result.get('target_id') == target_id):
-                  metadata_result = result
-                  break
-
-          if not metadata_result:
-              print(f"WARNING: No metadata result found for {index_name}")
+          
+          # Parse the pipeline task from the task-with-snapshot
+          try:
+              task_with_snapshot = json.loads(os.environ.get('PIPELINE_TASK'))
+              if isinstance(task_with_snapshot, dict) and 'task' in task_with_snapshot:
+                  pipeline_task = task_with_snapshot.get('task', {})
+              else:
+                  pipeline_task = task_with_snapshot  # In case it's directly the task object
+          except Exception as e:
+              print(f"Warning: Failed to parse pipeline task: {str(e)}")
+              pipeline_task = {}
+          
+          # Parse metadata result
+          metadata_result_str = os.environ.get('METADATA_RESULT')
+          try:
+              metadata_result = json.loads(metadata_result_str)
+          except Exception as e:
+              print(f"Warning: Failed to parse metadata result: {str(e)}")
               metadata_result = {"metadata_result": "unknown"}
-
+          
+          source_id = pipeline_task.get('source_id')
+          index = pipeline_task.get('index')
+          target_id = pipeline_task.get('target_id')
+          query = pipeline_task.get('backfill_query', {'match_all': {}})
+          
+          print(f"Processing RFS for index {index} from source {source_id} to target {target_id}")
+          print(f"Using query: {json.dumps(query)}")
+          
+          # Add some simulated processing time 
+          sleep_duration = random.randint(3, 15)
+          print(f"RFS processing - sleeping for {sleep_duration} seconds...")
+          time.sleep(sleep_duration)
+          print(f"RFS processing completed after {sleep_duration} seconds")
+          
           # Return RFS processing result
           result = {
-              "target_id": target_id,
               "source_id": source_id,
-              "index": index_name,
-              "rfs_result": f"rfs-{index_name}-{target_id}",
-              "metadata_used": metadata_result.get('metadata_result')
+              "target_id": target_id,
+              "index": index,
+              "rfs_result": f"rfs-{index}-{target_id}",
+              "metadata_used": metadata_result.get('metadata_result'),
+              "snapshot": metadata_result.get('snapshot')
           }
           with open('/tmp/output.json', 'w') as f:
               f.write(json.dumps(result))
-        env:
-          - name: TARGET_CONFIG
-            value: "{{inputs.parameters.target-config}}"
-          - name: BACKFILL_CONFIG
-            value: "{{inputs.parameters.backfill-config}}"
-          - name: METADATA_RESULTS
-            value: "{{inputs.parameters.metadata-results}}"
       outputs:
         parameters:
           - name: result
             valueFrom:
               path: /tmp/output.json
 
-    # Replayer target template
-    - name: replayer-target
+    # Aggregate RFS results per target and run replayer
+    - name: aggregate-and-replay
       inputs:
         parameters:
           - name: target-config
-          - name: rfs-results
+          - name: all-rfs-results
           - name: migration-config
+      retryStrategy:
+        limit: 3
+        retryPolicy: "Always"
       script:
         image: python:3.9-alpine
         env:
           - name: TARGET_CONFIG
             value: "{{inputs.parameters.target-config}}"
-          - name: RFS_RESULTS
-            value: "{{inputs.parameters.rfs-results}}"
+          - name: ALL_RFS_RESULTS
+            value: "{{inputs.parameters.all-rfs-results}}"
           - name: MIGRATION_CONFIG
             value: "{{inputs.parameters.migration-config}}"
-        command: [ python ]
+        command: [python]
         source: |
           import json, sys, os, random, time
-
-          # Debug all inputs
-          print("DEBUG INPUT - TARGET_CONFIG:", os.environ.get('TARGET_CONFIG')[:100])
-          print("DEBUG INPUT - RFS_RESULTS:", os.environ.get('RFS_RESULTS')[:100])
-
+          
           target_config = json.loads(os.environ.get('TARGET_CONFIG'))
           migration_config = json.loads(os.environ.get('MIGRATION_CONFIG'))
-
-          # Process RFS results with multiple fallback options
-          rfs_results_str = os.environ.get('RFS_RESULTS', '[]')
-          rfs_results = []
-
-          print("DEBUG - Raw RFS results string:", rfs_results_str[:200])
-
+          
+          target_id = target_config.get('id')
+          endpoint = target_config.get('endpoint')
+          
+          # Parse all RFS results
+          all_rfs_results_str = os.environ.get('ALL_RFS_RESULTS')
+          all_rfs_results = []
+          
           try:
-              # Try to parse as a JSON array first
-              parsed_results = json.loads(rfs_results_str)
-              print("DEBUG - Successfully parsed as JSON array")
-
-              # Handle different possible formats
+              # Try to parse as JSON array first
+              parsed_results = json.loads(all_rfs_results_str)
               if isinstance(parsed_results, list):
                   for item in parsed_results:
                       if isinstance(item, dict):
-                          # Already a dict, use as is
-                          rfs_results.append(item)
+                          all_rfs_results.append(item)
                       elif isinstance(item, str):
-                          # Might be a JSON string
                           try:
-                              rfs_results.append(json.loads(item))
-                              print("DEBUG - Found JSON string item in list")
+                              all_rfs_results.append(json.loads(item))
                           except:
-                              print(f"DEBUG - Couldn't parse list item as JSON: {item[:50]}")
-                      else:
-                          print(f"DEBUG - Unknown item type: {type(item)}")
+                              print(f"Warning: Could not parse RFS result item: {item[:50]}")
               elif isinstance(parsed_results, dict):
-                  # Single result as a dict
-                  rfs_results.append(parsed_results)
-                  print("DEBUG - Parsed as single dict")
+                  all_rfs_results.append(parsed_results)
           except Exception as e:
-              print(f"DEBUG - Initial JSON parse failed: {str(e)}")
-
-              # Try alternative parsing - string representation of Python list
-              try:
-                  import ast
-                  parsed_list = ast.literal_eval(rfs_results_str)
-                  print("DEBUG - Parsed with ast.literal_eval")
-
-                  if isinstance(parsed_list, list):
-                      for item in parsed_list:
-                          if isinstance(item, dict):
-                              rfs_results.append(item)
-                          elif isinstance(item, str):
-                              try:
-                                  rfs_results.append(json.loads(item))
-                              except:
-                                  print(f"DEBUG - Couldn't parse list item from ast: {item[:50]}")
-              except Exception as e:
-                  print(f"DEBUG - AST parsing failed: {str(e)}")
-
-                  # Last resort - try to split and parse
-                  if rfs_results_str.startswith('[') and rfs_results_str.endswith(']'):
-                      try:
-                          # Extremely simplified parsing for comma-separated items
-                          items = rfs_results_str[1:-1].split(',')
-                          print(f"DEBUG - Split into {len(items)} raw items")
-
-                          # Try to salvage any JSON objects
-                          for item in items:
-                              if '{' in item and '}' in item:
+              print(f"Warning: Failed to parse RFS results as JSON: {str(e)}")
+          
+              # Try alternative parsing
+              if all_rfs_results_str and all_rfs_results_str.startswith('[') and all_rfs_results_str.endswith(']'):
+                  try:
+                      import ast
+                      parsed_list = ast.literal_eval(all_rfs_results_str)
+          
+                      if isinstance(parsed_list, list):
+                          for item in parsed_list:
+                              if isinstance(item, dict):
+                                  all_rfs_results.append(item)
+                              elif isinstance(item, str):
                                   try:
-                                      start = item.find('{')
-                                      end = item.rfind('}') + 1
-                                      obj_str = item[start:end]
-                                      rfs_results.append(json.loads(obj_str))
-                                      print("DEBUG - Salvaged JSON object")
+                                      all_rfs_results.append(json.loads(item))
                                   except:
-                                      print(f"DEBUG - Failed to salvage: {item[:50]}")
-                      except Exception as e:
-                          print(f"DEBUG - Split parsing failed: {str(e)}")
-
-          print(f"DEBUG - Final RFS results count: {len(rfs_results)}")
-
-          target_id = target_config.get('id')
-          endpoint = target_config.get('endpoint')
-
-          print(f"Replaying to target {target_id} ({endpoint})")
-          print(f"Using {len(rfs_results)} RFS results")
-
-          # Find replayer configs from all sources
-          for source_config in migration_config.get('source-migration-configurations', []):
-              source_id = source_config.get('source', {}).get('id')
-              replayer_config = source_config.get('replayer-config', {})
-              batch_size = replayer_config.get('batchSize', 1000)
-              concurrency = replayer_config.get('concurrency', 4)
-
-              print(f"Replayer config for source {source_id}: batch size={batch_size}, concurrency={concurrency}")
-
-          # Count RFS results by index
-          indices = {}
-          for rfs_result in rfs_results:
-              index = rfs_result.get('index', 'unknown')
-              if index in indices:
-                  indices[index] += 1
+                                      print(f"Warning: Could not parse RFS result item: {item[:50]}")
+                  except Exception as e:
+                      print(f"Warning: AST parsing failed: {str(e)}")
+          
+          # Filter RFS results for this target
+          target_rfs_results = [r for r in all_rfs_results if r.get('target_id') == target_id]
+          
+          print(f"Aggregated {len(target_rfs_results)} RFS results for target {target_id}")
+          
+          # Group RFS results by source_id to apply correct replayer config
+          source_indices = {}
+          for rfs_result in target_rfs_results:
+              source_id = rfs_result.get('source_id')
+              index = rfs_result.get('index')
+          
+              if source_id not in source_indices:
+                  source_indices[source_id] = set()
+          
+              source_indices[source_id].add(index)
+          
+          # Find replayer configs from migration config
+          for source_id, indices in source_indices.items():
+              print(f"Source {source_id} indices: {', '.join(indices)}")
+          
+              # Find replayer config for this source
+              replayer_config = None
+              for source_config in migration_config.get('source-migration-configurations', []):
+                  if source_config.get('source', {}).get('id') == source_id:
+                      replayer_config = source_config.get('replayer-config', {})
+                      break
+          
+              if replayer_config:
+                  batch_size = replayer_config.get('batchSize', 1000)
+                  concurrency = replayer_config.get('concurrency', 4)
+                  print(f"Replayer config for source {source_id}: batch size={batch_size}, concurrency={concurrency}")
               else:
-                  indices[index] = 1
-
-          print("RFS results by index:")
-          for index, count in indices.items():
-              print(f"  {index}: {count}")
-
+                  print(f"No replayer config found for source {source_id}")
+          
           print(f"Replay to target {target_id} completed successfully")
-
+          
           # Write result to output file
           result = {
               "target_id": target_id,
               "status": "completed",
-              "indices_processed": list(indices.keys())
+              "indices_processed": [result.get('index') for result in target_rfs_results]
           }
           with open('/tmp/result.json', 'w') as f:
               f.write(json.dumps(result))
@@ -849,88 +932,3 @@ spec:
           - name: result
             valueFrom:
               path: /tmp/result.json
-
-    # Helper template to aggregate metadata results
-    - name: aggregate-metadata
-      inputs:
-        parameters:
-          - name: results
-      script:
-        image: python:3.9-alpine
-        command: [python]
-        source: |
-          import json, sys, os, ast
-          
-          # Get the results (might be a string representation of a list)
-          results_str = os.environ.get('RESULTS', '[]')
-          
-          try:
-              # Try to parse it as JSON
-              results = json.loads(results_str)
-          except json.JSONDecodeError:
-              # If it's not valid JSON, try to evaluate it as a Python expression
-              try:
-                  results = ast.literal_eval(results_str)
-              except:
-                  print(f"Error parsing results: {results_str[:100]}...")
-                  results = []
-          
-          # Ensure it's a list
-          if not isinstance(results, list):
-              results = [results]
-          
-          print(f"Aggregated {len(results)} metadata results")
-          
-          # Write to the expected output file
-          with open('/tmp/combined_results.json', 'w') as f:
-              f.write(json.dumps(results))
-        env:
-          - name: RESULTS
-            value: "{{inputs.parameters.results}}"
-      outputs:
-        parameters:
-          - name: combined_results
-            valueFrom:
-              path: /tmp/combined_results.json
-
-    - name: aggregate-rfs
-      inputs:
-        parameters:
-            - name: results
-      script:
-        image: python:3.9-alpine
-        command: [ python ]
-        source: |
-          import json, sys, os, ast
-          
-          # Get the results (might be a string representation of a list)
-          results_str = os.environ.get('RESULTS', '[]')
-          
-          try:
-              # Try to parse it as JSON
-              results = json.loads(results_str)
-          except json.JSONDecodeError:
-              # If it's not valid JSON, try to evaluate it as a Python expression
-              try:
-                  results = ast.literal_eval(results_str)
-              except:
-                  print(f"Error parsing results: {results_str[:100]}...")
-                  results = []
-          
-          # Ensure it's a list
-          if not isinstance(results, list):
-              results = [results]
-          
-          print(f"Aggregated {len(results)} RFS results")
-          
-          # Write to the expected output file
-          with open('/tmp/combined_results.json', 'w') as f:
-              f.write(json.dumps(results))
-        env:
-          - name: RESULTS
-            value: "{{inputs.parameters.results}}"
-      outputs:
-        parameters:
-          - name: combined_results
-            valueFrom:
-              path: /tmp/combined_results.json

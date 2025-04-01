@@ -1,0 +1,341 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: event-driven-workflow-template
+spec:
+  entrypoint: main
+  parallelism: 100
+  serviceAccountName: argo-workflow-executor
+
+  # Define executor resources
+  executorResources:
+    requests:
+      memory: "64Mi"
+      cpu: "250m"
+    limits:
+      memory: "128Mi"
+      cpu: "500m"
+
+  # Define workflow input parameters
+  arguments:
+    parameters:
+      - name: sources
+        value: "A,B"
+      - name: processors
+        value: "x,y"
+      - name: targets
+        value: "T1,T2,T3"
+      - name: etcd-endpoints
+        value: "http://ma-etcd.ma.svc.cluster.local:2379"
+      - name: etcd-user
+        value: "root"
+      - name: etcd-password
+        value: "password"
+      - name: etcd-image
+        value: "bitnami/etcd:latest"
+
+  templates:
+    # Main workflow template
+    - name: main
+      dag:
+        tasks:
+          # Initialize etcd keys
+          - name: init
+            template: init-etcd
+            arguments:
+              parameters:
+                - name: sources
+                  value: "{{workflow.parameters.sources}}"
+                - name: processors
+                  value: "{{workflow.parameters.processors}}"
+                - name: targets
+                  value: "{{workflow.parameters.targets}}"
+
+          # Process sources
+          - name: process-sources
+            template: process-source
+            dependencies: ["init"]
+            withParam: "{{=split(workflow.parameters.sources, ',')}}"
+            arguments:
+              parameters:
+                - name: source
+                  value: "{{item}}"
+                - name: processors
+                  value: "{{workflow.parameters.processors}}"
+                - name: targets
+                  value: "{{workflow.parameters.targets}}"
+
+    # Initialize etcd keys
+    - name: init-etcd
+      inputs:
+        parameters:
+          - name: sources
+          - name: processors
+          - name: targets
+      container:
+        image: "{{workflow.parameters.etcd-image}}"
+        command: [sh, -c]
+        args:
+          - |
+            export ETCDCTL_API=3
+            
+            # Run etcdctl with configured endpoints and authentication
+            etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+            
+            # Initialize target counters and metadata
+            for TARGET in $(echo {{inputs.parameters.targets}} | tr ',' ' '); do
+              # Create base keys with initial values
+              $etcdctl_cmd put /workflow/targets/$TARGET/completed_count "0"
+              $etcdctl_cmd put /workflow/targets/$TARGET/processed_count "0"
+              $etcdctl_cmd put /workflow/targets/$TARGET/status "pending"
+            
+              # Calculate total expected
+              SOURCE_COUNT=$(echo {{inputs.parameters.sources}} | tr ',' ' ' | wc -w)
+              PROCESSOR_COUNT=$(echo {{inputs.parameters.processors}} | tr ',' ' ' | wc -w)
+              TOTAL_EXPECTED=$((SOURCE_COUNT * PROCESSOR_COUNT))
+            
+              $etcdctl_cmd put /workflow/targets/$TARGET/total_expected "$TOTAL_EXPECTED"
+              echo "Target $TARGET expects $TOTAL_EXPECTED combinations"
+            done
+            
+            # Initialize pending status for all combinations
+            for SOURCE in $(echo {{inputs.parameters.sources}} | tr ',' ' '); do
+              for PROCESSOR in $(echo {{inputs.parameters.processors}} | tr ',' ' '); do
+                for TARGET in $(echo {{inputs.parameters.targets}} | tr ',' ' '); do
+                  # Mark as pending
+                  $etcdctl_cmd put /workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "pending"
+                done
+              done
+            done
+            
+            echo "Etcd keys initialized"
+
+    # Process a single source with all processors
+    - name: process-source
+      inputs:
+        parameters:
+          - name: source
+          - name: processors
+          - name: targets
+      steps:
+        - - name: process-processors
+            template: process-processor
+            withParam: "{{=split(inputs.parameters.processors, ',')}}"
+            arguments:
+              parameters:
+                - name: source
+                  value: "{{inputs.parameters.source}}"
+                - name: processor
+                  value: "{{item}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+
+    # Process a source-processor pair for all targets
+    - name: process-processor
+      inputs:
+        parameters:
+          - name: source
+          - name: processor
+          - name: targets
+      steps:
+        - - name: process-targets
+            template: process-target
+            withParam: "{{=split(inputs.parameters.targets, ',')}}"
+            arguments:
+              parameters:
+                - name: source
+                  value: "{{inputs.parameters.source}}"
+                - name: processor
+                  value: "{{inputs.parameters.processor}}"
+                - name: target
+                  value: "{{item}}"
+
+    # Process a single source-processor-target combination
+    - name: process-target
+      inputs:
+        parameters:
+          - name: source
+          - name: processor
+          - name: target
+      steps:
+        # Process the combination
+        - - name: process
+            template: process-combination
+            arguments:
+              parameters:
+                - name: source
+                  value: "{{inputs.parameters.source}}"
+                - name: processor
+                  value: "{{inputs.parameters.processor}}"
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+
+        # Check target readiness after processing and finalize if ready
+        - - name: check-and-finalize
+            template: check-target-ready
+            arguments:
+              parameters:
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+
+    # Process a specific combination
+    - name: process-combination
+      inputs:
+        parameters:
+          - name: source
+          - name: processor
+          - name: target
+      container:
+        image: "{{workflow.parameters.etcd-image}}"
+        command: [bash, -c]
+        args:
+          - |
+            export ETCDCTL_API=3
+            
+            # Run etcdctl with configured endpoints
+            etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+            
+            # Parameters
+            SOURCE="{{inputs.parameters.source}}"
+            PROCESSOR="{{inputs.parameters.processor}}"
+            TARGET="{{inputs.parameters.target}}"
+            
+            echo "Processing source=$SOURCE processor=$PROCESSOR target=$TARGET"
+            
+            # Randomize processing time (0-60 seconds)
+            SLEEP_TIME=$(( (RANDOM % 61) ))
+            
+            echo "Processing will take $SLEEP_TIME seconds"
+            sleep $SLEEP_TIME
+            
+            echo "SUCCESS: $SOURCE-$PROCESSOR for $TARGET"
+            
+            # Update combo status atomically
+            $etcdctl_cmd put /workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "completed"
+            
+            # Atomically increment completion counter
+            CURRENT=$($etcdctl_cmd get /workflow/targets/$TARGET/completed_count --print-value-only)
+            $etcdctl_cmd put /workflow/targets/$TARGET/completed_count "$((CURRENT + 1))"
+            
+            # Atomically increment processed counter (regardless of success or failure)
+            PROCESSED=$($etcdctl_cmd get /workflow/targets/$TARGET/processed_count --print-value-only)
+            $etcdctl_cmd put /workflow/targets/$TARGET/processed_count "$((PROCESSED + 1))"
+
+    # Check if a target is ready after processing
+    - name: check-target-ready
+      inputs:
+        parameters:
+          - name: target
+      steps:
+        # First step: check if all processes are complete for the target
+        - - name: check-status
+            template: check-target-status
+            arguments:
+              parameters:
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+
+        # Second step: finalize if needed
+        - - name: conditional-finalize
+            template: finalize-target
+            arguments:
+              parameters:
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+            when: "{{steps.check-status.outputs.parameters.should-finalize}} == true"
+
+    # Check target status and determine if it should be finalized
+    - name: check-target-status
+      inputs:
+        parameters:
+          - name: target
+      outputs:
+        parameters:
+          - name: should-finalize
+            valueFrom:
+              path: /tmp/should-finalize
+      script:
+        image: "{{workflow.parameters.etcd-image}}"
+        command: [sh]
+        source: |
+          export ETCDCTL_API=3
+          
+          # Run etcdctl with configured endpoints
+          etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+          
+          # Parameters
+          TARGET="{{inputs.parameters.target}}"
+          
+          # Read current counters atomically
+          PROCESSED=$($etcdctl_cmd get /workflow/targets/$TARGET/processed_count --print-value-only)
+          TOTAL=$($etcdctl_cmd get /workflow/targets/$TARGET/total_expected --print-value-only)
+          STATUS=$($etcdctl_cmd get /workflow/targets/$TARGET/status --print-value-only)
+          
+          echo "Target $TARGET status: $PROCESSED processed out of $TOTAL expected" >&2
+          
+          # Default: don't finalize yet
+          SHOULD_FINALIZE="false"
+          
+          # Check if all processes have completed for this target
+          if [ $PROCESSED -ge $TOTAL ]; then
+            echo "All $PROCESSED processors for $TARGET have completed processing" >&2
+          
+            # Check if the target was already processed
+            if [ "$STATUS" = "pending" ]; then
+              # Atomically update status with compare-and-swap to avoid race conditions
+              $etcdctl_cmd put /workflow/targets/$TARGET/status "ready" --prev-kv
+              if [ $? -eq 0 ]; then
+                echo "Updated status, $TARGET is now ready for finalization" >&2
+                SHOULD_FINALIZE="true"
+              else
+                echo "Status was already changed by another process" >&2
+              fi
+            else
+              echo "Target $TARGET was already marked as $STATUS" >&2
+            fi
+          else
+            echo "Target $TARGET still has pending processors ($PROCESSED < $TOTAL)" >&2
+          fi
+          
+          # Output just the boolean value to stdout for the result
+          echo $SHOULD_FINALIZE > /tmp/should-finalize
+          echo $SHOULD_FINALIZE
+
+    # Finalize a target
+    - name: finalize-target
+      inputs:
+        parameters:
+          - name: target
+      container:
+        image: "{{workflow.parameters.etcd-image}}"
+        command: [sh, -c]
+        args:
+          - |
+            export ETCDCTL_API=3
+            etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+            
+            TARGET="{{inputs.parameters.target}}"
+            echo "===== FINALIZING TARGET $TARGET ====="
+            
+            # Get completed and processed counts
+            COMPLETED=$($etcdctl_cmd get /workflow/targets/$TARGET/completed_count --print-value-only)
+            PROCESSED=$($etcdctl_cmd get /workflow/targets/$TARGET/processed_count --print-value-only)
+            TOTAL=$($etcdctl_cmd get /workflow/targets/$TARGET/total_expected --print-value-only)
+            
+            echo "Completion stats:"
+            echo "- Completed: $COMPLETED"
+            echo "- Processed: $PROCESSED" 
+            echo "- Total: $TOTAL"
+            
+            # Show successful combinations
+            echo "Successful processor combinations:"
+            $etcdctl_cmd get /workflow/targets/$TARGET/combos/ --prefix | grep -B1 completed
+            
+            # Perform target-specific final processing
+            echo "Performing final processing for $TARGET..."
+            sleep 10  # Simulate final processing
+            
+            # Mark as finalized
+            $etcdctl_cmd put /workflow/targets/$TARGET/status "finalized"
+            
+            echo "Target $TARGET processing complete."

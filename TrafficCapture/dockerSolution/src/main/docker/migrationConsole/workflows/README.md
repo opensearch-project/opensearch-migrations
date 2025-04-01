@@ -51,28 +51,29 @@ This workflow represents one where the user has done granular migrations, one sn
 
 In the diagram below, the gray nodes are represent those cloned directly from the workflow for target 1 and are kept in sync.
 
-Simple Multi-Source/Multi-Target Migration
+Simplified Multi-Source/Multi-Target Migration
 ```mermaid
 flowchart
     start_capture_s1 --> create_snapshot_s1
     start_capture_s1 --> setup_shared_kafka --> create_snapshot_s1
-    
-    create_snapshot_s1 --> metadata_t1
+    create_snapshot_s1 --> got_snapshot_s1
 
-    metadata_t1 --> rfs_t1
+    got_snapshot_s1 --> metadata_i1_t1 --> rfs_i1_t1
+    got_snapshot_s1 --> metadata_i2_t1 --> rfs_i2_t1
+    got_snapshot_s2 --> metadata_i3_t1 --> rfs_i3_t1
     
-    create_snapshot_s2 --> metadata_t1
-    
-    rfs_t1 --> replayer_target_t1
+    rfs_i1_t1 --> replayer_target_t1
+    rfs_i2_t1 --> replayer_target_t1
+    rfs_i3_t1 --> replayer_target_t1
 
 
-    create_snapshot_s1 --> metadata_t2
+    got_snapshot_s1 --> metadata_t2
 
     start_capture_s2 --> create_snapshot_s2
     start_capture_s2 --> setup_shared_kafka --> create_snapshot_s2
     
-    create_snapshot_s2 --> metadata_t2
-    metadata_t2 --> rfs_t2
+    create_snapshot_s2 --> got_snapshot_s2 --> metadata_t2
+    metadata_t2 --> rfs_t2[rfs...]
 
     rfs_t2 --> replayer_target_t2
 ```
@@ -80,15 +81,15 @@ flowchart
 ```mermaid
 flowchart
     start_capture_1["start capture for source A\n(if not started)"] --> create_snapshot_1
-    start_capture_1 --> setup_shared_kafka --> create_snapshot_1
-    
-    create_snapshot_1 --> metadata_index1_t1[Metadata index_1\ntarget_1]
-    create_snapshot_1 --> metadata_index2_t1[Metadata index_2\ntarget_1]
+    start_capture_1 --> setup_shared_kafka --> create_snapshot_1 --> got_snapshot_1
+
+    got_snapshot_1 --> metadata_index1_t1[Metadata index_1\ntarget_1]
+    got_snapshot_1 --> metadata_index2_t1[Metadata index_2\ntarget_1]
     
     metadata_index1_t1 --> rfs_index1_t1[RFS index_1\ntarget_1]
     metadata_index2_t1 --> rfs_index2_t1[RFS index_2\ntarget_1]
-    
-    create_snapshot_2 --> metadata_index3_and_index4_t1[Metadata index_3 and index_4\ntarget_1]
+
+    got_snapshot_2 --> metadata_index3_and_index4_t1[Metadata index_3 and index_4\ntarget_1]
     
     metadata_index3_and_index4_t1 --> rfs_index3_t1[RFS index_3\ntarget_1]
     metadata_index3_and_index4_t1 --> rfs_index4_t1[RFS index_4\ntarget_1]
@@ -99,16 +100,16 @@ flowchart
     rfs_index4_t1 --> replayer_target_t1
 
 
-    create_snapshot_1 --> metadata_index1_t2[Metadata index_1\ntarget_2]
-    create_snapshot_1 --> metadata_index2_t2[Metadata index_2\ntarget_2]
+    got_snapshot_1 --> metadata_index1_t2[Metadata index_1\ntarget_2]
+    got_snapshot_1 --> metadata_index2_t2[Metadata index_2\ntarget_2]
 
     metadata_index1_t2 --> rfs_index1_t2[RFS index_1\ntarget_2]
     metadata_index2_t2 --> rfs_index2_t2[RFS index_2\ntarget_2]
 
     start_capture_2["start capture for source B\n(if not started)"] --> create_snapshot_2
-    start_capture_2 --> setup_shared_kafka --> create_snapshot_2
-    
-    create_snapshot_2 --> metadata_index3_and_index4_t2[Metadata index_3 and index_4\ntarget_2]
+    start_capture_2 --> setup_shared_kafka --> create_snapshot_2 --> got_snapshot_2
+
+    got_snapshot_2 --> metadata_index3_and_index4_t2[Metadata index_3 and index_4\ntarget_2]
     metadata_index3_and_index4_t2 --> rfs_index3_t2[RFS index_3\ntarget_2]
     metadata_index3_and_index4_t2 --> rfs_index4_t2[RFS index_4\ntarget_2]
 
