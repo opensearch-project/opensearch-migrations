@@ -30,7 +30,7 @@ class SegmentNameSorter implements Comparator<LuceneLeafReader> {
             };
             log.atWarn().setMessage("Unexpected equality during leafReader sorting, expected sort to yield no equality " +
                     "to ensure consistent segment ordering. This may cause missing documents if both segments" +
-                    "contains docs. LeafReader1DebugInfo: {} \nLeafReader2DebugInfo: {}")
+                    "contains docs. \nLeafReader1DebugInfo: {} \nLeafReader2DebugInfo: {}")
                     .addArgument(getLeafReaderDebugInfo.apply(leafReader1))
                     .addArgument(getLeafReaderDebugInfo.apply(leafReader2))
                     .log();

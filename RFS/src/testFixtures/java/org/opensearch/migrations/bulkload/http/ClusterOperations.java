@@ -72,14 +72,17 @@ public class ClusterOperations {
         createDocument(index, docId, body, null, null);
     }
 
-    @SneakyThrows
-    public void createDocument(final String index, final String docId, final String body, String routing, String type) {
+    public void createDocument(final String index, final String docId, final String body, final String routing, final String type) {
         var response = put("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing, body);
         assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
-    public void deleteDocument(final String index, final String docId, final String type) throws IOException {
-        var response = delete("/" + index + "/" + docTypePathOrDefault(type) + docId);
+    public void deleteDocument(final String index, final String docId, final String type) {
+        deleteDocument(index, docId, null, type);
+    }
+
+    public void deleteDocument(final String index, final String docId, final String routing, final String type) {
+        var response = delete("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing);
         assertThat(response.getKey(), equalTo(200));
     }
 
