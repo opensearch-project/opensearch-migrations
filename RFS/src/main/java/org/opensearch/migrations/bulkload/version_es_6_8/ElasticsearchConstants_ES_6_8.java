@@ -30,9 +30,11 @@ public class ElasticsearchConstants_ES_6_8 {
         SMILE_FACTORY.disable(JsonGenerator.Feature.AUTO_CLOSE_JSON_CONTENT);
         SMILE_FACTORY.disable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
 
-        // Soft Deletes were added in 7.0
-        SOFT_DELETES_FIELD = "";
-        SOFT_DELETES_POSSIBLE = false;
+        // Soft deletes were added in 6.5
+        // Taken from:
+        // https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/common/lucene/Lucene.java#L117
+        SOFT_DELETES_FIELD = "__soft_deletes";
+        SOFT_DELETES_POSSIBLE = true;
     }
 
 }
