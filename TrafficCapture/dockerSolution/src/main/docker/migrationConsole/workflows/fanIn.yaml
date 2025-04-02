@@ -35,10 +35,12 @@ spec:
         value: "bitnami/etcd:latest"
 
   templates:
+
     # Main workflow template
     - name: main
       dag:
         tasks:
+
           # Initialize etcd keys
           - name: init
             template: init-etcd
@@ -50,6 +52,8 @@ spec:
                   value: "{{workflow.parameters.processors}}"
                 - name: targets
                   value: "{{workflow.parameters.targets}}"
+                - name: prefix
+                  value: "workflow-{{workflow.uid}}"
 
           # Process sources
           - name: process-sources
@@ -64,6 +68,17 @@ spec:
                   value: "{{workflow.parameters.processors}}"
                 - name: targets
                   value: "{{workflow.parameters.targets}}"
+                - name: prefix
+                  value: "{{tasks.init.outputs.parameters.prefix}}"
+
+          # Clean up etcd keys after all processing is complete
+          - name: cleanup
+            template: cleanup-etcd
+            dependencies: ["process-sources"]
+            arguments:
+              parameters:
+                - name: prefix
+                  value: "{{tasks.init.outputs.parameters.prefix}}"
 
     # Initialize etcd keys
     - name: init-etcd
@@ -72,29 +87,40 @@ spec:
           - name: sources
           - name: processors
           - name: targets
+          - name: prefix
+      outputs:
+        parameters:
+          - name: prefix
+            valueFrom:
+              path: /tmp/prefix
       container:
         image: "{{workflow.parameters.etcd-image}}"
         command: [sh, -c]
         args:
           - |
+            echo "{{inputs.parameters.prefix}}" > /tmp/prefix
             export ETCDCTL_API=3
             
             # Run etcdctl with configured endpoints and authentication
             etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
             
+            # Store the workflow prefix in etcd for future reference
+            $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/info/prefix "{{inputs.parameters.prefix}}"
+            $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/info/started "$(date +%s)"
+            
             # Initialize target counters and metadata
             for TARGET in $(echo {{inputs.parameters.targets}} | tr ',' ' '); do
               # Create base keys with initial values
-              $etcdctl_cmd put /workflow/targets/$TARGET/completed_count "0"
-              $etcdctl_cmd put /workflow/targets/$TARGET/processed_count "0"
-              $etcdctl_cmd put /workflow/targets/$TARGET/status "pending"
+              $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/completed_count "0"
+              $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/processed_count "0"
+              $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/status "pending"
             
               # Calculate total expected
               SOURCE_COUNT=$(echo {{inputs.parameters.sources}} | tr ',' ' ' | wc -w)
               PROCESSOR_COUNT=$(echo {{inputs.parameters.processors}} | tr ',' ' ' | wc -w)
               TOTAL_EXPECTED=$((SOURCE_COUNT * PROCESSOR_COUNT))
             
-              $etcdctl_cmd put /workflow/targets/$TARGET/total_expected "$TOTAL_EXPECTED"
+              $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/total_expected "$TOTAL_EXPECTED"
               echo "Target $TARGET expects $TOTAL_EXPECTED combinations"
             done
             
@@ -103,12 +129,12 @@ spec:
               for PROCESSOR in $(echo {{inputs.parameters.processors}} | tr ',' ' '); do
                 for TARGET in $(echo {{inputs.parameters.targets}} | tr ',' ' '); do
                   # Mark as pending
-                  $etcdctl_cmd put /workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "pending"
+                  $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "pending"
                 done
               done
             done
             
-            echo "Etcd keys initialized"
+            echo "Etcd keys initialized with prefix: {{inputs.parameters.prefix}}"
 
     # Process a single source with all processors
     - name: process-source
@@ -117,6 +143,7 @@ spec:
           - name: source
           - name: processors
           - name: targets
+          - name: prefix
       steps:
         - - name: process-processors
             template: process-processor
@@ -129,6 +156,8 @@ spec:
                   value: "{{item}}"
                 - name: targets
                   value: "{{inputs.parameters.targets}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
 
     # Process a source-processor pair for all targets
     - name: process-processor
@@ -137,6 +166,7 @@ spec:
           - name: source
           - name: processor
           - name: targets
+          - name: prefix
       steps:
         - - name: process-targets
             template: process-target
@@ -149,6 +179,8 @@ spec:
                   value: "{{inputs.parameters.processor}}"
                 - name: target
                   value: "{{item}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
 
     # Process a single source-processor-target combination
     - name: process-target
@@ -157,6 +189,7 @@ spec:
           - name: source
           - name: processor
           - name: target
+          - name: prefix
       steps:
         # Process the combination
         - - name: process
@@ -169,6 +202,8 @@ spec:
                   value: "{{inputs.parameters.processor}}"
                 - name: target
                   value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
 
         # Check target readiness after processing and finalize if ready
         - - name: check-and-finalize
@@ -177,6 +212,8 @@ spec:
               parameters:
                 - name: target
                   value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
 
     # Process a specific combination
     - name: process-combination
@@ -185,6 +222,7 @@ spec:
           - name: source
           - name: processor
           - name: target
+          - name: prefix
       container:
         image: "{{workflow.parameters.etcd-image}}"
         command: [bash, -c]
@@ -199,33 +237,34 @@ spec:
             SOURCE="{{inputs.parameters.source}}"
             PROCESSOR="{{inputs.parameters.processor}}"
             TARGET="{{inputs.parameters.target}}"
+            PREFIX="{{inputs.parameters.prefix}}"
             
-            echo "Processing source=$SOURCE processor=$PROCESSOR target=$TARGET"
+            echo "Processing source=$SOURCE processor=$PROCESSOR target=$TARGET with prefix=$PREFIX"
             
-            # Randomize processing time (0-60 seconds)
-            SLEEP_TIME=$(( (RANDOM % 61) ))
-            
+            # Randomize processing time
+            SLEEP_TIME=$(( (RANDOM % 1) ))
             echo "Processing will take $SLEEP_TIME seconds"
             sleep $SLEEP_TIME
             
             echo "SUCCESS: $SOURCE-$PROCESSOR for $TARGET"
             
             # Update combo status atomically
-            $etcdctl_cmd put /workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "completed"
+            $etcdctl_cmd put /$PREFIX/workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "completed"
             
             # Atomically increment completion counter
-            CURRENT=$($etcdctl_cmd get /workflow/targets/$TARGET/completed_count --print-value-only)
-            $etcdctl_cmd put /workflow/targets/$TARGET/completed_count "$((CURRENT + 1))"
+            CURRENT=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/completed_count --print-value-only)
+            $etcdctl_cmd put /$PREFIX/workflow/targets/$TARGET/completed_count "$((CURRENT + 1))"
             
             # Atomically increment processed counter (regardless of success or failure)
-            PROCESSED=$($etcdctl_cmd get /workflow/targets/$TARGET/processed_count --print-value-only)
-            $etcdctl_cmd put /workflow/targets/$TARGET/processed_count "$((PROCESSED + 1))"
+            PROCESSED=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/processed_count --print-value-only)
+            $etcdctl_cmd put /$PREFIX/workflow/targets/$TARGET/processed_count "$((PROCESSED + 1))"
 
     # Check if a target is ready after processing
     - name: check-target-ready
       inputs:
         parameters:
           - name: target
+          - name: prefix
       steps:
         # First step: check if all processes are complete for the target
         - - name: check-status
@@ -234,6 +273,8 @@ spec:
               parameters:
                 - name: target
                   value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
 
         # Second step: finalize if needed
         - - name: conditional-finalize
@@ -242,6 +283,8 @@ spec:
               parameters:
                 - name: target
                   value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
             when: "{{steps.check-status.outputs.parameters.should-finalize}} == true"
 
     # Check target status and determine if it should be finalized
@@ -249,6 +292,7 @@ spec:
       inputs:
         parameters:
           - name: target
+          - name: prefix
       outputs:
         parameters:
           - name: should-finalize
@@ -265,11 +309,12 @@ spec:
           
           # Parameters
           TARGET="{{inputs.parameters.target}}"
+          PREFIX="{{inputs.parameters.prefix}}"
           
           # Read current counters atomically
-          PROCESSED=$($etcdctl_cmd get /workflow/targets/$TARGET/processed_count --print-value-only)
-          TOTAL=$($etcdctl_cmd get /workflow/targets/$TARGET/total_expected --print-value-only)
-          STATUS=$($etcdctl_cmd get /workflow/targets/$TARGET/status --print-value-only)
+          PROCESSED=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/processed_count --print-value-only)
+          TOTAL=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/total_expected --print-value-only)
+          STATUS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/status --print-value-only)
           
           echo "Target $TARGET status: $PROCESSED processed out of $TOTAL expected" >&2
           
@@ -283,7 +328,7 @@ spec:
             # Check if the target was already processed
             if [ "$STATUS" = "pending" ]; then
               # Atomically update status with compare-and-swap to avoid race conditions
-              $etcdctl_cmd put /workflow/targets/$TARGET/status "ready" --prev-kv
+              $etcdctl_cmd put /$PREFIX/workflow/targets/$TARGET/status "ready" --prev-kv
               if [ $? -eq 0 ]; then
                 echo "Updated status, $TARGET is now ready for finalization" >&2
                 SHOULD_FINALIZE="true"
@@ -306,6 +351,7 @@ spec:
       inputs:
         parameters:
           - name: target
+          - name: prefix
       container:
         image: "{{workflow.parameters.etcd-image}}"
         command: [sh, -c]
@@ -315,12 +361,13 @@ spec:
             etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
             
             TARGET="{{inputs.parameters.target}}"
+            PREFIX="{{inputs.parameters.prefix}}"
             echo "===== FINALIZING TARGET $TARGET ====="
             
             # Get completed and processed counts
-            COMPLETED=$($etcdctl_cmd get /workflow/targets/$TARGET/completed_count --print-value-only)
-            PROCESSED=$($etcdctl_cmd get /workflow/targets/$TARGET/processed_count --print-value-only)
-            TOTAL=$($etcdctl_cmd get /workflow/targets/$TARGET/total_expected --print-value-only)
+            COMPLETED=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/completed_count --print-value-only)
+            PROCESSED=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/processed_count --print-value-only)
+            TOTAL=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/total_expected --print-value-only)
             
             echo "Completion stats:"
             echo "- Completed: $COMPLETED"
@@ -329,13 +376,72 @@ spec:
             
             # Show successful combinations
             echo "Successful processor combinations:"
-            $etcdctl_cmd get /workflow/targets/$TARGET/combos/ --prefix | grep -B1 completed
+            $etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/combos/ --prefix | grep -B1 completed
             
             # Perform target-specific final processing
             echo "Performing final processing for $TARGET..."
             sleep 10  # Simulate final processing
             
             # Mark as finalized
-            $etcdctl_cmd put /workflow/targets/$TARGET/status "finalized"
+            $etcdctl_cmd put /$PREFIX/workflow/targets/$TARGET/status "finalized"
             
             echo "Target $TARGET processing complete."
+
+    # New template to clean up etcd keys after workflow completion
+    - name: cleanup-etcd
+      inputs:
+        parameters:
+          - name: prefix
+      container:
+        image: "{{workflow.parameters.etcd-image}}"
+        command: [sh, -c]
+        args:
+          - |
+            export ETCDCTL_API=3
+            etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+            
+            PREFIX="{{inputs.parameters.prefix}}"
+            echo "===== CLEANING UP ETCD KEYS FOR PREFIX $PREFIX ====="
+            
+            # Record workflow completion time
+            $etcdctl_cmd put /$PREFIX/workflow/info/completed "$(date +%s)"
+            STARTED=$($etcdctl_cmd get /$PREFIX/workflow/info/started --print-value-only)
+            COMPLETED=$(date +%s)
+            DURATION=$((COMPLETED - STARTED))
+            
+            echo "Workflow completed in $DURATION seconds"
+            
+            # Get workflow stats for logging purposes
+            echo "Workflow completion stats:"
+            
+            for TARGET in $($etcdctl_cmd get /$PREFIX/workflow/targets/ --prefix --keys-only | grep "/status" | awk -F/ '{print $(NF-1)}' | sort | uniq); do
+              STATUS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/status --print-value-only)
+              COMPLETED=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/completed_count --print-value-only)
+              TOTAL=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/total_expected --print-value-only)
+            
+              echo "- Target $TARGET: Status=$STATUS, Completed=$COMPLETED/$TOTAL"
+            done
+            
+            # Keep statistics in a separate key that will persist
+            STATS_KEY="workflow-stats/runs/$PREFIX"
+            
+            # Save summarized workflow stats to a persistent key
+            $etcdctl_cmd put /$STATS_KEY/started "$STARTED"
+            $etcdctl_cmd put /$STATS_KEY/completed "$COMPLETED"
+            $etcdctl_cmd put /$STATS_KEY/duration "$DURATION"
+            
+            for TARGET in $($etcdctl_cmd get /$PREFIX/workflow/targets/ --prefix --keys-only | grep "/status" | awk -F/ '{print $(NF-1)}' | sort | uniq); do
+              STATUS=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/status --print-value-only)
+              COMPLETED=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/completed_count --print-value-only)
+              TOTAL=$($etcdctl_cmd get /$PREFIX/workflow/targets/$TARGET/total_expected --print-value-only)
+            
+              $etcdctl_cmd put /$STATS_KEY/targets/$TARGET/status "$STATUS"
+              $etcdctl_cmd put /$STATS_KEY/targets/$TARGET/completed "$COMPLETED"
+              $etcdctl_cmd put /$STATS_KEY/targets/$TARGET/total "$TOTAL"
+            done
+            
+            # Delete all workflow keys for this run (but keep the stats)
+            echo "Deleting all workflow keys with prefix: /$PREFIX/workflow/"
+            $etcdctl_cmd del /$PREFIX/workflow/ --prefix
+            
+            echo "Cleanup complete. Workflow stats preserved under /$STATS_KEY/"
