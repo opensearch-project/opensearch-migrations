@@ -17,29 +17,24 @@ public class TransformFunctions {
 
     private TransformFunctions() {}
 
-    /**
-     * presumedDimensionality is effectively another way of saying "our guess at the number of availability zones the
-     * target cluster is deployed across". We don't know for sure how many there are, so we start at 1 and then increment
-     * it until we find a number that works.
-     */
     public static Transformer getTransformer(
         Version sourceVersion,
         Version targetVersion,
-        int presumedDimensionality,
+        int clusterDimensionality,
         MetadataTransformerParams metadataTransformerParams
     ) {
         if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
             if (VersionMatchers.isES_5_X.test(sourceVersion)) {
-                return new Transformer_ES_5_6_to_OS_2_11(presumedDimensionality, metadataTransformerParams);
+                return new Transformer_ES_5_6_to_OS_2_11(clusterDimensionality, metadataTransformerParams);
             }
             if (VersionMatchers.isES_6_X.test(sourceVersion)) {
-                return new Transformer_ES_6_8_to_OS_2_11(presumedDimensionality, metadataTransformerParams);
+                return new Transformer_ES_6_8_to_OS_2_11(clusterDimensionality, metadataTransformerParams);
             }
             if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
-                return new Transformer_ES_7_10_OS_2_11(presumedDimensionality);
+                return new Transformer_ES_7_10_OS_2_11(clusterDimensionality);
             }
             if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).test(sourceVersion)) {
-                return new Transformer_ES_7_10_OS_2_11(presumedDimensionality);
+                return new Transformer_ES_7_10_OS_2_11(clusterDimensionality);
             }
         }
         throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion);

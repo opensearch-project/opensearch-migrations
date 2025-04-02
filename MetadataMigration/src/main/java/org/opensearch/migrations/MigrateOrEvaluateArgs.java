@@ -46,9 +46,11 @@ public class MigrateOrEvaluateArgs {
     public DataFilterArgs dataFilterArgs = new DataFilterArgs(); 
 
     // https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
-    @Parameter(names = {"--min-replicas" }, description = "Optional.  The minimum number of replicas configured for migrated indices on the target."
-            + " This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements.  Default: 0")
-    public int minNumberOfReplicas = 0;
+    @Parameter(names = {"--cluster-dimensionality" }, description = "Optional. This sets up a transformation for all indices to ensure that the number of replicas"
+            + "is compatible with the dimensionality of the cluster (usually the number of zones). This transformation strictly increases the number of replicas for each"
+            + "index to meet the cluster's dimensionality.  This can be useful for migrating to targets which use zonal deployments and require additional replicas to "
+            + "meet zone requirements.  Default: 0 (which does not apply any transformation)")
+    public int clusterDimensionality = 0;
 
     @Parameter(required = false, names = {
         "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"

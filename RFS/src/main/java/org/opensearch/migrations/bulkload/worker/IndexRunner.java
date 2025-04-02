@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.worker;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -26,6 +27,7 @@ public class IndexRunner {
     private final IndexCreator indexCreator;
     private final Transformer transformer;
     private final List<String> indexAllowlist;
+    private final AwarenessAttributeSettings awarenessAttributeSettings;
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -85,7 +87,7 @@ public class IndexRunner {
                                        ICreateIndexContext context,
                                        IndexMetadata transformedMetadata) {
         try {
-            return indexCreator.create(transformedMetadata, mode, context);
+            return indexCreator.create(transformedMetadata, mode, awarenessAttributeSettings, context);
         } catch (Exception e) {
             return CreationResult.builder()
                 .name(indexName)

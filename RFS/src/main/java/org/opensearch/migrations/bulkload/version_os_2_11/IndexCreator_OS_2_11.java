@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
@@ -26,6 +27,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
     public CreationResult create(
         IndexMetadata index,
         MigrationMode mode,
+        AwarenessAttributeSettings awarenessAttributeSettings,
         ICreateIndexContext context
     ) {
         var result = CreationResult.builder().name(index.getName());
@@ -46,7 +48,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         body.set("settings", settings);
 
         try {
-            createInner(index, mode, context, result, settings, body);
+            createInner(index, mode, context, result, settings, body, awarenessAttributeSettings);
         } catch (IncompatibleReplicaCountException e) {
             result.failureType(CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE);
             result.exception(e);
@@ -57,12 +59,30 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         return result.build();
     }
 
+    private void checkForReplicaCountIncompatibility(ObjectNode settings, AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
+        if (!awarenessAttributeSettings.isBalanceEnabled()) {
+            return;
+        }
+        var awarenessAttributes = awarenessAttributeSettings.getNumberOfAttributeValues();
+        String replicaSetting = "number_of_replicas";
+        if (!settings.hasNonNull(replicaSetting)) {
+            return;
+        }
+        var replicaCount = settings.get(replicaSetting).asInt();
+        // To be compatible with the number of awareness attributes (usually zones), the awareness attribute must be divisible
+        // by the replica count + 1
+        if ((replicaCount + 1) % awarenessAttributes != 0) {
+            throw new IncompatibleReplicaCountException("A replica count of " + replicaCount  + " is not compatible with " + awarenessAttributes + " awareness attributes", null);
+        }
+    }
+
     private void createInner(IndexMetadata index,
                              MigrationMode mode,
                              ICreateIndexContext context,
                              CreationResultBuilder result,
                              ObjectNode settings,
-                             ObjectNode body) throws IncompatibleReplicaCountException {
+                             ObjectNode body,
+                             AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
         try {
             var alreadyExists = false;
@@ -75,12 +95,15 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             if (alreadyExists) {
                 result.failureType(CreationFailureType.ALREADY_EXISTS);
             }
+
+            if (mode == MigrationMode.SIMULATE) {
+                checkForReplicaCountIncompatibility(settings, awarenessAttributeSettings);
+            }
         } catch (InvalidResponse invalidResponse) {
             var potentialAwarenessAttributeException = invalidResponse.containsAwarenessAttributeException();
             if (potentialAwarenessAttributeException.isPresent()) {
                 log.warn("Index creation failed due to awareness attribute exception: " + potentialAwarenessAttributeException.get());
                 throw new IncompatibleReplicaCountException(potentialAwarenessAttributeException.get(), invalidResponse);
-
             }
 
             var illegalArguments = invalidResponse.getIllegalArguments();

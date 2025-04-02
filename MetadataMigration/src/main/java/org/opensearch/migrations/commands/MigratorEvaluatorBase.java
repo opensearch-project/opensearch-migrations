@@ -36,8 +36,6 @@ public abstract class MigratorEvaluatorBase {
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
 
-    static final int MAX_REPLICA_ADJUSTMENT_LOOPS = 4;
-
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
 
@@ -70,11 +68,11 @@ public abstract class MigratorEvaluatorBase {
         return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
-    protected Transformer selectTransformer(Clusters clusters, int presumedClusterDimensionality) {
+    protected Transformer selectTransformer(Clusters clusters, int clusterDimensionality) {
         var versionTransformer = TransformFunctions.getTransformer(
                 clusters.getSource().getVersion(),
                 clusters.getTarget().getVersion(),
-                presumedClusterDimensionality,
+                clusterDimensionality,
                 arguments.metadataTransformationParams
         );
         var customTransformer = getCustomTransformer();
@@ -84,7 +82,7 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformer selectTransformer(Clusters clusters) {
-        return selectTransformer(clusters, arguments.minNumberOfReplicas);
+        return selectTransformer(clusters, arguments.clusterDimensionality);
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
@@ -124,33 +122,16 @@ public abstract class MigratorEvaluatorBase {
         return metadataResults;
     }
 
-    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer initalTransformer, RootMetadataMigrationContext context) {
-        int presumedClusterDimensionality = arguments.minNumberOfReplicas;
-        var transformer = initalTransformer;
-        while (true) {
-            var indexRunner = new IndexRunner(
-                    arguments.snapshotName,
-                    clusters.getSource().getIndexMetadata(),
-                    clusters.getTarget().getIndexCreator(),
-                    transformer,
-                    arguments.dataFilterArgs.indexAllowlist
-            );
-            var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
-            // Check whether any indices failed with an incompatibleReplicaCount
-            boolean incompatibleReplicaCountSeen = indexResults.getIndexes().stream().anyMatch(result -> result.wasFatal() && result.getFailureType().equals(CreationResult.CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE));
-            if (incompatibleReplicaCountSeen) {
-                if (presumedClusterDimensionality >= arguments.minNumberOfReplicas + MAX_REPLICA_ADJUSTMENT_LOOPS) {
-                    log.atWarn().setMessage("Incompatible replica count seen after max adjustment attempts ({}). Max replica count attempted: {}")
-                            .addArgument(MAX_REPLICA_ADJUSTMENT_LOOPS).addArgument(presumedClusterDimensionality - 1).log();
-                    return indexResults;
-                }
-                presumedClusterDimensionality++;
-                log.warn("Incompatible replica count seen for the cluster dimensionality. Retrying with an assumed cluster dimensionality of {}", presumedClusterDimensionality);
-                transformer = selectTransformer(clusters, presumedClusterDimensionality);
-                continue;
-            }
-            log.info("Index copy complete.");
-            return indexResults;
-        }
-    } 
-}
+    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
+        var indexRunner = new IndexRunner(
+            arguments.snapshotName,
+            clusters.getSource().getIndexMetadata(),
+            clusters.getTarget().getIndexCreator(),
+            transformer,
+            arguments.dataFilterArgs.indexAllowlist,
+            clusters.getTarget().getAwarenessAttributeSettings()
+        );
+        var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
+        log.info("Index copy complete.");
+        return indexResults;
+    } }

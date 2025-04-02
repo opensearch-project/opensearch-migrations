@@ -3,6 +3,8 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +13,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -19,6 +22,7 @@ import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
@@ -71,6 +75,59 @@ public abstract class OpenSearchClient {
 
     public Version getClusterVersion() {
         return version;
+    }
+
+    private JsonNode getSettingFromPersistentOrDefaults(String path, ObjectNode settings) {
+        return settings.get("persistent").has(path) ?
+            settings.get("persistent").get(path) : settings.get("defaults").get(path);
+    }
+
+    public AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        String settingsPath = "_cluster/settings?flat_settings&include_defaults";
+        var getResponse = client.getAsync(settingsPath, null)
+            .flatMap(resp -> {
+                if (resp.statusCode == HttpURLConnection.HTTP_OK)
+                {
+                    return Mono.just(resp);
+                } else {
+                    String errorMessage = "Could not retrieve cluster settings: " + settingsPath + ". " + getString(resp);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
+            .doOnError(e -> log.error(e.getMessage()))
+            .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+            .block();
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or " +
+            "an exception should have been thrown.");
+        ObjectNode settings;
+
+        String balanceIsEnabledSetting = "cluster.routing.allocation.awareness.balance";
+
+
+        try {
+            settings = objectMapper.readValue(getResponse.body, ObjectNode.class);
+        } catch (Exception e) {
+            throw new OperationFailed("Could not parse settings values", getResponse);
+        }
+        boolean balanceIsEnabled = getSettingFromPersistentOrDefaults(balanceIsEnabledSetting, settings).asBoolean();
+        if (!balanceIsEnabled) {
+            return new org.opensearch.migrations.AwarenessAttributeSettings(false, 0);
+        }
+        List<String> attributeValues = new ArrayList<>(List.of());
+
+        String balanceAttributeSetting = "cluster.routing.allocation.awareness.attributes";
+        String balanceAttributeValues = "cluster.routing.allocation.awareness.force.";
+
+        getSettingFromPersistentOrDefaults(balanceAttributeSetting, settings)
+            .forEach(attributeName -> {
+                    attributeValues.addAll(Arrays.asList(getSettingFromPersistentOrDefaults(
+                        balanceAttributeValues + attributeName.asText() + ".values", settings).asText().split(",")));
+                });
+
+        // Note that in some cases, the zone names are shielded as `xx-xxxxx-xx`, so filtering for
+        // distinct values will give an incorrect count.
+        return new AwarenessAttributeSettings(true, attributeValues.size()
+        );
     }
 
     /*
