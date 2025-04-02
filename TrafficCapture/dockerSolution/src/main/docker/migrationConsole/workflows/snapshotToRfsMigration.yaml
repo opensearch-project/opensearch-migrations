@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: full-migration
+  name: snapshot-and-rfs-poc1
   # add labels later w/ patch
 spec:
   serviceAccountName: argo-workflow-executor
