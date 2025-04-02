@@ -16,6 +16,8 @@ permissions:
 
 jobs:
   get-require-approval:
+    # Skip all jenkins jobs if not on main repo
+    if: ${{ github.repository == 'opensearch-project/opensearch-migrations' }}
     uses: ./.github/workflows/require-approval.yml
 
   sanitize-input:
