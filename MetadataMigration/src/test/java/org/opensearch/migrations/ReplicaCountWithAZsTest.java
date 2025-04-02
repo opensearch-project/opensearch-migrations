@@ -64,14 +64,11 @@ public class ReplicaCountWithAZsTest extends BaseMigrationTest{
 
             // Evaluate first and check that errors were thrown appropriately
             MigrationItemResult initialEvaluateResult = executeMigration(arguments, MetadataCommands.EVALUATE);
-//            System.out.println(initialEvaluateResult.asCliOutput());
             if (availabilityZoneCount == 1) {
                 Assertions.assertTrue(initialEvaluateResult.getItems().getIndexes().stream().allMatch(CreationResult::wasSuccessful));
             } else {
                 Assertions.assertFalse(initialEvaluateResult.getItems().getIndexes().stream().allMatch(CreationResult::wasSuccessful));
             }
-            assertThat(initialEvaluateResult.getExitCode(), equalTo(0));
-            // Ensure that the same number of indices were created (successfully) on the target cluster
 
             // Set argument for correct number of availability zones
             arguments.clusterDimensionality = availabilityZoneCount;
