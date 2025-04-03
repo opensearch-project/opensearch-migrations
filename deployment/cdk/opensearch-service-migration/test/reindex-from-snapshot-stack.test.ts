@@ -236,11 +236,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
 
     expect(reindexStack.rfsBackfillYaml.ecs.cluster_name).toBe('migration-unit-test-ecs-cluster');
     expect(reindexStack.rfsBackfillYaml.ecs.service_name).toBe('migration-unit-test-reindex-from-snapshot');
-    expect(reindexStack.rfsSnapshotYaml.s3).toEqual({
-      repo_uri: expect.stringMatching(/s3:\/\/migration-artifacts-.*-unit-test-.*/),
-      aws_region: expect.any(String),
-    });
-    expect(reindexStack.rfsSnapshotYaml.snapshot_name).toBe('rfs-snapshot');
   });
 
   test('ReindexFromSnapshotStack correctly overrides with extraArgs', () => {

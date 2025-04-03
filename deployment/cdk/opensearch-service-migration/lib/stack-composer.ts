@@ -20,11 +20,11 @@ import {
     ClusterNoAuth,
     MigrationSSMParameter,
     parseClusterDefinition,
-    parseRemovalPolicy,
+    parseRemovalPolicy, parseSnapshotDefinition,
     validateFargateCpuArch
 } from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ClientOptions, ClusterYaml, ServicesYaml} from "./migration-services-yaml";
+import {ClientOptions, ClusterYaml, ServicesYaml, SnapshotYaml} from "./migration-services-yaml";
 import { CdkLogger } from "./cdk-logger";
 
 export interface StackPropsExt extends StackProps {
@@ -139,7 +139,11 @@ export class StackComposer {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const defaultValues: Record<string, any> = defaultValuesJson
-        const region = props.env?.region
+        if (!props.env?.region || !props.env?.account) {
+            throw new Error('Missing at least one of required fields [region, account] in props.env');
+        }
+        const account = props.env.account
+        const region = props.env.region
         const defaultDeployId = 'default'
 
         const contextId = scope.node.tryGetContext("contextId")
@@ -378,8 +382,18 @@ export class StackComposer {
             servicesYaml.client_options.user_agent_extra = props.migrationsUserAgent
         }
 
-        // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
-        // created Domain like below or an imported one
+        const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
+        let snapshotYaml
+        if (existingSnapshotDefinition) {
+            snapshotYaml = parseSnapshotDefinition(existingSnapshotDefinition)
+        } else {
+            snapshotYaml = new SnapshotYaml();
+            snapshotYaml.snapshot_name = "rfs-snapshot"
+            const s3Uri = `s3://migration-artifacts-${account}-${stage}-${region}/rfs-snapshot-repo`;
+            snapshotYaml.s3 = {repo_uri: s3Uri, aws_region: region};
+        }
+        servicesYaml.snapshot = snapshotYaml
+
         let openSearchStack
         if (!preexistingOrContainerTargetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
@@ -502,13 +516,12 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 env: props.env,
                 maxShardSizeGiB: reindexFromSnapshotMaxShardSizeGiB,
-                reindexFromSnapshotWorkerSize
+                reindexFromSnapshotWorkerSize,
+                snapshotYaml: servicesYaml.snapshot
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(reindexFromSnapshotStack)
             servicesYaml.backfill = reindexFromSnapshotStack.rfsBackfillYaml;
-            servicesYaml.snapshot = reindexFromSnapshotStack.rfsSnapshotYaml;
-
         }
 
         let captureProxyESStack

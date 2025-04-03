@@ -92,6 +92,12 @@ export class SnapshotYaml {
     s3?: S3SnapshotYaml;
     fs?: FileSystemSnapshotYaml;
 
+    // constructor({snapshot_name, otel_endpoint, s3} : {snapshot_name: string, otel_endpoint: string, s3: S3SnapshotYaml}) {
+    //     this.snapshot_name = snapshot_name;
+    //     this.otel_endpoint = otel_endpoint;
+    //     this.s3 = s3;
+    // }
+
     toDict() {
         return {
             snapshot_name: this.snapshot_name,
