@@ -5,6 +5,7 @@ import random
 import string
 import json
 import time
+from pathlib import Path
 from typing import Dict, List
 from unittest import TestCase
 from console_link.models.cluster import HttpMethod, Cluster
@@ -24,6 +25,13 @@ class DefaultOperationsLibrary:
 
     def create_index(self, index_name: str, cluster: Cluster, **kwargs):
         headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}",
+                                headers=headers, **kwargs)
+
+    def create_index_es56(self, index_name: str, cluster: Cluster, body: dict = None, **kwargs):
+        headers = {'Content-Type': 'application/json'}
+        if body:
+            kwargs['data'] = json.dumps(body)
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}",
                                 headers=headers, **kwargs)
 
@@ -166,10 +174,9 @@ class DefaultOperationsLibrary:
         }
 
     def create_transformation_json_file(self, transform_config_data, file_path_to_create: str):
-        directory = os.path.dirname(file_path_to_create)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(file_path_to_create, "w") as file:
+        file_path = Path(file_path_to_create)
+        file_path.parent.mkdir(parents=True, exist_ok=True)  
+        with file_path.open("w") as file:
             json.dump(transform_config_data, file, indent=4)
 
     def convert_transformations_to_str(self, transform_list: List[Dict]) -> str:

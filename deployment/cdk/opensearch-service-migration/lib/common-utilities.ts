@@ -202,13 +202,13 @@ export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string,
     snapshotRole.addToPolicy(new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['s3:ListBucket'],
-        resources: [artifactS3Arn],
+        resources: ["*"],
     }));
 
     snapshotRole.addToPolicy(new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-        resources: [`${artifactS3Arn}/*`],
+        resources: ["*"],
     }));
 
     // The Migration Console Role needs to be able to pass the snapshot role
