@@ -89,7 +89,12 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
 
+            // === ACTION: Create two large documents (40MB each) ===
+            String largeDoc = generateLargeDocJson(40);
+            sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
+            sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);
 
+            // === ACTION: Create some searchable documents ===
             sourceClusterOperations.createDocument(indexName, "222", "{\"author\":\"Tobias Funke\"}");
             sourceClusterOperations.createDocument(indexName, "223", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
             sourceClusterOperations.createDocument(indexName, "224", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
@@ -157,6 +162,19 @@ public class EndToEndTest extends SourceTestBase {
         } finally {
             deleteTree(localDirectory.toPath());
         }
+    }
+
+    private String generateLargeDocJson(int sizeInMB) {
+        // Calculate the number of characters needed (1 char = 1 byte)
+        int numChars = sizeInMB * 1024 * 1024;
+        Random random = new Random(1); // fixed seed for reproducibility
+        StringBuilder sb = new StringBuilder(numChars);
+        String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        for (int i = 0; i < numChars; i++) {
+            sb.append(characters.charAt(random.nextInt(characters.length())));
+        }
+        String timestamp = java.time.Instant.now().toString();
+        return "{\"timestamp\":\"" + timestamp + "\", \"large_field\":\"" + sb + "\"}";
     }
 
     private void checkDocsWithRouting(

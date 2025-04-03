@@ -70,7 +70,7 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 
 @Slf4j
 public class SourceTestBase {
-    public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
+    public static final long MAX_SHARD_SIZE_BYTES = 1024 * 1024 * 1024L; // 1 GB
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
 

@@ -9,12 +9,14 @@ import java.util.Objects;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.io.SegmentedStringWriter;
 import com.fasterxml.jackson.core.io.SerializedString;
 import com.fasterxml.jackson.core.util.BufferRecycler;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
@@ -31,10 +33,21 @@ import lombok.extern.slf4j.Slf4j;
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @Slf4j
 public class BulkDocSection {
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private static final ObjectMapper BULK_INDEX_REQUEST_MAPPER = OBJECT_MAPPER.copy()
-            .registerModule(new SimpleModule()
-                    .addSerializer(BulkIndex.class, new BulkIndex.BulkIndexRequestSerializer()));
+    private static final int MAX_STRING_LENGTH = 100 * 1024 * 1024; // ~100 MB
+
+    private static final ObjectMapper OBJECT_MAPPER;
+    private static final ObjectMapper BULK_INDEX_REQUEST_MAPPER;
+
+    static {
+        OBJECT_MAPPER = JsonMapper.builder().build();
+        OBJECT_MAPPER.getFactory()
+                .setStreamReadConstraints(StreamReadConstraints.builder()
+                        .maxStringLength(MAX_STRING_LENGTH).build());
+        BULK_INDEX_REQUEST_MAPPER = OBJECT_MAPPER.copy()
+                .registerModule(new SimpleModule()
+                        .addSerializer(BulkIndex.class, new BulkIndex.BulkIndexRequestSerializer()));
+    }
+
     private static final String NEWLINE = "\n";
 
     @EqualsAndHashCode.Include
