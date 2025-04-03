@@ -468,11 +468,11 @@ export function parseClusterDefinition(json: any): ClusterYaml {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function parseSnapshotDefinition(json: any): SnapshotYaml {
-    const snapshotName = json.snapshot_name
-    const s3Region = json.s3_region
-    const s3Uri = json.s3_uri
+    const snapshotName = json.snapshotName
+    const s3Region = json.s3Region
+    const s3Uri = json.s3Uri
     if (!snapshotName || !s3Region || !s3Uri) {
-        throw new Error('Missing at least one of the required snapshot fields: snapshot_name, s3_region, s3_uri');
+        throw new Error('Missing at least one of the required snapshot fields: snapshotName, s3Region, s3Uri');
     }
     const snapshotYaml = new SnapshotYaml()
     snapshotYaml.snapshot_name = snapshotName
