@@ -125,6 +125,7 @@ subprojects {
             force "org.bouncycastle:bcprov-jdk18on:${libs.versions.bouncycastle.get()}"
             force 'com.jayway.jsonpath:json-path:2.9.0'
             force 'com.thoughtworks.xstream:xstream:1.4.21'
+            force "commons-io:commons-io:2.18.0"
             force 'commons-net:commons-net:3.11.1'
             force 'dnsjava:dnsjava:3.6.3'
             force 'net.minidev:json-smart:2.5.2'
