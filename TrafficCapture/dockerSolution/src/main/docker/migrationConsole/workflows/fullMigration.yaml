@@ -16,7 +16,7 @@ spec:
       - name: etcd-password
         value: "password"
       - name: etcd-image
-        value: "bitnami/etcd:latest"
+        value: "migrations/migration_console:latest"
       - name: create-snapshot-template-name
         value: "create-snapshot"
 
@@ -26,97 +26,19 @@ spec:
     - name: main
       inputs:
         parameters:
-          - name: source-configs
-            default: |
-              [
-                "source-migration-configurations": [
-                  {
-                    "source": {
-                      "id": "sourceA",
-                      "endpoint": "https://sourceA.example.com",
-                      "auth": { "type": "basic", "username": "user", "password": "pass" }
-                    },
-                    "snapshot-and-migration-configs": [
-                      {
-                        "indices": ["index_1", "index_2"],
-                        "existingSnapshot": {},
-                        "migrations": [
-                          {
-                            "metadata": {
-                              "mappings": { "properties": {} },
-                              "settings": {}
-                            },
-                            "documentBackfillConfigs": [
-                              {
-                                "indices": ["index_1"],
-                                "query": { "match_all": {} }
-                              },
-                              {
-                                "indices": ["index_2"],
-                                "query": { "match_all": {} }
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    ],
-                    "replayer-config": {
-                      "batchSize": 1000,
-                      "concurrency": 4
-                    }
-                  },
-                  {
-                    "source": {
-                      "id": "sourceB",
-                      "endpoint": "https://sourceB.example.com",
-                      "auth": { "type": "basic", "username": "user", "password": "pass" }
-                    },
-                    "snapshot-and-migration-configs": [
-                      {
-                        "indices": ["index_3", "index_4"],
-                        "existingSnapshot": {},
-                        "migrations": [
-                          {
-                            "metadata": {
-                            "mappings": { "properties": {} },
-                            "settings": {}
-                          },
-                          "documentBackfillConfigs": [
-                            {
-                              "indices": ["index_3", "index_4"],
-                              "query": { "match_all": {} }
-                            }
-                          ]
-                        ]
-                      }
-                    ],
-                    "replayer-config": {
-                      "batchSize": 1000,
-                      "concurrency": 4
-                    }
-                  }
-              ]
+          - name: source-migration-configs
+            default: "[{\"source\":{\"id\":\"sourceA\",\"endpoint\":\"https://sourceA.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"id\":\"sourceB\",\"endpoint\":\"https://sourceB.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
           - name: targets
-            value: "T1,T2" #"[{'endpoint': 'T1'},{'endpoint': T2},{'endpoint': T3}]"
+            value: "[{\"id\":\"T1\",\"endpoint\":\"https://t1.example.com\"}, {\"id\":\"T2\",\"endpoint\":\"https://t2.example.com\"}]"
       dag:
         tasks:
-          - name: compute-processor-combinations
-            template: compute-combinations
-            arguments:
-              parameters:
-                - name: "configurations"
-                  value: "{{inputs.parameters.source-configs}}"
-
           # Initialize etcd keys used to determine once all the processors have finished for a target
           - name: init
             template: init-etcd-keys
-            dependencies: ["compute-processor-combinations"]
             arguments:
               parameters:
-                - name: sources
-                  value: "{{=tasks['compute-processor-combinations'].outputs.parameters['sources']}}"
-                - name: processors
-                  value: "{{=tasks['compute-processor-combinations'].outputs.parameters['processor-combinations']}}"
+                - name: configurations
+                  value: "{{inputs.parameters.source-migration-configs}}"
                 - name: targets
                   value: "{{inputs.parameters.targets}}"
                 - name: prefix
@@ -125,7 +47,7 @@ spec:
           - name: source-pipeline
             template: source-migration-pipeline
             dependencies: ["init"]
-            withParam: "{{=jsonPath(inputs.parameters['source-migration-configurations'], '$[*]')}}"
+            withParam: "{{inputs.parameters.source-migration-configs}}"
             arguments:
               parameters:
                 - name: source-migration-config
@@ -144,31 +66,10 @@ spec:
                 - name: prefix
                   value: "{{tasks.init.outputs.parameters.prefix}}"
 
-    - name: compute-combinations
-      parameters:
-        - name: "configurations"
-      steps: [[]]
-      outputs:
-        parameters:
-          - name: "sources"
-            valueFrom:
-              expression: "{{=jsonPath(inputs.parameters.source-configs, '$[*].source')
-                            .map((source, i) => 'source-' + i + '-' + source.endpoint)
-                            .join(',')}}"
-          - name: processor-combinations
-            valueFrom:
-              expression: "{{=join(jsonPath(inputs.parameters.config, '$.source-migration-configurations[*]')
-                           .map(source => jsonPath(source, '$.snapshot-and-migration-configs[*]')
-                           .map(config => 'source-migration-configurations[' + @i + ']
-                           .snapshot-and-migration-configs[' + @j + ']
-                           .documentBackfillConfigs')
-                           .join(',')), ',')}}"
-
     - name: init-etcd-keys
       inputs:
         parameters:
-          - name: sources
-          - name: processors
+          - name: configurations
           - name: targets
           - name: prefix
       outputs:
@@ -177,10 +78,22 @@ spec:
             valueFrom:
               path: /tmp/prefix
       container:
-        image: "{{workflow.parameters.etcd-image}}"
+        image: migrations/migration_console:latest
+        imagePullPolicy: Never
         command: [sh, -c]
         args:
           - |
+            SOURCE_CONFIG=$(echo '{{inputs.parameters.configurations}}')
+            ls -l /usr/local/bin/
+            echo "source config = $SOURCE_CONFIG"
+
+            SOURCES=$(echo "$SOURCE_CONFIG" | jq -r 'to_entries | map("source-" + (.key|tostring) + "-" + .value.source.endpoint) | join(",")')
+            echo "Sources= $SOURCES"
+            
+            # Extract paths to migrations elements
+            PROCESSORS=$(echo "$SOURCE_CONFIG" | jq -r 'to_entries | map(.key as $src_idx | .value["snapshot-and-migration-configs"] | to_entries | map("[" + ($src_idx|tostring) + "].snapshot-and-migration-configs[" + (.key|tostring) + "].migrations")) | flatten | join(",")')
+            echo "Processors= $PROCESSORS"
+            
             echo "{{inputs.parameters.prefix}}" > /tmp/prefix
             export ETCDCTL_API=3
             
@@ -199,8 +112,8 @@ spec:
               $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/status "pending"
             
               # Calculate total expected
-              SOURCE_COUNT=$(echo {{inputs.parameters.sources}} | tr ',' ' ' | wc -w)
-              PROCESSOR_COUNT=$(echo {{inputs.parameters.processors}} | tr ',' ' ' | wc -w)
+              SOURCE_COUNT=$(echo $SOURCES | tr ',' ' ' | wc -w)
+              PROCESSOR_COUNT=$(echo $PROCESSORS | tr ',' ' ' | wc -w)
               TOTAL_EXPECTED=$((SOURCE_COUNT * PROCESSOR_COUNT))
             
               $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/total_expected "$TOTAL_EXPECTED"
@@ -208,8 +121,8 @@ spec:
             done
             
             # Initialize pending status for all combinations
-            for SOURCE in $(echo {{inputs.parameters.sources}} | tr ',' ' '); do
-              for PROCESSOR in $(echo {{inputs.parameters.processors}} | tr ',' ' '); do
+            for SOURCE in $(echo $SOURCES | tr ',' ' '); do
+              for PROCESSOR in $(echo $PROCESSORS | tr ',' ' '); do
                 for TARGET in $(echo {{inputs.parameters.targets}} | tr ',' ' '); do
                   # Mark as pending
                   $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$TARGET/combos/$SOURCE-$PROCESSOR "pending"
@@ -218,6 +131,7 @@ spec:
             done
             
             echo "Etcd keys initialized with prefix: {{inputs.parameters.prefix}}"
+
 
 
 
@@ -261,7 +175,7 @@ spec:
                   value: "{{inputs.parameters.snapshot-and-migration-config}}"
         - - name: snapshot-to-target-pipeline
             template: snapshot-to-target-pipeline
-            withParam: "{{=jsonPath(fromJSON(inputs.parameters.targets), '$[*]')}}"
+            withParam: "{{inputs.parameters.targets}}"
             arguments:
               parameters:
                 - name: source-config
@@ -271,7 +185,7 @@ spec:
                 - name: migration-configs
                   value: "{{=fromJSON(inputs.parameters['snapshot-and-migration-config'])['migrations']}}"
                 - name: target
-                  value: "{{inputs.parameters.targets}}"
+                  value: "{{item}}"
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
 
@@ -283,8 +197,8 @@ spec:
       outputs:
         parameters:
           - name: snapshot-config
-            value: "dirt"
-      #            value: "{{=fromJSON(inputs.parameters['snapshot-and-migration-config']['existingSnapshot'])}}"
+            valueFrom:
+              expression: "toJSON(fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot'])"
       steps: [[]]
 
     - name: snapshot-to-target-pipeline
@@ -298,7 +212,7 @@ spec:
       steps:
         - - name: migrate-from-snapshot-pipeline
             template: migrate-from-snapshot-pipeline
-            withParam: "{{=jsonPath(fromJSON(inputs.parameters.migrationConfigs), '$[*]')}}"
+            withParam: "{{inputs.parameters.migration-configs}}"
             arguments:
               parameters:
                 - name: source-config
@@ -323,7 +237,7 @@ spec:
       steps:
         - - name: migrate-metadata
             template: migrate-metadata
-            when: "{{fromJSON(inputs.parameters['migration-config'])['metadata'] != nil}}"
+#            when: "{{=fromJSON(inputs.parameters['migration-config'])['metadata'] != nil}}"
             arguments:
               parameters:
                 - name: source-config
@@ -336,7 +250,7 @@ spec:
                   value: "{{inputs.parameters.target}}"
         - - name: bulk-load-documents
             template: bulk-load-documents
-            withParam: "{{=jsonPath(fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs'], '$[*]')}}"
+            withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
             arguments:
               parameters:
                 - name: snapshot-config
@@ -345,6 +259,19 @@ spec:
                   value: "{{item}}"
                 - name: target
                   value: "{{inputs.parameters.target}}"
+        # Check target readiness after processing and bump it to the next phase if ready
+        - - name: check-for-target-processing-completion
+            template: reduce-target-when-ready
+            arguments:
+              parameters:
+                - name: source
+                  value: "{{inputs.parameters.source-config}}"
+                - name: processor
+                  value: "dont know yet"
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
 
     - name: migrate-metadata
       inputs:
@@ -353,7 +280,11 @@ spec:
           - name: snapshot-config
           - name: migration-config
           - name: target
-      steps: [[]]
+      container:
+        image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
+        command: [ echo ]
+        args: [ "metadata migrate" ]
 
     - name: bulk-load-documents
       inputs:
@@ -361,7 +292,11 @@ spec:
           - name: snapshot-config
           - name: rfs-config
           - name: target
-      steps: [[]]
+      container:
+        image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
+        command: [ echo ]
+        args: [ "backfill" ]
 
     # Do target processing after waiting for all other work (processors) to the target to complete
     - name: reduce-target-when-ready
@@ -387,7 +322,7 @@ spec:
 
         - - name: targets-all-processed-fan-in
             template: reduce-processors-for-target
-            when: "{{steps.target-processed-latch.outputs.parameters.should-finalize}} == true}}"
+            when: "{{steps.target-processed-latch.outputs.parameters.should-finalize}} == true"
             arguments:
               parameters:
                 - name: target
@@ -411,6 +346,7 @@ spec:
               path: /tmp/should-finalize
       script:
         image: "{{workflow.parameters.etcd-image}}"
+        imagePullPolicy: Never
         command: [sh]
         source: |
           SOURCE="{{inputs.parameters.source}}"
@@ -478,6 +414,7 @@ spec:
           - name: prefix
       container:
         image: "{{workflow.parameters.etcd-image}}"
+        imagePullPolicy: Never
         command: [sh, -c] # dummy implementation that preserves some stats about the work that was done
         args:
           - |
@@ -517,6 +454,7 @@ spec:
           - name: prefix
       container:
         image: "{{workflow.parameters.etcd-image}}"
+        imagePullPolicy: Never
         command: [sh, -c]
         args:
           - |
