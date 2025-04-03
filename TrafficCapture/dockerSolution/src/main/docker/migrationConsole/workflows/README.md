@@ -130,7 +130,7 @@ flowchart
     style replayer_target_t2 fill:#ddd,stroke:#333,stroke-width:4px
 ```
 
-e## Top-Level Configuration
+## Top-Level Configuration
 
 ```
 {
@@ -146,7 +146,7 @@ e## Top-Level Configuration
         "endpoint": "URI",
         "auth": { ... }
       },
-      "static-migration-configs": [
+      "snapshot-and-migration-configs": [
         {
           // when this is present, this stage (THIS static migration config) will NOT create a new snapshot, 
           // but from the top-level, the snapshot may be refresh it a replayer is set to happen
@@ -155,17 +155,18 @@ e## Top-Level Configuration
             "names": "index1,index2...",
             "mode": "include|exclude"
           },
-          "metadata": {
-            "transforms": "..."
-          },
-          "documentBackfillConfigs": [
+          "migrations": [
             {
-              // These indices should be a subset of the parent ones
-              "indices": {
-                "names": "index1,index2...",
-                "mode": "include|exclude"
+              "metadata": {
+                "transforms": "..."
               },
-              "transforms": "..."
+              "documentBackfillConfigs": {
+                // These indices should be a subset of the parent ones
+                "indices": {
+                  "names": "index1,index2...",
+                  "mode": "include|exclude"
+                },
+               "transforms": "..."
             }
           ]
         }
