@@ -170,7 +170,7 @@ jobs:
           --max-workers $MAX_WORKERS \
           -Dtest.striping.total=${{ env.gradle-test-parallelization }} \
           -Dtest.striping.index=${{ matrix.index }} \
-          -x spotlessCheck --stacktrace --continue --rerun-tasks
+          -x spotlessCheck --stacktrace --continue
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Detect Memory Dumps
