@@ -33,12 +33,11 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly sourceClusterVersion?: string,
     readonly maxShardSizeGiB?: number,
     readonly reindexFromSnapshotWorkerSize: "default" | "maximum",
-
+    readonly snapshotYaml: SnapshotYaml,
 }
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {
     rfsBackfillYaml: RFSBackfillYaml;
-    rfsSnapshotYaml: SnapshotYaml;
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
@@ -58,15 +57,9 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             })),
         ]
 
-        const artifactS3Arn = getMigrationStringParameterValue(this, {
-            parameter: MigrationSSMParameter.ARTIFACT_S3_ARN,
-            stage: props.stage,
-            defaultDeployId: props.defaultDeployId
-        });
-        const artifactS3AnyObjectPath = `${artifactS3Arn}/*`
-        const artifactS3PublishPolicy = new PolicyStatement({
+        const s3AccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [artifactS3Arn, artifactS3AnyObjectPath],
+            resources: ["*"],
             actions: [
                 "s3:*"
             ]
@@ -76,7 +69,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
-        const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
         let command = "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments"
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         const storagePath = "/storage"
@@ -85,9 +77,9 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const maxShardSizeGiB = planningSize * planningSizeBuffer
         const maxShardSizeBytes = maxShardSizeGiB * (1024 ** 3)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${props.snapshotYaml.s3?.repo_uri}"`)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", props.snapshotYaml.s3?.aws_region)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", props.snapshotYaml.snapshot_name)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${Math.ceil(maxShardSizeBytes)}`)
@@ -124,7 +116,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
-        const servicePolicies = [sharedLogFileSystem.asPolicyStatement(), artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
+        const servicePolicies = [sharedLogFileSystem.asPolicyStatement(), s3AccessPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.password_from_secret_arn ?
             getSecretAccessPolicy(props.clusterAuthDetails.basicAuth.password_from_secret_arn) : null;
@@ -226,8 +218,5 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.rfsBackfillYaml = new RFSBackfillYaml();
         this.rfsBackfillYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
         this.rfsBackfillYaml.ecs.service_name = `migration-${props.stage}-reindex-from-snapshot`;
-        this.rfsSnapshotYaml = new SnapshotYaml();
-        this.rfsSnapshotYaml.s3 = {repo_uri: s3Uri, aws_region: this.region};
-        this.rfsSnapshotYaml.snapshot_name = "rfs-snapshot";
     }
 }

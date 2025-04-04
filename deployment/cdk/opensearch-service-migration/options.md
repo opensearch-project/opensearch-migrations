@@ -49,6 +49,22 @@ In all other cases, the required components of each cluster object are:
     3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
     4. Basic auth with password in secrets manager (recommended): `{"type": "basic", "username": "admin", "passwordFromSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"}`
 
+### Snapshot Definition Options
+
+| Name     | Type   | Example                                                                                                                          | Description                                                                                        |
+|----------|--------|----------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| snapshot | object | {"snapshotName": "test-snapshot", "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo", "s3Region": "us-east-2"} | A json object for defining the details of an existing S3 snapshot. See below for detailed options. |
+
+#### Structure of the snapshot object
+
+A snapshot should only be configured when the user has an existing snapshot they want to utilize for performing an RFS backfill or Metadata migration instead of creating a snapshot with the Migration Assistant.
+
+In such case, the required fields in the snapshot object are:
+
+- `snapshotName` -- the name of the existing snapshot that was created
+- `s3Uri` -- the `s3://` URI path to where the snapshot repo exists in the given S3 bucket
+- `s3Region` -- the region where the S3 bucket is located
+
 ### Reindex from Snapshot (RFS) Service Options
 
 | Name                                | Type    | Example                                                              | Description                                                                                                                                                                                                                                                                          |
