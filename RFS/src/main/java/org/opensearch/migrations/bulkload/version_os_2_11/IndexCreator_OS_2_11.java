@@ -72,7 +72,10 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         // To be compatible with the number of awareness attributes (usually zones), the awareness attribute must be divisible
         // by the replica count + 1
         if ((replicaCount + 1) % awarenessAttributes != 0) {
-            throw new IncompatibleReplicaCountException("A replica count of " + replicaCount  + " is not compatible with " + awarenessAttributes + " awareness attributes", null);
+            var replicaCountMessage = ("A replica count of %d is not compatible with %d awareness attributes (usually zones). " +
+                "The metadata migration tool can automatically remedy this by increasing the replica count to a compatible number " +
+                "if run with the command line parameter `--cluster-awareness-attributes %d`").formatted(replicaCount, awarenessAttributes, awarenessAttributes);
+            throw new IncompatibleReplicaCountException(replicaCountMessage, null);
         }
     }
 

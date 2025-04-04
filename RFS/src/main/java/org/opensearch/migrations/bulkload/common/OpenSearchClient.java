@@ -103,7 +103,6 @@ public abstract class OpenSearchClient {
 
         String balanceIsEnabledSetting = "cluster.routing.allocation.awareness.balance";
 
-
         try {
             settings = objectMapper.readValue(getResponse.body, ObjectNode.class);
         } catch (Exception e) {

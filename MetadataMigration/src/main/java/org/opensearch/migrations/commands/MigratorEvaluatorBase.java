@@ -82,7 +82,7 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformer selectTransformer(Clusters clusters) {
-        return selectTransformer(clusters, arguments.clusterDimensionality);
+        return selectTransformer(clusters, arguments.clusterAwarenessAttributes);
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
