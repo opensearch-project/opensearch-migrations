@@ -27,9 +27,9 @@ target cluster) via `localhost:19200`, and to the target cluster directly at `lo
 
 For sample data that exercises various endpoints with a range of datatypes, you can execute a shell in the Migration
 Console (`docker exec -i -t $(docker ps -aqf "ancestor=migrations/migration_console:latest") bash` or via the Docker
-console) and run `./runTestBenchmarks.sh`. By default, this runs four short test workloads from
+console) and run `console clusters run-test-benchmarks`. This runs four short test workloads from
 [Opensearch-Benchmark](https://github.com/opensearch-project/opensearch-benchmark) against the Capture Proxy endpoint
-(9200). The Migration Console contains other utility functions (`./catIndices.sh`, `kafka-tools`, etc.) to interact
+(9200). The Migration Console contains other utility functions within the `console` command to interact
 with the various containers of the solution.
 
 With the default docker-compose configuration launched with :dockerSolution:composeUp, instrumentation containers

@@ -176,9 +176,7 @@ class Cluster:
             r.raise_for_status()
         return r
 
-    def execute_benchmark_workload(self, workload: str,
-                                   workload_params='target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,'
-                                                   'search_clients:1'):
+    def execute_benchmark_workload(self, workload: str):
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
@@ -188,25 +186,40 @@ class Cluster:
             client_options += (f",basic_auth_user:{self.auth_details['username']},"
                                f"basic_auth_password:{password_to_censor}")
         elif self.auth_type == AuthMethod.SIGV4:
-            raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
-                                      f"benchmark workloads")
-        # Note -- we should censor the password when logging this command
-        # Fix commit used for OSB on latest verified working commit
-        workload_revision = "fc64258a9b2ed2451423d7758ca1c5880626c520"
+            raise NotImplementedError("SigV4 auth not supported for benchmark workloads")
+        shared_command = (f"--exclude-tasks=check-cluster-health "
+                          f"--target-host={self.endpoint} "
+                          f"--pipeline=benchmark-only "
+                          "--test-mode --kill-running-processes "
+                          f"--client-options={client_options}")
+        numeric_version = f"{self.version.split('_')[1]}.0"
+        major_version = int(numeric_version.split('.')[0])
+
+        flavor = self.version.split('_')[0]
+
+        # Use esrally for older ES versions, opensearch-benchmark for everything else
+        if flavor == "ES" and major_version in [1, 2, 5]:
+            exec_name = "/opt/venv-esrally/bin/esrally race"
+            workload_key_name = "track"
+            workload_revision = f"v{major_version}"
+            workload_params = "bulk_size:10,bulk_indexing_clients:1"
+        else:
+            exec_name = "/opt/venv-opensearch/bin/opensearch-benchmark execute-test"
+            workload_key_name = "workload"
+            workload_revision = "fc64258a9b2ed2451423d7758ca1c5880626c520"
+            workload_params = "target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,search_clients:1"
+
         logger.info(f"Running opensearch-benchmark with '{workload}' workload and revision '{workload_revision}'")
-        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                   f"--exclude-tasks=check-cluster-health "
-                   f"--workload-revision={workload_revision} "
-                   f"--target-host={self.endpoint} "
-                   f"--workload={workload} "
-                   f"--pipeline=benchmark-only "
-                   "--test-mode --kill-running-processes "
-                   f"--workload-params={workload_params} "
-                   f"--client-options={client_options}")
+        command = (f"{exec_name} {shared_command} "
+                   f"--{workload_key_name}={workload} "
+                   f"--{workload_key_name}-revision={workload_revision} "
+                   f"--{workload_key_name}-params={workload_params} "
+                   f"--distribution-version={numeric_version}")
         # While a little wordier, this approach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
-        display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
-        logger.info(f"Executing command: {display_command}")
+        display_command = command.replace(f"basic_auth_password:{password_to_censor}",
+                                          "basic_auth_password:********")
+        logger.warn(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)
 
     def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Generator[Dict[str, Any], None, None]:
