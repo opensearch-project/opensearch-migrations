@@ -1,0 +1,268 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: full-migration
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: etcd-endpoints
+        value: "http://ma-etcd.ma.svc.cluster.local:2379"
+      - name: etcd-user
+        value: "root"
+      - name: etcd-password
+        value: "password"
+      - name: etcd-image
+        value: "migrations/migration_console:latest"
+      - name: create-snapshot-template-name
+        value: "create-snapshot"
+      - name: demo-max-sleep-time
+        value: "60"
+
+  templates:
+    # Main workflow template
+    - name: main
+      inputs:
+        parameters:
+          - name: source-migration-configs
+            default: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
+          - name: targets
+            value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
+      steps:
+        - - name: init
+            templateRef:
+              name: target-latch-helpers
+              template: init-etcd-keys
+            arguments:
+              parameters:
+                - name: configurations
+                  value: "{{inputs.parameters.source-migration-configs}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: prefix
+                  value: "workflow-{{workflow.uid}}"
+
+        - - name: pipeline-source-migration
+            template: pipeline-source-migration
+            withParam: "{{inputs.parameters.source-migration-configs}}"
+            arguments:
+              parameters:
+                - name: source-migration-config
+                  value: "{{item}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: prefix
+                  value: "{{steps.init.outputs.parameters.prefix}}"
+
+        - - name: cleanup
+            templateRef:
+              name: target-latch-helpers
+              template: cleanup-etcd-keys
+            arguments:
+              parameters:
+                - name: prefix
+                  value: "{{steps.init.outputs.parameters.prefix}}"
+
+
+    # Unroll snapshotting and their dependent steps
+    - name: pipeline-source-migration
+      inputs:
+        parameters:
+          - name: source-migration-config
+          - name: targets
+          - name: prefix
+      steps:
+        - - name: pipeline-snapshot
+            template: pipeline-snapshot
+            withParam: "{{=fromJSON(inputs.parameters['source-migration-config'])['snapshot-and-migration-configs']}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{=fromJSON(inputs.parameters['source-migration-config'])['source']}}"
+                - name: snapshot-and-migration-config
+                  value: "{{item}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: process-name
+                  value: "{{=toBase64(fromJSON(inputs.parameters['source-migration-config'])['source']['endpoint'])}}"
+                  #"\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
+                  #value: "\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
+
+    - name: pipeline-snapshot
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-and-migration-config
+          - name: targets
+          - name: process-name
+          - name: prefix
+      steps:
+        - - name: create-or-get-snapshot
+            templateRef:
+              name: create-or-get-snapshot
+              template: create-or-get-snapshot
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-and-migration-config
+                  value: "{{inputs.parameters.snapshot-and-migration-config}}"
+        - - name: pipeline-snapshot-to-target
+            template: pipeline-snapshot-to-target
+            withParam: "{{inputs.parameters.targets}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-config
+                  value: "{{steps.create-or-get-snapshot.outputs.parameters.snapshot-config}}"
+                - name: migration-configs
+                  value: "{{=fromJSON(inputs.parameters['snapshot-and-migration-config'])['migrations']}}"
+                - name: target
+                  value: "{{item}}"
+                - name: process-name
+                  value: "{{inputs.parameters.process-name}}::{{=toBase64(toJSON(item))}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
+
+    - name: pipeline-snapshot-to-target
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-config
+          - name: migration-configs
+          - name: target
+          - name: process-name
+          - name: prefix
+      steps:
+        - - name: pipeline-migrate-from-snapshot
+            template: pipeline-migrate-from-snapshot
+            withParam: "{{inputs.parameters.migration-configs}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: migration-config
+                  value: "{{item}}"
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+                - name: process-name
+                  value: "{{inputs.parameters.process-name}}::{{=toBase64(toJSON(item))}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
+
+    - name: pipeline-migrate-from-snapshot
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-config
+          - name: migration-config
+          - name: target
+          - name: process-name
+          - name: prefix
+      steps:
+        - - name: migrate-metadata
+            template: migrate-metadata
+#            when: "{{=fromJSON(inputs.parameters['migration-config'])['metadata'] != nil}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: migration-config
+                  value: "{{fromJSON(inputs.parameters['migration-config'])['metadata']}}"
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+        - - name: bulk-load-documents
+            template: bulk-load-documents
+            withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
+            arguments:
+              parameters:
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: rfs-config
+                  value: "{{item}}"
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+        # Check target readiness after processing and bump it to the next phase if ready
+        - - name: target-backfill-complete-check
+            templateRef:
+              name: target-latch-helpers
+              template: target-processed-latch
+            arguments:
+              parameters:
+                - name: source
+                  value: "{{inputs.parameters.source-config}}"
+                - name: processor
+                  value: "{{inputs.parameters.process-name}}"
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
+        - - name: run-replayer-for-target
+            template: run-replayer-for-target
+            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
+            arguments:
+              parameters:
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
+
+
+    - name: migrate-metadata
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-config
+          - name: migration-config
+          - name: target
+      script:
+        image: python:3.9-alpine
+        command: [ python ]
+        source: |
+          import json, sys, os, random, time
+          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
+          print(f"Sleeping for {sleep_duration} seconds to simulate metadata migration time...")
+          time.sleep(sleep_duration)
+          print(f"Finished sleeping after {sleep_duration} seconds")
+#      container:
+#        image: migrations/migration_console:latest
+#        imagePullPolicy: IfNotPresent
+#        command: [ echo ]
+#        args: [ "metadata migrate" ]
+
+    - name: bulk-load-documents
+      inputs:
+        parameters:
+          - name: snapshot-config
+          - name: rfs-config
+          - name: target
+      container:
+        image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
+        command: [ echo ]
+        args: [ "backfill" ]
+
+
+    # This is where we'd start running live-replay
+    - name: run-replayer-for-target
+      inputs:
+        parameters:
+          - name: target
+          - name: prefix
+      container:
+        image: "{{workflow.parameters.etcd-image}}"
+        imagePullPolicy: Never
+        command: [sh, -c] # dummy implementation that preserves some stats about the work that was done
+        args:
+          - |
+            echo "run-replayer-for-target"

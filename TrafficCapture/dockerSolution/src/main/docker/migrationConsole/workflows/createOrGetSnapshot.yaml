@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: create-or-get-snapshot
+spec:
+  entrypoint: create-or-get-snapshot
+  templates:
+    - name: create-or-get-snapshot
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-and-migration-config
+      steps:
+        - - name: get-existing-snapshot
+            template: get-existing-snapshot
+            arguments:
+              parameters:
+                - name: existing-snapshot
+                  value: "fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot']"
+
+        - - name: create-snapshot
+            template: create-snapshot
+            when: "{{steps.get-existing-snapshot.outputs.parameters.existing-snapshot}} == nil"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: indices
+                  value: "{{=fromJSON(inputs.parameters['snapshot-and-migration-config'])['indices']}}"
+
+        - - name: collect-output
+            template: collect-output
+            arguments:
+              parameters:
+                - name: create-snapshot-output
+                  value: "{{steps.create-snapshot.outputs.parameters.snapshot-config}}"
+                - name: existing-snapshot
+                  value: "{{steps.get-existing-snapshot.outputs.parameters.existing-snapshot}}"
+
+      outputs:
+        parameters:
+          - name: snapshot-config
+            valueFrom:
+              parameter: "{{steps.collect-output.outputs.parameters.snapshot-config}}"
+
+    - name: get-existing-snapshot
+      steps: [[]]
+      inputs:
+        parameters:
+          - name: existing-snapshot
+      outputs:
+        parameters:
+          - name: existing-snapshot
+            valueFrom:
+              parameter: "{{inputs.parameters.existing-snapshot}}"
+
+    - name: create-snapshot
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-and-migration-config
+      outputs:
+        parameters:
+          - name: snapshot-config
+            value: "{}"
+      container:
+        image: snapshot-tool:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            # Your get-snapshot logic goes here
+            echo '{"id": "existing-snapshot-67890", "created": false, "timestamp": "2023-03-30T09:30:00Z"}' > /tmp/snapshot-config.json
+
+    - name: collect-output
+      inputs:
+        parameters:
+          - name: create-snapshot-output
+          - name: existing-snapshot
+      outputs:
+        parameters:
+          - name: snapshot-config
+            valueFrom:
+              expression: "inputs.parameters['existing-snapshot'] != null && inputs.parameters['existing-snapshot'] != 'nil' ? inputs.parameters['existing-snapshot'] : inputs.parameters['create-snapshot-output']"
+      steps: [[]]

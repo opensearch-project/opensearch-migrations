@@ -23,6 +23,8 @@ source:
   #      discovery.type: single-node
 
   minimumMasterNodes: 1
+  persistence:
+    enabled: false
   extraEnvs:
     - name: path.repo
       value: "/snapshot"

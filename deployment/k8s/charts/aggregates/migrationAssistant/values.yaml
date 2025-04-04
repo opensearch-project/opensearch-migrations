@@ -1,16 +1,60 @@
 conditionalPackageInstalls:
-  bulkLoader: true
-  grafana: false
-  jaeger: false
-  kafka: true
-  migrationConsole: true
-  prometheus: false
-  proxy: true
-  replayer: true
   sharedConfigs: true
   snapshotVolume: true
-  logsVolume: true
+  logsVolume: false
+  migrationConsole: true
 
+  bulkLoader: false
+  proxy: true
+  kafka: false
+  replayer: false
+  argoWorkflows: true
+  gatekeeper: false
+  grafana: false
+  prometheus: false
+  jaeger: false
+
+  etcd: true
+
+etcd:
+  replicaCount: 1
+  auth:
+    rbac:
+      rootPassword: password
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  persistence:
+    enabled: false
+#    storageClass: "standard"
+#    size: 10Gi
+  service:
+    type: ClusterIP
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  extraEnvVars:
+    - name: ETCD_AUTO_COMPACTION_RETENTION
+      value: "1"
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "8589934592" # 8GB
+    - name: ETCD_HEARTBEAT_INTERVAL
+      value: "100"
+    - name: ETCD_ELECTION_TIMEOUT
+      value: "1000"
+  startFromSnapshot:
+    enabled: false
+  serviceAccount:
+    create: true
+
+  podSecurityContext:
+    fsGroup: 1001
+    runAsUser: 1001
 
 shared-configs:
   globalParameters:
@@ -57,7 +101,6 @@ shared-configs:
 #        observabilityType: "prometheus"
 
 
-
 capture-proxy:
   parameters:
     destinationUri:
@@ -79,6 +122,7 @@ migration-console:
   snapshotVolumePvc: "snapshot-volume-pvc"
   sharedLogsVolumeEnabled: true
   sharedLogsPvc: "shared-logs-pvc"
+
 
 bulk-document-loader:
   snapshotVolumeEnabled: true
@@ -112,6 +156,7 @@ bulk-document-loader:
       configMapName: "source-cluster"
       configMapKey: "version"
 
+
 replayer:
   sharedLogsVolumeEnabled: true
   sharedLogsPvc: "shared-logs-pvc"
@@ -138,6 +183,7 @@ replayer:
       value: 10
       allowRuntimeOverride: true
 
+
 captured-traffic-kafka-cluster:
   environment: test
 
@@ -150,6 +196,64 @@ captured-traffic-kafka-cluster:
   dedicatedController:
     replicas: 1
     storageSize: 10Gi
+
+
+argo-workflows:
+  fullnameOverride: "argo"
+  controller:
+    containerSecurityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+    clusterWorkflowTemplates:
+      enabled: false
+    metricsConfig: # to publish
+      enabled: true
+  server:
+    extraArgs:
+      - --auth-mode=server
+  serviceAccount:
+    create: true
+  singleNamespace: true
+  # Extra workflow configuration
+  workflow:
+    serviceAccount:
+      create: false
+      name: argo-workflow-executor
+
+
+workflowService:
+  defaultEnvVars:
+    ENV_VAR1: "default-value-1"
+    ENV_VAR2: "default-value-2"
+  defaultReplicas: 1
+  monitorImage: "bitnami/kubectl:latest"
+  allowedRepos:
+    - "bitnami/"
+#    - "k8s.gcr.io/"
+#    - "docker.io/library/"
+
+
+gatekeeper:
+  auditInterval: 60
+  constraintViolationsLimit: 20
+  enableExternalData: true
+  audit:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  controllerManager:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
 
 jaeger:
   allInOne:

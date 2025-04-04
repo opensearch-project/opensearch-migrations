@@ -1,0 +1,30 @@
+{{- if and .Values.conditionalPackageInstalls.argoWorkflows .Values.conditionalPackageInstalls.gatekeeper }}
+# Job to wait for the CRD to be fully established
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wait-for-k8sallowedrepos-crd
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-weight: "7"  # Between ConstraintTemplate (5) and Constraint (10)
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+{{/*      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}*/}}
+      containers:
+        - name: kubectl
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until kubectl get crd k8sallowedrepos.constraints.gatekeeper.sh; do
+                echo "Waiting for K8sAllowedRepos CRD to be established..."
+                sleep 2
+              done
+              echo "CRD is available now!"
+      restartPolicy: OnFailure
+  backoffLimit: 10
+{{- end }}
