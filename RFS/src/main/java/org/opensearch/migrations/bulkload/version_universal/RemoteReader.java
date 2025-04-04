@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_universal;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -49,6 +50,11 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
             version = clientFactory.getClusterVersion();
         }
         return version;
+    }
+
+    @Override
+    public AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        return getClient().getAwarenessAttributeSettings();
     }
 
     public String toString() {

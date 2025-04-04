@@ -115,6 +115,20 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         this.containerVersion = version;
     }
 
+    public SearchClusterContainer(final ContainerVersion version, Map<String, String> supplementaryEnvVariables) {
+        super(DockerImageName.parse(version.imageName));
+        var builder = this.withExposedPorts(9200, 9300);
+
+        var combinedEnvVariables = new ImmutableMap.Builder<String, String>().putAll(
+                                        version.getInitializationType().getEnvVariables()).putAll(
+                                        supplementaryEnvVariables
+                                    ).build();
+        builder.withEnv(combinedEnvVariables)
+                .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
+        this.containerVersion = version;
+    }
+
+
     public void copySnapshotData(final String directory) {
         try {
             // Execute command to list all files in the directory

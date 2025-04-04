@@ -1,5 +1,6 @@
 package org.opensearch.migrations.cluster;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
 
 /** Version specific cluster */
@@ -10,4 +11,8 @@ public interface VersionSpecificCluster {
 
     /** Gets the detected version of the cluster */
     Version getVersion();
+
+    /** Gets the awareness attribute settings of the cluster */
+    AwarenessAttributeSettings getAwarenessAttributeSettings();
+
 }

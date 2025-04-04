@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -68,6 +69,11 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
             version = getClient().getClusterVersion();
         }
         return version;
+    }
+
+    @Override
+    public AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        return getClient().getAwarenessAttributeSettings();
     }
 
     public String toString() {
