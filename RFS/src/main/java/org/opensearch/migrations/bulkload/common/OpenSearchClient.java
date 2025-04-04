@@ -108,7 +108,10 @@ public abstract class OpenSearchClient {
         } catch (Exception e) {
             throw new OperationFailed("Could not parse settings values", getResponse);
         }
-        boolean balanceIsEnabled = getSettingFromPersistentOrDefaults(balanceIsEnabledSetting, settings).asBoolean();
+        boolean balanceIsEnabled = Optional.ofNullable(getSettingFromPersistentOrDefaults(balanceIsEnabledSetting, settings))
+            .map(JsonNode::asBoolean)
+            .orElse(false);
+
         if (!balanceIsEnabled) {
             return new org.opensearch.migrations.AwarenessAttributeSettings(false, 0);
         }
@@ -117,11 +120,18 @@ public abstract class OpenSearchClient {
         String balanceAttributeSetting = "cluster.routing.allocation.awareness.attributes";
         String balanceAttributeValues = "cluster.routing.allocation.awareness.force.";
 
-        getSettingFromPersistentOrDefaults(balanceAttributeSetting, settings)
-            .forEach(attributeName -> {
-                    attributeValues.addAll(Arrays.asList(getSettingFromPersistentOrDefaults(
-                        balanceAttributeValues + attributeName.asText() + ".values", settings).asText().split(",")));
+        Optional.ofNullable(getSettingFromPersistentOrDefaults(balanceAttributeSetting, settings))
+            .ifPresent(attributes -> {
+                attributes.forEach(attributeName -> {
+                    Optional.ofNullable(getSettingFromPersistentOrDefaults(
+                            balanceAttributeValues + attributeName.asText() + ".values", settings))
+                        .map(JsonNode::asText)
+                        .map(text -> text.split(","))
+                        .map(Arrays::asList)
+                        .ifPresent(attributeValues::addAll);
                 });
+            });
+
 
         // Note that in some cases, the zone names are shielded as `xx-xxxxx-xx`, so filtering for
         // distinct values will give an incorrect count.
