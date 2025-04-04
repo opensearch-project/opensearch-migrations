@@ -1,5 +1,10 @@
 package org.opensearch.migrations.bulkload.common;
 
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLHandshakeException;
+
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
@@ -13,9 +18,13 @@ import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 
+import io.netty.handler.ssl.ClientAuth;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
@@ -126,6 +135,127 @@ class RestClientTest {
             );
         }
     }
+
+    @Test
+    public void testMutualTlsSuccess() throws Exception {
+        SslContext serverSslContext = SslContextBuilder
+                .forServer(new File(TestResources.getCertPath("test-server.crt")),
+                        new File(TestResources.getCertPath("test-server.key")))
+                .trustManager(new File(TestResources.getCertPath("test-ca.crt")))
+                .clientAuth(ClientAuth.REQUIRE)
+                .build();
+
+        SimpleNettyHttpServer.SSLEngineSupplier engineSupplier = (allocator) -> {
+            SSLEngine engine = serverSslContext.newEngine(allocator);
+            engine.setUseClientMode(false);
+            return engine;
+        };
+
+        try (var testServer = SimpleNettyHttpServer.makeServer(
+                engineSupplier,
+                null,
+                this::makeResponseContext)) {
+
+            var params = ConnectionContextTestParams.builder()
+                    .host("https://localhost:" + testServer.port)
+                    .insecure(false)
+                    .caCert(TestResources.getCertPath("test-ca.crt"))
+                    .clientCert(TestResources.getCertPath("test-client.crt"))
+                    .clientCertKey(TestResources.getCertPath("test-client.key"))
+                    .build();
+
+            var connCtx = params.toConnectionContext();
+
+            var restClient = new RestClient(connCtx);
+
+            var response = restClient.get("/", null);
+
+            Assertions.assertEquals(200, response.statusCode);
+            Assertions.assertEquals("Hi", response.body);
+        }
+    }
+
+    @Test
+    public void testMutualTlsFailsWithoutClientCert() throws Exception {
+        SslContext serverSslContext = SslContextBuilder
+                .forServer(new File(TestResources.getCertPath("test-server.crt")),
+                        new File(TestResources.getCertPath("test-server.key")))
+                .trustManager(new File(TestResources.getCertPath("test-ca.crt")))
+                .clientAuth(ClientAuth.REQUIRE)
+                .build();
+
+        SimpleNettyHttpServer.SSLEngineSupplier engineSupplier = (allocator) -> {
+            SSLEngine engine = serverSslContext.newEngine(allocator);
+            engine.setUseClientMode(false);
+            return engine;
+        };
+
+        try (var testServer = SimpleNettyHttpServer.makeServer(
+                engineSupplier,
+                null,
+                this::makeResponseContext)) {
+
+            var params = ConnectionContextTestParams.builder()
+                    .host("https://localhost:" + testServer.port)
+                    .caCert(TestResources.getCertPath("test-ca.crt"))
+                    .insecure(false)
+                    .build();
+
+            var restClient = new RestClient(params.toConnectionContext());
+
+            // 1) Capture the top-level exception (ReactiveException)
+            Exception ex = Assertions.assertThrows(Exception.class, () -> restClient.get("/", null));
+
+            // 2) Unwrap the cause chain
+            Throwable cause = ex.getCause();
+            while (cause != null && !(cause instanceof SSLException)) {
+                cause = cause.getCause();
+            }
+
+            // 3) Now check cause is the type we want
+            Assertions.assertNotNull(cause, "Expected an SSLException somewhere in the cause chain");
+            Assertions.assertTrue(cause instanceof SSLHandshakeException,
+                    "Expected an SSLHandshakeException but got " + cause.getClass());
+        }
+    }
+
+    @Test
+    public void ttestMutualTlsSucceedsWithoutClientCert_WhenClientAuthNone() throws Exception {
+        SslContext serverSslContext = SslContextBuilder
+                .forServer(
+                        new File(TestResources.getCertPath("test-server.crt")),
+                        new File(TestResources.getCertPath("test-server.key")))
+                .trustManager(new File(TestResources.getCertPath("test-ca.crt")))
+                // The server does NOT require a client cert
+                .clientAuth(ClientAuth.NONE)
+                .build();
+
+        SimpleNettyHttpServer.SSLEngineSupplier engineSupplier = (allocator) -> {
+            SSLEngine engine = serverSslContext.newEngine(allocator);
+            engine.setUseClientMode(false);
+            return engine;
+        };
+
+        try (var testServer = SimpleNettyHttpServer.makeServer(engineSupplier, null, this::makeResponseContext)) {
+            // Note: .caCert(...) ensures the client trusts the server's cert.
+            // No client cert is provided.
+            var params = ConnectionContextTestParams.builder()
+                    .host("https://localhost:" + testServer.port)
+                    .insecure(false)
+                    .caCert(TestResources.getCertPath("test-ca.crt"))
+                    .build();
+
+            var restClient = new RestClient(params.toConnectionContext());
+
+            // Because the server doesn't require a client cert,
+            // we expect the request to succeed.
+            var response = restClient.get("/", null);
+
+            Assertions.assertEquals(200, response.statusCode);
+            Assertions.assertEquals("Hi", response.body);
+        }
+    }
+
 
     SimpleHttpResponse makeResponseContext(HttpRequest firstLine) {
         var payloadBytes = "Hi".getBytes(StandardCharsets.UTF_8);
