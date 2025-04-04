@@ -19,7 +19,8 @@ spec:
         value: "migrations/migration_console:latest"
       - name: create-snapshot-template-name
         value: "create-snapshot"
-
+      - name: demo-max-sleep-time
+        value: "1"
 
   templates:
     # Main workflow template
@@ -44,8 +45,8 @@ spec:
                 - name: prefix
                   value: "workflow-{{workflow.uid}}"
 
-        - - name: source-pipeline
-            template: source-migration-pipeline
+        - - name: pipeline-source-migration
+            template: pipeline-source-migration
             withParam: "{{inputs.parameters.source-migration-configs}}"
             arguments:
               parameters:
@@ -67,15 +68,15 @@ spec:
 
 
     # Unroll snapshotting and their dependent steps
-    - name: source-migration-pipeline
+    - name: pipeline-source-migration
       inputs:
         parameters:
           - name: source-migration-config
           - name: targets
           - name: prefix
       steps:
-        - - name: snapshot-pipeline
-            template: snapshot-pipeline
+        - - name: pipeline-snapshot
+            template: pipeline-snapshot
             withParam: "{{=fromJSON(inputs.parameters['source-migration-config'])['snapshot-and-migration-configs']}}"
             arguments:
               parameters:
@@ -92,7 +93,7 @@ spec:
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
 
-    - name: snapshot-pipeline
+    - name: pipeline-snapshot
       inputs:
         parameters:
           - name: source-config
@@ -109,8 +110,8 @@ spec:
                   value: "{{inputs.parameters.source-config}}"
                 - name: snapshot-and-migration-config
                   value: "{{inputs.parameters.snapshot-and-migration-config}}"
-        - - name: snapshot-to-target-pipeline
-            template: snapshot-to-target-pipeline
+        - - name: pipeline-snapshot-to-target
+            template: pipeline-snapshot-to-target
             withParam: "{{inputs.parameters.targets}}"
             arguments:
               parameters:
@@ -135,11 +136,20 @@ spec:
       outputs:
         parameters:
           - name: snapshot-config
-            valueFrom:
-              expression: "toJSON(fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot'])"
-      steps: [[]]
+            value: "{}"
+#            valueFrom:
+#              expression: "toJSON(fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot'])"
+      script:
+        image: python:3.9-alpine
+        command: [ python ]
+        source: |
+          import json, sys, os, random, time
+          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
+          print(f"Sleeping for {sleep_duration} seconds to simulate snapshot creation time...")
+          time.sleep(sleep_duration)
+          print(f"Finished sleeping after {sleep_duration} seconds")
 
-    - name: snapshot-to-target-pipeline
+    - name: pipeline-snapshot-to-target
       inputs:
         parameters:
           - name: source-config
@@ -149,8 +159,8 @@ spec:
           - name: process-name
           - name: prefix
       steps:
-        - - name: migrate-from-snapshot-pipeline
-            template: migrate-from-snapshot-pipeline
+        - - name: pipeline-migrate-from-snapshot
+            template: pipeline-migrate-from-snapshot
             withParam: "{{inputs.parameters.migration-configs}}"
             arguments:
               parameters:
@@ -167,7 +177,7 @@ spec:
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
 
-    - name: migrate-from-snapshot-pipeline
+    - name: pipeline-migrate-from-snapshot
       inputs:
         parameters:
           - name: source-config
@@ -202,8 +212,10 @@ spec:
                 - name: target
                   value: "{{inputs.parameters.target}}"
         # Check target readiness after processing and bump it to the next phase if ready
-        - - name: check-for-target-processing-completion
-            template: reduce-target-when-ready
+        - - name: target-backfill-complete-check
+            templateRef:
+              name: target-latch-helpers
+              template: target-processed-latch
             arguments:
               parameters:
                 - name: source
@@ -214,6 +226,16 @@ spec:
                   value: "{{inputs.parameters.target}}"
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
+        - - name: run-replayer-for-target
+            template: run-replayer-for-target
+            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
+            arguments:
+              parameters:
+                - name: target
+                  value: "{{inputs.parameters.target}}"
+                - name: prefix
+                  value: "{{inputs.parameters.prefix}}"
+
 
     - name: migrate-metadata
       inputs:
@@ -227,8 +249,8 @@ spec:
         command: [ python ]
         source: |
           import json, sys, os, random, time
-          sleep_duration = random.randint(0, 60)
-          print(f"Sleeping for {sleep_duration} seconds to simulate snapshot creation time...")
+          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
+          print(f"Sleeping for {sleep_duration} seconds to simulate metadata migration time...")
           time.sleep(sleep_duration)
           print(f"Finished sleeping after {sleep_duration} seconds")
 #      container:
@@ -249,42 +271,9 @@ spec:
         command: [ echo ]
         args: [ "backfill" ]
 
-    # Do target processing after waiting for all other work (processors) to the target to complete
-    - name: reduce-target-when-ready
-      inputs:
-        parameters:
-          - name: source
-          - name: processor
-          - name: target
-          - name: prefix
-      steps:
-        - - name: target-processed-latch
-            templateRef:
-              name: target-latch-helpers
-              template: target-processed-latch
-            arguments:
-              parameters:
-                - name: source
-                  value: "{{inputs.parameters.source}}"
-                - name: processor
-                  value: "{{inputs.parameters.processor}}"
-                - name: target
-                  value: "{{inputs.parameters.target}}"
-                - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
-
-        - - name: targets-all-processed-fan-in
-            template: reduce-processors-for-target
-            when: "{{steps.target-processed-latch.outputs.parameters.should-finalize}} == true"
-            arguments:
-              parameters:
-                - name: target
-                  value: "{{inputs.parameters.target}}"
-                - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
 
     # This is where we'd start running live-replay
-    - name: reduce-processors-for-target
+    - name: run-replayer-for-target
       inputs:
         parameters:
           - name: target
@@ -295,4 +284,4 @@ spec:
         command: [sh, -c] # dummy implementation that preserves some stats about the work that was done
         args:
           - |
-            echo "reduce-processors-for-target"
+            echo "run-replayer-for-target"
