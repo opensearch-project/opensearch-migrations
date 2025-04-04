@@ -28,7 +28,7 @@ spec:
       inputs:
         parameters:
           - name: source-migration-configs
-            default: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
+            default: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"existingSnapshot\":{\"name\":\"test\"},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"existingSnapshot\":{\"name\":\"test\"},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
           - name: targets
             value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
       steps:
@@ -136,18 +136,18 @@ spec:
       outputs:
         parameters:
           - name: snapshot-config
-            value: "{}"
-#            valueFrom:
-#              expression: "toJSON(fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot'])"
-      script:
-        image: python:3.9-alpine
-        command: [ python ]
-        source: |
-          import json, sys, os, random, time
-          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
-          print(f"Sleeping for {sleep_duration} seconds to simulate snapshot creation time...")
-          time.sleep(sleep_duration)
-          print(f"Finished sleeping after {sleep_duration} seconds")
+            valueFrom:
+              expression: "toJSON(fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot'])"
+      steps: [[]]
+#      script:
+#        image: python:3.9-alpine
+#        command: [ python ]
+#        source: |
+#          import json, sys, os, random, time
+#          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
+#          print(f"Sleeping for {sleep_duration} seconds to simulate snapshot creation time...")
+#          time.sleep(sleep_duration)
+#          print(f"Finished sleeping after {sleep_duration} seconds")
 
     - name: pipeline-snapshot-to-target
       inputs:
@@ -201,15 +201,19 @@ spec:
                 - name: target
                   value: "{{inputs.parameters.target}}"
         - - name: bulk-load-documents
-            template: bulk-load-documents
+            templateRef:
+              name: bulk-load
+              template: run-bulk-load-from-config
             withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
             arguments:
               parameters:
-                - name: snapshot-config
-                  value: "{{inputs.parameters.snapshot-config}}"
-                - name: rfs-config
+                - name: name
+                  value: "{{inputs.parameters.process-name}}"
+                - name: snapshot-name
+                  value: "{{=fromJSON(inputs.parameters['snapshot-config'])['name']}}"
+                - name: optional-configs
                   value: "{{item}}"
-                - name: target
+                - name: target-config
                   value: "{{inputs.parameters.target}}"
         # Check target readiness after processing and bump it to the next phase if ready
         - - name: target-backfill-complete-check

@@ -8,6 +8,32 @@ spec:
   entrypoint: run-bulk-load
 
   templates:
+    - name: run-bulk-load-from-config
+      inputs:
+        parameters:
+          # Required parameters (no default names)
+          - name: name
+            description: "Unique identifier for this bulk load job (required)"
+          - name: target-config
+            description: "Target host config object"
+          - name: snapshot-name
+            description: "Name of the snapshot to use (required)"
+          - name: optional-configs
+            description: "JSON Key-Value form of all of the optional parameters to run-bulk-load"
+            default: ""
+      steps:
+        - - name: run-bulk-load
+            template: run-bulk-load
+            arguments:
+              parameters:
+                - name: name
+                  value: "{{inputs.parameters.name}}"
+                - name: target-host
+                  value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
+                - name: snapshot-name
+                  value: "{{inputs.parameters.snapshot-name}}"
+                  # TODO - parse the other stuff out and into the args.
+
     - name: run-bulk-load
       inputs:
         parameters:
@@ -42,20 +68,6 @@ spec:
             value: ""
             description: "Initial lease duration"
 
-          - name: lucene-dir
-            value: ""
-            description: "Directory on the host for Lucene files - not sure why this would matter"
-          - name: default-lucene-dir
-            value: "/tmp"
-            description: "Default directory for Lucene files"
-
-          - name: snapshot-local-dir
-            value: ""
-            description: "Local directory for snapshots"
-          - name: default-snapshot-local-dir
-            value: "/snapshot"
-            description: "Default local directory for snapshots"
-
           - name: target-insecure
             value: ""
             description: "Flag for insecure target connections"
@@ -75,7 +87,6 @@ spec:
           - name: index-allowlist
             value: ""
             description: "Indices to migrate"
-
       steps:
         - - name: create-replicaset
             template: create-rs
@@ -96,10 +107,6 @@ spec:
                   value: "{{=inputs.parameters['documents-per-bulk-request']}}"
                 - name: lease-duration
                   value: "{{=inputs.parameters['lease-duration']}}"
-                - name: lucene-dir
-                  value: "{{=inputs.parameters['lucene-dir'] == '' ? inputs.parameters['default-lucene-dir'] : inputs.parameters['lucene-dir']}}"
-                - name: snapshot-local-dir
-                  value: "{{=inputs.parameters['snapshot-local-dir'] == '' ? inputs.parameters['default-snapshot-local-dir'] : inputs.parameters['snapshot-local-dir']}}"
                 - name: target-insecure
                   value: "{{=inputs.parameters['target-insecure']}}"
                 - name: target-username
@@ -136,8 +143,6 @@ spec:
           - name: image
           - name: documents-per-bulk-request
           - name: lease-duration
-          - name: lucene-dir
-          - name: snapshot-local-dir
           - name: target-insecure
           - name: target-username
           - name: target-password
@@ -145,20 +150,21 @@ spec:
           - name: index-allowlist
       resource:
         action: create
+        generateName: my-replicaset-
         manifest: |
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            name: "bulk-loader-{{inputs.parameters.name}}"
+            generateName: rfs-
           spec:
             replicas: {{inputs.parameters.replicas}}
             selector:
               matchLabels:
-                app: bulk-loader-{{inputs.parameters.name}}
+                app: bulk-loader
             template:
               metadata:
                 labels:
-                  app: bulk-loader-{{inputs.parameters.name}}
+                  app: bulk-loader
               spec:
                 containers:
                 - name: bulk-loader
@@ -174,9 +180,9 @@ spec:
                     - name: LEASE_DURATION
                       value: "{{inputs.parameters.lease-duration}}"
                     - name: LUCENE_DIR
-                      value: "{{inputs.parameters.lucene-dir}}"
+                      value: "/tmp"
                     - name: SNAPSHOT_LOCAL_DIR
-                      value: "{{inputs.parameters.snapshot-local-dir}}"
+                      value: "/snapshot"
                     - name: TARGET_INSECURE
                       value: "{{inputs.parameters.target-insecure}}"
                     - name: TARGET_USERNAME
@@ -201,8 +207,8 @@ spec:
                       ARGS="${ARGS}${TARGET_HOST:+ --targetHost $TARGET_HOST}"
                       ARGS="${ARGS}${TARGET_PASSWORD:+ --targetPassword $TARGET_PASSWORD}"
                       ARGS="${ARGS}${TARGET_USERNAME:+ --targetUsername $TARGET_USERNAME}"
-                      ARGS="${ARGS}${DOC_TRANSFORMER_BASE64}:+ --docTransformerConfigBase64 $DOC_TRANSFORMER_BASE64"
-                      ARGS="${ARGS}${INDEX_ALLOW_LIST}:+ --indexAllowList $INDEX_ALLOW_LIST"
+                      ARGS="${ARGS}${DOC_TRANSFORMER_BASE64:+ --docTransformerConfigBase64 $DOC_TRANSFORMER_BASE64}"
+                      ARGS="${ARGS}${INDEX_ALLOW_LIST:+ --indexAllowList $INDEX_ALLOW_LIST}"
           
                       # Special handling for boolean flag
                       if [ "$TARGET_INSECURE" = "true" ] || [ "$TARGET_INSECURE" = "1" ]; then

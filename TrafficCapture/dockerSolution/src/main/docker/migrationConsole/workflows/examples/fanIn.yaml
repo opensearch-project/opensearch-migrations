@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: full-migration
+  name: example-eager-evaluations-with-latches
 spec:
   entrypoint: main
   parallelism: 100
