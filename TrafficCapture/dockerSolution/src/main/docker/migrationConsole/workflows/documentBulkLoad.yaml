@@ -12,12 +12,12 @@ spec:
       inputs:
         parameters:
           # Required parameters (no default names)
-          - name: name
-            description: "Unique identifier for this bulk load job (required)"
           - name: target-config
             description: "Target host config object"
           - name: snapshot-name
             description: "Name of the snapshot to use (required)"
+          - name: session-name
+            description: "Name of the unique session to disambiguate coordinating indices"
           - name: optional-configs
             description: "JSON Key-Value form of all of the optional parameters to run-bulk-load"
             default: ""
@@ -26,20 +26,20 @@ spec:
             template: run-bulk-load
             arguments:
               parameters:
-                - name: name
-                  value: "{{inputs.parameters.name}}"
                 - name: target-host
                   value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
                 - name: snapshot-name
                   value: "{{inputs.parameters.snapshot-name}}"
+                - name: session-name
+                  value: "{{inputs.parameters.session-name}}"
                   # TODO - parse the other stuff out and into the args.
 
     - name: run-bulk-load
       inputs:
         parameters:
           # Required parameters (no default names)
-          - name: name
-            description: "Unique identifier for this bulk load job (required)"
+          - name: session-name
+            description: "Name of the unique session to disambiguate coordinating indices"
           - name: target-host
             description: "Target host URL (required)"
           - name: snapshot-name
@@ -93,37 +93,37 @@ spec:
             arguments:
               parameters:
                 # Required parameters - pass directly
-                - name: name
-                  value: "{{=inputs.parameters.name}}"
                 - name: target-host
-                  value: "{{=inputs.parameters['target-host']}}"
+                  value: "{{inputs.parameters.target-host}}"
                 - name: snapshot-name
-                  value: "{{=inputs.parameters['snapshot-name']}}"
+                  value: "{{inputs.parameters.snapshot-name}}"
+                - name: session-name
+                  value: "{{inputs.parameters.session-name}}"
                 - name: replicas
                   value: "{{=inputs.parameters.replicas == '' ? inputs.parameters['default-replicas'] : inputs.parameters.replicas}}"
                 - name: image
                   value: "{{=inputs.parameters.image == '' ? inputs.parameters['default-image'] : inputs.parameters.image}}"
                 - name: documents-per-bulk-request
-                  value: "{{=inputs.parameters['documents-per-bulk-request']}}"
+                  value: "{{inputs.parameters.documents-per-bulk-request}}"
                 - name: lease-duration
-                  value: "{{=inputs.parameters['lease-duration']}}"
+                  value: "{{inputs.parameters.lease-duration}}"
                 - name: target-insecure
-                  value: "{{=inputs.parameters['target-insecure']}}"
+                  value: "{{inputs.parameters.target-insecure}}"
                 - name: target-username
-                  value: "{{=inputs.parameters['target-username']}}"
+                  value: "{{inputs.parameters.target-username}}"
                 - name: target-password
-                  value: "{{=inputs.parameters['target-password']}}"
+                  value: "{{inputs.parameters.target-password}}"
                 - name: doc-transformer-base64
-                  value: "{{=inputs.parameters['doc-transformer-base64']}}"
+                  value: "{{inputs.parameters.doc-transformer-base64}}"
                 - name: index-allowlist
-                  value: "{{=inputs.parameters['index-allowlist']}}"
+                  value: "{{inputs.parameters.index-allowlist}}"
 
         - - name: wait-for-completion
             template: check-completion
             arguments:
               parameters:
-                - name: name
-                  value: "{{inputs.parameters.name}}"
+                - name: session-name
+                  value: "{{inputs.parameters.session-name}}"
 
         - - name: cleanup-replicaset
             template: delete-rs
@@ -136,9 +136,9 @@ spec:
     - name: create-rs
       inputs:
         parameters:
-          - name: name
           - name: target-host
           - name: snapshot-name
+          - name: session-name
           - name: replicas
           - name: image
           - name: documents-per-bulk-request
@@ -150,7 +150,6 @@ spec:
           - name: index-allowlist
       resource:
         action: create
-        generateName: my-replicaset-
         manifest: |
           apiVersion: apps/v1
           kind: ReplicaSet
@@ -175,6 +174,8 @@ spec:
                       value: "{{inputs.parameters.target-host}}"
                     - name: SNAPSHOT_NAME
                       value: "{{inputs.parameters.snapshot-name}}"
+                    - name: SESSION_NAME
+                      value: "{{inputs.parameters.session-name}}"
                     - name: DOCUMENTS_PER_BULK_REQUEST
                       value: "{{inputs.parameters.documents-per-bulk-request}}"
                     - name: LEASE_DURATION
@@ -202,6 +203,7 @@ spec:
                       ARGS="${ARGS}${DOCUMENTS_PER_BULK_REQUEST:+ --documentsPerBulkRequest $DOCUMENTS_PER_BULK_REQUEST}"
                       ARGS="${ARGS}${INITIAL_LEASE_DURATION:+ --initialLeaseDuration $INITIAL_LEASE_DURATION}"
                       ARGS="${ARGS}${LUCENE_DIR:+ --luceneDir $LUCENE_DIR}"
+                      ARGS="${ARGS}${SESSION_NAME:+ --sessionName $SESSION_NAME}"
                       ARGS="${ARGS}${SNAPSHOT_LOCAL_DIR:+ --snapshotLocalDir $SNAPSHOT_LOCAL_DIR}"
                       ARGS="${ARGS}${SNAPSHOT_NAME:+ --snapshotName $SNAPSHOT_NAME}"
                       ARGS="${ARGS}${TARGET_HOST:+ --targetHost $TARGET_HOST}"
@@ -228,7 +230,7 @@ spec:
     - name: check-completion
       inputs:
         parameters:
-          - name: name
+          - name: session-name
       container:
         image: migrations/migration_console:latest
         imagePullPolicy: IfNotPresent
@@ -237,7 +239,7 @@ spec:
           - |
             sleep 10 
             if [[ "SUCCESS" == "SUCCESS" ]]; then
-              echo "Work for {{inputs.parameters.name}} completed successfully"
+              echo "Work for {{inputs.parameters.session-name}} completed successfully"
               exit 0
             else
               echo "Work not yet complete (state: $state), retrying..."

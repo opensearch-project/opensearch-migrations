@@ -260,8 +260,10 @@ spec:
 #      container:
 #        image: migrations/migration_console:latest
 #        imagePullPolicy: IfNotPresent
-#        command: [ echo ]
-#        args: [ "metadata migrate" ]
+#        command: [ bash ]
+#        args:
+#          - "-c"
+#          - "source ~/.bashrc && console metadata migrate --source-host {{=fromJSON(inputs.parameters['source-config'])['endpoint']}}"
 
     - name: bulk-load-documents
       inputs:
