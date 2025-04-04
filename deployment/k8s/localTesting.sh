@@ -1,5 +1,6 @@
 minikube start
 eval $(minikube docker-env)
+kubectl config set-context --current --namespace=ma
 
 helm dependency build charts/aggregates/testClusters
 ./linkSubChartsToDependencies.sh charts/aggregates/testClusters

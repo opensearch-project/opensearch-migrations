@@ -1,0 +1,53 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: migration-console-template
+spec:
+  entrypoint: run-migration-command
+  arguments:
+    parameters:
+      - name: command
+        description: "Command to run in the migration container"
+      - name: source-cluster
+        description: "Source cluster configuration (JSON)"
+      - name: target-cluster
+        description: "Target cluster configuration (JSON)"
+      - name: snapshot-info
+        description: "Snapshot configuration information (JSON)"
+
+  templates:
+    - name: run-console
+      inputs:
+        parameters:
+          - name: command
+          - name: source-cluster
+          - name: target-cluster
+          - name: snapshot-info
+      container:
+        image: migrations/migration_console:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |            
+            mkdir -p /config
+            
+            # Create the YAML configuration file by converting JSON inputs
+            cat > /config/migration_services.yaml << EOF
+            source_cluster: $(echo '{{inputs.parameters.source-cluster}}' | yq eval -P -)
+            target_cluster: $(echo '{{inputs.parameters.target-cluster}}' | yq eval -P -)
+            snapshot: $(echo '{{inputs.parameters.snapshot-info}}' | yq eval -P -)
+            EOF
+            
+            # setup console python environment
+            . /etc/profile.d/venv.sh
+            source /.venv/bin/activate
+            alias console='console --config-file=/root/lib/console_link/services.yaml'
+
+            # Execute the command
+            {{inputs.parameters.command}}
+        resources:
+          limits:
+            memory: 512Mi
+            cpu: 500m
+          requests:
+            memory: 256Mi
+            cpu: 250m

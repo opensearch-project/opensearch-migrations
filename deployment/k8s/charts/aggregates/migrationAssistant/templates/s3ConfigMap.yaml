@@ -1,0 +1,15 @@
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-snapshot-config
+  labels:
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  AWS_REGION: "us-west-2"
+  {{- if .Values.s3Configuration.useLocalStack }}
+  ENDPOINT: "http://ma-localstack:4566"
+  {{- else }}
+  ENDPOINT: "http://s3.us-east-1.amazonaws.com"
+  {{- end }}

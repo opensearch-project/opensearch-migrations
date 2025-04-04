@@ -1,20 +1,26 @@
 conditionalPackageInstalls:
-  sharedConfigs: true
-  snapshotVolume: true
-  logsVolume: false
-  migrationConsole: true
-
-  bulkLoader: false
-  proxy: true
-  kafka: false
-  replayer: false
+  # required migration infrastructure components
   argoWorkflows: true
+  etcd: true
+
+  # optional migration components
+  kafkaOperator: true
+  proxy: false
+
+  # migration support packages
+  migrationConsole: true
+  sharedConfigs: true
+  snapshotVolume: false
+  logsVolume: false
+
+  # Test packages
+  localstack: true
+
+  # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
   prometheus: false
   jaeger: false
-
-  etcd: true
 
 etcd:
   replicaCount: 1
@@ -56,142 +62,12 @@ etcd:
     fsGroup: 1001
     runAsUser: 1001
 
-shared-configs:
-  globalParameters:
-    sourceCluster:
-      allowRuntimeOverride: true
-      object:
-        endpoint: "http://ma-capture-proxy:9200"
-        directEndpoint: "http://elasticsearch-master:9200"
-        allowInsecure: true
-        authType: "no_auth"
-        version: "ES_7.10"
-    targetCluster:
-      allowRuntimeOverride: true
-      object:
-        endpoint: "https://opensearch-cluster-master:9200"
-        allowInsecure: true
-        authType: "basic_auth"
-        basicAuthUsername: "admin"
-        basicAuthPassword: "myStrongPassword123!"
-        # Should be in sync with above username/password
-        basicAuthHeader: "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
-        version: "OS_2.16"
-    kafkaBrokers:
-      allowRuntimeOverride: false
-      object:
-        brokers: "captured-traffic-kafka-bootstrap.ma.svc:9092"
-        kafkaType: "standard"
-    snapshot:
-      allowRuntimeOverride: true
-      object:
-        #otelEndpoint: "http://localhost:4317"
-        repoPath: "/snapshot"
-        snapshotName: "migration-assistant-snapshot"
-        snapshotType: "fs"
-    metadataMigration:
-      allowRuntimeOverride: true
-      object:
-        minReplicas: 0
-        metadataType: "from_snapshot"
-        #otelEndpoint: "http://localhost:4317"
-        sourceClusterVersion: "ES_7.10"
-#    metricsSource:
-#      allowRuntimeOverride: false
-#      object:
-#        endpoint: "http://prometheus:9090"
-#        observabilityType: "prometheus"
 
-
-capture-proxy:
-  parameters:
-    destinationUri:
-      source: otherConfig
-      configMapName: "source-cluster"
-      configMapKey: "directEndpoint"
-    insecureDestination:
-      source: otherConfig
-      configMapName: "source-cluster"
-      configMapKey: "allowInsecure"
-    kafkaConnection:
-      source: otherConfig
-      configMapName: "kafka-brokers"
-      configMapKey: "brokers"
-
-
-migration-console:
-  snapshotVolumeEnabled: true
-  snapshotVolumePvc: "snapshot-volume-pvc"
-  sharedLogsVolumeEnabled: true
-  sharedLogsPvc: "shared-logs-pvc"
-
-
-bulk-document-loader:
-  snapshotVolumeEnabled: true
-  snapshotVolumePvc: "snapshot-volume-pvc"
-  sharedLogsVolumeEnabled: true
-  sharedLogsPvc: "shared-logs-pvc"
-  parameters:
-    snapshotName:
-      source: otherConfig
-      configMapName: "snapshot"
-      configMapKey: "snapshotName"
-    targetHost:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "endpoint"
-    targetInsecure:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "allowInsecure"
-      parameterType: booleanFlag
-    targetUsername:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "basicAuthUsername"
-    targetPassword:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "basicAuthPassword"
-    sourceVersion:
-      source: parameterConfig
-      value: "ES_7.10"
-      allowRuntimeOverride: true
-    docTransformerConfigFile:
-      source: parameterConfig
-      value: "/shared-logs-output/test-transformations/transformation.json"
-      allowRuntimeOverride: true
-
-
-replayer:
-  sharedLogsVolumeEnabled: true
-  sharedLogsPvc: "shared-logs-pvc"
-  parameters:
-    kafkaTrafficBrokers:
-      source: otherConfig  # eventually this will become a list from a shared config
-      configMapName: "kafka-brokers"
-      configMapKey: "brokers"
-    targetUri:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "endpoint"
-    insecure:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "allowInsecure"
-      parameterType: booleanFlag
-    authHeaderValue:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "basicAuthHeader"
-    speedupFactor:
-      source: parameterConfig
-      value: 10
-      allowRuntimeOverride: true
-    transformerConfigFile:
-      source: parameterConfig
-      value: "/shared-logs-output/test-transformations/transformation.json"
-      allowRuntimeOverride: true
+#migration-console:
+#  snapshotVolumeEnabled: true
+#  snapshotVolumePvc: "snapshot-volume-pvc"
+#  sharedLogsVolumeEnabled: true
+#  sharedLogsPvc: "shared-logs-pvc"
 
 
 captured-traffic-kafka-cluster:
@@ -207,6 +83,13 @@ captured-traffic-kafka-cluster:
     replicas: 1
     storageSize: 10Gi
 
+s3Configuration:
+  region: us-east-2
+  useLocalStack: true
+
+snapshotBucketConfiguration:
+  create: true
+  bucketName: snapshot
 
 argo-workflows:
   fullnameOverride: "argo"
@@ -278,6 +161,7 @@ jaeger:
     enabled: false
   query:
     enabled: false
+
 
 grafana:
   ## Grafana data sources configuration

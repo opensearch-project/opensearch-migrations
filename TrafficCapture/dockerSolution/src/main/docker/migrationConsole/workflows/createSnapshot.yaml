@@ -17,6 +17,15 @@ spec:
             value: "true"
           - name: repo-args
             value: "--file-system-repo-path /snapshot"
+          - name: indices
+            value: ""
+            description: "Which indices should be snapshot.  Default empty.  Empty string means all."
+      outputs:
+        parameters:
+          - name: snapshot-config
+            valueFrom:
+              parameter: "{{steps.create-snapshot.outputs.parameters.snapshot-config}}"
+
       steps:
         - - name: create-snapshot
             template: create-snapshot-template
@@ -30,6 +39,8 @@ spec:
                   value: "{{inputs.parameters.source-insecure}}"
                 - name: repo-args
                   value: "{{inputs.parameters.repo-args}}"
+                - name: index-allow-list
+                  value: ""
         - - name: check-snapshot-status
             template: check-snapshot-status-template
             arguments:
@@ -48,6 +59,11 @@ spec:
           - name: source-host
           - name: source-insecure
           - name: repo-args
+      outputs:
+        parameters:
+          - name: snapshot-config
+            valueFrom:
+              path: /tmp/snapshotConfig.json
       container:
         image: migrations/migration_console:latest
         imagePullPolicy: IfNotPresent
@@ -64,6 +80,7 @@ spec:
               --source-host {{inputs.parameters.source-host}} \
               $INSECURE_FLAG \
               {{inputs.parameters.repo-args}}
+            cat "{}" > /tmp/snapshotConfig.json
 
     - name: check-snapshot-status-template
       inputs:

@@ -17,10 +17,10 @@ spec:
         value: "password"
       - name: etcd-image
         value: "migrations/migration_console:latest"
-      - name: create-snapshot-template-name
-        value: "create-snapshot"
       - name: demo-max-sleep-time
-        value: "1"
+        value: "60"
+      - name: s3-configmap
+        value: "s3-snapshot-config"
 
   templates:
     # Main workflow template
@@ -28,9 +28,58 @@ spec:
       inputs:
         parameters:
           - name: source-migration-configs
-            default: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"auth\":{\"type\":\"basic\",\"username\":\"user\",\"password\":\"pass\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"existingSnapshot\":{},\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
+            value: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
           - name: targets
             value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
+      steps:
+        - - name: get-configs-from-maps
+            template: get-configs-from-maps
+            arguments:
+              parameters:
+                - name: aws-region
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-configmap}}"
+                      key: AWS_REGION
+                - name: s3-endpoint
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-configmap}}"
+                      key: ENDPOINT
+        - - name: main-direct
+            template: main-direct
+            arguments:
+              parameters:
+                - name: source-migration-configs
+                  value: "{{inputs.parameters.source-migration-configs}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: s3-config
+                  value: "{{steps.get-configs-from-maps.outputs.parameters.s3-config}}"
+
+    - name: get-configs-from-maps
+      steps: [[]]
+      inputs:
+        parameters:
+          - name: aws-region
+          - name: s3-endpoint
+      outputs:
+        parameters:
+          - name: s3-config
+            valueFrom:
+              # TODO - format this with a map->string function
+              expression: "'{ \"region\": \"' + inputs.parameters['aws-region'] + '\", ' + '\"endpoint\": \"' + inputs.parameters['s3-endpoint'] + '\" }'"
+
+    # All configmaps from main have been resolved.  Use this version to bypass those global configurations.
+    - name: main-direct
+      inputs:
+        parameters:
+          - name: source-migration-configs
+            value: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
+          - name: targets
+            value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
+          - name: s3-config
+            #value: '{}'
       steps:
         - - name: init
             templateRef:
@@ -67,7 +116,7 @@ spec:
                   value: "{{steps.init.outputs.parameters.prefix}}"
 
 
-    # Unroll snapshotting and their dependent steps
+    # Unroll snapshotting and their dependent steps ('source-migration-configs')
     - name: pipeline-source-migration
       inputs:
         parameters:
@@ -86,7 +135,7 @@ spec:
                   value: "{{item}}"
                 - name: targets
                   value: "{{inputs.parameters.targets}}"
-                - name: process-name
+                - name: source-pipeline-name
                   value: "{{=toBase64(fromJSON(inputs.parameters['source-migration-config'])['source']['endpoint'])}}"
                   #"\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
                   #value: "\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
@@ -99,13 +148,17 @@ spec:
           - name: source-config
           - name: snapshot-and-migration-config
           - name: targets
-          - name: process-name
+          - name: source-pipeline-name
           - name: prefix
       steps:
         - - name: create-or-get-snapshot
-            template: create-or-get-snapshot
+            templateRef:
+              name: create-or-get-snapshot
+              template: create-or-get-snapshot
             arguments:
               parameters:
+                - name: source-name
+                  value: "{{inputs.parameters.source-pipeline-name}}"
                 - name: source-config
                   value: "{{inputs.parameters.source-config}}"
                 - name: snapshot-and-migration-config
@@ -124,30 +177,9 @@ spec:
                 - name: target
                   value: "{{item}}"
                 - name: process-name
-                  value: "{{inputs.parameters.process-name}}::{{=toBase64(toJSON(item))}}"
+                  value: "{{inputs.parameters.source-pipeline-name}}::{{=toBase64(toJSON(item))}}"
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
-
-    - name: create-or-get-snapshot
-      inputs:
-        parameters:
-          - name: source-config
-          - name: snapshot-and-migration-config
-      outputs:
-        parameters:
-          - name: snapshot-config
-            value: "{}"
-#            valueFrom:
-#              expression: "toJSON(fromJSON(inputs.parameters['snapshot-and-migration-config'])['existingSnapshot'])"
-      script:
-        image: python:3.9-alpine
-        command: [ python ]
-        source: |
-          import json, sys, os, random, time
-          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
-          print(f"Sleeping for {sleep_duration} seconds to simulate snapshot creation time...")
-          time.sleep(sleep_duration)
-          print(f"Finished sleeping after {sleep_duration} seconds")
 
     - name: pipeline-snapshot-to-target
       inputs:
@@ -201,7 +233,9 @@ spec:
                 - name: target
                   value: "{{inputs.parameters.target}}"
         - - name: bulk-load-documents
-            template: bulk-load-documents
+            templateRef:
+              name: bulk-load
+              template: run-bulk-load-from-config
             withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
             arguments:
               parameters:
@@ -258,19 +292,6 @@ spec:
 #        imagePullPolicy: IfNotPresent
 #        command: [ echo ]
 #        args: [ "metadata migrate" ]
-
-    - name: bulk-load-documents
-      inputs:
-        parameters:
-          - name: snapshot-config
-          - name: rfs-config
-          - name: target
-      container:
-        image: migrations/migration_console:latest
-        imagePullPolicy: IfNotPresent
-        command: [ echo ]
-        args: [ "backfill" ]
-
 
     # This is where we'd start running live-replay
     - name: run-replayer-for-target

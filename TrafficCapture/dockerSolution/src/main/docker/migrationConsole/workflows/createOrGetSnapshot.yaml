@@ -1,0 +1,77 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: create-or-get-snapshot
+spec:
+  entrypoint: create-or-get-snapshot
+  templates:
+    - name: create-or-get-snapshot
+      inputs:
+        parameters:
+          - name: source-name
+          - name: source-config
+          - name: snapshot-and-migration-config
+      steps:
+        - - name: get-existing-snapshot
+            template: get-existing-snapshot
+            when: "{{='existingSnapshot' in fromJSON(inputs.parameters['snapshot-and-migration-config'])}}"
+            arguments:
+              parameters:
+                - name: existing-snapshot
+                  value: "{{=get(fromJSON(inputs.parameters['snapshot-and-migration-config']), 'existingSnapshot')}}"
+
+        - - name: create-snapshot
+            templateRef:
+              name: create-snapshot
+              template: snapshot-workflow
+            when: "{{='existingSnapshot' in fromJSON(inputs.parameters['snapshot-and-migration-config'])}} == false"
+            arguments:
+              parameters:
+                - name: snapshot-name
+                  value: "{{inputs.parameters.source-name}}::{{=toBase64(get(toJSON(inputs.parameters['snapshot-and-migration-config'], 'indices'))))}}"
+                - name: source-host
+                  value: "{{=fromJSON(inputs.parameters['source-config')['']}}"
+                - name: source-insecure
+                  value: "{{=fromJSON(inputs.parameters['source-config')['']}}"
+                - name: repo-args
+                  value: "--s3-role-arn GETME --s3-region GETME --s3-repo-uri GETME"
+                - name: index-allow-list
+                  value: "{{=join(fromJSON(inputs.parameters['snapshot-and-migration-config'])['indices'], ',')}}"
+
+        - - name: collect-output
+            template: collect-output
+            arguments:
+              parameters:
+                - name: create-snapshot-output
+                  value: "{{steps.create-snapshot.outputs.parameters.snapshot-config}}"
+                - name: existing-snapshot
+                  value: "{{steps.get-existing-snapshot.outputs.parameters.existing-snapshot}}"
+
+      outputs:
+        parameters:
+          - name: snapshot-config
+            valueFrom:
+              parameter: "{{steps.collect-output.outputs.parameters.snapshot-config}}"
+
+    - name: get-existing-snapshot
+      steps: [[]]
+      inputs:
+        parameters:
+          - name: existing-snapshot
+      outputs:
+        parameters:
+          - name: existing-snapshot
+            valueFrom:
+              parameter: "{{inputs.parameters.existing-snapshot}}"
+
+    - name: collect-output
+      inputs:
+        parameters:
+          - name: create-snapshot-output
+          - name: existing-snapshot
+      outputs:
+        parameters:
+          - name: snapshot-config
+            valueFrom:
+              expression: "inputs.parameters['existing-snapshot'] != null && inputs.parameters['existing-snapshot'] != 'nil' ? inputs.parameters['existing-snapshot'] : inputs.parameters['create-snapshot-output']"
+      steps: [[]]
