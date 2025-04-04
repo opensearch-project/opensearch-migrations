@@ -67,7 +67,7 @@ public class WorkCoordinatorTest {
     }
 
     @SneakyThrows
-    private JsonNode searchForExpiredDocs(long expirationEpochSeconds) {
+    private JsonNode searchForExpiredDocs(String indexName, long expirationEpochSeconds) {
         final var body = "{"
             + OpenSearchWorkCoordinator.QUERY_INCOMPLETE_EXPIRED_ITEMS_STR.replace(
                 OpenSearchWorkCoordinator.OLD_EXPIRATION_THRESHOLD_TEMPLATE,
@@ -78,7 +78,7 @@ public class WorkCoordinatorTest {
         var response = httpClientSupplier.get()
             .makeJsonRequest(
                 AbstractedHttpClient.GET_METHOD,
-                OpenSearchWorkCoordinator.INDEX_NAME + "/_search",
+                indexName + "/_search",
                 null,
                 body
             );
@@ -174,7 +174,7 @@ public class WorkCoordinatorTest {
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
                 log.atError().setCause(e).setMessage("Unexpected clock drift error.  Got response: {}")
-                    .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
+                    .addArgument(() -> searchForExpiredDocs(factory.getFinalIndexName(), e.getTimestampEpochSeconds()))
                     .log();
             }
             Thread.sleep(EXPIRATION.plusSeconds(1).toMillis());
@@ -501,7 +501,7 @@ public class WorkCoordinatorTest {
             log.atError()
                 .setCause(e)
                 .setMessage("Unexpected clock drift error.  Got response: {}")
-                .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
+                .addArgument(() -> searchForExpiredDocs(factory.getFinalIndexName(), e.getTimestampEpochSeconds()))
                 .log();
             throw e;
         }
