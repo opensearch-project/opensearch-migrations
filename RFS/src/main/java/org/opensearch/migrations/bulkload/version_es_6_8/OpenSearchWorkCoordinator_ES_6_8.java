@@ -10,27 +10,20 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator {    
         public OpenSearchWorkCoordinator_ES_6_8(
             AbstractedHttpClient httpClient,
-            String indexNameAppendage,
             long tolerableClientServerClockDifferenceSeconds,
             String workerId
         ) {
-            super(httpClient, indexNameAppendage, tolerableClientServerClockDifferenceSeconds, workerId);
+            super(httpClient, tolerableClientServerClockDifferenceSeconds, workerId);
         }
 
         public OpenSearchWorkCoordinator_ES_6_8(
             AbstractedHttpClient httpClient,
-            String indexNameAppendage,
             long tolerableClientServerClockDifferenceSeconds,
             String workerId,
             Clock clock,
             Consumer<WorkItemAndDuration> workItemConsumer
         ) {
-            super(httpClient,
-                indexNameAppendage,
-                tolerableClientServerClockDifferenceSeconds,
-                workerId,
-                clock,
-                workItemConsumer);
+            super(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
         }
 
         protected String getCoordinationIndexSettingsBody(){
@@ -68,17 +61,17 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
             + "}\n";
         }
         protected String getPathForUpdates(String workItemId) {
-            return indexName + "/doc/" + workItemId + "/_update";
+            return INDEX_NAME + "/doc/" + workItemId + "/_update";
         }
 
-        protected String getPathForSingleDocumentUpdateByQuery() { return indexName + "/_update_by_query?refresh=true&size=1"; }
+        protected String getPathForSingleDocumentUpdateByQuery() { return INDEX_NAME + "/_update_by_query?refresh=true&size=1"; }
 
         protected String getPathForGets(String workItemId) {
-            return indexName + "/doc/" + workItemId;
+            return INDEX_NAME + "/doc/" + workItemId;
         }
 
         protected String getPathForSearches() {
-            return indexName + "/doc/_search";
+            return INDEX_NAME + "/doc/_search";
         }
 
         protected int getTotalHitsFromSearchResponse(JsonNode searchResponse) {

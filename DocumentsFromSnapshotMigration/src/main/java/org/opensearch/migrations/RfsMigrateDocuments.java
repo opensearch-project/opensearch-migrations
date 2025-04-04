@@ -183,12 +183,6 @@ public class RfsMigrateDocuments {
             description = ("Version of the source cluster."))
         public Version sourceVersion = Version.fromString("ES 7.10");
 
-        @Parameter(required = false,
-            names = { "--session-name", "--sessionName" },
-            description = "Name to disambiguate fleets of RFS workers running against the same target.  " +
-                "This will be appended to the name of the index that is used for work coordination.")
-        public String indexNameAppendage = "";
-
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
     }
@@ -300,7 +294,7 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameAppendage);
+        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(

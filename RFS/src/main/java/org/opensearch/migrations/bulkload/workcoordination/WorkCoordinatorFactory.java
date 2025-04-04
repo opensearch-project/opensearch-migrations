@@ -9,17 +9,13 @@ import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchWorkCoordinat
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchWorkCoordinator_OS_2_11;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @RequiredArgsConstructor
-@AllArgsConstructor
 @Slf4j
 public class WorkCoordinatorFactory {
     private final Version version;
-    private String indexNameAppendage = "";
 
     public OpenSearchWorkCoordinator get(
             AbstractedHttpClient httpClient,
@@ -27,15 +23,9 @@ public class WorkCoordinatorFactory {
             String workerId
         ) {
         if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
-            return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
-                indexNameAppendage,
-                tolerableClientServerClockDifferenceSeconds,
-                workerId);
+            return new OpenSearchWorkCoordinator_OS_2_11(httpClient, tolerableClientServerClockDifferenceSeconds, workerId);
         } else if (VersionMatchers.isES_6_X.test(version)) {
-            return new OpenSearchWorkCoordinator_ES_6_8(httpClient,
-                indexNameAppendage,
-                tolerableClientServerClockDifferenceSeconds,
-                workerId);
+            return new OpenSearchWorkCoordinator_ES_6_8(httpClient, tolerableClientServerClockDifferenceSeconds, workerId);
         } else {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
@@ -49,25 +39,12 @@ public class WorkCoordinatorFactory {
             Consumer<WorkItemAndDuration> workItemConsumer
         ) {
         if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
-            return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
-                indexNameAppendage,
-                tolerableClientServerClockDifferenceSeconds,
-                workerId,
-                clock,
-                workItemConsumer);
+            return new OpenSearchWorkCoordinator_OS_2_11(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
         } else if (VersionMatchers.isES_6_X.test(version)) {
-            return new OpenSearchWorkCoordinator_ES_6_8(httpClient,
-                indexNameAppendage,
-                tolerableClientServerClockDifferenceSeconds,
-                workerId,
-                clock,
-                workItemConsumer);
+            return new OpenSearchWorkCoordinator_ES_6_8(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, workItemConsumer);
         } else {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
     }
-
-    public String getFinalIndexName() {
-        return OpenSearchWorkCoordinator.getFinalIndexName(indexNameAppendage);
-    }
+    
 }
