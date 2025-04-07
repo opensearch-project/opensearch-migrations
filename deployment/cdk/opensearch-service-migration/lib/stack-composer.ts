@@ -139,11 +139,10 @@ export class StackComposer {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const defaultValues: Record<string, any> = defaultValuesJson
-        if (!props.env?.region || !props.env?.account) {
-            throw new Error('Missing at least one of required fields [region, account] in props.env. ' +
+        if (!props.env?.region) {
+            throw new Error('Missing at least one of required fields [region] in props.env. ' +
                 'Has AWS been configured for this environment?');
         }
-        const account = props.env.account
         const region = props.env.region
         const defaultDeployId = 'default'
 
@@ -394,8 +393,6 @@ export class StackComposer {
         } else {
             snapshotYaml = new SnapshotYaml();
             snapshotYaml.snapshot_name = "rfs-snapshot"
-            const s3Uri = `s3://migration-artifacts-${account}-${stage}-${region}/rfs-snapshot-repo`;
-            snapshotYaml.s3 = {repo_uri: s3Uri, aws_region: region};
         }
         servicesYaml.snapshot = snapshotYaml
 
@@ -467,6 +464,12 @@ export class StackComposer {
             this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
             servicesYaml.kafka = migrationStack.kafkaYaml;
+            if (!existingSnapshotDefinition) {
+                snapshotYaml.s3 = {
+                    repo_uri: `s3://${migrationStack.artifactBucketName}/rfs-snapshot-repo`,
+                    aws_region: region
+                };
+            }
         }
 
         let osContainerStack
