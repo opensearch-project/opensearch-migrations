@@ -4,7 +4,7 @@ plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "2.1.1"
     id "com.diffplug.spotless" version '7.0.2'
-    id 'io.freefair.lombok' version '8.13' apply false
+    id 'io.freefair.lombok' version '8.13.1' apply false
     id 'jacoco'
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.6' apply false
@@ -114,17 +114,26 @@ subprojects {
     configurations.all {
         resolutionStrategy {
             // Force specific versions of transitive dependencies to handle CVEs
-            force 'net.minidev:json-smart:2.5.2'
-            force 'xalan:xalan:2.7.3'
-            force 'com.thoughtworks.xstream:xstream:1.4.21'
-            force 'commons-net:commons-net:3.11.1'
-            force 'org.jsoup:jsoup:1.19.1'
-            force 'org.apache.tika:tika-core:3.1.0'
+            force "com.fasterxml.jackson.core:jackson-databind:${libs.versions.jackson.get()}"
+            force "com.google.guava:guava:${libs.versions.guava.get()}"
+            force "io.netty:netty-codec:${libs.versions.netty.get()}"
+            force "io.netty:netty-codec-http:${libs.versions.netty.get()}"
+            force "io.netty:netty-common:${libs.versions.netty.get()}"
+            force "io.netty:netty-handler:${libs.versions.netty.get()}"
+            force 'org.apache.httpcomponents:httpclient:4.5.9'
+            force "org.bouncycastle:bcpkix-jdk18on:${libs.versions.bouncycastle.get()}"
+            force "org.bouncycastle:bcprov-jdk18on:${libs.versions.bouncycastle.get()}"
             force 'com.jayway.jsonpath:json-path:2.9.0'
+            force 'com.thoughtworks.xstream:xstream:1.4.21'
+            force "commons-io:commons-io:2.18.0"
+            force 'commons-net:commons-net:3.11.1'
             force 'dnsjava:dnsjava:3.6.3'
-            force 'org.xerial.snappy:snappy-java:1.1.10.7'
+            force 'net.minidev:json-smart:2.5.2'
+            force 'org.apache.tika:tika-core:3.1.0'
             force 'org.glassfish.jersey.core:jersey-common:3.1.10'
-            force 'org.apache.httpcomponents:httpclient:4.5.14'
+            force 'org.jsoup:jsoup:1.19.1'
+            force 'org.xerial.snappy:snappy-java:1.1.10.7'
+            force 'xalan:xalan:2.7.3'
 
             preferProjectModules()
         }
@@ -200,7 +209,7 @@ subprojects {
 
             systemProperty 'junit.jupiter.extensions.autodetection.enabled', true
             // Verify assertions in tests
-            jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
+            jvmArgs += ['-ea', '-XX:+HeapDumpOnOutOfMemoryError', '-Xmx2g']
             systemProperty "junit.jupiter.execution.timeout.default", "5m"
             jacoco {
                 enabled = true

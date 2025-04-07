@@ -1,13 +1,11 @@
 package org.opensearch.migrations.bulkload.lucene.version_6;
 
 import java.io.IOException;
-import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.AllArgsConstructor;
 import shadow.lucene6.org.apache.lucene.index.LeafReader;
-import shadow.lucene6.org.apache.lucene.index.SegmentCommitInfo;
 import shadow.lucene6.org.apache.lucene.index.SegmentReader;
 
 @AllArgsConstructor
@@ -31,24 +29,22 @@ public class LeafReader6 implements LuceneLeafReader {
         return wrapped.getContext().toString();
     }
 
-    private Optional<SegmentReader> getSegmentReader() {
+    private SegmentReader getSegmentReader() {
         if (wrapped instanceof SegmentReader) {
-            return Optional.of(((SegmentReader)wrapped));
+            return (SegmentReader) wrapped;
         }
-        return Optional.empty();
+        throw new IllegalStateException("Expected SegmentReader but got " + wrapped.getClass());
     }
 
     public String getSegmentName() { 
         return getSegmentReader()
-            .map(SegmentReader::getSegmentName)
-            .orElse(null);
+            .getSegmentName();
     }
 
     public String getSegmentInfoString() {
         return getSegmentReader()
-            .map(SegmentReader::getSegmentInfo)
-            .map(SegmentCommitInfo::toString)
-            .orElse(null);
+            .getSegmentInfo()
+            .toString();
     }
 
     public String toString() {

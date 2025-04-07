@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload;
 import java.io.File;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -28,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.testcontainers.lifecycle.Startables;
 
 
 @Tag("isolatedTest")
@@ -44,7 +44,7 @@ public class EndToEndTest extends SourceTestBase {
     @MethodSource(value = "scenarios")
     public void migrationDocuments(
         final SearchClusterContainer.ContainerVersion sourceVersion,
-        final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
+        final SearchClusterContainer.ContainerVersion targetVersion) {
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
@@ -62,13 +62,8 @@ public class EndToEndTest extends SourceTestBase {
         final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
 
         try {
-
             // === ACTION: Set up the source/target clusters ===
-            var bothClustersStarted = CompletableFuture.allOf(
-                CompletableFuture.runAsync(() -> sourceCluster.start()),
-                CompletableFuture.runAsync(() -> targetCluster.start())
-            );
-            bothClustersStarted.join();
+            Startables.deepStart(sourceCluster, targetCluster).join();
 
             var indexName = "blog_2023";
             var numberOfShards = 3;
@@ -77,13 +72,16 @@ public class EndToEndTest extends SourceTestBase {
 
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
+            var sourceVersion = sourceCluster.getContainerVersion().getVersion();
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
-                "    \"index\": {" +
-                "      \"number_of_shards\": %d," +
-                "      \"number_of_replicas\": 0" +
-                "    }" +
+                "    \"number_of_shards\": %d," +
+                "    \"number_of_replicas\": 0," +
+                (VersionMatchers.isBelowES_6_X.test(sourceVersion)
+                        ? ""
+                        : "    \"index.soft_deletes.enabled\": true,") +
+                "    \"refresh_interval\": -1" +
                 "  }" +
                 "}",
                 numberOfShards
@@ -91,11 +89,25 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
 
+            // === ACTION: Create two large documents (40MB each) ===
+            String largeDoc = generateLargeDocJson(40);
+            sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
+            sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);
 
+            // === ACTION: Create some searchable documents ===
             sourceClusterOperations.createDocument(indexName, "222", "{\"author\":\"Tobias Funke\"}");
             sourceClusterOperations.createDocument(indexName, "223", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
             sourceClusterOperations.createDocument(indexName, "224", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
             sourceClusterOperations.createDocument(indexName, "225", "{\"author\":\"Tobias Funke\", \"category\": \"tech\"}", "2", null);
+
+
+            // To create deleted docs in a segment that persists on the snapshot, refresh, then create two docs on a shard, then after a refresh, delete one.
+            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.createDocument(indexName, "toBeDeleted", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "remaining", "{\"author\":\"Tobias Funke\", \"category\": \"tech\"}", "1", null);
+            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
+            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
@@ -150,6 +162,19 @@ public class EndToEndTest extends SourceTestBase {
         } finally {
             deleteTree(localDirectory.toPath());
         }
+    }
+
+    private String generateLargeDocJson(int sizeInMB) {
+        // Calculate the number of characters needed (1 char = 1 byte)
+        int numChars = sizeInMB * 1024 * 1024;
+        Random random = new Random(1); // fixed seed for reproducibility
+        StringBuilder sb = new StringBuilder(numChars);
+        String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        for (int i = 0; i < numChars; i++) {
+            sb.append(characters.charAt(random.nextInt(characters.length())));
+        }
+        String timestamp = java.time.Instant.now().toString();
+        return "{\"timestamp\":\"" + timestamp + "\", \"large_field\":\"" + sb + "\"}";
     }
 
     private void checkDocsWithRouting(

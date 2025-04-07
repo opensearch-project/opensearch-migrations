@@ -23,12 +23,12 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 
 class MATestBase:
-    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str,
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str, description: str,
                  migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL, MigrationType.CAPTURE_AND_REPLAY],
-                 allow_source_target_combinations=None, run_isolated=False, short_description="MA base test case"):
+                 allow_source_target_combinations=None, run_isolated=False):
         self.allow_source_target_combinations = allow_source_target_combinations or []
         self.run_isolated = run_isolated
-        self.short_description = short_description
+        self.description = description
         self.console_link_env = console_link_env
         self.migrations_required = migrations_required
         if ((not console_link_env.source_cluster or not console_link_env.target_cluster) or

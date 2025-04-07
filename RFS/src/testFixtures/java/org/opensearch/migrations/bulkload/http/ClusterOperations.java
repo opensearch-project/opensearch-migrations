@@ -72,14 +72,17 @@ public class ClusterOperations {
         createDocument(index, docId, body, null, null);
     }
 
-    @SneakyThrows
-    public void createDocument(final String index, final String docId, final String body, String routing, String type) {
+    public void createDocument(final String index, final String docId, final String body, final String routing, final String type) {
         var response = put("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing, body);
         assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
-    public void deleteDocument(final String index, final String docId, final String type) throws IOException {
-        var response = delete("/" + index + "/" + docTypePathOrDefault(type) + docId);
+    public void deleteDocument(final String index, final String docId, final String type) {
+        deleteDocument(index, docId, null, type);
+    }
+
+    public void deleteDocument(final String index, final String docId, final String routing, final String type) {
+        var response = delete("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing);
         assertThat(response.getKey(), equalTo(200));
     }
 
@@ -123,17 +126,27 @@ public class ClusterOperations {
         }
         try (var response = httpClient.execute(postRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            log.atInfo()
-                .setMessage("{} {}\n{}\nResponse: {}\n{}")
-                .addArgument("POST")
-                .addArgument(path)
-                .addArgument(body)
-                .addArgument(response.getCode())
-                .addArgument(responseBody)
-                .log();
+            logHttpRequestResponse("POST", path, response.getCode(), responseBody, null);
             return Map.entry(response.getCode(), responseBody);
         }
     }
+
+    private static String truncate(String input, int maxLength) {
+        return input != null && input.length() > maxLength ? input.substring(0, maxLength) + "..." : input;
+    }
+
+    private static void logHttpRequestResponse(
+            String method, String path, int statusCode, String responseBody, String body) {
+        log.atInfo()
+                .setMessage("{} {}\n{}\nResponse: {}\n{}")
+                .addArgument(method)
+                .addArgument(path)
+                .addArgument(() -> body != null ? truncate(body, 1000) : "")
+                .addArgument(statusCode)
+                .addArgument(() -> truncate(responseBody, 1000))
+                .log();
+    }
+
 
     @SneakyThrows
     public Map.Entry<Integer, String> put(final String path, final String body) {
@@ -144,14 +157,7 @@ public class ClusterOperations {
         }
         try (var response = httpClient.execute(putRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            log.atInfo()
-                .setMessage("{} {}\n{}\nResponse: {}\n{}")
-                .addArgument("PUT")
-                .addArgument(path)
-                .addArgument(body)
-                .addArgument(response.getCode())
-                .addArgument(responseBody)
-                .log();
+            logHttpRequestResponse("PUT", path, response.getCode(), responseBody, body);
             return Map.entry(response.getCode(), responseBody);
         }
     }
@@ -162,13 +168,7 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(getRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            log.atInfo()
-                .setMessage("{} {}\nResponse: {}\n{}")
-                .addArgument("GET")
-                .addArgument(path)
-                .addArgument(response.getCode())
-                .addArgument(responseBody)
-                .log();
+            logHttpRequestResponse("GET", path, response.getCode(), responseBody, null);
             return Map.entry(response.getCode(), responseBody);
         }
     }
@@ -179,13 +179,7 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(request)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            log.atInfo()
-                .setMessage("{} {}\nResponse: {}\n{}")
-                .addArgument("DELETE")
-                .addArgument(path)
-                .addArgument(response.getCode())
-                .addArgument(responseBody)
-                .log();
+            logHttpRequestResponse("DELETE", path, response.getCode(), responseBody, null);
             return Map.entry(response.getCode(), responseBody);
         }
     }

@@ -21,7 +21,7 @@ shared-configs:
         directEndpoint: "http://elasticsearch-master:9200"
         allowInsecure: true
         authType: "no_auth"
-        version: "ES_7.10"
+        version: "ES_5.6"
     targetCluster:
       allowRuntimeOverride: true
       object:
@@ -49,7 +49,7 @@ shared-configs:
       object:
         minReplicas: 0
         metadataType: "from_snapshot"
-        sourceClusterVersion: "ES_7.10"
+        sourceClusterVersion: "ES_5.6"
 #    metricsSource:
 #      allowRuntimeOverride: false
 #      object:
@@ -111,6 +111,10 @@ bulk-document-loader:
       source: otherConfig
       configMapName: "source-cluster"
       configMapKey: "version"
+    docTransformerConfigFile:
+      source: parameterConfig
+      value: "/shared-logs-output/test-transformations/transformation.json"
+      allowRuntimeOverride: true
 
 replayer:
   sharedLogsVolumeEnabled: true
@@ -136,6 +140,10 @@ replayer:
     speedupFactor:
       source: parameterConfig
       value: 10
+      allowRuntimeOverride: true
+    transformerConfigFile:
+      source: parameterConfig
+      value: "/shared-logs-output/test-transformations/transformation.json"
       allowRuntimeOverride: true
 
 captured-traffic-kafka-cluster:

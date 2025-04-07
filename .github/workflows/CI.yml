@@ -11,12 +11,26 @@ env:
   node-version: '18.x'
   gradle-test-parallelization: '30'
 
-# Prevent multiple simultaneous runs
+# Prevent multiple simultaneous runs except on main repo
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations') }}
 
 jobs:
+  generate-cache-key:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Docker Cache Key
+        id: generate_docker_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
   workflow-info:
     runs-on: ubuntu-latest
     steps:
@@ -126,7 +140,7 @@ jobs:
           echo "matrix=$(IFS=,; echo "[${indices[*]}]")" >> $GITHUB_OUTPUT
 
   gradle-tests:
-    needs: [generate-test-matrix]
+    needs: [generate-test-matrix, generate-cache-key]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -142,6 +156,13 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
+      - name: Restore Docker Cache
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
+          # Delegate cache saving to python-e2e-tests
+          read-only: true
+
       - name: Run Gradle tests with striping
         run: |
           MAX_WORKERS=$(( $(nproc) - 1 ))
@@ -224,6 +245,7 @@ jobs:
             **/jacocoMergedReport.xml
 
   python-e2e-tests:
+    needs: [ generate-cache-key ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -237,18 +259,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.python-version }}
-      - name: Generate Cache Key from Dockerfiles
-        id: generate_cache_key
-        run: |
-          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
-          file_contents=$(cat $files)
-          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
-          echo "key=${key}" >> "$GITHUB_OUTPUT"
       - name: Cache Docker Images
         uses: ScribeMD/docker-cache@0.5.0
         with:
-          key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
-          read-only: true
+          key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
+          # Only save cache on push events
+          read-only: ${{ github.event_name != 'push' }}
       - name: Start Docker Solution
         run: gradle -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
@@ -342,4 +358,4 @@ jobs:
         run: |
           echo "One or more job cancelled, failed, or skipped" && exit 1
       - run: |
-          echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY
+          echo '## :heavy_check_mark: All continuous integration checks pass' >> $GITHUB_STEP_SUMMARY
