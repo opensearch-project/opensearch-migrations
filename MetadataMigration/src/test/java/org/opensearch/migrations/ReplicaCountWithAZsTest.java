@@ -128,6 +128,45 @@ class ReplicaCountWithAZsTest extends BaseMigrationTest{
         }
     }
 
+    @Test
+    void testMigrateWithMultipleAwarenessAttributeTypes() {
+        // The behavior with multiple attribute types is that replica balancing is enforced for the largest value.
+        var multipleAttributesValues = List.of(2, 5, 3); var initalReplicas = 3;
+        try (
+            final var sourceCluster = new SearchClusterContainer(SOURCE_VERSION);
+            final var targetCluster = new SearchClusterWithZoneAwarenessContainer(multipleAttributesValues)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            // Create a single index on the source cluster with 1 primary and n replicas.
+            var indexName = "index_1_" + initalReplicas;
+            var body =
+                "{\"settings\": {\"index\": {\"number_of_replicas\": " + initalReplicas + ", \"number_of_shards\": " + 1
+                    + "}}}";
+            sourceOperations.createIndex(indexName, body);
+
+            MigrateOrEvaluateArgs arguments = new MigrateOrEvaluateArgs();
+            arguments.sourceArgs.host = sourceCluster.getUrl();
+            arguments.targetArgs.host = targetCluster.getUrl();
+
+            // Run Migrate and check that the index failed with the expected error and index is not present on the target
+            // cluster.
+            MigrationItemResult migrateResult = executeMigration(arguments, MetadataCommands.EVALUATE);
+            Assertions.assertFalse(migrateResult.getItems().getIndexes().get(0).wasSuccessful());
+            Assertions.assertTrue(migrateResult.getItems().getIndexes().get(0).wasFatal());
+            Assertions.assertEquals(
+                migrateResult.getItems().getIndexes().get(0).getException().getClass(),
+                IncompatibleReplicaCountException.class
+            );
+            arguments.clusterAwarenessAttributes = multipleAttributesValues.stream().max(Integer::compareTo).get();
+            MigrationItemResult updatedMigrateResult = executeMigration(arguments, MetadataCommands.MIGRATE);
+            Assertions.assertTrue(updatedMigrateResult.getItems().getIndexes().get(0).wasSuccessful());
+            verifyIndexesExistOnTargetCluster(List.of(indexName));
+        }
+    }
+
     void verifyIndexesExistOnTargetCluster(List<String> indexNames) {
         for (String indexName : indexNames) {
             var res = targetOperations.get("/" + indexName);

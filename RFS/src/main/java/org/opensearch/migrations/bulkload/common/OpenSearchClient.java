@@ -3,12 +3,11 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -115,7 +114,7 @@ public abstract class OpenSearchClient {
         if (!balanceIsEnabled) {
             return new org.opensearch.migrations.AwarenessAttributeSettings(false, 0);
         }
-        List<String> attributeValues = new ArrayList<>(List.of());
+        AtomicInteger attributeValues = new AtomicInteger(1);
 
         String balanceAttributeSetting = "cluster.routing.allocation.awareness.attributes";
         String balanceAttributeValues = "cluster.routing.allocation.awareness.force.";
@@ -127,16 +126,13 @@ public abstract class OpenSearchClient {
                             balanceAttributeValues + attributeName.asText() + ".values", settings))
                         .map(JsonNode::asText)
                         .map(text -> text.split(","))
-                        .map(Arrays::asList)
-                        .ifPresent(attributeValues::addAll);
+                        .ifPresent(values -> attributeValues.getAndAccumulate(
+                            values.length,
+                            Math::max
+                        ));
                 });
             });
-
-
-        // Note that in some cases, the zone names are shielded as `xx-xxxxx-xx`, so filtering for
-        // distinct values will give an incorrect count.
-        return new AwarenessAttributeSettings(true, attributeValues.size()
-        );
+        return new AwarenessAttributeSettings(true, attributeValues.get());
     }
 
     /*
