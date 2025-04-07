@@ -185,7 +185,7 @@ class Metadata:
             command: None,
             "--snapshot-name": self._snapshot_name,
             "--target-host": self._target_cluster.endpoint,
-            "--min-replicas": self._min_replicas
+            "--cluster-awareness-attributes": self._min_replicas
         })
 
         if self._snapshot_location == 's3':
