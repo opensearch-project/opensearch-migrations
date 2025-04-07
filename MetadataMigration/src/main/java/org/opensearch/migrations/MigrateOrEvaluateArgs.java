@@ -45,7 +45,7 @@ public class MigrateOrEvaluateArgs {
     @ParametersDelegate
     public DataFilterArgs dataFilterArgs = new DataFilterArgs(); 
 
-    // https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
+    // https://opensearch.org/docs/2.19/tuning-your-cluster/#forced-awareness
     @Parameter(names = {"--cluster-awareness-attributes" }, description = "Optional. This sets up a transformation for all indices to ensure"
         + " that the number of replicas is compatible with the routing awareness attributes of the cluster (usually the number of zones)."
         + " This transformation strictly increases the number of replicas for each index to meet the cluster's requirements. This can be"
