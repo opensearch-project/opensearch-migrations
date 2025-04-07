@@ -40,7 +40,7 @@ def test_metadata_init_with_fully_specified_config_succeeds():
                 "aws_region": "us-east-1"
             },
         },
-        "min_replicas": 1,
+        "cluster_awareness_attributes": 1,
         "index_allowlist": [
             "my_index", "my_second_index"
         ],
@@ -233,7 +233,7 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
-def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
+def test_metadata_with_cluster_awareness_attributes_makes_correct_subprocess_call(mocker):
     config = {
         "from_snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -241,7 +241,7 @@ def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "min_replicas": 2
+        "cluster_awareness_attributes": 2
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, None)

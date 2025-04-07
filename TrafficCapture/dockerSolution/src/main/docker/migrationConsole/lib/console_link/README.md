@@ -80,7 +80,7 @@ snapshot:
       aws_region: "us-east-2"
 metadata_migration:
   from_snapshot:
-  min_replicas: 0
+  cluster_awarness_attributes: 1
 kafka:
   broker_endpoints: "kafka:9092"
   standard:
@@ -215,7 +215,7 @@ Exactly one of the following blocks must be present:
 
 The metadata migration moves indices, components, and templates from a snapshot to the target cluster. In the future, there may be a `from_live_cluster` option, but currently all metadata migration must originate from a snapshot. A snapshot can be created via `console snapshot create` or can be pre-existing. The snapshot details are independently defineable, so if a special case is necessary, a snapshot could theoretically be created and used for document, but metadata migration could operate from a separate, pre-existing snapshot. This block is optional if metadata migration isn't being used as part of the migration.
 
-- `min_replicas`: optional, an integer value for the number of replicas to create. The default value is 0.
+- `cluster_awareness_attributes`: optional, an integer value for the number of awareness attributes that the cluster has (usually this means zones). This is only necessary if routing balancing across attributes is enforced.
 - `index_allowlist`: optional, a list of index names. If this key is provided, only the named indices will be migrated. If the field is not provided, all non-system indices will be migrated.
 - `index_template_allowlist`: optional, a list of index template names. If this key is provided, only the named templates will be migrated. If the field is not provided, all templates will be migrated.
 - `component_template_allowlist`: optional, a list of component template names. If this key is provided, only the named component templates will be migrated. If the field is not provided, all component templates will be migrated.
