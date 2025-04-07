@@ -140,7 +140,8 @@ export class StackComposer {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const defaultValues: Record<string, any> = defaultValuesJson
         if (!props.env?.region || !props.env?.account) {
-            throw new Error('Missing at least one of required fields [region, account] in props.env');
+            throw new Error('Missing at least one of required fields [region, account] in props.env. ' +
+                'Has AWS been configured for this environment?');
         }
         const account = props.env.account
         const region = props.env.region
@@ -385,6 +386,10 @@ export class StackComposer {
         const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
         let snapshotYaml
         if (existingSnapshotDefinition) {
+            if(!sourceCluster?.version) {
+                throw new Error("The `sourceCluster` object must be provided with a `version` field when using an external snapshot to ensure proper parsing of " +
+                    "the snapshot based on cluster version. See options.md for more details.")
+            }
             snapshotYaml = parseSnapshotDefinition(existingSnapshotDefinition)
         } else {
             snapshotYaml = new SnapshotYaml();
