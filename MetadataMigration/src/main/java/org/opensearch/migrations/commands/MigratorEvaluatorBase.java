@@ -68,11 +68,11 @@ public abstract class MigratorEvaluatorBase {
         return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
-    protected Transformer selectTransformer(Clusters clusters, int clusterDimensionality) {
+    protected Transformer selectTransformer(Clusters clusters, int awarenessAttributes) {
         var versionTransformer = TransformFunctions.getTransformer(
                 clusters.getSource().getVersion(),
                 clusters.getTarget().getVersion(),
-                clusterDimensionality,
+                awarenessAttributes,
                 arguments.metadataTransformationParams
         );
         var customTransformer = getCustomTransformer();
