@@ -20,6 +20,7 @@ public class InvalidResponse extends RfsException {
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
+    private static final String ERROR_STRING = "error";
 
     public InvalidResponse(String message, HttpResponse response) {
         super(message);
@@ -35,7 +36,7 @@ public class InvalidResponse extends RfsException {
             var interimResults = new ArrayList<Map.Entry<String, String>>();
             var bodyNode = objectMapper.readTree(response.body);
 
-            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get("error"));
+            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get(ERROR_STRING));
 
             // Check high level cause
             errorBody.map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
@@ -97,8 +98,8 @@ public class InvalidResponse extends RfsException {
             var interimResults = new ArrayList<String>();
             var bodyNode = objectMapper.readTree(response.body);
 
-            if (bodyNode != null && bodyNode.has("error")) {
-                JsonNode errorNode = bodyNode.get("error");
+            if (bodyNode != null && bodyNode.has(ERROR_STRING)) {
+                JsonNode errorNode = bodyNode.get(ERROR_STRING);
                 JsonNode rootCauses = errorNode.get("root_cause");
 
                 if (rootCauses != null && rootCauses.isArray()) {
