@@ -190,13 +190,9 @@ class Cluster:
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
-        # Note -- we should censor the password when logging this command
-        # Fix commit used for OSB on latest verified working commit
-        workload_revision = "fc64258a9b2ed2451423d7758ca1c5880626c520"
-        logger.info(f"Running opensearch-benchmark with '{workload}' workload and revision '{workload_revision}'")
-        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
+        logger.info(f"Running opensearch-benchmark with '{workload}' workload")
+        command = (f"opensearch-benchmark execute-test "
                    f"--exclude-tasks=check-cluster-health "
-                   f"--workload-revision={workload_revision} "
                    f"--target-host={self.endpoint} "
                    f"--workload={workload} "
                    f"--pipeline=benchmark-only "
