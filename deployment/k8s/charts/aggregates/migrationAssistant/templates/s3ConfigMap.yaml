@@ -13,3 +13,4 @@ data:
   {{- else }}
   ENDPOINT: "http://s3.us-east-1.amazonaws.com"
   {{- end }}
+  repo_uri: {{ .Values.snapshotBucketConfiguration.bucketName }}

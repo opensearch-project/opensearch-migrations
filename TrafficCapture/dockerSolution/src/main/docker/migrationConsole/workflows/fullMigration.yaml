@@ -19,7 +19,7 @@ spec:
         value: "migrations/migration_console:latest"
       - name: demo-max-sleep-time
         value: "60"
-      - name: s3-configmap
+      - name: s3-snapshot-configmap
         value: "s3-snapshot-config"
 
   templates:
@@ -28,24 +28,34 @@ spec:
       inputs:
         parameters:
           - name: source-migration-configs
-            value: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
+#                {\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},
+            value: |
+              [
+               {"source":{"endpoint":"https://elasticsearch-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}},"snapshot-and-migration-configs":[{"indices":["index_3","index_4"],"migrations":[{"metadata":{"mappings":{"properties":{}},"settings":{}},"documentBackfillConfigs":[{"indices":["index_3","index_4"]}]}]}],"replayer-config":{"batchSize":1000,"concurrency":4}}
+              ]
+
           - name: targets
             value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
       steps:
         - - name: get-configs-from-maps
-            template: get-configs-from-maps
+            template: get-configs-from-args
             arguments:
               parameters:
                 - name: aws-region
                   valueFrom:
                     configMapKeyRef:
-                      name: "{{workflow.parameters.s3-configmap}}"
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
                       key: AWS_REGION
                 - name: s3-endpoint
                   valueFrom:
                     configMapKeyRef:
-                      name: "{{workflow.parameters.s3-configmap}}"
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
                       key: ENDPOINT
+                - name: repo-uri
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: repo_uri
         - - name: main-direct
             template: main-direct
             arguments:
@@ -57,18 +67,24 @@ spec:
                 - name: s3-config
                   value: "{{steps.get-configs-from-maps.outputs.parameters.s3-config}}"
 
-    - name: get-configs-from-maps
+    - name: get-configs-from-args
       steps: [[]]
       inputs:
         parameters:
           - name: aws-region
           - name: s3-endpoint
+          - name: repo-uri
       outputs:
         parameters:
           - name: s3-config
             valueFrom:
-              # TODO - format this with a map->string function
-              expression: "'{ \"region\": \"' + inputs.parameters['aws-region'] + '\", ' + '\"endpoint\": \"' + inputs.parameters['s3-endpoint'] + '\" }'"
+
+              # add this too... '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' +
+              expression: >- 
+                '{' + 
+                '"aws_region": "' + inputs.parameters['aws-region'] + '", ' + 
+                '"repo_uri": "s3://' + inputs.parameters['repo-uri'] + '"' +
+                '}'
 
     # All configmaps from main have been resolved.  Use this version to bypass those global configurations.
     - name: main-direct
@@ -103,6 +119,8 @@ spec:
                   value: "{{item}}"
                 - name: targets
                   value: "{{inputs.parameters.targets}}"
+                - name: s3-config
+                  value: "{{inputs.parameters.s3-config}}"
                 - name: prefix
                   value: "{{steps.init.outputs.parameters.prefix}}"
 
@@ -122,6 +140,7 @@ spec:
         parameters:
           - name: source-migration-config
           - name: targets
+          - name: s3-config
           - name: prefix
       steps:
         - - name: pipeline-snapshot
@@ -136,9 +155,11 @@ spec:
                 - name: targets
                   value: "{{inputs.parameters.targets}}"
                 - name: source-pipeline-name
-                  value: "{{=toBase64(fromJSON(inputs.parameters['source-migration-config'])['source']['endpoint'])}}"
+                  value: "{{=lower(toBase64(fromJSON(inputs.parameters['source-migration-config'])['source']['endpoint']))}}"
                   #"\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
                   #value: "\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
+                - name: s3-config
+                  value: "{{inputs.parameters.s3-config}}"
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
 
@@ -149,6 +170,7 @@ spec:
           - name: snapshot-and-migration-config
           - name: targets
           - name: source-pipeline-name
+          - name: s3-config
           - name: prefix
       steps:
         - - name: create-or-get-snapshot
@@ -163,6 +185,8 @@ spec:
                   value: "{{inputs.parameters.source-config}}"
                 - name: snapshot-and-migration-config
                   value: "{{inputs.parameters.snapshot-and-migration-config}}"
+                - name: s3-config
+                  value: "{{inputs.parameters.s3-config}}"
         - - name: pipeline-snapshot-to-target
             template: pipeline-snapshot-to-target
             withParam: "{{inputs.parameters.targets}}"
@@ -177,7 +201,7 @@ spec:
                 - name: target
                   value: "{{item}}"
                 - name: process-name
-                  value: "{{inputs.parameters.source-pipeline-name}}::{{=toBase64(toJSON(item))}}"
+                  value: "{{inputs.parameters.source-pipeline-name}}.{{=lower(toBase64(toJSON(item)))}}"
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
 
@@ -205,7 +229,7 @@ spec:
                 - name: target
                   value: "{{inputs.parameters.target}}"
                 - name: process-name
-                  value: "{{inputs.parameters.process-name}}::{{=toBase64(toJSON(item))}}"
+                  value: "{{inputs.parameters.process-name}}.{{=lower(toBase64(toJSON(item)))}}"
                 - name: prefix
                   value: "{{inputs.parameters.prefix}}"
 

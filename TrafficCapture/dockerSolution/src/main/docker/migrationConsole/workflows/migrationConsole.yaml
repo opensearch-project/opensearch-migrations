@@ -4,50 +4,81 @@ metadata:
   name: migration-console-template
 spec:
   entrypoint: run-migration-command
-  arguments:
-    parameters:
-      - name: command
-        description: "Command to run in the migration container"
-      - name: source-cluster
-        description: "Source cluster configuration (JSON)"
-      - name: target-cluster
-        description: "Target cluster configuration (JSON)"
-      - name: snapshot-info
-        description: "Snapshot configuration information (JSON)"
-
   templates:
+    - name: get-console-config
+      inputs:
+        parameters:
+          - name: source-cluster
+            default: ""
+            description: "Source cluster configuration (JSON)"
+          - name: target-cluster
+            default: ""
+            description: "Target cluster configuration (JSON)"
+          - name: snapshot-info
+            default: ""
+            description: "Snapshot configuration information (JSON)"
+      outputs:
+        parameters:
+          - name: config-contents
+            valueFrom:
+              expression: >-
+                (inputs.parameters['source-cluster'] != "" ? "source_cluster: " + inputs.parameters['source-cluster'] + "\n" : "") + 
+                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " + inputs.parameters['target-cluster'] + "\n" : "") + 
+                (inputs.parameters['snapshot-info'] != "" ? "snapshot: " + inputs.parameters['snapshot-info'] + "\n" : "")
+      steps: [[]]
+
+    - name: run-console-with-config
+      inputs:
+        parameters:
+          - name: command
+          - name: config-contents
+      container:
+        image: migrations/migration_console:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e -x
+            cat <<'EOF' > /config/migration_services.yaml
+            {{inputs.parameters.config-contents}}
+            EOF
+            
+            . /etc/profile.d/venv.sh
+            source /.venv/bin/activate
+            
+            echo file dump
+            echo ---
+            cat /config/migration_services.yaml
+            echo ---
+            
+            {{inputs.parameters.command}}
+
     - name: run-console
       inputs:
         parameters:
           - name: command
           - name: source-cluster
+            default: ""
           - name: target-cluster
+            default: ""
           - name: snapshot-info
-      container:
-        image: migrations/migration_console:latest
-        command: ["/bin/sh", "-c"]
-        args:
-          - |            
-            mkdir -p /config
-            
-            # Create the YAML configuration file by converting JSON inputs
-            cat > /config/migration_services.yaml << EOF
-            source_cluster: $(echo '{{inputs.parameters.source-cluster}}' | yq eval -P -)
-            target_cluster: $(echo '{{inputs.parameters.target-cluster}}' | yq eval -P -)
-            snapshot: $(echo '{{inputs.parameters.snapshot-info}}' | yq eval -P -)
-            EOF
-            
-            # setup console python environment
-            . /etc/profile.d/venv.sh
-            source /.venv/bin/activate
-            alias console='console --config-file=/root/lib/console_link/services.yaml'
-
-            # Execute the command
-            {{inputs.parameters.command}}
-        resources:
-          limits:
-            memory: 512Mi
-            cpu: 500m
-          requests:
-            memory: 256Mi
-            cpu: 250m
+            default: ""
+      steps:
+        - - name: get-console-config
+            template: get-console-config
+            arguments:
+              parameters:
+                - name: source-cluster
+                  value: "{{inputs.parameters.source-cluster}}"
+                - name: target-cluster
+                  value: "{{inputs.parameters.target-cluster}}"
+                - name: snapshot-info
+                  value: "{{inputs.parameters.snapshot-info}}"
+        - - name: run-console-with-config
+            template: run-console-with-config
+            arguments:
+              parameters:
+                - name: config-contents
+                  value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
+                - name: command
+                  value: "{{inputs.parameters.command}}"

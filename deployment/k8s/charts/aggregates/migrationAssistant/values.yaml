@@ -83,6 +83,12 @@ captured-traffic-kafka-cluster:
     replicas: 1
     storageSize: 10Gi
 
+localstack:
+  image:
+    repository: "localstack/localstack"
+    tag: "4.3.0"
+
+
 s3Configuration:
   region: us-east-2
   useLocalStack: true

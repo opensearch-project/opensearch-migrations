@@ -11,12 +11,10 @@ spec:
         parameters:
           - name: snapshot-name
             value: "migration-assistant-snapshot"
-          - name: source-host
-            value: "http://ma-capture-proxy:9200"
-          - name: source-insecure
-            value: "true"
-          - name: repo-args
-            value: "--file-system-repo-path /snapshot"
+          - name: source-config
+            value: "{ \"endpoint\": \"http://ma-capture-proxy:9200\" }"
+          - name: s3-config
+            value: "{ \"repo_uri\": \"s3://snapshot\", \"aws_region\": \"us-east-1\" }"
           - name: indices
             value: ""
             description: "Which indices should be snapshot.  Default empty.  Empty string means all."
@@ -24,70 +22,45 @@ spec:
         parameters:
           - name: snapshot-config
             valueFrom:
-              parameter: "{{steps.create-snapshot.outputs.parameters.snapshot-config}}"
-
+              expression: >-
+                "{\"snapshot_name\": " + toJson(inputs.parameters['snapshot-name']) + ", \"s3\": " + inputs.parameters['s3-config'] + "}"
       steps:
+        - - name: get-console-config
+            templateRef:
+              name: migration-console-template
+              template: get-console-config
+            arguments:
+              parameters:
+                - name: source-cluster
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-info
+                  value: "{ \"snapshot_name\": \"{{inputs.parameters.snapshot-name}}\", \"s3\": {{inputs.parameters.s3-config}} }"
+
         - - name: create-snapshot
-            template: create-snapshot-template
+            templateRef:
+              name: migration-console-template
+              template: run-console-with-config
             arguments:
               parameters:
-                - name: source-host
-                  value: "{{inputs.parameters.source-host}}"
-                - name: snapshot-name
-                  value: "{{inputs.parameters.snapshot-name}}"
-                - name: source-insecure
-                  value: "{{inputs.parameters.source-insecure}}"
-                - name: repo-args
-                  value: "{{inputs.parameters.repo-args}}"
-                - name: index-allow-list
-                  value: ""
+                - name: config-contents
+                  value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
+                - name: command
+                  value: |
+                    set -x && 
+                    console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk ;
+                    console --config-file=/config/migration_services.yaml -v snapshot create
+
         - - name: check-snapshot-status
-            template: check-snapshot-status-template
+            template: check-snapshot-status
             arguments:
               parameters:
-                - name: snapshot-name
-                  value: "{{inputs.parameters.snapshot-name}}"
-                - name: source-host
-                  value: "{{inputs.parameters.source-host}}"
-                - name: source-insecure
-                  value: "{{inputs.parameters.source-insecure}}"
+                - name: config-contents
+                  value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
 
-    - name: create-snapshot-template
+    - name: check-snapshot-status
       inputs:
         parameters:
-          - name: snapshot-name
-          - name: source-host
-          - name: source-insecure
-          - name: repo-args
-      outputs:
-        parameters:
-          - name: snapshot-config
-            valueFrom:
-              path: /tmp/snapshotConfig.json
-      container:
-        image: migrations/migration_console:latest
-        imagePullPolicy: IfNotPresent
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            INSECURE_FLAG=""
-            if [ "{{inputs.parameters.source-insecure}}" = "true" ]; then
-              INSECURE_FLAG="--source-insecure"
-            fi
-
-            /root/createSnapshot/bin/CreateSnapshot \
-              --snapshot-name {{inputs.parameters.snapshot-name}} \
-              --source-host {{inputs.parameters.source-host}} \
-              $INSECURE_FLAG \
-              {{inputs.parameters.repo-args}}
-            cat "{}" > /tmp/snapshotConfig.json
-
-    - name: check-snapshot-status-template
-      inputs:
-        parameters:
-          - name: snapshot-name
-          - name: source-host
-          - name: source-insecure
+          - name: config-contents
       retryStrategy:
         limit: "200"
         retryPolicy: "Always"
@@ -95,39 +68,16 @@ spec:
           duration: "30"
           factor: 2
           maxDuration: "300"
-      container:
-        image: migrations/migration_console:latest
-        imagePullPolicy: IfNotPresent
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            # Ensure jq is available (some images might not have it pre-installed)
-            if ! command -v jq &> /dev/null; then
-              echo "jq is required but not found. Attempting to install..."
-              apt-get update && apt-get install -y jq || apk add --no-cache jq
-            fi
-
-            CURL_INSECURE=""
-            if [ "{{inputs.parameters.source-insecure}}" = "true" ]; then
-              CURL_INSECURE="--insecure"
-            fi
-
-            # Form the URL using the source-host parameter
-            SNAPSHOT_URL="{{inputs.parameters.source-host}}/_snapshot/_all/{{inputs.parameters.snapshot-name}}"
-            echo "Checking snapshot status from: $SNAPSHOT_URL"
-
-            # Perform the curl request and parse the JSON response using jq
-            response=$(curl -s $CURL_INSECURE $SNAPSHOT_URL)
-            echo "Response received"
-
-            # Extract the state value using jq (proper JSON parsing)
-            state=$(echo $response | jq -r '.snapshots[0].state')
-            echo "Current snapshot state: $state"
-
-            if [[ "$state" == "SUCCESS" ]]; then
-              echo "Snapshot {{inputs.parameters.snapshot-name}} completed successfully"
-              exit 0
-            else
-              echo "Snapshot not yet complete (state: $state), retrying..."
-              exit 1  # This will trigger a retry
-            fi
+      steps:
+        - - name: status-snapshot-console-check
+            templateRef:
+              name: migration-console-template
+              template: run-console-with-config
+            arguments:
+              parameters:
+                - name: config-contents
+                  value: "{{inputs.parameters.config-contents}}"
+                - name: command
+                  value: |
+                    set -x && 
+                    console --config-file=/config/migration_services.yaml -v snapshot status

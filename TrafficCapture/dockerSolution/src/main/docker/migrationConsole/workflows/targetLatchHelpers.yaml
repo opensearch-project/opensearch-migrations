@@ -20,13 +20,12 @@ spec:
               path: /tmp/processors-per-target
       container:
         image: migrations/migration_console:latest
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         command: [ sh, -c ]
         args:
           - |
             SOURCE_CONFIG=$(echo '{{inputs.parameters.configurations}}')
             TARGETS_CONFIG=$(echo '{{inputs.parameters.targets}}')
-            ls -l /usr/local/bin/
             echo "source config = $SOURCE_CONFIG"
             echo "targets config = $TARGETS_CONFIG"
   
