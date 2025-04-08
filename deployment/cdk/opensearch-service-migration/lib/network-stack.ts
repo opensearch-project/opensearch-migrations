@@ -21,6 +21,7 @@ import { CdkLogger } from "./cdk-logger";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
+    readonly vpcWithSubnets?: VpcWithSubnets;
     readonly vpcAZCount?: number;
     readonly elasticsearchServiceEnabled?: boolean;
     readonly captureProxyServiceEnabled?: boolean;
@@ -37,11 +38,24 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly env?: Record<string, any>;
 }
 
+export class VpcWithSubnets {
+    constructor(
+        public readonly vpcId: string,
+        public readonly subnetIds: string[]
+    ) {}
+
+    static fromContext(vpcId?: string, subnetIds?: string[]): VpcWithSubnets | undefined {
+        if (!vpcId) return undefined;
+        return new VpcWithSubnets(vpcId, subnetIds || []);
+    }
+}
+
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
+    public readonly vpcWithSubnets?: VpcWithSubnets;
 
     private validateVPC(vpc: IVpc) {
         let uniqueAzPrivateSubnets: string[] = []
@@ -109,6 +123,13 @@ export class NetworkStack extends Stack {
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId
             });
+        }
+        // Use existing VPC with specified subnets
+        else if (props.vpcWithSubnets) {
+            this.vpc = Vpc.fromLookup(this, 'ExistingVPC', {
+                vpcId: props.vpcWithSubnets.vpcId
+            });
+            this.vpcWithSubnets = props.vpcWithSubnets;
         }
         // Retrieve existing VPC
         else if (props.vpcId) {
