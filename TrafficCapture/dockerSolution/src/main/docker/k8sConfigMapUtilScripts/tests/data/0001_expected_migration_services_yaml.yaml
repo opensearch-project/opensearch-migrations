@@ -25,7 +25,7 @@ snapshot:
   snapshot_name: migration-assistant-snapshot
 metadata_migration:
   from_snapshot:
-  min_replicas: 0
+  cluster_awareness_attributes: 1
   source_cluster_version: ES_7.10
 kafka:
   broker_endpoints: captured-traffic-kafka-bootstrap.ma.svc:9092

@@ -233,7 +233,7 @@ subprojects {
             }
         }
 
-                tasks.register('isolatedTest', Test) {
+        tasks.register('isolatedTest', Test) {
             maxParallelForks = 1
             useJUnitPlatform {
                 includeTags 'isolatedTest'

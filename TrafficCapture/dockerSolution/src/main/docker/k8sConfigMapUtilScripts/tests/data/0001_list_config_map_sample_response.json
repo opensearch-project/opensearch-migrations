@@ -586,7 +586,7 @@
       "apiVersion": "v1",
       "data": {
         "metadataType": "from_snapshot",
-        "minReplicas": "0",
+        "clusterAwarenessAttributes": "1",
         "sourceClusterVersion": "ES_7.10"
       },
       "kind": "ConfigMap",

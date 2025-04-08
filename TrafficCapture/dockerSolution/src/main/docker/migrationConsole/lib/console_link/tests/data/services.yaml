@@ -28,7 +28,7 @@ metadata_migration:
       repo_uri: "s3://my-snapshot-bucket"
       aws_region: "us-east-2"
   otel_endpoint: "http://otel-collector:4317"
-  min_replicas: 0
+  cluster_awareness_attributes: 0
 replay:
   ecs:
     cluster_name: "my-cluster"
