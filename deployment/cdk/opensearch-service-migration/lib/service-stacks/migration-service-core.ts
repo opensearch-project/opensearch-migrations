@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {VpcDetails} from "../network-stack";
-import {ISecurityGroup, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {ISecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {
     Cluster,
     ContainerImage, CpuArchitecture,

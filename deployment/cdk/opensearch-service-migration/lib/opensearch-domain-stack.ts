@@ -4,7 +4,6 @@ import {
   EbsDeviceVolumeType,
   ISecurityGroup,
   SecurityGroup,
-  SubnetFilter,
   SubnetSelection
 } from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";

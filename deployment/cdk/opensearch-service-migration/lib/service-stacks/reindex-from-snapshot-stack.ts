@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import { VpcDetails } from "../network-stack";
+import {VpcDetails} from "../network-stack";
 import {Size} from "aws-cdk-lib/core";
 import {SecurityGroup, EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
 import {

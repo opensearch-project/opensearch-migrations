@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import { VpcDetails } from "../network-stack";
-import {ISecurityGroup, IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {ISecurityGroup, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";

@@ -1,6 +1,6 @@
-import { VpcDetails } from "../network-stack";
+import {VpcDetails} from "../network-stack";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import {Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {Port, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {FileSystem, LifecyclePolicy, ThroughputMode} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -21,7 +21,6 @@ import {
     ClusterMonitoringLevel,
     KafkaVersion
 } from "@aws-cdk/aws-msk-alpha";
-import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
 import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {
@@ -51,7 +50,6 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         const brokerNodesPerAZ = props.mskBrokersPerAZCount ? props.mskBrokersPerAZCount : 1
-        const mskAZs = props.mskAZCount ? props.mskAZCount : 2
 
         const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
