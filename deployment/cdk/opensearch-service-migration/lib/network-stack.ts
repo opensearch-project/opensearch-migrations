@@ -5,7 +5,9 @@ import {
     InterfaceVpcEndpointAwsService,
     IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
-    Vpc
+    Vpc,
+    SubnetSelection,
+    SubnetFilter
 } from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
@@ -21,7 +23,7 @@ import { CdkLogger } from "./cdk-logger";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
-    readonly vpcWithSubnets?: VpcWithSubnets;
+    readonly vpcSubnetIds?: string[];
     readonly vpcAZCount?: number;
     readonly elasticsearchServiceEnabled?: boolean;
     readonly captureProxyServiceEnabled?: boolean;
@@ -38,24 +40,28 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly env?: Record<string, any>;
 }
 
-export class VpcWithSubnets {
-    constructor(
-        public readonly vpcId: string,
-        public readonly subnetIds: string[]
-    ) {}
-
-    static fromContext(vpcId?: string, subnetIds?: string[]): VpcWithSubnets | undefined {
-        if (!vpcId) return undefined;
-        return new VpcWithSubnets(vpcId, subnetIds || []);
+export class VpcDetails {
+    public readonly subnetSelection: SubnetSelection;
+    public readonly vpc: IVpc;
+    
+    constructor(vpc: IVpc,vpcSubnetIds?: string[]) {
+        this.vpc = vpc;
+        
+        if (vpcSubnetIds) {
+            this.subnetSelection = [SubnetFilter.byIds(vpcSubnetIds)]
+        } else {
+            this.subnetSelection = {
+                subnets: vpc.selectSubnets.PRIVATE_WITH_EGRESS
+            };
+        }
     }
 }
 
 export class NetworkStack extends Stack {
-    public readonly vpc: IVpc;
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
-    public readonly vpcWithSubnets?: VpcWithSubnets;
+    public readonly VpcDetails: VpcDetails;
 
     private validateVPC(vpc: IVpc) {
         let uniqueAzPrivateSubnets: string[] = []
@@ -110,6 +116,7 @@ export class NetworkStack extends Stack {
 
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
+        let vpc: IVpc;
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
@@ -120,20 +127,13 @@ export class NetworkStack extends Stack {
                     parameter: MigrationSSMParameter.VPC_ID
                 })
             )
-            this.vpc = Vpc.fromLookup(this, 'domainVPC', {
+            vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId
             });
         }
-        // Use existing VPC with specified subnets
-        else if (props.vpcWithSubnets) {
-            this.vpc = Vpc.fromLookup(this, 'ExistingVPC', {
-                vpcId: props.vpcWithSubnets.vpcId
-            });
-            this.vpcWithSubnets = props.vpcWithSubnets;
-        }
         // Retrieve existing VPC
         else if (props.vpcId) {
-            this.vpc = Vpc.fromLookup(this, 'domainVPC', {
+            vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId: props.vpcId,
             });
         }
@@ -144,7 +144,7 @@ export class NetworkStack extends Stack {
             if (zoneCount && zoneCount !== 2 && zoneCount !== 3) {
                 throw new Error(`Required vpcAZCount is 2 or 3 but received: ${zoneCount}`)
             }
-            this.vpc = new Vpc(this, 'domainVPC', {
+            vpc = new Vpc(this, 'domainVPC', {
                 // IP space should be customized for use cases that have specific IP range needs
                 ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
                 maxAzs: zoneCount ?? 2,
@@ -166,11 +166,13 @@ export class NetworkStack extends Stack {
                 natGateways: 0,
             });
             // Only create interface endpoints if VPC not imported
-            this.createVpcEndpoints(this.vpc);
+            this.createVpcEndpoints(vpc);
         }
-        this.validateVPC(this.vpc)
+        this.validateVPC(vpc)
+        this.VpcDetails = new VpcDetails(vpc.vpcId, props.vpcSubnetIds);
+
         if(!props.addOnMigrationDeployId) {
-            createMigrationStringParameter(this, this.vpc.vpcId, {
+            createMigrationStringParameter(this, vpc.vpcId, {
                 ...props,
                 parameter: MigrationSSMParameter.VPC_ID
             });
@@ -184,7 +186,7 @@ export class NetworkStack extends Stack {
         if(needAlb) {
             // Create the ALB with the strongest TLS 1.3 security policy
             const alb = new ApplicationLoadBalancer(this, 'ALB', {
-                vpc: this.vpc,
+                vpc: vpc,
                 internetFacing: false,
                 http2Enabled: false,
                 loadBalancerName: `MigrationAssistant-${props.stage}`
@@ -192,7 +194,7 @@ export class NetworkStack extends Stack {
 
             const route53 = new HostedZone(this, 'ALBHostedZone', {
                 zoneName: `alb.migration.${props.stage}.local`,
-                vpcs: [this.vpc]
+                vpcs: [vpc]
             });
 
             const createALBListenerUrlParameter = (port: number, parameter: MigrationSSMParameter): void => {
@@ -224,14 +226,14 @@ export class NetworkStack extends Stack {
             // Setup when deploying elasticsearch source on ECS
             if (props.elasticsearchServiceEnabled || props.captureProxyESServiceEnabled) {
                 const targetPort = props.captureProxyESServiceEnabled ? 19200 : 9200
-                this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, targetPort, this.vpc);
+                this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, targetPort, vpc);
                 this.createSecureListener('SourceCluster', 9999, alb, cert, this.albSourceClusterTG);
                 createALBListenerUrlParameter(9999, MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT);
             }
 
             // Setup when deploying capture proxy in ECS
             if (props.captureProxyServiceEnabled || props.captureProxyESServiceEnabled) {
-                this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
+                this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, vpc);
                 this.createSecureListener('SourceProxy', 9201, alb, cert, this.albSourceProxyTG);
                 createALBListenerUrlParameter(9201, MigrationSSMParameter.SOURCE_PROXY_URL);
                 createALBListenerUrlParameterAlias(9201, MigrationSSMParameter.SOURCE_PROXY_URL_ALIAS);
@@ -239,7 +241,7 @@ export class NetworkStack extends Stack {
 
             // Setup when deploying target cluster proxy in ECS
             if (props.targetClusterProxyServiceEnabled) {
-                this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
+                this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, vpc);
                 this.createSecureListener('TargetProxy', 9202, alb, cert, this.albTargetProxyTG);
                 createALBListenerUrlParameter(9202, MigrationSSMParameter.TARGET_PROXY_URL);
                 createALBListenerUrlParameterAlias(9202, MigrationSSMParameter.TARGET_PROXY_URL_ALIAS);
@@ -272,7 +274,7 @@ export class NetworkStack extends Stack {
         if (!props.addOnMigrationDeployId) {
             // Create a default SG which only allows members of this SG to access the Domain endpoints
             const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
-                vpc: this.vpc,
+                vpc: vpc,
                 allowAllOutbound: false,
                 allowAllIpv6Outbound: false,
             });

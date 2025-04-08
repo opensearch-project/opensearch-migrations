@@ -1,5 +1,6 @@
+import { VpcDetails } from "../network-stack";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import {IVpc, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem, LifecyclePolicy, ThroughputMode} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -24,12 +25,11 @@ import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
 import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
     readonly mskBrokersPerAZCount?: number,
-    readonly mskSubnetIds?: string[],
     readonly mskAZCount?: number,
     readonly replayerOutputEFSRemovalPolicy?: string
     readonly artifactBucketRemovalPolicy?: string
@@ -38,62 +38,6 @@ export interface MigrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
-
-    // This function exists to overcome the limitation on the vpc.selectSubnets() call which requires the subnet
-    // type to be provided or else an empty list will be returned if public subnets are provided, thus this function
-    // tries different subnet types if unable to select the provided subnetIds
-    selectSubnetsFromTypes(vpc: IVpc, subnetIds: string[]): SelectedSubnets {
-        const subnetsTypeList = [SubnetType.PRIVATE_WITH_EGRESS, SubnetType.PUBLIC, SubnetType.PRIVATE_ISOLATED]
-        for (const subnetType of subnetsTypeList) {
-            const subnets = vpc.selectSubnets({
-                subnetType: subnetType,
-                subnetFilters: [SubnetFilter.byIds(subnetIds)]
-            })
-            if (subnets.subnetIds.length == subnetIds.length) {
-                return subnets
-            }
-        }
-        throw Error(`Unable to find subnet ids: ${subnetIds} in VPC: ${vpc.vpcId}. Please ensure all subnet ids exist and are of the same subnet type`)
-    }
-
-    validateAndReturnVPCSubnetsForMSK(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): SelectedSubnets {
-        if (specifiedSubnetIds) {
-            if (specifiedSubnetIds.length !== 2 && specifiedSubnetIds.length !== 3) {
-                throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected ${specifiedSubnetIds.length} subnet ids provided with 'mskSubnetIds'`)
-            }
-            if (brokerNodeCount < 2 || brokerNodeCount % specifiedSubnetIds.length !== 0) {
-                throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
-                    AZs (${specifiedSubnetIds.length} AZs inferred from provided 'mskSubnetIds'). The node count can be set with the 'mskBrokersPerAZCount' context option.`)
-            }
-            return this.selectSubnetsFromTypes(vpc, specifiedSubnetIds)
-        }
-        if (azCount !== 2 && azCount !== 3) {
-            throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected an AZ count of ${azCount} has been provided with 'mskAZCount'`)
-        }
-        if (brokerNodeCount < 2 || brokerNodeCount % azCount !== 0) {
-            throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
-                AZs (${azCount} AZs inferred from provided 'mskAZCount'). The node count can be set with the 'mskBrokersPerAZCount' context option.`)
-        }
-
-        let uniqueAzPrivateSubnets: SelectedSubnets|undefined
-        if (vpc.privateSubnets.length > 0) {
-            uniqueAzPrivateSubnets = vpc.selectSubnets({
-                subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-                onePerAz: true
-            })
-        }
-        if (uniqueAzPrivateSubnets && uniqueAzPrivateSubnets.subnetIds.length >= azCount) {
-            const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds.sort().slice(0, azCount)
-            return vpc.selectSubnets({
-                subnetFilters: [
-                    SubnetFilter.byIds(desiredSubnetIds)
-                ]
-            })
-        }
-        else {
-            throw new Error(`Not enough AZs available for private subnets in VPC to meet desired ${azCount} AZs. The AZ count can be specified with the 'mskAZCount' context option`)
-        }
-    }
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         // Create MSK cluster config
@@ -108,14 +52,13 @@ export class MigrationAssistanceStack extends Stack {
 
         const brokerNodesPerAZ = props.mskBrokersPerAZCount ? props.mskBrokersPerAZCount : 1
         const mskAZs = props.mskAZCount ? props.mskAZCount : 2
-        const subnets = this.validateAndReturnVPCSubnetsForMSK(props.vpc, brokerNodesPerAZ * mskAZs, mskAZs, props.mskSubnetIds)
 
         const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
             kafkaVersion: KafkaVersion.V3_6_0,
             numberOfBrokerNodes: brokerNodesPerAZ,
-            vpc: props.vpc,
-            vpcSubnets: subnets,
+            vpc: props.vpcDetails.vpc,
+            vpcSubnets: props.vpcDetails.subnetSelection,
             securityGroups: [streamingSecurityGroup],
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
@@ -164,7 +107,7 @@ export class MigrationAssistanceStack extends Stack {
         const replayerEFSRemovalPolicy = parseRemovalPolicy('replayerOutputEFSRemovalPolicy', props.replayerOutputEFSRemovalPolicy)
 
         const streamingSecurityGroup = new SecurityGroup(this, 'trafficStreamSourceSG', {
-            vpc: props.vpc,
+            vpc: props.vpcDetails.vpc,
             allowAllOutbound: false,
             allowAllIpv6Outbound: false,
         });
@@ -179,7 +122,7 @@ export class MigrationAssistanceStack extends Stack {
         }
 
         const sharedLogsSG = new SecurityGroup(this, 'sharedLogsSG', {
-            vpc: props.vpc,
+            vpc: props.vpcDetails.vpc,
             allowAllOutbound: false,
             allowAllIpv6Outbound: false,
         });
@@ -192,7 +135,7 @@ export class MigrationAssistanceStack extends Stack {
 
         // Create an EFS file system for Traffic Replayer output
         const sharedLogsEFS = new FileSystem(this, 'sharedLogsEFS', {
-            vpc: props.vpc,
+            vpc: props.vpcDetails.vpc,
             securityGroup: sharedLogsSG,
             removalPolicy: replayerEFSRemovalPolicy,
             lifecyclePolicy: LifecyclePolicy.AFTER_1_DAY, // Cost break even is at 26 downloads / month
@@ -204,7 +147,7 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
-            vpc: props.vpc,
+            vpc: props.vpcDetails.vpc,
             // Required for retrieving ECR image at service startup
             allowAllOutbound: true,
             allowAllIpv6Outbound: true,
@@ -229,7 +172,7 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         new Cluster(this, 'migrationECSCluster', {
-            vpc: props.vpc,
+            vpc: props.vpcDetails.vpc,
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
 
