@@ -30,7 +30,6 @@ export interface MigrationStackProps extends StackPropsExt {
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
     readonly mskBrokersPerAZCount?: number,
-    readonly mskAZCount?: number,
     readonly replayerOutputEFSRemovalPolicy?: string
     readonly artifactBucketRemovalPolicy?: string
 }
@@ -38,16 +37,6 @@ export interface MigrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
-
-    validateMSKOptions(vpcDetails: VpcDetails, brokerNodeCount: number) {
-        const numSubnets = vpcDetails.subnetSelection.subnets?.length
-        if (numSubnets !== 2 && numSubnets !== 3) {
-            throw new Error(`MSK requires 2 or 3 subnets each with a unique AZ, but have detected ${numSubnets} subnets provided`)
-        }
-        if (brokerNodeCount < 2 || brokerNodeCount % numSubnets !== 0) {
-            throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of AZs (${numSubnets} AZs inferred). The node count can be set with the 'mskBrokersPerAZCount' context option.`)
-        }
-    }
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         // Create MSK cluster config
@@ -61,8 +50,9 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         const brokerNodesPerAZ = props.mskBrokersPerAZCount ? props.mskBrokersPerAZCount : 1
-        const mskAZs = props.mskAZCount ? props.mskAZCount : 2
-        this.validateMSKOptions(props.vpcDetails, brokerNodesPerAZ * mskAZs)
+        if (brokerNodesPerAZ < 1) {
+            throw new Error(`The MSK context option 'mskBrokersPerAZCount' must be set to at least 1`)
+        }
 
         const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
@@ -147,6 +137,7 @@ export class MigrationAssistanceStack extends Stack {
         // Create an EFS file system for Traffic Replayer output
         const sharedLogsEFS = new FileSystem(this, 'sharedLogsEFS', {
             vpc: props.vpcDetails.vpc,
+            vpcSubnets: props.vpcDetails.subnetSelection,
             securityGroup: sharedLogsSG,
             removalPolicy: replayerEFSRemovalPolicy,
             lifecyclePolicy: LifecyclePolicy.AFTER_1_DAY, // Cost break even is at 26 downloads / month

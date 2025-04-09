@@ -38,11 +38,13 @@ import {
 } from "./common-utilities";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CdkLogger} from "./cdk-logger";
+import {StreamingSourceType} from "./streaming-source-type";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
     readonly vpcSubnetIds?: string[];
     readonly vpcAZCount?: number;
+    readonly streamingSourceType: StreamingSourceType
     readonly elasticsearchServiceEnabled?: boolean;
     readonly captureProxyServiceEnabled?: boolean;
     readonly targetClusterProxyServiceEnabled?: boolean;
@@ -60,37 +62,70 @@ export interface NetworkStackProps extends StackPropsExt {
 
 export class VpcDetails {
     public readonly subnetSelection: SubnetSelection;
+    public readonly azCount: number;
     public readonly vpc: IVpc;
 
-    private validateProvidedSubnetIds(vpc: IVpc, vpcSubnetIds: string[]) {
-        if (vpcSubnetIds.length < 2 || vpcSubnetIds.length > 3) {
-            throw new Error(`Exactly 2 or 3 subnets should be provided, but received ${vpcSubnetIds.length} subnets`)
+    /**
+     *  This function returns the SubnetType of a list of subnet ids, and throws an error if the subnets do not exist
+     *  in the VPC or are of different subnet types.
+     *
+     *  There is a limitation on the vpc.selectSubnets() call which requires the SubnetType to be provided or else an
+     *  empty list will be returned if public subnets are provided, thus this function tries different subnet types if
+     *  unable to select the provided subnetIds
+     */
+    private getSubnetTypeOfProvidedSubnets(vpc: IVpc, subnetIds: string[]): SubnetType {
+        const subnetsTypeList = []
+        if (vpc.privateSubnets.length > 0) {
+            subnetsTypeList.push(SubnetType.PRIVATE_WITH_EGRESS)
         }
-        // const uniqueAzSubnets = vpc.selectSubnets({
-        //     onePerAz: true,
-        //     subnetFilters: [SubnetFilter.byIds(vpcSubnetIds)]
-        // })
-        // if (uniqueAzSubnets.subnetIds.length != vpcSubnetIds.length) {
-        //     throw Error(`Not all subnet ids provided were in a unique AZ`)
-        // }
+        if (vpc.publicSubnets.length > 0) {
+            subnetsTypeList.push(SubnetType.PUBLIC)
+        }
+        if (vpc.isolatedSubnets.length > 0) {
+            subnetsTypeList.push(SubnetType.PRIVATE_ISOLATED)
+        }
+        for (const subnetType of subnetsTypeList) {
+            const subnets = vpc.selectSubnets({
+                subnetType: subnetType,
+                subnetFilters: [SubnetFilter.byIds(subnetIds)]
+            })
+            if (subnets.subnetIds.length == subnetIds.length) {
+                return subnetType
+            }
+        }
+        throw Error(`Unable to find subnet ids: [${subnetIds}] in VPC: ${vpc.vpcId}. Please ensure all subnet ids exist and are of the same subnet type`)
+    }
+
+    private validateProvidedSubnetIds(vpc: IVpc, vpcSubnetIds: string[], azCount: number) {
+        if (vpcSubnetIds.length != azCount) {
+            throw new Error(`The number of provided subnets (${vpcSubnetIds.length}), must match the AZ count of ${azCount}. The setting can be specified with the 'vpcAZCount' option`)
+        }
+        const subnetType = this.getSubnetTypeOfProvidedSubnets(vpc, vpcSubnetIds);
+        const uniqueAzSubnets = vpc.selectSubnets({
+            onePerAz: true,
+            subnetType: subnetType,
+            subnetFilters: [SubnetFilter.byIds(vpcSubnetIds)]
+        })
+        if (uniqueAzSubnets.subnetIds.length != vpcSubnetIds.length) {
+            throw Error(`Not all subnet ids provided: [${vpcSubnetIds}] were in a unique AZ`)
+        }
+        return uniqueAzSubnets
     }
     
     constructor(vpc: IVpc, azCount: number, vpcSubnetIds?: string[]) {
-        this.vpc = vpc;
+        this.vpc = vpc
+        this.azCount = azCount
         CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
         
         if (vpcSubnetIds) {
-            this.validateProvidedSubnetIds(vpc, vpcSubnetIds)
-            this.subnetSelection = vpc.selectSubnets({
-                subnetFilters: [SubnetFilter.byIds(vpcSubnetIds)]
-            })
+            this.subnetSelection = this.validateProvidedSubnetIds(vpc, vpcSubnetIds, azCount)
         } else {
             const uniqueAzPrivateSubnets = vpc.selectSubnets({
                 onePerAz: true,
                 subnetType: SubnetType.PRIVATE_WITH_EGRESS
             })
             if (uniqueAzPrivateSubnets.subnetIds.length < azCount) {
-                throw new Error(`Not enough AZs (${azCount} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement. Alternatively subnets can be manually specified with the 'vpcSubnetIds' option`)
+                throw new Error(`Not enough AZs (${azCount} unique AZs detected) used for private subnets to meet the ${azCount} AZ requirement. Alternatively subnets can be manually specified with the 'vpcSubnetIds' option and the AZ requirement set with the 'vpcAZCount' option`)
             }
             const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds.sort().slice(0, azCount)
             this.subnetSelection = vpc.selectSubnets({
@@ -107,20 +142,6 @@ export class NetworkStack extends Stack {
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
     public readonly vpcDetails: VpcDetails;
-
-    // private validateVPC(vpc: IVpc) {
-    //     let uniqueAzPrivateSubnets: string[] = []
-    //     if (vpc.privateSubnets.length > 0) {
-    //         uniqueAzPrivateSubnets = vpc.selectSubnets({
-    //             subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    //             onePerAz: true
-    //         }).subnetIds
-    //     }
-    //     CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
-    //     if (uniqueAzPrivateSubnets.length < 2) {
-    //         throw new Error(`Not enough AZs (${uniqueAzPrivateSubnets.length} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement`)
-    //     }
-    // }
 
     private createVpcEndpoints(vpc: IVpc) {
         // Gateway endpoints
@@ -162,6 +183,11 @@ export class NetworkStack extends Stack {
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
         let vpc: IVpc;
+        const zoneCount = props.vpcAZCount ?? 2
+        // Either 2 or 3 AZ count must be used with MSK
+        if (props.streamingSourceType == StreamingSourceType.AWS_MSK && zoneCount !== 2 && zoneCount !== 3) {
+            throw new Error(`Capture and Replay migrations have a requirement from MSK that 2 or 3 AZs must be used, however, the 'vpcAZCount' context option is set to: ${zoneCount}`)
+        }
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
@@ -184,15 +210,10 @@ export class NetworkStack extends Stack {
         }
         // Create new VPC
         else {
-            const zoneCount = props.vpcAZCount
-            // Either 2 or 3 AZ count must be used
-            if (zoneCount && zoneCount !== 2 && zoneCount !== 3) {
-                throw new Error(`Required vpcAZCount is 2 or 3 but received: ${zoneCount}`)
-            }
             vpc = new Vpc(this, 'domainVPC', {
                 // IP space should be customized for use cases that have specific IP range needs
                 ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
-                maxAzs: zoneCount ?? 2,
+                maxAzs: zoneCount,
                 subnetConfiguration: [
                     // Outbound internet access for private subnets require a NAT Gateway which must live in
                     // a public subnet
@@ -213,7 +234,7 @@ export class NetworkStack extends Stack {
             // Only create interface endpoints if VPC not imported
             this.createVpcEndpoints(vpc);
         }
-        this.vpcDetails = new VpcDetails(vpc, props.vpcAZCount ?? 2, props.vpcSubnetIds);
+        this.vpcDetails = new VpcDetails(vpc, zoneCount, props.vpcSubnetIds);
 
         if(!props.addOnMigrationDeployId) {
             createMigrationStringParameter(this, vpc.vpcId, {
