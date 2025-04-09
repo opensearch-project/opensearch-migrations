@@ -1,13 +1,10 @@
-import {VpcDetails} from "../network-stack";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {Port, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {FileSystem, LifecyclePolicy, ThroughputMode} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
-import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 import {
     createMigrationStringParameter,
@@ -21,6 +18,10 @@ import {
     ClusterMonitoringLevel,
     KafkaVersion
 } from "@aws-cdk/aws-msk-alpha";
+
+import {VpcDetails} from "./network-stack";
+import {StackPropsExt} from "./stack-composer";
+import {StreamingSourceType} from "./streaming-source-type";
 import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {
@@ -38,6 +39,16 @@ export interface MigrationStackProps extends StackPropsExt {
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
 
+    validateMSKOptions(vpcDetails: VpcDetails, brokerNodeCount: number) {
+        const numSubnets = vpcDetails.subnetSelection.subnets?.length
+        if (numSubnets !== 2 && numSubnets !== 3) {
+            throw new Error(`MSK requires 2 or 3 subnets each with a unique AZ, but have detected ${numSubnets} subnets provided`)
+        }
+        if (brokerNodeCount < 2 || brokerNodeCount % numSubnets !== 0) {
+            throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of AZs (${numSubnets} AZs inferred). The node count can be set with the 'mskBrokersPerAZCount' context option.`)
+        }
+    }
+
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
@@ -50,6 +61,8 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         const brokerNodesPerAZ = props.mskBrokersPerAZCount ? props.mskBrokersPerAZCount : 1
+        const mskAZs = props.mskAZCount ? props.mskAZCount : 2
+        this.validateMSKOptions(props.vpcDetails, brokerNodesPerAZ * mskAZs)
 
         const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,

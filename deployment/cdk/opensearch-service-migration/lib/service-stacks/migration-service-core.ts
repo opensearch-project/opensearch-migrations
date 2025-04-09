@@ -55,7 +55,7 @@ export class MigrationServiceCore extends Stack {
     createService(props: MigrationServiceCoreProps) {
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
-            vpcDetails: props.vpcDetails.vpc
+            vpc: props.vpcDetails.vpc
         })
 
         this.serviceTaskRole = props.taskRole ? props.taskRole : createDefaultECSTaskRole(this, props.serviceName)

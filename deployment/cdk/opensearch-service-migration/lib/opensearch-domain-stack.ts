@@ -1,5 +1,5 @@
 import {Construct} from "constructs";
-import {VpcDetails} from "../network-stack";
+import {VpcDetails} from "./network-stack";
 import {
   EbsDeviceVolumeType,
   ISecurityGroup,
@@ -221,7 +221,7 @@ export class OpenSearchDomainStack extends Stack {
         appLogEnabled: props.appLogEnabled,
         appLogGroup: appLG
       },
-      vpc: props.vpcDetails.vpc,
+      vpc: props.vpcDetails?.vpc,
       vpcSubnets: domainSubnets,
       securityGroups: securityGroups,
       zoneAwareness: zoneAwarenessConfig,

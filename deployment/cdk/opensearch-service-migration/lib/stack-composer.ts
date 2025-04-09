@@ -409,7 +409,7 @@ export class StackComposer {
                 appLogEnabled: loggingAppLogEnabled,
                 appLogGroup: loggingAppLogGroupARN,
                 nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
-                vpcDetails: networkStack ? networkStack.VpcDetails : undefined,
+                vpcDetails: networkStack ? networkStack.vpcDetails : undefined,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
                 domainAZCount: domainAZCount,
                 domainRemovalPolicy: domainRemovalPolicy,
@@ -430,7 +430,7 @@ export class StackComposer {
         let migrationStack
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 mskImportARN: mskARN,
                 mskBrokersPerAZCount: mskBrokersPerAZCount,
@@ -451,7 +451,7 @@ export class StackComposer {
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
             osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
                 description: "This stack contains resources for the OpenSearch Container ECS service",
                 stage: stage,
@@ -472,7 +472,7 @@ export class StackComposer {
         let kafkaBrokerStack
         if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
             kafkaBrokerStack = new KafkaStack(scope, "kafka", {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
                 description: "This stack contains resources for the Kafka Broker ECS service",
                 stage: stage,
@@ -488,7 +488,7 @@ export class StackComposer {
         let reindexFromSnapshotStack
         if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
                 sourceClusterVersion: sourceCluster?.version,
@@ -512,7 +512,7 @@ export class StackComposer {
         let captureProxyESStack
         if (captureProxyESServiceEnabled && networkStack && migrationStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyESExtraArgs,
@@ -531,7 +531,7 @@ export class StackComposer {
         let trafficReplayerStack
         if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 clusterAuthDetails: servicesYaml.target_cluster.auth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
@@ -556,7 +556,7 @@ export class StackComposer {
         let elasticsearchStack
         if (elasticsearchServiceEnabled && networkStack && migrationStack) {
             elasticsearchStack = new ElasticsearchStack(scope, "elasticsearch", {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 stackName: `OSMigrations-${stage}-${region}-Elasticsearch`,
                 description: "This stack contains resources for a testing mock Elasticsearch single node cluster ECS service",
                 stage: stage,
@@ -572,7 +572,7 @@ export class StackComposer {
         let captureProxyStack
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
                 },
@@ -596,7 +596,7 @@ export class StackComposer {
         if (targetClusterProxyServiceEnabled && networkStack && migrationStack) {
             targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
                 serviceName: "target-cluster-proxy",
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
                     securityGroupMigrationSSMParameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
@@ -620,7 +620,7 @@ export class StackComposer {
         if (migrationConsoleServiceEnabled && networkStack && migrationStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
-                vpcDetails: networkStack.VpcDetails,
+                vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,

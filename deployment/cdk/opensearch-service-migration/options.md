@@ -62,12 +62,12 @@ In all other cases, the required components of each cluster object are:
 
 ### VPC Options
 
-| Name       | Type    | Example                 | Description                                                                                                                               |
-| ---------- | ------- | ----------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| vpcEnabled | boolean | true                    | Enable VPC to place Domain and Migration resources in. If a `vpcId` is not provided a new VPC will be created                             |
-| vpcId      | string  | "vpc-123456789abcdefgh" | Specify an existing VPC to place the domain inside of                                                                                     |
-| vpcSubnetIds | string array | ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"] | Specify the subnet IDs of an existing VPC to place the migration resources in. Requires `vpcId` to be specified |
-| vpcAZCount | number  | 2                       | The number of Availability Zones for the created VPC. **Note**: Only applicable if creating a new VPC (thus `vpcId` must not be provided) |
+| Name         | Type         | Example                                                  | Description                                                                                                                               |
+|--------------|--------------|----------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------|
+| vpcEnabled   | boolean      | true                                                     | Enable VPC to place Domain and Migration resources in. If a `vpcId` is not provided a new VPC will be created                             |
+| vpcId        | string       | "vpc-123456789abcdefgh"                                  | Specify an existing VPC to place the domain inside of                                                                                     |
+| vpcSubnetIds | string array | ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"] | Specify the subnet IDs of an existing VPC to place the migration resources in. Requires `vpcId` to be specified                           |
+| vpcAZCount   | number       | 2                                                        | The number of Availability Zones for the created VPC. **Note**: Only applicable if creating a new VPC (thus `vpcId` must not be provided) |
 
 ### MSK(Kafka) Options
 

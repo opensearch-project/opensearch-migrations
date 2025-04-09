@@ -3,23 +3,41 @@ import {
     GatewayVpcEndpointAwsService,
     InterfaceVpcEndpoint,
     InterfaceVpcEndpointAwsService,
-    IpAddresses, IVpc, Port, SecurityGroup,
-    SubnetType,
-    Vpc,
+    IpAddresses,
+    IVpc,
+    Port,
+    SecurityGroup,
+    SubnetFilter,
     SubnetSelection,
-    SubnetFilter
+    SubnetType,
+    Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
-import { ApplicationListener, ApplicationLoadBalancer, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, ListenerAction, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
-import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
-import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
-import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
-import { Stack } from "aws-cdk-lib";
-import { createMigrationStringParameter, getMigrationStringParameterName, isStackInGovCloud, MigrationSSMParameter } from "./common-utilities";
-import { StringParameter } from "aws-cdk-lib/aws-ssm";
-import { CdkLogger } from "./cdk-logger";
+import {
+    ApplicationListener,
+    ApplicationLoadBalancer,
+    ApplicationProtocol,
+    ApplicationProtocolVersion,
+    ApplicationTargetGroup,
+    IApplicationLoadBalancer,
+    IApplicationTargetGroup,
+    ListenerAction,
+    SslPolicy
+} from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import {Certificate, ICertificate} from "aws-cdk-lib/aws-certificatemanager";
+import {ARecord, HostedZone, RecordTarget} from "aws-cdk-lib/aws-route53";
+import {LoadBalancerTarget} from "aws-cdk-lib/aws-route53-targets";
+import {AcmCertificateImporter} from "./service-stacks/acm-cert-importer";
+import {Stack} from "aws-cdk-lib";
+import {
+    createMigrationStringParameter,
+    getMigrationStringParameterName,
+    isStackInGovCloud,
+    MigrationSSMParameter
+} from "./common-utilities";
+import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {CdkLogger} from "./cdk-logger";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -43,16 +61,43 @@ export interface NetworkStackProps extends StackPropsExt {
 export class VpcDetails {
     public readonly subnetSelection: SubnetSelection;
     public readonly vpc: IVpc;
+
+    private validateProvidedSubnetIds(vpc: IVpc, vpcSubnetIds: string[]) {
+        if (vpcSubnetIds.length < 2 || vpcSubnetIds.length > 3) {
+            throw new Error(`Exactly 2 or 3 subnets should be provided, but received ${vpcSubnetIds.length} subnets`)
+        }
+        // const uniqueAzSubnets = vpc.selectSubnets({
+        //     onePerAz: true,
+        //     subnetFilters: [SubnetFilter.byIds(vpcSubnetIds)]
+        // })
+        // if (uniqueAzSubnets.subnetIds.length != vpcSubnetIds.length) {
+        //     throw Error(`Not all subnet ids provided were in a unique AZ`)
+        // }
+    }
     
-    constructor(vpc: IVpc,vpcSubnetIds?: string[]) {
+    constructor(vpc: IVpc, azCount: number, vpcSubnetIds?: string[]) {
         this.vpc = vpc;
+        CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
         
         if (vpcSubnetIds) {
-            this.subnetSelection = [SubnetFilter.byIds(vpcSubnetIds)]
+            this.validateProvidedSubnetIds(vpc, vpcSubnetIds)
+            this.subnetSelection = vpc.selectSubnets({
+                subnetFilters: [SubnetFilter.byIds(vpcSubnetIds)]
+            })
         } else {
-            this.subnetSelection = {
-                subnets: vpc.selectSubnets.PRIVATE_WITH_EGRESS
-            };
+            const uniqueAzPrivateSubnets = vpc.selectSubnets({
+                onePerAz: true,
+                subnetType: SubnetType.PRIVATE_WITH_EGRESS
+            })
+            if (uniqueAzPrivateSubnets.subnetIds.length < azCount) {
+                throw new Error(`Not enough AZs (${azCount} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement. Alternatively subnets can be manually specified with the 'vpcSubnetIds' option`)
+            }
+            const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds.sort().slice(0, azCount)
+            this.subnetSelection = vpc.selectSubnets({
+                subnetFilters: [
+                    SubnetFilter.byIds(desiredSubnetIds)
+                ]
+            })
         }
     }
 }
@@ -63,19 +108,19 @@ export class NetworkStack extends Stack {
     public readonly albSourceClusterTG: IApplicationTargetGroup;
     public readonly vpcDetails: VpcDetails;
 
-    private validateVPC(vpc: IVpc) {
-        let uniqueAzPrivateSubnets: string[] = []
-        if (vpc.privateSubnets.length > 0) {
-            uniqueAzPrivateSubnets = vpc.selectSubnets({
-                subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-                onePerAz: true
-            }).subnetIds
-        }
-        CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
-        if (uniqueAzPrivateSubnets.length < 2) {
-            throw new Error(`Not enough AZs (${uniqueAzPrivateSubnets.length} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement`)
-        }
-    }
+    // private validateVPC(vpc: IVpc) {
+    //     let uniqueAzPrivateSubnets: string[] = []
+    //     if (vpc.privateSubnets.length > 0) {
+    //         uniqueAzPrivateSubnets = vpc.selectSubnets({
+    //             subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    //             onePerAz: true
+    //         }).subnetIds
+    //     }
+    //     CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
+    //     if (uniqueAzPrivateSubnets.length < 2) {
+    //         throw new Error(`Not enough AZs (${uniqueAzPrivateSubnets.length} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement`)
+    //     }
+    // }
 
     private createVpcEndpoints(vpc: IVpc) {
         // Gateway endpoints
@@ -168,8 +213,7 @@ export class NetworkStack extends Stack {
             // Only create interface endpoints if VPC not imported
             this.createVpcEndpoints(vpc);
         }
-        this.validateVPC(vpc)
-        this.vpcDetails = new VpcDetails(vpc, props.vpcSubnetIds);
+        this.vpcDetails = new VpcDetails(vpc, props.vpcAZCount ?? 2, props.vpcSubnetIds);
 
         if(!props.addOnMigrationDeployId) {
             createMigrationStringParameter(this, vpc.vpcId, {
