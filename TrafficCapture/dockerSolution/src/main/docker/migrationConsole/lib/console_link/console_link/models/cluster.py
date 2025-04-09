@@ -177,8 +177,7 @@ class Cluster:
         return r
 
     def execute_benchmark_workload(self, workload: str,
-                                   workload_params='target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,'
-                                                   'search_clients:1'):
+                                   workload_params='bulk_size:10,bulk_indexing_clients:1'):
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
