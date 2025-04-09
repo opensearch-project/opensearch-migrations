@@ -120,6 +120,9 @@ export class VpcDetails {
         if (vpcSubnetIds) {
             this.subnetSelection = this.validateProvidedSubnetIds(vpc, vpcSubnetIds, azCount)
         } else {
+            if (vpc.privateSubnets.length < 1) {
+                throw new Error(`No private subnets detected in VPC: ${vpc.vpcId}. Alternatively subnets can be manually specified with the 'vpcSubnetIds' context option`)
+            }
             const uniqueAzPrivateSubnets = vpc.selectSubnets({
                 onePerAz: true,
                 subnetType: SubnetType.PRIVATE_WITH_EGRESS
@@ -184,10 +187,6 @@ export class NetworkStack extends Stack {
         super(scope, id, props);
         let vpc: IVpc;
         const zoneCount = props.vpcAZCount ?? 2
-        // Either 2 or 3 AZ count must be used with MSK
-        if (props.streamingSourceType == StreamingSourceType.AWS_MSK && zoneCount !== 2 && zoneCount !== 3) {
-            throw new Error(`Capture and Replay migrations have a requirement from MSK that 2 or 3 AZs must be used, however, the 'vpcAZCount' context option is set to: ${zoneCount}`)
-        }
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
@@ -234,8 +233,6 @@ export class NetworkStack extends Stack {
             // Only create interface endpoints if VPC not imported
             this.createVpcEndpoints(vpc);
         }
-        this.vpcDetails = new VpcDetails(vpc, zoneCount, props.vpcSubnetIds);
-
         if(!props.addOnMigrationDeployId) {
             createMigrationStringParameter(this, vpc.vpcId, {
                 ...props,
@@ -247,6 +244,15 @@ export class NetworkStack extends Stack {
             props.elasticsearchServiceEnabled ||
             props.captureProxyESServiceEnabled ||
             props.targetClusterProxyServiceEnabled;
+
+        // Check that AZ requirements are met
+        // MSK requirement: Exactly two or three subnets with each subnet in a different Availability Zone
+        // ALB requirement: At least two subnets in two different Availability Zones
+        if ((needAlb || props.streamingSourceType == StreamingSourceType.AWS_MSK) && zoneCount !== 2 && zoneCount !== 3) {
+            throw new Error(`Capture and Replay migrations, as well as migrations with a capture proxy or target proxy, have a requirement that 2 or 3 AZs must be used, however, the 'vpcAZCount' context option is set to: ${zoneCount}`)
+        }
+
+        this.vpcDetails = new VpcDetails(vpc, zoneCount, props.vpcSubnetIds);
 
         if(needAlb) {
             // Create the ALB with the strongest TLS 1.3 security policy
