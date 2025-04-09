@@ -38,6 +38,7 @@ export interface MigrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
+    artifactBucketName: string;
 
     // This function exists to overcome the limitation on the vpc.selectSubnets() call which requires the subnet
     // type to be provided or else an empty list will be returned if public subnets are provided, thus this function
@@ -216,8 +217,9 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID
         });
 
+        this.artifactBucketName = `migration-artifacts-${this.account}-${props.stage}-${this.region}`
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
-            bucketName: `migration-artifacts-${this.account}-${props.stage}-${this.region}`,
+            bucketName: this.artifactBucketName,
             encryption: BucketEncryption.S3_MANAGED,
             enforceSSL: true,
             removalPolicy: bucketRemovalPolicy,

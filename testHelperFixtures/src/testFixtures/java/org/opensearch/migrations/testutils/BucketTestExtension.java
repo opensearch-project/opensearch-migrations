@@ -2,7 +2,7 @@ package org.opensearch.migrations.testutils;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
 /**
@@ -14,13 +14,9 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * and I is the current bucket index (0 to N-1)
  */
 @Slf4j
-public class BucketTestExtension implements BeforeTestExecutionCallback {
-    // Use a unique namespace for our extension to avoid conflicts with other extensions
-    private static final ExtensionContext.Namespace BUCKET_NAMESPACE = 
-        ExtensionContext.Namespace.create(BucketTestExtension.class);
-
+public class BucketTestExtension implements BeforeEachCallback {
     @Override
-    public void beforeTestExecution(ExtensionContext context) {
+    public void beforeEach(ExtensionContext context) {
         var stripingTotal = Integer.getInteger("test.striping.total", 1);
         var stripingIndex = Integer.getInteger("test.striping.index", 0);
 

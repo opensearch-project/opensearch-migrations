@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.version_os_2_11;
 import java.util.Optional;
 import java.util.Set;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -131,6 +132,6 @@ class IndexCreator_OS_2_11Test {
         var indexId = "indexId";
         var indexData = new IndexMetadataData_OS_2_11(node, indexId, indexName);
         var indexCreator = new IndexCreator_OS_2_11(client);
-        return indexCreator.create(indexData, MigrationMode.PERFORM, mock(ICreateIndexContext.class));
+        return indexCreator.create(indexData, MigrationMode.PERFORM, new AwarenessAttributeSettings(false, 0), mock(ICreateIndexContext.class));
     }
 }

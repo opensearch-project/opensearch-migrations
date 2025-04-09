@@ -17,8 +17,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class InvalidResponse extends RfsException {
     private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
+    private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
+    private static final String ERROR_STRING = "error";
 
     public InvalidResponse(String message, HttpResponse response) {
         super(message);
@@ -34,7 +36,7 @@ public class InvalidResponse extends RfsException {
             var interimResults = new ArrayList<Map.Entry<String, String>>();
             var bodyNode = objectMapper.readTree(response.body);
 
-            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get("error"));
+            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get(ERROR_STRING));
 
             // Check high level cause
             errorBody.map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
@@ -85,4 +87,36 @@ public class InvalidResponse extends RfsException {
             return Map.entry(entry.getKey().asText(), matcher.group(1));
         }).orElse(null);
     }
+
+    /** Awareness attribute exceptions (when the replica count doesn't match the number of zones) present slightly differently
+     in different versions. The message is the same (`"Validation Failed: 1: expected total copies needs to be a multiple of total awareness attributes [3];"`,
+     for instance), but the type is different (either `validation_exception` or `illegal_argument_exception`). For this reason,
+     we're matching based on a regex against the message instead of also checking the type.
+    **/
+    public Optional<String> containsAwarenessAttributeException() {
+        try {
+            var interimResults = new ArrayList<String>();
+            var bodyNode = objectMapper.readTree(response.body);
+
+            if (bodyNode != null && bodyNode.has(ERROR_STRING)) {
+                JsonNode errorNode = bodyNode.get(ERROR_STRING);
+                JsonNode rootCauses = errorNode.get("root_cause");
+
+                if (rootCauses != null && rootCauses.isArray()) {
+                    for (JsonNode cause : rootCauses) {
+                        JsonNode reasonNode = cause.get("reason");
+                        if (reasonNode != null && !reasonNode.isNull()) {
+                            interimResults.add(reasonNode.textValue());
+                        }
+                    }
+                }
+            }
+            interimResults = interimResults.stream().filter(AWARENESS_ATTRIBUTE_EXCEPTION.asPredicate()).collect(Collectors.toCollection(ArrayList::new));
+
+            return interimResults.stream().findAny();
+
+        } catch (Exception e) {
+            log.warn("Error parsing error message to attempt recovery" + response.body, e);
+            return Optional.empty();
+        }    }
 }

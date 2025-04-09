@@ -47,7 +47,7 @@ shared-configs:
     metadataMigration:
       allowRuntimeOverride: true
       object:
-        minReplicas: 0
+        clusterAwarenessAttributes: 1
         metadataType: "from_snapshot"
         sourceClusterVersion: "ES_7.10"
 #    metricsSource:
