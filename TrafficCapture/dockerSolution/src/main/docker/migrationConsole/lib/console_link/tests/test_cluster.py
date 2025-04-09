@@ -393,13 +393,12 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0"
+    mock.assert_called_once_with("opensearch-benchmark execute-test"
                                  " --exclude-tasks=check-cluster-health"
-                                 " --workload-revision=fc64258a9b2ed2451423d7758ca1c5880626c520"
                                  f" --target-host={cluster.endpoint} --workload={workload}"
                                  " --pipeline=benchmark-only"
-                                 " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
-                                 "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
+                                 " --test-mode --kill-running-processes --workload-params="
+                                 "bulk_size:10,bulk_indexing_clients:1 "
                                  "--client-options=verify_certs:false", shell=True)
 
 
@@ -418,13 +417,12 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0"
+    mock.assert_called_once_with("opensearch-benchmark execute-test"
                                  " --exclude-tasks=check-cluster-health"
-                                 " --workload-revision=fc64258a9b2ed2451423d7758ca1c5880626c520"
                                  f" --target-host={cluster.endpoint} --workload={workload}"
                                  " --pipeline=benchmark-only"
-                                 " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
-                                 "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
+                                 " --test-mode --kill-running-processes --workload-params="
+                                 "bulk_size:10,bulk_indexing_clients:1 "
                                  "--client-options=verify_certs:false,use_ssl:true,"
                                  f"basic_auth_user:{auth_details['username']},"
                                  f"basic_auth_password:{auth_details['password']}", shell=True)
