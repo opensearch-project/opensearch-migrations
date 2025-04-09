@@ -61,7 +61,7 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
-    public readonly VpcDetails: VpcDetails;
+    public readonly vpcDetails: VpcDetails;
 
     private validateVPC(vpc: IVpc) {
         let uniqueAzPrivateSubnets: string[] = []
