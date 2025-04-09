@@ -169,7 +169,7 @@ export class NetworkStack extends Stack {
             this.createVpcEndpoints(vpc);
         }
         this.validateVPC(vpc)
-        this.VpcDetails = new VpcDetails(vpc.vpcId, props.vpcSubnetIds);
+        this.vpcDetails = new VpcDetails(vpc, props.vpcSubnetIds);
 
         if(!props.addOnMigrationDeployId) {
             createMigrationStringParameter(this, vpc.vpcId, {
