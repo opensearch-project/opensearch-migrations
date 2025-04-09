@@ -4,7 +4,7 @@ import {ContainerImage, CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
-import { ClusterYaml } from "./migration-services-yaml";
+import {ClusterYaml, SnapshotYaml} from "./migration-services-yaml";
 import { CdkLogger } from "./cdk-logger";
 import { mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -464,6 +464,20 @@ export function parseClusterDefinition(json: any): ClusterYaml {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }
     return new ClusterYaml({endpoint, version, auth})
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parseSnapshotDefinition(json: any): SnapshotYaml {
+    const snapshotName = json.snapshotName
+    const s3Region = json.s3Region
+    const s3Uri = json.s3Uri
+    if (!snapshotName || !s3Region || !s3Uri) {
+        throw new Error('Missing at least one of the required snapshot fields: snapshotName, s3Region, s3Uri');
+    }
+    const snapshotYaml = new SnapshotYaml()
+    snapshotYaml.snapshot_name = snapshotName
+    snapshotYaml.s3 = {repo_uri: s3Uri, aws_region: s3Region}
+    return snapshotYaml
 }
 
 export function isStackInGovCloud(stack: Stack): boolean {
