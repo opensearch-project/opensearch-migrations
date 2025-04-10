@@ -37,6 +37,7 @@ export interface MigrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
+    artifactBucketName: string;
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         // Create MSK cluster config
@@ -161,8 +162,9 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID
         });
 
+        this.artifactBucketName = `migration-artifacts-${this.account}-${props.stage}-${this.region}`
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
-            bucketName: `migration-artifacts-${this.account}-${props.stage}-${this.region}`,
+            bucketName: this.artifactBucketName,
             encryption: BucketEncryption.S3_MANAGED,
             enforceSSL: true,
             removalPolicy: bucketRemovalPolicy,

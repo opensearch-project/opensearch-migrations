@@ -40,7 +40,7 @@ def test_metadata_init_with_fully_specified_config_succeeds():
                 "aws_region": "us-east-1"
             },
         },
-        "min_replicas": 1,
+        "cluster_awareness_attributes": 1,
         "index_allowlist": [
             "my_index", "my_second_index"
         ],
@@ -194,7 +194,7 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
-        "--min-replicas", '0',
+        "--cluster-awareness-attributes", '0',
         "--s3-local-dir", config["from_snapshot"]["local_dir"],
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
@@ -227,13 +227,13 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
-        "--min-replicas", '0',
+        "--cluster-awareness-attributes", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
-def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
+def test_metadata_with_cluster_awareness_attributes_makes_correct_subprocess_call(mocker):
     config = {
         "from_snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -241,7 +241,7 @@ def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "min_replicas": 2
+        "cluster_awareness_attributes": 2
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, None)
@@ -256,7 +256,7 @@ def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
-        "--min-replicas", '2',
+        "--cluster-awareness-attributes", '2',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         '--target-insecure'
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
@@ -290,7 +290,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
-        "--min-replicas", '0',
+        "--cluster-awareness-attributes", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--index-allowlist", "index1,index2",
@@ -324,7 +324,7 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
-        "--min-replicas", '0',
+        "--cluster-awareness-attributes", '0',
         "--s3-local-dir", config["from_snapshot"]["local_dir"],
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
@@ -362,7 +362,7 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
-        "--min-replicas", '0',
+        "--cluster-awareness-attributes", '0',
         "--s3-local-dir", config["from_snapshot"]["local_dir"],
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
@@ -402,7 +402,7 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         "evaluate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         '--target-host', 'https://opensearchtarget:9200',
-        '--min-replicas', '0',
+        '--cluster-awareness-attributes', '0',
         "--s3-local-dir", mocker.ANY,
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],

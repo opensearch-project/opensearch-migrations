@@ -70,6 +70,11 @@ public class RemoteWriter_OS_6_8 implements RemoteCluster, ClusterWriter {
         return version;
     }
 
+    @Override
+    public org.opensearch.migrations.AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        return getClient().getAwarenessAttributeSettings();
+    }
+
     public String toString() {
         // These values could be null, don't want to crash during toString
         return String.format("Remote Cluster: %s %s", version, connection);

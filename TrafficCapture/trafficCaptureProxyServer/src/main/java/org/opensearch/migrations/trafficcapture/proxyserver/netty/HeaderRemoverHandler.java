@@ -2,14 +2,25 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
+import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.util.ReferenceCountUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * This handler performs in-place filtering of specific HTTP headers during HTTP request parsing.
+ * <p>
+ * It maintains minimal internal state to track whether a target header has been processed.
+ * This state is automatically cleared on each response flush ({@code write(...)}) and is designed
+ * to work seamlessly across multiple HTTP/1.1 requests on a persistent connection.
+ * <p>
+ * As long as a response is written for each request—as is typical in HTTP/1.1 scenarios—the handler
+ * will reset itself correctly and continue functioning as expected.
+ */
 @Slf4j
-public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
+public class HeaderRemoverHandler extends ChannelDuplexHandler {
     final String headerToRemove;
     CompositeByteBuf previousRemaining;
     // This handler has 3 states - copying, dropping, or testing.  when previousRemaining != null, we're testing.
@@ -63,10 +74,12 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
     }
 
     void flushAndClearPreviousRemaining(ChannelHandlerContext ctx) {
-        previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb.retain()));
-        previousRemaining.removeComponents(0, previousRemaining.numComponents());
-        previousRemaining.release();
-        previousRemaining = null;
+        if (previousRemaining != null) {
+            previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb.retain()));
+            previousRemaining.removeComponents(0, previousRemaining.numComponents());
+            previousRemaining.release();
+            previousRemaining = null;
+        }
     }
 
     boolean advanceByteBufUntilNewline(ByteBuf bb) {
@@ -165,5 +178,17 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         ReferenceCountUtil.release(previousRemaining);
         super.channelUnregistered(ctx);
+    }
+
+    @Override
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        resetState(ctx);
+        super.write(ctx, msg, promise);
+    }
+
+    private void resetState(ChannelHandlerContext ctx) {
+        flushAndClearPreviousRemaining(ctx);
+        dropUntilNewline = false;
+        requestPosition = MessagePosition.IN_HEADER;
     }
 }

@@ -68,17 +68,21 @@ public abstract class MigratorEvaluatorBase {
         return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
-    protected Transformer selectTransformer(Clusters clusters) {
+    protected Transformer selectTransformer(Clusters clusters, int awarenessAttributes) {
         var versionTransformer = TransformFunctions.getTransformer(
-            clusters.getSource().getVersion(),
-            clusters.getTarget().getVersion(),
-            arguments.minNumberOfReplicas,
-            arguments.metadataTransformationParams
+                clusters.getSource().getVersion(),
+                clusters.getTarget().getVersion(),
+                awarenessAttributes,
+                arguments.metadataTransformationParams
         );
         var customTransformer = getCustomTransformer();
         var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
         log.atInfo().setMessage("Selected transformer: {}").addArgument(compositeTransformer).log();
         return compositeTransformer;
+    }
+
+    protected Transformer selectTransformer(Clusters clusters) {
+        return selectTransformer(clusters, arguments.clusterAwarenessAttributes);
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
@@ -124,10 +128,10 @@ public abstract class MigratorEvaluatorBase {
             clusters.getSource().getIndexMetadata(),
             clusters.getTarget().getIndexCreator(),
             transformer,
-            arguments.dataFilterArgs.indexAllowlist
+            arguments.dataFilterArgs.indexAllowlist,
+            clusters.getTarget().getAwarenessAttributeSettings()
         );
         var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
         log.info("Index copy complete.");
         return indexResults;
-    } 
-}
+    } }

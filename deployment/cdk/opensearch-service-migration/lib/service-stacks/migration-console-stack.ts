@@ -195,10 +195,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN,
         });
-        const artifactS3AnyObjectPath = `${artifactS3Arn}/*`;
-        const artifactS3PublishPolicy = new PolicyStatement({
+        const s3AccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [artifactS3Arn, artifactS3AnyObjectPath],
+            resources: ["*"],
             actions: [
                 "s3:*"
             ]
@@ -262,7 +261,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             // only add secrets policies if they're non-null
             ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
             ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
