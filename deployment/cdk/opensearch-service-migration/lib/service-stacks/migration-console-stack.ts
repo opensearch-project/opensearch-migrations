@@ -1,5 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
@@ -23,7 +24,7 @@ import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly migrationConsoleEnableOSI: boolean,
