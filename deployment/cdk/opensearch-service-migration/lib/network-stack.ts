@@ -263,6 +263,7 @@ export class NetworkStack extends Stack {
             // Create the ALB with the strongest TLS 1.3 security policy
             const alb = new ApplicationLoadBalancer(this, 'ALB', {
                 vpc: vpc,
+                vpcSubnets: this.vpcDetails.subnetSelection,
                 internetFacing: false,
                 http2Enabled: false,
                 loadBalancerName: `MigrationAssistant-${props.stage}`
