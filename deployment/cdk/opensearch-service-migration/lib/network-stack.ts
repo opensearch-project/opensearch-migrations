@@ -116,7 +116,12 @@ export class VpcDetails {
         this.vpc = vpc
         this.azCount = azCount
         CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
-        
+
+        // Skip VPC validations for first synthesis stage which hasn't yet loaded in the VPC details from lookup
+        if (vpc.vpcId == "vpc-12345") {
+            return
+        }
+
         if (vpcSubnetIds) {
             this.subnetSelection = this.validateProvidedSubnetIds(vpc, vpcSubnetIds, azCount)
         } else {
