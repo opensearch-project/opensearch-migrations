@@ -5,8 +5,9 @@ import random
 import string
 import json
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 from unittest import TestCase
+from console_link.middleware.clusters import run_test_benchmarks
 from console_link.models.cluster import HttpMethod, Cluster
 from .common_utils import execute_api_call, DEFAULT_INDEX_IGNORE_LIST
 
@@ -107,7 +108,7 @@ class DefaultOperationsLibrary:
 
     def check_doc_counts_match(self, cluster: Cluster,
                                expected_index_details: Dict[str, Dict[str, str]],
-                               test_case: TestCase,
+                               test_case: Optional[TestCase] = None,
                                index_prefix_ignore_list=None,
                                max_attempts: int = 5,
                                delay: float = 2.5):
@@ -126,21 +127,26 @@ class DefaultOperationsLibrary:
                                  f"Actual: {actual_index_details.keys()}")
                 logger.debug(f"Error on attempt {attempt}: {error_message}")
             else:
+                errors = []
                 for index_details in actual_index_details.values():
                     index_name = index_details['index']
-                    actual_doc_count = index_details['count']
-                    expected_doc_count = expected_index_details[index_name]['count']
+                    actual_doc_count = int(index_details['count'])
+                    expected_doc_count = int(expected_index_details[index_name]['count'])
                     if actual_doc_count != expected_doc_count:
-                        error_message = (f"Index {index_name} has {actual_doc_count} documents "
-                                         f"but {expected_doc_count} were expected")
+                        errors.append(f"Index {index_name} has {actual_doc_count} documents "
+                                      f"but {expected_doc_count} were expected")
                         logger.debug(f"Error on attempt {attempt}: {error_message}")
                         break
+                error_message = "\n,".join(errors)
             if not error_message:
                 return True
             if attempt != max_attempts:
                 error_message = ""
                 time.sleep(delay)
-        test_case.fail(error_message)
+        if test_case is not None:
+            test_case.fail(error_message)
+        else:
+            raise AssertionError(error_message)
 
     def check_doc_match(self, test_case: TestCase, index_name: str, doc_id: str, source_cluster: Cluster,
                         target_cluster: Cluster):
@@ -193,3 +199,6 @@ class DefaultOperationsLibrary:
 
             }
         }
+    
+    def run_test_benchmarks(self, cluster: Cluster):
+        run_test_benchmarks(cluster=cluster)

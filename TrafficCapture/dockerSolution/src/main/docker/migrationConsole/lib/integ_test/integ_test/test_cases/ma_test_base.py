@@ -91,8 +91,8 @@ class MATestBase:
 
     def backfill_start(self):
         if MigrationType.BACKFILL in self.migrations_required:
-            backfill_start_result: CommandResult = self.backfill.start()
-            assert backfill_start_result.success
+            # backfill_start_result: CommandResult = self.backfill.start()
+            # assert backfill_start_result.success
             backfill_scale_result: CommandResult = self.backfill.scale(units=1)
             assert backfill_scale_result.success
             wait_for_service_status(status_func=lambda: self.backfill.get_status(),

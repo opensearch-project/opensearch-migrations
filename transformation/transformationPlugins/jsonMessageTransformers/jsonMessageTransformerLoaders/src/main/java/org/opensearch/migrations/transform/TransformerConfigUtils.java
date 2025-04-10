@@ -18,20 +18,22 @@ public final class TransformerConfigUtils {
                 isConfigured(params.getTransformerConfigEncoded()) +
                 isConfigured(params.getTransformerConfig());
         if (configuredCount > 1) {
-            System.err.println("Specify only one of " +
+            var message = "Specify only one of " +
                     "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config-base64" + ", " +
                     "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config" + ", or " +
                     "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config-file" +
-                    ". Both Kebab case and lower Camel case are supported.");
-            System.exit(4);
+                    ". Both Kebab case and lower Camel case are supported.";
+            System.err.println(message);
+            throw new RuntimeException(message);
         }
 
         if (params.getTransformerConfigFile() != null && !params.getTransformerConfigFile().isBlank()) {
             try {
                 return Files.readString(Paths.get(params.getTransformerConfigFile()), StandardCharsets.UTF_8);
             } catch (IOException e) {
-                System.err.println("Error reading transformer configuration file: " + e.getMessage());
-                System.exit(5);
+                var message = "Error reading transformer configuration file: " + e.getMessage();
+                System.err.println(message);
+                throw new RuntimeException(message);
             }
         }
 
