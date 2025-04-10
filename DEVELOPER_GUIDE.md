@@ -123,7 +123,7 @@ testImplementation testFixtures('org.opensearch.migrations.trafficcapture:traffi
 
 #### Python
 
-Settings.json files are already setup in the project, make sure that venv environments are created in all folders with pipfile.  Bootstrap your environment by running the following command that creates all the environments.
+Settings.json files are already set up in the project, make sure that venv environments are created in all folders with pipfile.  Bootstrap your environment by running the following command that creates all the environments.
 
 ```bash
 find . -name Pipfile -not -path "*/cdk.out/*"  | while read pipfile; do
