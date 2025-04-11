@@ -64,6 +64,23 @@ class ElasticsearchV5_XOperationsLibrary(DefaultOperationsLibrary):
                                                      split_index_name_2=split_index_name_2,
                                                      cluster_version=cluster_version)
 
+    def get_type_mapping_only_union_transformation(self, cluster_version: ClusterVersion):
+        return {
+            "TypeMappingSanitizationTransformerProvider": {
+                "sourceProperties": {
+                    "version": {
+                        "major": cluster_version.major_version,
+                        "minor": cluster_version.minor_version
+                    }
+                },
+                "regexMappings": [{
+                    "sourceIndexPattern": "(.*)",
+                    "sourceTypePattern": ".*",
+                    "targetIndexPattern": "$1"
+                }]
+            }
+        }
+
 
 class ElasticsearchV6_XOperationsLibrary(DefaultOperationsLibrary):
     pass

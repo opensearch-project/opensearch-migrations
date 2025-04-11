@@ -11,6 +11,7 @@ from typing import List
 from .test_cases.ma_test_base import ClusterVersionCombinationUnsupported
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
+from .test_cases.backfill_tests import *
 
 from console_link.cli import Context
 from console_link.environment import Environment
