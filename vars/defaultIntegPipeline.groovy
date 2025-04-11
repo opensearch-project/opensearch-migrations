@@ -33,6 +33,19 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'test-k8s-large-snapshot', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
+            string(name: 'NUM_SHARDS', defaultValue: '10', description: 'Number of index shards')
+            string(name: 'MULTIPLICATION_FACTOR', defaultValue: '1000', description: 'Document multiplication factor')
+            string(name: 'BATCH_COUNT', defaultValue: '3', description: 'Number of batches')
+            string(name: 'DOCS_PER_BATCH', defaultValue: '100', description: 'Documents per batch')
+            string(name: 'BACKFILL_TIMEOUT_HOURS', defaultValue: '45', description: 'Backfill timeout in hours')
+        }
+
+        environment {
+            NUM_SHARDS = "${params.NUM_SHARDS}"
+            MULTIPLICATION_FACTOR = "${params.MULTIPLICATION_FACTOR}"
+            BATCH_COUNT = "${params.BATCH_COUNT}"
+            DOCS_PER_BATCH = "${params.DOCS_PER_BATCH}"
+            BACKFILL_TIMEOUT_HOURS = "${params.BACKFILL_TIMEOUT_HOURS}"
         }
 
         options {
@@ -160,6 +173,7 @@ def call(Map config = [:]) {
                                 if (config.integTestStep) {
                                     config.integTestStep()
                                 } else {
+                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", stage)
                                     def command = "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +

@@ -16,15 +16,22 @@ from .common_utils import execute_api_call
 from datetime import datetime
 import time
 import shutil
+import os
 
-# Global configuration
-NUM_SHARDS = 10
-MULTIPLICATION_FACTOR = 1000  
-BATCH_COUNT = 3 
-DOCS_PER_BATCH = 100 
+# Global environment variables
+NUM_SHARDS = int(os.getenv("NUM_SHARDS", 10)) # Index setting for number of shards
+MULTIPLICATION_FACTOR = int(os.getenv("MULTIPLICATION_FACTOR", 1000)) # Transformer multiplication factor
+BATCH_COUNT = int(os.getenv("BATCH_COUNT", 3)) # Number of bulk ingestion batches
+DOCS_PER_BATCH = int(os.getenv("DOCS_PER_BATCH", 100)) # Number of documents per batch for Bulk Ingest
+BACKFILL_TIMEOUT_HOURS = int(os.getenv("BACKFILL_TIMEOUT_HOURS", 45)) # Timeout for backfill completion in hours
+TRANSFORMATION_DIRECTORY = str(os.getenv("TRANSFORMATION_DIRECTORY", "/shared-logs-output/test-transformations"))  # Directory for transformation files
+TRANSFORMATION_FILE_PATH = str(os.path.join(TRANSFORMATION_DIRECTORY, "transformation.json"))  # Path to the transformation file
+LARGE_SNAPSHOT_S3_URI = str(os.getenv("LARGE_SNAPSHOT_S3_URI", "s3://test-large-snapshot-bucket/es56-10tb-snapshot/"))  # S3 URI for large snapshot
+LARGE_SNAPSHOT_AWS_REGION = str(os.getenv("LARGE_SNAPSHOT_AWS_REGION", "us-east-1"))  # AWS region for S3 Bucket of large snapshot
+
+#Calculated values
 TOTAL_SOURCE_DOCS = BATCH_COUNT * DOCS_PER_BATCH  
 EXPECTED_TOTAL_TARGET_DOCS = TOTAL_SOURCE_DOCS * MULTIPLICATION_FACTOR
-BACKFILL_TIMEOUT_HOURS = 45  # Timeout for backfill completion in hours
 
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
@@ -41,8 +48,8 @@ def preload_data(source_cluster: Cluster):
 
     # Cleanup generated transformation files
     try:
-        shutil.rmtree("/shared-logs-output/test-transformations")
-        logger.info("Removed existing /shared-logs-output/test-transformations directory")
+        shutil.rmtree(TRANSFORMATION_DIRECTORY)
+        logger.info("Removed existing " + TRANSFORMATION_DIRECTORY + " directory")
     except FileNotFoundError:
         logger.info("No transformation files detected to cleanup")
 
@@ -53,11 +60,7 @@ def preload_data(source_cluster: Cluster):
         "bindingsObject": "{}"
         }
     }
-
-    ops.create_transformation_json_file(
-        [transform_config],
-        "/shared-logs-output/test-transformations/transformation.json"
-    )
+    ops.create_transformation_json_file([transform_config], TRANSFORMATION_FILE_PATH)
 
     # Create source index with settings for ES 5.6
     index_settings_es56 = {
@@ -372,7 +375,7 @@ class BackfillTest(unittest.TestCase):
             command_args={
                 "s3": None,
                 "rm": None,
-                "s3://test-large-snapshot-bucket/es56-10tb-snapshot/": None,
+                LARGE_SNAPSHOT_S3_URI: None,
                 "--recursive": None
             }
         )
@@ -384,8 +387,8 @@ class BackfillTest(unittest.TestCase):
         final_snapshot_config = {
             'snapshot_name': f'final-snapshot-{pytest.unique_id}',  # Use unique ID to avoid conflicts
             's3': {
-                'repo_uri': 's3://test-large-snapshot-bucket/es56-10tb-snapshot/',  # New folder
-                'aws_region': 'us-east-1',
+                'repo_uri': LARGE_SNAPSHOT_S3_URI,  # New folder
+                'aws_region': LARGE_SNAPSHOT_AWS_REGION,
                 'role': migrationAssistant_deployTimeRole
             }
         }

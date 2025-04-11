@@ -1,15 +1,15 @@
 import groovy.json.JsonOutput
 
 def call(Map config = [:]) {
-    def migrationContextId = 'full-migration'
+    def migrationContextId = 'document-multiplier-rfs'
     def time = new Date().getTime()
-    def testUniqueId = "integ_full_${time}_${currentBuild.number}"
+    def testUniqueId = "document_multiplier_${time}_${currentBuild.number}"
 
     def docTransformerPath = "/shared-logs-output/test-transformations/transformation.json"
     
     def migration_cdk_context = """
         {
-          "full-migration": {
+          "document-multiplier-rfs": {
             "stage": "dev",
             "artifactBucketRemovalPolicy": "DESTROY",
             "captureProxyServiceEnabled": false,
@@ -62,6 +62,13 @@ def call(Map config = [:]) {
             skipSourceDeploy: true,
             jobName: 'k8s-large-snapshot-test',
             testUniqueId: testUniqueId,
-            integTestCommand: '/root/lib/integ_test/integ_test/document_multiplier.py --config-file=/config/migration-services.yaml --log-cli-level=info'
+            integTestCommand: '/root/lib/integ_test/integ_test/document_multiplier.py --config-file=/config/migration-services.yaml --log-cli-level=info',
+            parameterDefaults: [
+              NUM_SHARDS: params.NUM_SHARDS ?: '10',  
+              MULTIPLICATION_FACTOR: params.MULTIPLICATION_FACTOR ?: '1000',
+              BATCH_COUNT: params.BATCH_COUNT ?: '3',
+              DOCS_PER_BATCH: params.DOCS_PER_BATCH ?: '100',
+              BACKFILL_TIMEOUT_HOURS: params.BACKFILL_TIMEOUT_HOURS ?: '45'
+            ]
     )
 }
