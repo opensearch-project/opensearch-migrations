@@ -51,7 +51,6 @@ public class KafkaTestUtils {
             return new KafkaProducer(kafkaProps);
         } catch (Exception e) {
             log.atError().setCause(e).log();
-            System.exit(1);
             throw e;
         }
     }
