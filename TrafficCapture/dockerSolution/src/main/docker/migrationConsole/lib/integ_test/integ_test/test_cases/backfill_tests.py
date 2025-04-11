@@ -31,7 +31,7 @@ full_indices = {
 }
 
 
-class Test0006Backfill(MATestBase):
+class Test0006OpenSearchBenchmarkBackfill(MATestBase):
     def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV2_X),
@@ -55,7 +55,6 @@ class Test0006Backfill(MATestBase):
         )
         self.source_operations.create_transformation_json_file(transform_config_data=[union_transform],
                                                                file_path_to_create=self.transform_config_file)
-        pass
 
     def metadata_migrate(self):
         metadata_result: CommandResult = self.metadata.migrate(extra_args=["--multi-type-behavior", "UNION"])
