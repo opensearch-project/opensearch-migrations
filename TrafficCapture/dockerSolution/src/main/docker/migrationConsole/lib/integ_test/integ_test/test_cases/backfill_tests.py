@@ -1,7 +1,6 @@
 import logging
-import time
 from ..cluster_version import ElasticsearchV5_X, OpensearchV2_X
-from .ma_test_base import MATestBase
+from .ma_test_base import MATestBase, MigrationType
 from console_link.environment import Environment
 from console_link.models.command_result import CommandResult
 
@@ -38,19 +37,23 @@ class Test0006Backfill(MATestBase):
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
-        description = "Performs metadata, backfill, and replayer migrations with a multi-type split transformation."
+        description = "Run OpenSearch Benchmark tests and then runs metadata and backfill."
         super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
                          description=description,
                          allow_source_target_combinations=allow_combinations,
+                         migrations_required=[MigrationType.BACKFILL, MigrationType.METADATA],
                          run_isolated=run_isolated)
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
     def test_before(self):
         self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
-        # TODO: Fix this invalid transformation config
-        self.source_operations.create_transformation_json_file(transform_config_data=[{}],
+        # Current test structure requires a transformation config
+        union_transform = self.source_operations.get_type_mapping_only_union_transformation(
+            cluster_version=self.source_version
+        )
+        self.source_operations.create_transformation_json_file(transform_config_data=[union_transform],
                                                                file_path_to_create=self.transform_config_file)
         pass
 
@@ -59,30 +62,14 @@ class Test0006Backfill(MATestBase):
         assert metadata_result.success
 
     def metadata_after(self):
-        self.target_operations.check_doc_counts_match(cluster=self.target_cluster, expected_index_details=empty_indices)
-
-    def backfill_after(self):
-        try:
-            self.target_operations.check_doc_counts_match(cluster=self.target_cluster, expected_index_details=full_indices)
-        except Exception as e:
-            logger.info('Hit an exception! ' + str(e))
-            time.sleep(1000)
+        self.target_operations.check_doc_counts_match(cluster=self.target_cluster,
+                                                      expected_index_details=empty_indices,
+                                                      delay=3,
+                                                      max_attempts=20)
 
     def backfill_wait_for_stop(self):
-        # Don't scale down so I can look at logs
-        pass
-
-    def replay_before(self):
-        pass
-
-    def replay_start(self):
-        pass
-
-    def replay_during(self):
-        pass
-
-    def replay_wait_for_stop(self):
-        pass
-
-    def replay_after(self):
-        pass
+        self.target_operations.check_doc_counts_match(cluster=self.target_cluster,
+                                                      expected_index_details=full_indices,
+                                                      delay=5,
+                                                      max_attempts=30)
+        return super().backfill_wait_for_stop()

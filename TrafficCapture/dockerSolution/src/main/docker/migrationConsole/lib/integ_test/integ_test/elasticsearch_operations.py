@@ -40,7 +40,30 @@ def get_type_mapping_union_transformation(multi_type_index_name: str, doc_type_1
                     "major": cluster_version.major_version,
                     "minor": cluster_version.minor_version
                 }
-            }
+            },
+            "regexMappings": [{
+                "sourceIndexPattern": "(.*)",
+                "sourceTypePattern": ".*",
+                "targetIndexPattern": "$1"
+            }]
+        }
+    }
+
+
+def get_type_mapping_only_union_transformation(cluster_version: ClusterVersion) -> Dict:
+    return {
+        "TypeMappingSanitizationTransformerProvider": {
+            "sourceProperties": {
+                "version": {
+                    "major": cluster_version.major_version,
+                    "minor": cluster_version.minor_version
+                }
+            },
+            "regexMappings": [{
+                "sourceIndexPattern": "(.*)",
+                "sourceTypePattern": ".*",
+                "targetIndexPattern": "$1"
+            }]
         }
     }
 

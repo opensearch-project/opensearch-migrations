@@ -122,25 +122,22 @@ class DefaultOperationsLibrary:
             actual_index_details = self.get_all_index_details(cluster=cluster,
                                                               index_prefix_ignore_list=index_prefix_ignore_list)
             logger.debug(f"Received actual indices: {actual_index_details}")
-            if actual_index_details.keys() != expected_index_details.keys():
+            if not expected_index_details.keys() <= actual_index_details.keys():
                 error_message = (f"Indices are different: \n Expected: {expected_index_details.keys()} \n "
                                  f"Actual: {actual_index_details.keys()}")
-                logger.debug(f"Error on attempt {attempt}: {error_message}")
             else:
                 errors = []
-                for index_details in actual_index_details.values():
-                    index_name = index_details['index']
-                    actual_doc_count = int(index_details['count'])
+                for index_name in expected_index_details.keys():
                     expected_doc_count = int(expected_index_details[index_name]['count'])
+                    actual_doc_count = int(actual_index_details[index_name]['count'])
                     if actual_doc_count != expected_doc_count:
                         errors.append(f"Index {index_name} has {actual_doc_count} documents "
                                       f"but {expected_doc_count} were expected")
-                        logger.debug(f"Error on attempt {attempt}: {error_message}")
-                        break
-                error_message = "\n,".join(errors)
+                error_message = ",\n".join(errors)
             if not error_message:
                 return True
             if attempt != max_attempts:
+                logger.debug(f"Error on attempt {attempt}: {error_message}")
                 error_message = ""
                 time.sleep(delay)
         if test_case is not None:
