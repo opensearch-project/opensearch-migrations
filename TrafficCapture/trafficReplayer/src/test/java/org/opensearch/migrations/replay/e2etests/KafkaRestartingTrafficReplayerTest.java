@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.e2etests;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -12,9 +13,12 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
+import org.opensearch.migrations.replay.V0_1TrafficCaptureSource;
 import org.opensearch.migrations.replay.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -24,6 +28,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import com.google.common.collect.Streams;
+import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -205,4 +210,44 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
             throw e;
         }
     }
+
+    private Supplier<ISimpleTrafficCaptureSource> loadStreamsToKafkaFromCompressedFile(
+        TestContext rootCtx,
+        KafkaConsumer<String, byte[]> kafkaConsumer,
+        String filename,
+        int recordCount
+    ) throws Exception {
+        var kafkaProducer = buildKafkaProducer();
+        loadStreamsAsynchronouslyWithCloseableResource(
+            kafkaConsumer,
+            new V0_1TrafficCaptureSource(rootCtx, filename),
+            originalTrafficSource -> {
+                try {
+                    for (int i = 0; i < recordCount; ++i) {
+                        List<ITrafficStreamWithKey> chunks = null;
+                        chunks = originalTrafficSource.readNextTrafficStreamChunk(rootCtx::createReadChunkContext)
+                            .get();
+                        for (int j = 0; j < chunks.size(); ++j) {
+                            KafkaTestUtils.writeTrafficStreamRecord(
+                                kafkaProducer,
+                                chunks.get(j).getStream(),
+                                TEST_TOPIC_NAME,
+                                "KEY_" + i + "_" + j
+                            );
+                            Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
+                        }
+                    }
+                } catch (Exception e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            }
+        );
+        return () -> new KafkaTrafficCaptureSource(
+            rootCtx,
+            kafkaConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS)
+        );
+    }
+
 }
