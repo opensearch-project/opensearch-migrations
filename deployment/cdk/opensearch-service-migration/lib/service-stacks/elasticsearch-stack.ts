@@ -1,5 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {ELBTargetGroup, MigrationServiceCore, } from "./migration-service-core";
@@ -7,7 +8,7 @@ import { MigrationSSMParameter, getMigrationStringParameterValue } from "../comm
 
 
 export interface ElasticsearchProps extends StackPropsExt {
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly fargateCpuArch: CpuArchitecture,
     readonly targetGroups: ELBTargetGroup[]
 }

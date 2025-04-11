@@ -1,5 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
@@ -13,7 +14,7 @@ import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
 
 export interface CaptureProxyESProps extends StackPropsExt {
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     readonly otelCollectorEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,

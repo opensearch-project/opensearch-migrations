@@ -76,7 +76,7 @@ describe('NetworkStack Tests', () => {
         // For each AZ, a private and public subnet is created
         networkTemplate.resourceCountIs("AWS::EC2::Subnet", 4)
 
-        const vpc = networkStack.vpc
+        const vpc = networkStack.vpcDetails.vpc
         expect(vpc.publicSubnets.length).toBe(2)
         expect(vpc.privateSubnets.length).toBe(2)
     });
