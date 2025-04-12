@@ -161,7 +161,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     public static String getFinalIndexName(String indexNameAppendage) {
-        return INDEX_BASENAME + indexNameAppendage;
+        return INDEX_BASENAME + Optional.ofNullable(indexNameAppendage)
+            .filter(s->!s.isEmpty())
+            .map(s->"_" + s)
+            .orElse("");
     }
 
     @FunctionalInterface

@@ -7,10 +7,10 @@ metadata:
   labels:
     workflows.argoproj.io/configmap-type: Parameter
 data:
-  AWS_REGION: "us-west-2"
+  AWS_REGION: {{ .Values.s3Configuration.region }}
   {{- if .Values.s3Configuration.useLocalStack }}
-  ENDPOINT: "http://ma-localstack:4566"
+  ENDPOINT: "http://{{ .Values.s3Configuration.endpoint }}:4566"
   {{- else }}
-  ENDPOINT: "http://s3.us-east-1.amazonaws.com"
+  ENDPOINT: "http://s3.{{ .Values.s3Configuration.region }}.amazonaws.com"
   {{- end }}
   repo_uri: {{ .Values.snapshotBucketConfiguration.bucketName }}

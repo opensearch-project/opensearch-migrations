@@ -57,6 +57,7 @@ RFS_BACKFILL_SCHEMA = {
             "k8s": K8S_RFS_SCHEMA,
             "snapshot_name": {"type": "string", "required": False},
             "snapshot_repo": {"type": "string", "required": False},
+            "session_name": {"type": "string", "required": False},
             "scale": {"type": "integer", "required": False, "min": 1}
         },
         "check_with": contains_one_of({'docker', 'ecs', 'k8s'}),
@@ -232,10 +233,10 @@ class ECSRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
 
-def get_detailed_status(target_cluster: Cluster) -> Optional[str]:
+def get_detailed_status(target_cluster: Cluster, index_to_check: str = "/.migrations_working_state") -> Optional[str]:
     # Check whether the working state index exists. If not, we can't run queries.
     try:
-        target_cluster.call_api("/.migrations_working_state")
+        target_cluster.call_api(index_to_check)
     except requests.exceptions.RequestException:
         logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
         return None

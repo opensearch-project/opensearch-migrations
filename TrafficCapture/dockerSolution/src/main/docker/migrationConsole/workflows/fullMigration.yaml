@@ -4,6 +4,8 @@ metadata:
   name: full-migration
 spec:
   serviceAccountName: argo-workflow-executor
+  ttlStrategy:
+    secondsAfterCompletion: 600  # Delete workflow so many seconds after completion
   entrypoint: main
   parallelism: 100
 
@@ -29,13 +31,18 @@ spec:
         parameters:
           - name: source-migration-configs
 #                {\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},
+#               {"source":{"endpoint":"https://doesnt.resolve.example.com:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}},"snapshot-and-migration-configs":[{"indices":["index_3","index_4"],"migrations":[{"metadata":{"mappings":{"properties":{}},"settings":{}},"documentBackfillConfigs":[{"indices":["index_3","index_4"]}]}]}],"replayer-config":{"batchSize":1000,"concurrency":4}}
             value: |
               [
                {"source":{"endpoint":"https://elasticsearch-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}},"snapshot-and-migration-configs":[{"indices":["index_3","index_4"],"migrations":[{"metadata":{"mappings":{"properties":{}},"settings":{}},"documentBackfillConfigs":[{"indices":["index_3","index_4"]}]}]}],"replayer-config":{"batchSize":1000,"concurrency":4}}
               ]
 
           - name: targets
-            value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
+#                {"endpoint":"https://doesnt.resolve.example.com:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"myStrongPassword123!"}}
+            value: |
+              [
+               {"endpoint":"https://opensearch-cluster-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"myStrongPassword123!"}}
+              ]
       steps:
         - - name: get-configs-from-maps
             template: get-configs-from-args
@@ -78,12 +85,12 @@ spec:
         parameters:
           - name: s3-config
             valueFrom:
-
               # add this too... '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' +
               expression: >- 
                 '{' + 
-                '"aws_region": "' + inputs.parameters['aws-region'] + '", ' + 
-                '"repo_uri": "s3://' + inputs.parameters['repo-uri'] + '"' +
+                  '"aws_region": "' + inputs.parameters['aws-region'] + '", ' + 
+                  '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' + 
+                  '"repo_uri": "s3://' + inputs.parameters['repo-uri'] + '"' +
                 '}'
 
     # All configmaps from main have been resolved.  Use this version to bypass those global configurations.
@@ -121,7 +128,7 @@ spec:
                   value: "{{inputs.parameters.targets}}"
                 - name: s3-config
                   value: "{{inputs.parameters.s3-config}}"
-                - name: prefix
+                - name: latch-coordination-prefix
                   value: "{{steps.init.outputs.parameters.prefix}}"
 
         - - name: cleanup
@@ -141,7 +148,7 @@ spec:
           - name: source-migration-config
           - name: targets
           - name: s3-config
-          - name: prefix
+          - name: latch-coordination-prefix
       steps:
         - - name: pipeline-snapshot
             template: pipeline-snapshot
@@ -155,13 +162,11 @@ spec:
                 - name: targets
                   value: "{{inputs.parameters.targets}}"
                 - name: source-pipeline-name
-                  value: "{{=lower(toBase64(fromJSON(inputs.parameters['source-migration-config'])['source']['endpoint']))}}"
-                  #"\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
-                  #value: "\"snapshot-\" + fromJSON(inputs.parameters['source-config']).endpoint.replace(/\\//g, '_') + \"-\" + workflow.uid"
+                  value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
                 - name: s3-config
                   value: "{{inputs.parameters.s3-config}}"
-                - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
+                - name: latch-coordination-prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
 
     - name: pipeline-snapshot
       inputs:
@@ -171,7 +176,7 @@ spec:
           - name: targets
           - name: source-pipeline-name
           - name: s3-config
-          - name: prefix
+          - name: latch-coordination-prefix
       steps:
         - - name: create-or-get-snapshot
             templateRef:
@@ -198,12 +203,10 @@ spec:
                   value: "{{steps.create-or-get-snapshot.outputs.parameters.snapshot-config}}"
                 - name: migration-configs
                   value: "{{=fromJSON(inputs.parameters['snapshot-and-migration-config'])['migrations']}}"
-                - name: target
+                - name: target-config
                   value: "{{item}}"
-                - name: process-name
-                  value: "{{inputs.parameters.source-pipeline-name}}.{{=lower(toBase64(toJSON(item)))}}"
-                - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
+                - name: latch-coordination-prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
 
     - name: pipeline-snapshot-to-target
       inputs:
@@ -211,9 +214,8 @@ spec:
           - name: source-config
           - name: snapshot-config
           - name: migration-configs
-          - name: target
-          - name: process-name
-          - name: prefix
+          - name: target-config
+          - name: latch-coordination-prefix
       steps:
         - - name: pipeline-migrate-from-snapshot
             template: pipeline-migrate-from-snapshot
@@ -226,12 +228,10 @@ spec:
                   value: "{{inputs.parameters.snapshot-config}}"
                 - name: migration-config
                   value: "{{item}}"
-                - name: target
-                  value: "{{inputs.parameters.target}}"
-                - name: process-name
-                  value: "{{inputs.parameters.process-name}}.{{=lower(toBase64(toJSON(item)))}}"
-                - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: latch-coordination-prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
 
     - name: pipeline-migrate-from-snapshot
       inputs:
@@ -239,10 +239,11 @@ spec:
           - name: source-config
           - name: snapshot-config
           - name: migration-config
-          - name: target
-          - name: process-name
-          - name: prefix
+          - name: target-config
+          - name: latch-coordination-prefix
       steps:
+        - - name: id-generator
+            template: do-nothing
         - - name: migrate-metadata
             template: migrate-metadata
 #            when: "{{=fromJSON(inputs.parameters['migration-config'])['metadata'] != nil}}"
@@ -254,8 +255,8 @@ spec:
                   value: "{{inputs.parameters.snapshot-config}}"
                 - name: migration-config
                   value: "{{fromJSON(inputs.parameters['migration-config'])['metadata']}}"
-                - name: target
-                  value: "{{inputs.parameters.target}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
         - - name: bulk-load-documents
             templateRef:
               name: bulk-load
@@ -267,8 +268,10 @@ spec:
                   value: "{{inputs.parameters.snapshot-config}}"
                 - name: rfs-config
                   value: "{{item}}"
-                - name: target
-                  value: "{{inputs.parameters.target}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: session-name
+                  value: "{{=steps['id-generator'].id}}"
         # Check target readiness after processing and bump it to the next phase if ready
         - - name: target-backfill-complete-check
             templateRef:
@@ -279,20 +282,18 @@ spec:
                 - name: source
                   value: "{{inputs.parameters.source-config}}"
                 - name: processor
-                  value: "{{inputs.parameters.process-name}}"
+                  value: "{{steps['id-generator'].id}}"
                 - name: target
-                  value: "{{inputs.parameters.target}}"
+                  value: "{{=inputs.parameters['target-config']['endpoint']}}"
                 - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
         - - name: run-replayer-for-target
             template: run-replayer-for-target
             when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
             arguments:
               parameters:
-                - name: target
-                  value: "{{inputs.parameters.target}}"
-                - name: prefix
-                  value: "{{inputs.parameters.prefix}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
 
 
     - name: migrate-metadata
@@ -301,16 +302,8 @@ spec:
           - name: source-config
           - name: snapshot-config
           - name: migration-config
-          - name: target
-      script:
-        image: python:3.9-alpine
-        command: [ python ]
-        source: |
-          import json, sys, os, random, time
-          sleep_duration = random.randint(0, {{workflow.parameters.demo-max-sleep-time}})
-          print(f"Sleeping for {sleep_duration} seconds to simulate metadata migration time...")
-          time.sleep(sleep_duration)
-          print(f"Finished sleeping after {sleep_duration} seconds")
+          - name: target-config
+      steps: [[]]
 #      container:
 #        image: migrations/migration_console:latest
 #        imagePullPolicy: IfNotPresent
@@ -321,8 +314,7 @@ spec:
     - name: run-replayer-for-target
       inputs:
         parameters:
-          - name: target
-          - name: prefix
+          - name: target-config
       container:
         image: "{{workflow.parameters.etcd-image}}"
         imagePullPolicy: Never
@@ -330,3 +322,6 @@ spec:
         args:
           - |
             echo "run-replayer-for-target"
+
+    - name: do-nothing
+      steps: [[]]

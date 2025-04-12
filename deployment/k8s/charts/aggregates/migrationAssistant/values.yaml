@@ -92,6 +92,7 @@ localstack:
 s3Configuration:
   region: us-east-2
   useLocalStack: true
+  endpoint: ma-localstack
 
 snapshotBucketConfiguration:
   create: true

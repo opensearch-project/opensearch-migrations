@@ -18,12 +18,13 @@ spec:
           - name: indices
             value: ""
             description: "Which indices should be snapshot.  Default empty.  Empty string means all."
+          - name: snapshot-config
+            value: "{ \"snapshot_name\": \"{{inputs.parameters.snapshot-name}}\", \"s3\": {{inputs.parameters.s3-config}} }"
       outputs:
         parameters:
           - name: snapshot-config
             valueFrom:
-              expression: >-
-                "{\"snapshot_name\": " + toJson(inputs.parameters['snapshot-name']) + ", \"s3\": " + inputs.parameters['s3-config'] + "}"
+              expression: "inputs.parameters['snapshot-config']"
       steps:
         - - name: get-console-config
             templateRef:
@@ -34,7 +35,7 @@ spec:
                 - name: source-cluster
                   value: "{{inputs.parameters.source-config}}"
                 - name: snapshot-info
-                  value: "{ \"snapshot_name\": \"{{inputs.parameters.snapshot-name}}\", \"s3\": {{inputs.parameters.s3-config}} }"
+                  value: "{{inputs.parameters.snapshot-config}}"
 
         - - name: create-snapshot
             templateRef:

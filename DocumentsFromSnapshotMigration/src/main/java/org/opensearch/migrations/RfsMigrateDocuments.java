@@ -1,6 +1,9 @@
 package org.opensearch.migrations;
 
+import java.io.File;
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URI;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
@@ -57,6 +60,9 @@ import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.ConfigurationFactory;
+import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.slf4j.MDC;
 
 @Slf4j
@@ -76,6 +82,7 @@ public class RfsMigrateDocuments {
             "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
             "  }" +
             "]";
+    public static final String LOG4J2_PROPERTIES_FILE = "LOG4J2_PROPERTIES_FILE";
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -122,6 +129,12 @@ public class RfsMigrateDocuments {
             description = ("The AWS Region the S3 bucket is in, like: us-east-2.  If you supply this, you must"
                 + " also supply --s3-local-dir and --s3-repo-uri.  Mutually exclusive with --snapshot-local-dir."))
         public String s3Region = null;
+
+        @Parameter(required = false,
+            names = { "--s3-endpoint", "--s3Endpoint" },
+            description = ("The endpoint URL to use for S3 calls.  " +
+                "For use when the default AWS ones won't work for a particular context."))
+        public String s3Endpoint = null;
 
         @Parameter(required = true,
             names = { "--lucene-dir", "--luceneDir" },
@@ -261,7 +274,24 @@ public class RfsMigrateDocuments {
 
     }
 
+    public static void reloadConfiguration(String configFile) throws IOException {
+        ConfigurationSource source;
+        var file = configFile == null || configFile.isEmpty() ? null : new File(configFile);
+        if (file != null && file.exists()) {
+            source = new ConfigurationSource(file.toURI().toURL().openStream(), file.toURI().toURL());
+            LoggerContext context = (LoggerContext) LogManager.getContext(false);
+            var config = ConfigurationFactory.getInstance().getConfiguration(context, source);
+            context.start(config);
+            log.atInfo().setMessage("Successfully reloaded Log4j2 configuration from: {}")
+                .addArgument(configFile).log();
+        } else {
+            log.atInfo().setMessage("Using the default Log4j2 configuration").log();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
+        reloadConfiguration(System.getenv(LOG4J2_PROPERTIES_FILE));
+
         // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
         System.err.println("Starting program with: " + String.join(" ", args));
@@ -354,7 +384,8 @@ public class RfsMigrateDocuments {
                 sourceRepo = S3Repo.create(
                     Paths.get(arguments.s3LocalDir),
                     new S3Uri(arguments.s3RepoUri),
-                    arguments.s3Region
+                    arguments.s3Region,
+                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
                 );
             } else {
                 sourceRepo = new FileSystemRepo(snapshotLocalDirPath);

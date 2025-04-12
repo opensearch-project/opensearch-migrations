@@ -35,7 +35,7 @@ spec:
                 - name: s3-config
                   value: "{{inputs.parameters.s3-config}}"
                 - name: indices
-                  value: "{{=hasKey(fromJSON(inputs.parameters['snapshot-and-migration-config']), 'indices') ? join(fromJSON(inputs.parameters['snapshot-and-migration-config']).indices, ',') : ''}}"
+                  value: "{{=let sc=inputs.parameters['snapshot-and-migration-config']; hasKey(fromJSON(sc), 'indices') ? join(fromJSON(sc).indices, ',') : ''}}"
 
         - - name: collect-output
             template: collect-output

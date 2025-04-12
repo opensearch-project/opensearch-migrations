@@ -23,7 +23,8 @@ SNAPSHOT_SCHEMA = {
                 'schema': {
                     'repo_uri': {'type': 'string', 'required': True},
                     'aws_region': {'type': 'string', 'required': True},
-                    'role': {'type': 'string', 'required': False}
+                    'role': {'type': 'string', 'required': False},
+                    'endpoint': {'type': 'string', 'required': False}
                 }
             },
             'fs': {
@@ -105,7 +106,7 @@ S3_SNAPSHOT_SCHEMA = {
     'snapshot_name': {'type': 'string', 'required': True},
     'otel_endpoint': {'type': 'string', 'required': False},
     's3_repo_uri': {'type': 'string', 'required': True},
-    's3_region': {'type': 'string', 'required': True}
+    's3_region': {'type': 'string', 'required': True},
 }
 
 
