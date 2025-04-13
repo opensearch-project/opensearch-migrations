@@ -144,12 +144,30 @@ spec:
                 - name: index-allowlist
                   value: "{{inputs.parameters.index-allowlist}}"
 
+        - - name: setup-wait-for-completion
+            templateRef:
+              name: migration-console-template
+              template: get-console-config
+            arguments:
+              parameters:
+                - name: target-cluster
+                  value: |
+                    { 
+                      "endpoint": "{{inputs.parameters.target-host}}",
+                      {{=let u = inputs.parameters['target-username']; let p = inputs.parameters['target-password']; 
+                        (u == nil && u == '') ? "" : 
+                     '"basic_auth": {"username": "' + u + '", "password": "' + p + '" }, ' }}
+                      "allow_insecure": {{=inputs.parameters['target-insecure'] ?? "false"}}
+                    }
+
         - - name: wait-for-completion
-            template: check-completion
+            template: wait-for-completion
             arguments:
               parameters:
                 - name: session-name
                   value: "{{inputs.parameters.session-name}}"
+                - name: config-contents
+                  value: "{{steps.setup-wait-for-completion.outputs.parameters.config-contents}}"
 
         - - name: cleanup-replicaset
             template: delete-rs
@@ -333,23 +351,44 @@ spec:
                   - name: shared-data
                     mountPath: /shared-data
 
-    - name: check-completion
+
+    - name: wait-for-completion
       inputs:
         parameters:
+          - name: config-contents
           - name: session-name
-      container:
-        image: migrations/migration_console:latest
-        imagePullPolicy: IfNotPresent
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            source /.venv/bin/activate
-            python -c "
-            from environment import Environment
-            from status import get_detailed_status
-            
-            print(get_detailed_status(Environment('/config/services.yaml').target_cluster))
-            "
+      retryStrategy:
+        limit: "200"
+        retryPolicy: "Always"
+        backoff:
+          duration: "30"
+          factor: 2
+          maxDuration: "300"
+      steps:
+        - - name: check-completion
+            templateRef:
+              name: migration-console-template
+              template: run-console-with-config
+            arguments:
+              parameters:
+                - name: config-contents
+                  value: "{{inputs.parameters.config-contents}}"
+                - name: command
+                  value: |
+                    set -x && 
+                    python -c '
+                    import sys
+                    from lib.console_link.console_link.environment import Environment
+                    from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
+                    from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
+                    
+                    status = get_detailed_status_dict(Environment("/config/migration_services.yaml").target_cluster, 
+                                                      "{{=inputs.parameters['session-name']}}")
+                    print(status)
+                    all_finished = all_shards_finished_processing(Environment("/config/migration_services.yaml").target_cluster,
+                                                                  "{{=inputs.parameters['session-name']}}")
+                    sys.exit(0 if all_finished else 1)
+                    '
 
     - name: delete-rs
       inputs:
