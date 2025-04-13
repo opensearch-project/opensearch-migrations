@@ -361,7 +361,7 @@ spec:
         limit: "200"
         retryPolicy: "Always"
         backoff:
-          duration: "30"
+          duration: "5"
           factor: 2
           maxDuration: "300"
       steps:

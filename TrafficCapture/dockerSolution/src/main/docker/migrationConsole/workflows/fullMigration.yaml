@@ -4,8 +4,8 @@ metadata:
   name: full-migration
 spec:
   serviceAccountName: argo-workflow-executor
-  ttlStrategy:
-    secondsAfterCompletion: 600  # Delete workflow so many seconds after completion
+#  ttlStrategy:
+#    secondsAfterCompletion: 86400  # Delete workflow so many seconds after completion
   entrypoint: main
   parallelism: 100
 
