@@ -271,7 +271,7 @@ spec:
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
                 - name: session-name
-                  value: "{{=steps['id-generator'].id}}"
+                  value: "{{steps.id-generator.id}}"
         # Check target readiness after processing and bump it to the next phase if ready
         - - name: target-backfill-complete-check
             templateRef:
@@ -279,12 +279,10 @@ spec:
               template: target-processed-latch
             arguments:
               parameters:
-                - name: source
-                  value: "{{inputs.parameters.source-config}}"
                 - name: processor
-                  value: "{{steps['id-generator'].id}}"
+                  value: "{{steps.id-generator.id}}"
                 - name: target
-                  value: "{{=inputs.parameters['target-config']['endpoint']}}"
+                  value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
                 - name: prefix
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
         - - name: run-replayer-for-target

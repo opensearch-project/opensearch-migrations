@@ -119,7 +119,6 @@ spec:
     - name: target-processed-latch
       inputs:
         parameters:
-          - name: source
           - name: processor
           - name: target
           - name: prefix
@@ -133,9 +132,9 @@ spec:
         imagePullPolicy: Never
         command: [sh]
         source: |
-          SOURCE_CONFIG=$(echo '{{inputs.parameters.source}}')
+          set -x -e
           PROCESSOR_ID="{{inputs.parameters.processor}}"
-          TARGET_JSON=$(echo '{{inputs.parameters.target}}')
+          TARGET_ENDPOINT="{{inputs.parameters.target}}"
           ETCD_ENDPOINT={{workflow.parameters.etcd-endpoints}}
           PREFIX="{{inputs.parameters.prefix}}"
           
@@ -143,11 +142,7 @@ spec:
             echo "$1" | base64
           }
           
-          TARGET_ENDPOINT=$(echo "$TARGET_JSON" | jq -r '.endpoint')
           NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_ENDPOINT")
-          
-          SOURCE_ENDPOINT=$(echo "$SOURCE_CONFIG" | jq -r '.endpoint')
-          NORMALIZED_SOURCE=$(normalize_endpoint "$SOURCE_ENDPOINT")
           
           USERNAME={{workflow.parameters.etcd-user}}
           PASSWORD={{workflow.parameters.etcd-password}}
@@ -167,12 +162,12 @@ spec:
           local current_value="$1"
           local next_value="$2"
           
-          # be very mindful of the empty lines in the file being sent to the transaction command!
           echo "LATCH_KEY_NAME=$LATCH_KEY_NAME"
           echo "current_value=$current_value"
           echo "next_value=$next_value"
           echo "etcdctl_cmd=$etcdctl_cmd"
           
+          # be very mindful of the empty lines in the file being sent to the transaction command!
           $etcdctl_cmd txn  --write-out=json << EOF | jq -e '.succeeded == true'
           val("$LATCH_KEY_NAME") = "$current_value"
           
