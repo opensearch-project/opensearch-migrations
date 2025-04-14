@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -33,15 +34,16 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
 
     private final Logger tupleLogger;
     private final Logger progressLogger;
-    private final IJsonTransformer tupleTransformer;
+    private final ThreadLocal<IJsonTransformer> tupleTransformer;
 
     private final AtomicInteger tupleCounter;
 
-    public ResultsToLogsConsumer(Logger tupleLogger, Logger progressLogger, IJsonTransformer tupleTransformer) {
+    public ResultsToLogsConsumer(Logger tupleLogger, Logger progressLogger, Supplier<IJsonTransformer> tupleTransformerSupplier) {
         this.tupleLogger = tupleLogger != null ? tupleLogger : LoggerFactory.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
         this.progressLogger = progressLogger != null ? progressLogger : makeTransactionSummaryLogger();
         tupleCounter = new AtomicInteger();
-        this.tupleTransformer = tupleTransformer != null ? tupleTransformer : NOOP_JSON_TRANSFORMER ;
+        Supplier<IJsonTransformer> jsonTransformerSupplier = tupleTransformerSupplier != null ? tupleTransformerSupplier : () -> NOOP_JSON_TRANSFORMER ;
+        this.tupleTransformer = ThreadLocal.withInitial(jsonTransformerSupplier);
     }
 
     // set this up so that the preamble prints out once, right after we have a logger
@@ -142,7 +144,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         if (tupleLogger.isInfoEnabled()) {
             try {
                 var originalTuple = toJSONObject(tuple, parsedMessages);
-                Object transformedTuple = tupleTransformer.transformJson(originalTuple);
+                Object transformedTuple = tupleTransformer.get().transformJson(originalTuple);
                 var tupleString = PLAIN_MAPPER.writeValueAsString(transformedTuple);
                 tupleLogger.atInfo().setMessage("{}").addArgument(tupleString).log();
             } catch (Exception e) {

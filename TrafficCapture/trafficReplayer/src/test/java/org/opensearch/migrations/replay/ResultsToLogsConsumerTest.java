@@ -338,7 +338,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 targetResponses,
                 null
             );
-            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, transformer);
+            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, () -> transformer);
             var consumer = new TupleParserChainConsumer(streamConsumer);
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
