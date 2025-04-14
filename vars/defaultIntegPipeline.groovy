@@ -176,16 +176,16 @@ def call(Map config = [:]) {
                                     echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", stage)
-                                    def command = "NUM_SHARDS='${env.NUM_SHARDS}' " +
-                                            "MULTIPLICATION_FACTOR='${env.MULTIPLICATION_FACTOR}' " +
-                                            "BATCH_COUNT='${env.BATCH_COUNT}' " +
-                                            "DOCS_PER_BATCH='${env.DOCS_PER_BATCH}' " +
-                                            "BACKFILL_TIMEOUT_HOURS='${env.BACKFILL_TIMEOUT_HOURS}' " +
+                                    def command = "/bin/sh -c 'NUM_SHARDS=${env.NUM_SHARDS} " +
+                                            "MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR} " +
+                                            "BATCH_COUNT=${env.BATCH_COUNT} " +
+                                            "DOCS_PER_BATCH=${env.DOCS_PER_BATCH} " +
+                                            "BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS} " +
                                             "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
                                             "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
                                             "--unique_id ${testUniqueId} " +
                                             "--stage ${stage} " +
-                                            "-s"
+                                            "-s'"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
                                             sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
