@@ -171,22 +171,12 @@ def setup_backfill(request):
     # Initialize backfill first (creates .migrations_working_state)
     backfill_create_result: CommandResult = backfill.create()
     assert backfill_create_result.success
-    logger.info("EXHIBIT A Backfill initialized successfully")
+    logger.info("Backfill initialized successfully. Created working state at %s", backfill_create_result.value)
 
     # Create initial RFS snapshot and wait for completion
     snapshot_result: CommandResult = snapshot.create(wait=True)
     assert snapshot_result.success
     logger.info("Snapshot creation completed successfully")
-
-    # Start backfill process
-    backfill_start_result: CommandResult = backfill.start()
-    assert backfill_start_result.success
-    logger.info("EXHIBIT A Backfill started successfully")
-
-    # Scale up backfill workers
-    backfill_scale_result: CommandResult = backfill.scale(5)
-    assert backfill_scale_result.success
-    logger.info("EXHIBIT A Backfill scaled successfully")
 
     yield
 
