@@ -411,20 +411,21 @@ class BackfillTest(unittest.TestCase):
         logger.info(f"Backfill working state archived to: {archive_result.value}")
 
         # Setup S3 Bucket
-        account_number = pytest.console_env.aws_account_number  # Replace with actual account number retrieval logic
+        snapshot: Snapshot = pytest.console_env.snapshot
+        assert snapshot is not None
+        migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
+        # Extract account ID from the role ARN
+        account_number = migrationAssistant_deployTimeRole.split(':')[4]
         region = LARGE_SNAPSHOT_AWS_REGION
         updated_s3_uri = self.setup_s3_bucket(account_number, region)
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
         # Delete the existing snapshot and snapshot repo from the cluster
-        snapshot: Snapshot = pytest.console_env.snapshot
-        assert snapshot is not None
         snapshot.delete()
         snapshot.delete_snapshot_repo()
 
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
-        migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         final_snapshot_config = {
             'snapshot_name': f'final-snapshot-{pytest.unique_id}',  # Use unique ID to avoid conflicts
             's3': {
