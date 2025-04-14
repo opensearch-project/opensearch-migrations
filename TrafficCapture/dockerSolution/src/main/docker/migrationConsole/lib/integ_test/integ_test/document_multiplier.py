@@ -30,6 +30,9 @@ LARGE_SNAPSHOT_S3_URI = str(os.getenv("LARGE_SNAPSHOT_S3_URI", "s3://test-large-
 LARGE_SNAPSHOT_AWS_REGION = str(os.getenv("LARGE_SNAPSHOT_AWS_REGION", "us-east-1"))  # AWS region for S3 Bucket of large snapshot
 LARGE_SNAPSHOT_RATE_MB_PER_NODE = int(os.getenv("LARGE_SNAPSHOT_RATE_MB_PER_NODE", 2000))  # Rate for large snapshot creation
 
+# Constants
+PILOT_INDEX = "pilot_index"  # Name of the index used for testing
+
 #Calculated values
 TOTAL_SOURCE_DOCS = BATCH_COUNT * DOCS_PER_BATCH  
 EXPECTED_TOTAL_TARGET_DOCS = TOTAL_SOURCE_DOCS * MULTIPLICATION_FACTOR
@@ -37,32 +40,7 @@ EXPECTED_TOTAL_TARGET_DOCS = TOTAL_SOURCE_DOCS * MULTIPLICATION_FACTOR
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
 
-def preload_data(source_cluster: Cluster):
-    """Setup test data"""
-    # Confirm cluster connection
-    source_con_result: ConnectionResult = connection_check(source_cluster)
-    assert source_con_result.connection_established is True
-
-    # Clear indices and snapshots at the start
-    logger.info("Clearing indices and snapshots before starting test...")
-    clear_cluster(source_cluster)
-
-    # Cleanup generated transformation files
-    try:
-        shutil.rmtree(TRANSFORMATION_DIRECTORY)
-        logger.info("Removed existing " + TRANSFORMATION_DIRECTORY + " directory")
-    except FileNotFoundError:
-        logger.info("No transformation files detected to cleanup")
-
-    # Transformer structure
-    transform_config = {
-    "JsonJSTransformerProvider": {
-        "initializationScript": "const MULTIPLICATION_FACTOR = " + str(MULTIPLICATION_FACTOR)+ "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
-        "bindingsObject": "{}"
-        }
-    }
-    ops.create_transformation_json_file([transform_config], TRANSFORMATION_FILE_PATH)
-
+def preload_data_cluster_es56(source_cluster: Cluster):
     # Create source index with settings for ES 5.6
     index_settings_es56 = {
         "settings": {
@@ -95,9 +73,8 @@ def preload_data(source_cluster: Cluster):
         }
     }
 
-    pilot_index = f"pilot_index"
-    logger.info("Creating index %s with settings: %s", pilot_index, index_settings_es56)
-    ops.create_index_es56(cluster=source_cluster, index_name=pilot_index, data=json.dumps(index_settings_es56))
+    logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_es56)
+    ops.create_index_es56(cluster=source_cluster, index_name=PILOT_INDEX, data=json.dumps(index_settings_es56))
     
     # Create documents with timestamp in bulk
     for j in range(BATCH_COUNT):
@@ -105,7 +82,7 @@ def preload_data(source_cluster: Cluster):
         for i in range(DOCS_PER_BATCH):
             doc_id = f"doc_{j}_{i}"
             bulk_data.extend([
-                {"index": {"_index": pilot_index, "_type": "doc", "_id": doc_id}},
+                {"index": {"_index": PILOT_INDEX, "_type": "doc", "_id": doc_id}},
                 {
                     "timestamp": datetime.now().isoformat(),
                     "value": f"test_value_{i}",
@@ -134,14 +111,44 @@ def preload_data(source_cluster: Cluster):
             data="\n".join(json.dumps(d) for d in bulk_data) + "\n",
             headers={"Content-Type": "application/x-ndjson"}
         )
+
+
+def setup_test_environment(source_cluster: Cluster):
+    """Setup test data"""
+    # Confirm cluster connection
+    source_con_result: ConnectionResult = connection_check(source_cluster)
+    assert source_con_result.connection_established is True
+
+    # Clear indices and snapshots at the start
+    logger.info("Clearing indices and snapshots before starting test...")
+    clear_cluster(source_cluster)
+
+    # Cleanup generated transformation files
+    try:
+        shutil.rmtree(TRANSFORMATION_DIRECTORY)
+        logger.info("Removed existing " + TRANSFORMATION_DIRECTORY + " directory")
+    except FileNotFoundError:
+        logger.info("No transformation files detected to cleanup")
+
+    # Transformer structure
+    transform_config = {
+    "JsonJSTransformerProvider": {
+        "initializationScript": "const MULTIPLICATION_FACTOR = " + str(MULTIPLICATION_FACTOR)+ "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
+        "bindingsObject": "{}"
+        }
+    }
+    ops.create_transformation_json_file([transform_config], TRANSFORMATION_FILE_PATH)
+
+    # preload data on source cluster 
+    preload_data_cluster_es56(source_cluster)
     
-    # Refresh indices before creating snapshot
+    # Refresh indices before creating initial snapshot
     execute_api_call(
         cluster=source_cluster,
         method=HttpMethod.POST,
         path="/_refresh"
     )
-    logger.info(f"Created {TOTAL_SOURCE_DOCS} documents in bulk in index %s", pilot_index)
+    logger.info(f"Created {TOTAL_SOURCE_DOCS} documents in bulk in index %s", PILOT_INDEX)
 
 
 @pytest.fixture(scope="class")
@@ -153,7 +160,7 @@ def setup_backfill(request):
     pytest.unique_id = unique_id
 
     # Preload data on pilot index
-    preload_data(source_cluster=pytest.console_env.source_cluster)
+    setup_test_environment(source_cluster=pytest.console_env.source_cluster)
 
     # Get components
     backfill: Backfill = pytest.console_env.backfill
@@ -296,7 +303,7 @@ class BackfillTest(unittest.TestCase):
     def test_data_multiplication(self):
         """Monitor backfill progress and report final stats"""
         source = pytest.console_env.source_cluster
-        index_name = f"pilot_index"
+        index_name = PILOT_INDEX
         backfill = pytest.console_env.backfill
 
         logger.info("\n" + "="*50)
