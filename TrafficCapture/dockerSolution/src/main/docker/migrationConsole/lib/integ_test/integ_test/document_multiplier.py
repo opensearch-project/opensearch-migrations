@@ -212,6 +212,11 @@ def setup_environment(request):
 class BackfillTest(unittest.TestCase):
     """Test backfill functionality"""
 
+    @pytest.fixture(autouse=True, scope="class")
+    def _inject_fixtures(self, request, get_test_config):
+        self.config = get_test_config
+        self.request = request
+
     def get_cluster_stats(self, cluster: Cluster, pilot_index: str = None):
         """Get document count and size stats for a cluster (primary shards only)"""
         try:
@@ -352,8 +357,7 @@ class BackfillTest(unittest.TestCase):
             previous_count = current_count
             time.sleep(30)
 
-    @pytest.mark.usefixtures("setup_backfill")
-    def test_data_multiplication(self, get_test_config, request):
+    def test_data_multiplication(self):
         """Monitor backfill progress and report final stats"""
         source = pytest.console_env.source_cluster
         index_name = PILOT_INDEX
@@ -372,9 +376,8 @@ class BackfillTest(unittest.TestCase):
 
         # Start backfill
         logger.info("\n=== Starting Backfill Process ===")
-        config = get_test_config
-        logger.info(f"Expected Document Multiplication Factor: {config['MULTIPLICATION_FACTOR']}")
-        logger.info(f"Expected Final Document Count: {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,}")
+        logger.info(f"Expected Document Multiplication Factor: {self.config['MULTIPLICATION_FACTOR']}")
+        logger.info(f"Expected Final Document Count: {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,}")
         logger.info("Starting backfill...")
         backfill_start_result: CommandResult = backfill.start()
         assert backfill_start_result.success, f"Failed to start backfill: {backfill_start_result.error}"
@@ -386,7 +389,7 @@ class BackfillTest(unittest.TestCase):
 
         # Wait for backfill to complete
         logger.info("\n=== Monitoring Backfill Progress ===")
-        self.wait_for_backfill_completion(source, index_name, request=request, get_test_config=get_test_config)
+        self.wait_for_backfill_completion(source, index_name, request=self.request, get_test_config=self.config)
 
         # Get final stats
         logger.info("\n=== Final Cluster Stats ===")
@@ -405,7 +408,7 @@ class BackfillTest(unittest.TestCase):
 
         # Assert that documents were actually migrated
         assert final_doc_count > 0, "No documents were migrated to target index"
-        assert final_doc_count == config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR'], f"Document count mismatch: source={initial_doc_count}, target={final_doc_count}"
+        assert final_doc_count == self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR'], f"Document count mismatch: source={initial_doc_count}, target={final_doc_count}"
 
         # Stop backfill
         logger.info("\n=== Stopping Backfill ===")
@@ -430,8 +433,8 @@ class BackfillTest(unittest.TestCase):
         migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         # Extract account ID from the role ARN
         account_number = migrationAssistant_deployTimeRole.split(':')[4]
-        region = get_test_config['LARGE_SNAPSHOT_AWS_REGION']
-        updated_s3_uri = self.setup_s3_bucket(account_number, region, get_test_config)
+        region = self.config['LARGE_SNAPSHOT_AWS_REGION']
+        updated_s3_uri = self.setup_s3_bucket(account_number, region, self.config)
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
         # Delete the existing snapshot and snapshot repo from the cluster
@@ -451,7 +454,7 @@ class BackfillTest(unittest.TestCase):
         final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.source_cluster)
         final_snapshot_result: CommandResult = final_snapshot.create(
             wait=True,
-            max_snapshot_rate_mb_per_node=get_test_config['LARGE_SNAPSHOT_RATE_MB_PER_NODE']
+            max_snapshot_rate_mb_per_node=self.config['LARGE_SNAPSHOT_RATE_MB_PER_NODE']
         )
         assert final_snapshot_result.success, f"Failed to create final snapshot: {final_snapshot_result.error}"
         logger.info("Final Snapshot after migration and multiplication was created successfully")
