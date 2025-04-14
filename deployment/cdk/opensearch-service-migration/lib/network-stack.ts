@@ -142,7 +142,7 @@ export class NetworkStack extends Stack {
                         cidrMask: 24,
                     },
                 ],
-                natGateways: 0,
+                natGateways: 1,
             });
             // Only create interface endpoints if VPC not imported
             this.createVpcEndpoints(this.vpc);

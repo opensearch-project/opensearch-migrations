@@ -5,8 +5,8 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/new_k8slargesnapshotTest.groovy)
-new_k8slargesnapshotTest(
+// Shared library function (location from root: vars/largeSnapshotGeneratorTest.groovy)
+largeSnapshotGeneratorTest(
         NUM_SHARDS: params.NUM_SHARDS,
         MULTIPLICATION_FACTOR: params.MULTIPLICATION_FACTOR,
         BATCH_COUNT: params.BATCH_COUNT,

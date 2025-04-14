@@ -53,7 +53,7 @@ def call(Map config = [:]) {
         }
     """
 
-    defaultIntegPipeline(
+    largeSnapshotPipeline(
             sourceContext: source_cdk_context,
             migrationContext: migration_cdk_context,
             migrationContextId: migrationContextId,
