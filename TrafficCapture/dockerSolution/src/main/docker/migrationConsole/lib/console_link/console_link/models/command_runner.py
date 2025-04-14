@@ -16,7 +16,12 @@ class CommandRunner:
                  run_as_detatched: bool = False, log_file: Optional[str] = None):
         self.command_args = command_args
         self.command = [command_root]
+        if "__positional__" in command_args:
+            self.command.extend(command_args["__positional__"])
+
         for key, value in command_args.items():
+            if key == "__positional__":
+                continue
             self.command.append(key)
             if value is not FlagOnlyArgument:
                 if type(value) is not str:

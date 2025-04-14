@@ -234,8 +234,7 @@ class BackfillTest(unittest.TestCase):
         check_bucket_cmd = CommandRunner(
             command_root="aws",
             command_args={
-                "s3api": None,
-                "head-bucket": None,
+                "__positional__": ["s3api", "head-bucket"],
                 "--bucket": bucket_name
             }
         )
@@ -248,10 +247,8 @@ class BackfillTest(unittest.TestCase):
             s3_cleanup_cmd = CommandRunner(
                 command_root="aws",
                 command_args={
-                    "s3": None,
-                    "rm": None,
-                    f"s3://{bucket_name}/es56-snapshot/": None,
-                    "--recursive": None
+                "__positional__": ["s3", "rm", f"s3://{bucket_name}/es56-snapshot/"],
+                "--recursive": None  
                 }
             )
             cleanup_result = s3_cleanup_cmd.run()
@@ -261,8 +258,7 @@ class BackfillTest(unittest.TestCase):
             logger.info(f"S3 bucket {bucket_name} does not exist. Creating it...")
             logger.info("\n=== Creating new S3 bucket as it does not exist  ===")
             create_args = {
-                "s3api": None,
-                "create-bucket": None,
+                "__positional__": ["s3api", "create-bucket"],
                 "--bucket": bucket_name,
                 "--region": region,
             }
