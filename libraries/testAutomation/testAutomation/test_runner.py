@@ -130,10 +130,9 @@ class TestRunner:
         self.k8s_service.exec_migration_console_cmd(["pipenv",
                                                      "run",
                                                      "pytest",
-                                                     "/root//lib/integ_test/integ_test/ma_workflow_test.py",
+                                                     "/root/lib/integ_test/integ_test/ma_workflow_test.py",
                                                      f"--unique_id={self.unique_id}",
-                                                     f"--test_ids={','.join(self.test_ids)}"
-                                                     ])
+                                                     f"--test_ids={','.join(self.test_ids)}"])
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
         cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
