@@ -240,7 +240,9 @@ class BackfillTest(unittest.TestCase):
             }
         )
         check_result = check_bucket_cmd.run()
-        if check_result.success:
+        bucket_exists = check_result.success
+        
+        if bucket_exists:
             logger.info(f"S3 bucket {bucket_name} already exists.")
             logger.info("\n=== Cleaning up S3 bucket contents ===")
             s3_cleanup_cmd = CommandRunner(
@@ -258,22 +260,26 @@ class BackfillTest(unittest.TestCase):
         else:
             logger.info(f"S3 bucket {bucket_name} does not exist. Creating it...")
             logger.info("\n=== Creating new S3 bucket as it does not exist  ===")
+            create_args = {
+                "s3api": None,
+                "create-bucket": None,
+                "--bucket": bucket_name,
+                "--region": region,
+            }
+            
+            # Only add LocationConstraint for non-us-east-1 regions
+            if region != "us-east-1":
+                create_args["--create-bucket-configuration"] = f"LocationConstraint={region}"
+                
             create_bucket_cmd = CommandRunner(
                 command_root="aws",
-                command_args={
-                    "s3api": None,
-                    "create-bucket": None,
-                    "--bucket": bucket_name,
-                    "--region": region,
-                    "--create-bucket-configuration": f"LocationConstraint={region}" if region != "us-east-1" else None
-                }
+                command_args=create_args
             )
             create_result = create_bucket_cmd.run()
             assert create_result.success, f"Failed to create S3 bucket: {create_result.display()}"
             logger.info(f"S3 bucket {bucket_name} created successfully.")
         
         return f"s3://{bucket_name}/es56-snapshot/"
-
 
     def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = BACKFILL_TIMEOUT_HOURS):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
