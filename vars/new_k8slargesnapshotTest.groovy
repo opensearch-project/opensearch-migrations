@@ -64,11 +64,12 @@ def call(Map config = [:]) {
             testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/document_multiplier.py --config-file=/config/migration-services.yaml --log-cli-level=info',
             parameterDefaults: [
-              NUM_SHARDS: params.NUM_SHARDS ?: '10',  
-              MULTIPLICATION_FACTOR: params.MULTIPLICATION_FACTOR ?: '1000',
-              BATCH_COUNT: params.BATCH_COUNT ?: '3',
-              DOCS_PER_BATCH: params.DOCS_PER_BATCH ?: '100',
-              BACKFILL_TIMEOUT_HOURS: params.BACKFILL_TIMEOUT_HOURS ?: '45'
+              NUM_SHARDS: params.NUM_SHARDS,
+              MULTIPLICATION_FACTOR: params.MULTIPLICATION_FACTOR,
+              BATCH_COUNT: params.BATCH_COUNT,
+              DOCS_PER_BATCH: params.DOCS_PER_BATCH,
+              BACKFILL_TIMEOUT_HOURS: params.BACKFILL_TIMEOUT_HOURS,
+              LARGE_SNAPSHOT_RATE_MB_PER_NODE: params.LARGE_SNAPSHOT_RATE_MB_PER_NODE,
             ]
     )
 }

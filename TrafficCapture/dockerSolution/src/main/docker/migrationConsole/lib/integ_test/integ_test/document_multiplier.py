@@ -288,7 +288,7 @@ class BackfillTest(unittest.TestCase):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
         previous_count = 0
         stable_count = 0
-        required_stable_checks = 3  # Need 3 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
+        required_stable_checks = 10  # Need 10 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
         start_time = time.time()
         timeout_seconds = timeout_hours * 3600
         
@@ -436,9 +436,9 @@ class BackfillTest(unittest.TestCase):
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
         final_snapshot_config = {
-            'snapshot_name': f'final-snapshot-{pytest.unique_id}',  # Use unique ID to avoid conflicts
+            'snapshot_name': f'final-snapshot-{pytest.unique_id}',  
             's3': {
-                'repo_uri': updated_s3_uri,  # New folder
+                'repo_uri': updated_s3_uri,  
                 'aws_region': region,
                 'role': migrationAssistant_deployTimeRole
             }

@@ -38,6 +38,7 @@ def call(Map config = [:]) {
             string(name: 'BATCH_COUNT', defaultValue: '3', description: 'Number of batches')
             string(name: 'DOCS_PER_BATCH', defaultValue: '100', description: 'Documents per batch')
             string(name: 'BACKFILL_TIMEOUT_HOURS', defaultValue: '45', description: 'Backfill timeout in hours')
+            string(name: 'LARGE_SNAPSHOT_RATE_MB_PER_NODE', defaultValue: '2000', description: 'Rate for large snapshot creation in MB per node')
         }
 
         environment {
@@ -46,6 +47,7 @@ def call(Map config = [:]) {
             BATCH_COUNT = "${params.BATCH_COUNT}"
             DOCS_PER_BATCH = "${params.DOCS_PER_BATCH}"
             BACKFILL_TIMEOUT_HOURS = "${params.BACKFILL_TIMEOUT_HOURS}"
+            LARGE_SNAPSHOT_RATE_MB_PER_NODE = "${params.LARGE_SNAPSHOT_RATE_MB_PER_NODE}"
         }
 
         options {
