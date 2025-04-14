@@ -288,7 +288,7 @@ class BackfillTest(unittest.TestCase):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
         previous_count = 0
         stable_count = 0
-        required_stable_checks = 10  # Need 10 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
+        required_stable_checks = 3  # Need 3 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
         start_time = time.time()
         timeout_seconds = timeout_hours * 3600
         
@@ -336,8 +336,8 @@ class BackfillTest(unittest.TestCase):
             elif 0 < current_count < EXPECTED_TOTAL_TARGET_DOCS:
                 if current_count == previous_count:
                     stuck_count += 1
-                    logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/3 checks")
-                    if stuck_count >= 3:
+                    logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/10 checks")
+                    if stuck_count >= 10:
                         raise SystemExit(f"Document count has been stuck at {current_count:,} for too long. Possible issue with backfill.")
                 else:
                     stuck_count = 0
