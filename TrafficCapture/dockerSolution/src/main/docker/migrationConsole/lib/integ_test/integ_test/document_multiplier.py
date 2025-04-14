@@ -10,7 +10,7 @@ from console_link.models.snapshot import Snapshot
 from console_link.cli import Context
 from console_link.models.snapshot import S3Snapshot  # Import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
-from console_link.models.command_runner import CommandRunner
+from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from .default_operations import DefaultOperationsLibrary
 from .common_utils import execute_api_call
 from datetime import datetime
@@ -238,8 +238,11 @@ class BackfillTest(unittest.TestCase):
                 "--bucket": bucket_name
             }
         )
-        check_result = check_bucket_cmd.run()
-        bucket_exists = check_result.success
+        try:
+            check_result = check_bucket_cmd.run()
+            bucket_exists = check_result.success
+        except CommandRunnerError:
+            bucket_exists = False
         
         if bucket_exists:
             logger.info(f"S3 bucket {bucket_name} already exists.")
