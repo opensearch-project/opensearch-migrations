@@ -2,6 +2,7 @@ import logging
 import pytest
 import unittest
 import json
+from requests.exceptions import HTTPError
 from console_link.middleware.clusters import connection_check, clear_cluster, ConnectionResult
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill
@@ -121,8 +122,11 @@ def setup_test_environment(source_cluster: Cluster):
 
     # Clear indices and snapshots at the start
     logger.info("Clearing indices and snapshots before starting test...")
-    clear_cluster(source_cluster)
-
+    try:
+        clear_cluster(source_cluster)
+    except Exception as e:
+        logger.warning(f"Non-fatal error during cluster cleanup: {str(e)}. Continuing with test...")
+    
     # Cleanup generated transformation files
     try:
         shutil.rmtree(TRANSFORMATION_DIRECTORY)
