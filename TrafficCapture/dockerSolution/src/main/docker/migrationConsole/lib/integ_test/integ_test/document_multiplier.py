@@ -21,7 +21,8 @@ import os
 
 # Test configuration from pytest options
 @pytest.fixture(scope="class")
-def get_test_config(request):
+def test_config(request):
+    """Fixture to provide test configuration at class level"""
     return {
         'NUM_SHARDS': request.config.getoption("--num_shards"),
         'MULTIPLICATION_FACTOR': request.config.getoption("--multiplication_factor"),
@@ -40,8 +41,8 @@ PILOT_INDEX = "pilot_index"  # Name of the index used for testing
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
 
-def preload_data_cluster_es56(source_cluster: Cluster, get_test_config):
-    config = get_test_config
+def preload_data_cluster_es56(source_cluster: Cluster, test_config):
+    config = test_config
     # Create source index with settings for ES 5.6
     index_settings_es56 = {
         "settings": {
@@ -114,7 +115,7 @@ def preload_data_cluster_es56(source_cluster: Cluster, get_test_config):
         )
 
 
-def setup_test_environment(source_cluster: Cluster, get_test_config):
+def setup_test_environment(source_cluster: Cluster, test_config):
     """Setup test data"""
     # Confirm cluster connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
@@ -129,13 +130,13 @@ def setup_test_environment(source_cluster: Cluster, get_test_config):
     
     # Cleanup generated transformation files
     try:
-        shutil.rmtree(get_test_config['TRANSFORMATION_DIRECTORY'])
-        logger.info("Removed existing " + get_test_config['TRANSFORMATION_DIRECTORY'] + " directory")
+        shutil.rmtree(test_config['TRANSFORMATION_DIRECTORY'])
+        logger.info("Removed existing " + test_config['TRANSFORMATION_DIRECTORY'] + " directory")
     except FileNotFoundError:
         logger.info("No transformation files detected to cleanup")
 
     # Transformer structure
-    config = get_test_config
+    config = test_config
     transform_config = {
     "JsonJSTransformerProvider": {
         "initializationScript": "const MULTIPLICATION_FACTOR = " + str(config['MULTIPLICATION_FACTOR'])+ "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
@@ -145,7 +146,7 @@ def setup_test_environment(source_cluster: Cluster, get_test_config):
     ops.create_transformation_json_file([transform_config], os.path.join(config['TRANSFORMATION_DIRECTORY'], "transformation.json"))
 
     # preload data on source cluster 
-    preload_data_cluster_es56(source_cluster, get_test_config)
+    preload_data_cluster_es56(source_cluster, test_config)
     
     # Refresh indices before creating initial snapshot
     execute_api_call(
@@ -157,7 +158,7 @@ def setup_test_environment(source_cluster: Cluster, get_test_config):
 
 
 @pytest.fixture(scope="class")
-def setup_backfill(get_test_config, request):
+def setup_backfill(test_config, request):
     """Test setup with backfill lifecycle management"""
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
@@ -165,7 +166,7 @@ def setup_backfill(get_test_config, request):
     pytest.unique_id = unique_id
 
     # Preload data on pilot index
-    setup_test_environment(source_cluster=pytest.console_env.source_cluster, get_test_config=get_test_config)
+    setup_test_environment(source_cluster=pytest.console_env.source_cluster, test_config=test_config)
 
     # Get components
     backfill: Backfill = pytest.console_env.backfill
@@ -208,101 +209,27 @@ def setup_environment(request):
     logger.info("Test environment teardown complete")
 
 
-@pytest.mark.usefixtures("setup_backfill")
+@pytest.mark.usefixtures("setup_backfill", "test_config")
 class BackfillTest(unittest.TestCase):
     """Test backfill functionality"""
 
-    @pytest.fixture(autouse=True, scope="class")
-    def _inject_fixtures(self, request, get_test_config):
-        self.config = get_test_config
+    @pytest.fixture(autouse=True)
+    def setup_test(self, test_config, request):
+        """Setup test configuration before each test method"""
+        self.config = test_config
         self.request = request
 
-    def get_cluster_stats(self, cluster: Cluster, pilot_index: str = None):
-        """Get document count and size stats for a cluster (primary shards only)"""
-        try:
-            if pilot_index:
-                path = f"/{pilot_index}/_stats"
-            else:
-                path = "/_stats"
-
-            stats = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=path).json()
-            total_docs = stats['_all']['primaries']['docs']['count']
-            total_size_bytes = stats['_all']['primaries']['store']['size_in_bytes']
-            total_size_mb = total_size_bytes / (1024 * 1024)
-            
-            return total_docs, total_size_mb
-        except Exception as e:
-            logger.error(f"Error getting cluster stats: {str(e)}")
-            return 0, 0
-        
-    def setup_s3_bucket(self, account_number: str, region: str, get_test_config):
-        """Check and create S3 bucket to store large snapshot"""
-        config = get_test_config
-        bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
-        
-        # Check if bucket exists
-        logger.info(f"Checking if S3 bucket {bucket_name} exists in region {region}...")
-        check_bucket_cmd = CommandRunner(
-            command_root="aws",
-            command_args={
-                "__positional__": ["s3api", "head-bucket"],
-                "--bucket": bucket_name
-            }
-        )
-        try:
-            check_result = check_bucket_cmd.run()
-            bucket_exists = check_result.success
-        except CommandRunnerError:
-            bucket_exists = False
-        
-        if bucket_exists:
-            logger.info(f"S3 bucket {bucket_name} already exists.")
-            logger.info("\n=== Cleaning up S3 bucket contents ===")
-            s3_cleanup_cmd = CommandRunner(
-                command_root="aws",
-                command_args={
-                "__positional__": ["s3", "rm", f"s3://{bucket_name}/es56-snapshot/"],
-                "--recursive": None  
-                }
-            )
-            cleanup_result = s3_cleanup_cmd.run()
-            assert cleanup_result.success, f"Failed to clean up S3 bucket: {cleanup_result.display()}"
-            logger.info("Successfully cleaned up S3 bucket contents")
-        else:
-            logger.info(f"S3 bucket {bucket_name} does not exist. Creating it...")
-            logger.info("\n=== Creating new S3 bucket as it does not exist  ===")
-            create_args = {
-                "__positional__": ["s3api", "create-bucket"],
-                "--bucket": bucket_name,
-                "--region": region,
-            }
-            
-            # Only add LocationConstraint for non-us-east-1 regions
-            if region != "us-east-1":
-                create_args["--create-bucket-configuration"] = f"LocationConstraint={region}"
-                
-            create_bucket_cmd = CommandRunner(
-                command_root="aws",
-                command_args=create_args
-            )
-            create_result = create_bucket_cmd.run()
-            assert create_result.success, f"Failed to create S3 bucket: {create_result.display()}"
-            logger.info(f"S3 bucket {bucket_name} created successfully.")
-        
-        return f"s3://{bucket_name}/es56-snapshot/"
-
-    def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None, get_test_config=None):
+    def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
-        config = get_test_config
         previous_count = 0
         stable_count = 0
         required_stable_checks = 3  # Need 3 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
         start_time = time.time()
-        timeout_seconds = timeout_hours * 3600 if timeout_hours else config['BACKFILL_TIMEOUT_HOURS'] * 3600
+        timeout_seconds = timeout_hours * 3600 if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS'] * 3600
         
         while True:  
             if time.time() - start_time > timeout_seconds:
-                raise TimeoutError(f"Backfill monitoring timed out after {timeout_hours if timeout_hours else config['BACKFILL_TIMEOUT_HOURS']} hours. Last count: {previous_count:,}")
+                raise TimeoutError(f"Backfill monitoring timed out after {timeout_hours if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS']} hours. Last count: {previous_count:,}")
 
             cluster_response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{pilot_index}/_count?format=json")
             current_count = cluster_response.json()['count']
@@ -323,8 +250,8 @@ class BackfillTest(unittest.TestCase):
             elapsed_hours = (time.time() - start_time) / 3600
             logger.info(f"Backfill Progress - {elapsed_hours:.2f} hours elapsed:")
             logger.info(f"- Current doc count: {current_count:,}")
-            logger.info(f"- Target doc count: {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,}")
-            logger.info(f"- Progress: {(current_count/(config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']))*100:.2f}%")
+            logger.info(f"- Target doc count: {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,}")
+            logger.info(f"- Progress: {(current_count/(self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']))*100:.2f}%")
             logger.info(f"- Bulk loader active: {bulk_loader_active}")
             
             stuck_count = 0
@@ -334,14 +261,14 @@ class BackfillTest(unittest.TestCase):
                 stable_count = 0
                 stuck_count = 0
             # Only consider it stable if count matches previous and is non-zero
-            elif current_count == config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:
+            elif current_count == self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:
                 stable_count += 1
-                logger.info(f"Count stable at target {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,} for {stable_count}/{required_stable_checks} checks")
+                logger.info(f"Count stable at target {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,} for {stable_count}/{required_stable_checks} checks")
                 if stable_count >= required_stable_checks:
-                    logger.info(f"Document count reached target {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,} and stabilized for {required_stable_checks} consecutive checks")
+                    logger.info(f"Document count reached target {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,} and stabilized for {required_stable_checks} consecutive checks")
                     return
             # If count is less than expected and not zero, check for stuck condition
-            elif 0 < current_count < config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:
+            elif 0 < current_count < self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:
                 if current_count == previous_count:
                     stuck_count += 1
                     logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/10 checks")
@@ -389,7 +316,7 @@ class BackfillTest(unittest.TestCase):
 
         # Wait for backfill to complete
         logger.info("\n=== Monitoring Backfill Progress ===")
-        self.wait_for_backfill_completion(source, index_name, request=self.request, get_test_config=self.config)
+        self.wait_for_backfill_completion(source, index_name)
 
         # Get final stats
         logger.info("\n=== Final Cluster Stats ===")
@@ -461,3 +388,77 @@ class BackfillTest(unittest.TestCase):
 
         logger.info("\n=== Test Completed Successfully ===")
         logger.info("Document multiplication verified with correct count")
+
+    def get_cluster_stats(self, cluster: Cluster, pilot_index: str = None):
+        """Get document count and size stats for a cluster (primary shards only)"""
+        try:
+            if pilot_index:
+                path = f"/{pilot_index}/_stats"
+            else:
+                path = "/_stats"
+
+            stats = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=path).json()
+            total_docs = stats['_all']['primaries']['docs']['count']
+            total_size_bytes = stats['_all']['primaries']['store']['size_in_bytes']
+            total_size_mb = total_size_bytes / (1024 * 1024)
+            
+            return total_docs, total_size_mb
+        except Exception as e:
+            logger.error(f"Error getting cluster stats: {str(e)}")
+            return 0, 0
+        
+    def setup_s3_bucket(self, account_number: str, region: str, test_config):
+        """Check and create S3 bucket to store large snapshot"""
+        config = test_config
+        bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
+        
+        # Check if bucket exists
+        logger.info(f"Checking if S3 bucket {bucket_name} exists in region {region}...")
+        check_bucket_cmd = CommandRunner(
+            command_root="aws",
+            command_args={
+                "__positional__": ["s3api", "head-bucket"],
+                "--bucket": bucket_name
+            }
+        )
+        try:
+            check_result = check_bucket_cmd.run()
+            bucket_exists = check_result.success
+        except CommandRunnerError:
+            bucket_exists = False
+        
+        if bucket_exists:
+            logger.info(f"S3 bucket {bucket_name} already exists.")
+            logger.info("\n=== Cleaning up S3 bucket contents ===")
+            s3_cleanup_cmd = CommandRunner(
+                command_root="aws",
+                command_args={
+                "__positional__": ["s3", "rm", f"s3://{bucket_name}/es56-snapshot/"],
+                "--recursive": None  
+                }
+            )
+            cleanup_result = s3_cleanup_cmd.run()
+            assert cleanup_result.success, f"Failed to clean up S3 bucket: {cleanup_result.display()}"
+            logger.info("Successfully cleaned up S3 bucket contents")
+        else:
+            logger.info(f"S3 bucket {bucket_name} does not exist. Creating it...")
+            logger.info("\n=== Creating new S3 bucket as it does not exist  ===")
+            create_args = {
+                "__positional__": ["s3api", "create-bucket"],
+                "--bucket": bucket_name,
+                "--region": region,
+            }
+            
+            # Only add LocationConstraint for non-us-east-1 regions
+            if region != "us-east-1":
+                create_args["--create-bucket-configuration"] = f"LocationConstraint={region}"
+                
+            create_bucket_cmd = CommandRunner(
+                command_root="aws",
+                command_args=create_args
+            )
+            create_result = create_bucket_cmd.run()
+            assert create_result.success, f"Failed to create S3 bucket: {create_result.display()}"
+            logger.info(f"S3 bucket {bucket_name} created successfully.")
+        
+        return f"s3://{bucket_name}/es56-snapshot/"
