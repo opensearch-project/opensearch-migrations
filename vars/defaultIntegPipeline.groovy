@@ -176,7 +176,12 @@ def call(Map config = [:]) {
                                     echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", stage)
-                                    def command = "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
+                                    def command = "export NUM_SHARDS='${env.NUM_SHARDS}' " +
+                                            "&& export MULTIPLICATION_FACTOR='${env.MULTIPLICATION_FACTOR}' " +
+                                            "&& export BATCH_COUNT='${env.BATCH_COUNT}' " +
+                                            "&& export DOCS_PER_BATCH='${env.DOCS_PER_BATCH}' " +
+                                            "&& export BACKFILL_TIMEOUT_HOURS='${env.BACKFILL_TIMEOUT_HOURS}' " +
+                                            "&& pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
                                             "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
                                             "--unique_id ${testUniqueId} " +
                                             "--stage ${stage} " +

@@ -28,6 +28,7 @@ TRANSFORMATION_DIRECTORY = str(os.getenv("TRANSFORMATION_DIRECTORY", "/shared-lo
 TRANSFORMATION_FILE_PATH = str(os.path.join(TRANSFORMATION_DIRECTORY, "transformation.json"))  # Path to the transformation file
 LARGE_SNAPSHOT_S3_URI = str(os.getenv("LARGE_SNAPSHOT_S3_URI", "s3://test-large-snapshot-bucket/es56-10tb-snapshot/"))  # S3 URI for large snapshot
 LARGE_SNAPSHOT_AWS_REGION = str(os.getenv("LARGE_SNAPSHOT_AWS_REGION", "us-east-1"))  # AWS region for S3 Bucket of large snapshot
+LARGE_SNAPSHOT_RATE_MB_PER_NODE = int(os.getenv("LARGE_SNAPSHOT_RATE_MB_PER_NODE", 2000))  # Rate for large snapshot creation
 
 #Calculated values
 TOTAL_SOURCE_DOCS = BATCH_COUNT * DOCS_PER_BATCH  
@@ -163,7 +164,7 @@ def setup_backfill(request):
     # Initialize backfill first (creates .migrations_working_state)
     backfill_create_result: CommandResult = backfill.create()
     assert backfill_create_result.success
-    logger.info("Backfill initialized successfully")
+    logger.info("EXHIBIT A Backfill initialized successfully")
 
     # Create initial RFS snapshot and wait for completion
     snapshot_result: CommandResult = snapshot.create(wait=True)
@@ -173,22 +174,22 @@ def setup_backfill(request):
     # Start backfill process
     backfill_start_result: CommandResult = backfill.start()
     assert backfill_start_result.success
-    logger.info("Backfill started successfully")
+    logger.info("EXHIBIT A Backfill started successfully")
 
     # Scale up backfill workers
     backfill_scale_result: CommandResult = backfill.scale(5)
     assert backfill_scale_result.success
-    logger.info("Backfill scaled successfully")
+    logger.info("EXHIBIT A Backfill scaled successfully")
 
     yield
 
     # Cleanup - stop backfill
-    logger.info("Cleaning up test environment...")
+    logger.info("EXHIBIT A Cleaning up test environment...")
     try:
         backfill.stop()
-        logger.info("Backfill stopped and snapshots cleaned up.")
+        logger.info("EXHIBIT A Backfill stopped and snapshots cleaned up.")
     except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}")
+        logger.error(f"EXHIBIT A Error during cleanup: {str(e)}")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -199,10 +200,10 @@ def setup_environment(request):
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
     
-    logger.info("Starting backfill tests...")
+    logger.info("EXHIBIT B Starting backfill tests...")
     yield
     # Note: Individual tests handle their own cleanup
-    logger.info("Test environment teardown complete")
+    logger.info("EXHIBIT B Test environment teardown complete")
 
 
 @pytest.mark.usefixtures("setup_backfill")
@@ -299,7 +300,7 @@ class BackfillTest(unittest.TestCase):
         backfill = pytest.console_env.backfill
 
         logger.info("\n" + "="*50)
-        logger.info("Starting Document Multiplication Test")
+        logger.info("EXHIBIT C Starting Document Multiplication Test")
         logger.info("="*50)
 
         # Initial index stats
@@ -318,9 +319,9 @@ class BackfillTest(unittest.TestCase):
         assert backfill_start_result.success, f"Failed to start backfill: {backfill_start_result.error}"
 
         # Scale backfill workers
-        logger.info("Scaling backfill...")
+        logger.info("EXHIBIT C Scaling backfill...")
         backfill_scale_result: CommandResult = backfill.scale(units=8)
-        assert backfill_scale_result.success, f"Failed to scale backfill: {backfill_scale_result.error}"
+        assert backfill_scale_result.success, f"EXHIBIT C Failed to scale backfill: {backfill_scale_result.error}"
 
         # Wait for backfill to complete
         logger.info("\n=== Monitoring Backfill Progress ===")
@@ -348,8 +349,8 @@ class BackfillTest(unittest.TestCase):
         # Stop backfill
         logger.info("\n=== Stopping Backfill ===")
         stop_result = backfill.stop()
-        assert stop_result.success, f"Failed to stop backfill: {stop_result.error}"
-        logger.info("Backfill stopped successfully")
+        assert stop_result.success, f"EXHIBIT C Failed to stop backfill: {stop_result.error}"
+        logger.info("EXHIBIT C Backfill stopped successfully")
 
         logger.info("Archiving the working state of the backfill operation...")
         archive_result = backfill.archive()
@@ -395,7 +396,7 @@ class BackfillTest(unittest.TestCase):
         final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.source_cluster)
         final_snapshot_result: CommandResult = final_snapshot.create(
             wait=True,
-            max_snapshot_rate_mb_per_node=2000
+            max_snapshot_rate_mb_per_node=LARGE_SNAPSHOT_RATE_MB_PER_NODE
         )
         assert final_snapshot_result.success, f"Failed to create final snapshot: {final_snapshot_result.error}"
         logger.info("Final Snapshot after migration and multiplication was created successfully")
