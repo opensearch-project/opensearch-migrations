@@ -26,7 +26,7 @@ DOCS_PER_BATCH = int(os.getenv("DOCS_PER_BATCH", 100)) # Number of documents per
 BACKFILL_TIMEOUT_HOURS = int(os.getenv("BACKFILL_TIMEOUT_HOURS", 45)) # Timeout for backfill completion in hours
 TRANSFORMATION_DIRECTORY = str(os.getenv("TRANSFORMATION_DIRECTORY", "/shared-logs-output/test-transformations"))  # Directory for transformation files
 TRANSFORMATION_FILE_PATH = str(os.path.join(TRANSFORMATION_DIRECTORY, "transformation.json"))  # Path to the transformation file
-LARGE_SNAPSHOT_S3_URI = str(os.getenv("LARGE_SNAPSHOT_S3_URI", "s3://test-large-snapshot-bucket/es56-10tb-snapshot/"))  # S3 URI for large snapshot
+LARGE_SNAPSHOT_S3_URI = str(os.getenv("LARGE_SNAPSHOT_S3_URI", "s3://test-large-snapshot-bucket/es56-snapshot/"))  # S3 URI for large snapshot
 LARGE_SNAPSHOT_AWS_REGION = str(os.getenv("LARGE_SNAPSHOT_AWS_REGION", "us-east-1"))  # AWS region for S3 Bucket of large snapshot
 LARGE_SNAPSHOT_RATE_MB_PER_NODE = int(os.getenv("LARGE_SNAPSHOT_RATE_MB_PER_NODE", 2000))  # Rate for large snapshot creation
 
@@ -181,12 +181,12 @@ def setup_backfill(request):
     yield
 
     # Cleanup - stop backfill
-    logger.info("EXHIBIT A Cleaning up test environment...")
+    logger.info("Cleaning up test environment...")
     try:
         backfill.stop()
-        logger.info("EXHIBIT A Backfill stopped and snapshots cleaned up.")
+        logger.info("Backfill stopped and snapshots cleaned up.")
     except Exception as e:
-        logger.error(f"EXHIBIT A Error during cleanup: {str(e)}")
+        logger.error(f"Error during cleanup: {str(e)}")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -197,10 +197,10 @@ def setup_environment(request):
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
     
-    logger.info("EXHIBIT B Starting backfill tests...")
+    logger.info("Starting tests...")
     yield
     # Note: Individual tests handle their own cleanup
-    logger.info("EXHIBIT B Test environment teardown complete")
+    logger.info("Test environment teardown complete")
 
 
 @pytest.mark.usefixtures("setup_backfill")
@@ -224,6 +224,56 @@ class BackfillTest(unittest.TestCase):
         except Exception as e:
             logger.error(f"Error getting cluster stats: {str(e)}")
             return 0, 0
+        
+    def setup_s3_bucket(self, account_number: str, region: str):
+        """Check and create S3 bucket to store large snapshot"""
+        bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
+        
+        # Check if bucket exists
+        logger.info(f"Checking if S3 bucket {bucket_name} exists in region {region}...")
+        check_bucket_cmd = CommandRunner(
+            command_root="aws",
+            command_args={
+                "s3api": None,
+                "head-bucket": None,
+                "--bucket": bucket_name
+            }
+        )
+        check_result = check_bucket_cmd.run()
+        if check_result.success:
+            logger.info(f"S3 bucket {bucket_name} already exists.")
+            logger.info("\n=== Cleaning up S3 bucket contents ===")
+            s3_cleanup_cmd = CommandRunner(
+                command_root="aws",
+                command_args={
+                    "s3": None,
+                    "rm": None,
+                    f"s3://{bucket_name}/es56-snapshot/": None,
+                    "--recursive": None
+                }
+            )
+            cleanup_result = s3_cleanup_cmd.run()
+            assert cleanup_result.success, f"Failed to clean up S3 bucket: {cleanup_result.display()}"
+            logger.info("Successfully cleaned up S3 bucket contents")
+        else:
+            logger.info(f"S3 bucket {bucket_name} does not exist. Creating it...")
+            logger.info("\n=== Creating new S3 bucket as it does not exist  ===")
+            create_bucket_cmd = CommandRunner(
+                command_root="aws",
+                command_args={
+                    "s3api": None,
+                    "create-bucket": None,
+                    "--bucket": bucket_name,
+                    "--region": region,
+                    "--create-bucket-configuration": f"LocationConstraint={region}" if region != "us-east-1" else None
+                }
+            )
+            create_result = create_bucket_cmd.run()
+            assert create_result.success, f"Failed to create S3 bucket: {create_result.display()}"
+            logger.info(f"S3 bucket {bucket_name} created successfully.")
+        
+        return f"s3://{bucket_name}/es56-snapshot/"
+
 
     def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = BACKFILL_TIMEOUT_HOURS):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
@@ -297,7 +347,7 @@ class BackfillTest(unittest.TestCase):
         backfill = pytest.console_env.backfill
 
         logger.info("\n" + "="*50)
-        logger.info("EXHIBIT C Starting Document Multiplication Test")
+        logger.info("Starting Document Multiplication Test")
         logger.info("="*50)
 
         # Initial index stats
@@ -316,9 +366,9 @@ class BackfillTest(unittest.TestCase):
         assert backfill_start_result.success, f"Failed to start backfill: {backfill_start_result.error}"
 
         # Scale backfill workers
-        logger.info("EXHIBIT C Scaling backfill...")
+        logger.info("Scaling backfill...")
         backfill_scale_result: CommandResult = backfill.scale(units=8)
-        assert backfill_scale_result.success, f"EXHIBIT C Failed to scale backfill: {backfill_scale_result.error}"
+        assert backfill_scale_result.success, f"Failed to scale backfill: {backfill_scale_result.error}"
 
         # Wait for backfill to complete
         logger.info("\n=== Monitoring Backfill Progress ===")
@@ -346,8 +396,8 @@ class BackfillTest(unittest.TestCase):
         # Stop backfill
         logger.info("\n=== Stopping Backfill ===")
         stop_result = backfill.stop()
-        assert stop_result.success, f"EXHIBIT C Failed to stop backfill: {stop_result.error}"
-        logger.info("EXHIBIT C Backfill stopped successfully")
+        assert stop_result.success, f"Failed to stop backfill: {stop_result.error}"
+        logger.info("Backfill stopped successfully")
 
         logger.info("Archiving the working state of the backfill operation...")
         archive_result = backfill.archive()
@@ -360,33 +410,26 @@ class BackfillTest(unittest.TestCase):
         assert archive_result.success, f"Failed to archive backfill: {archive_result.value}"
         logger.info(f"Backfill working state archived to: {archive_result.value}")
 
+        # Setup S3 Bucket
+        account_number = pytest.console_env.aws_account_number  # Replace with actual account number retrieval logic
+        region = LARGE_SNAPSHOT_AWS_REGION
+        updated_s3_uri = self.setup_s3_bucket(account_number, region)
+        logger.info(f"Updated S3 URI: {updated_s3_uri}")
+
+        # Delete the existing snapshot and snapshot repo from the cluster
         snapshot: Snapshot = pytest.console_env.snapshot
         assert snapshot is not None
-        migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         snapshot.delete()
         snapshot.delete_snapshot_repo()
 
-        # Clean up S3 bucket contents
-        logger.info("\n=== Cleaning up S3 bucket contents ===")
-        s3_cleanup_cmd = CommandRunner(
-            command_root="aws",
-            command_args={
-                "s3": None,
-                "rm": None,
-                LARGE_SNAPSHOT_S3_URI: None,
-                "--recursive": None
-            }
-        )
-        result = s3_cleanup_cmd.run()
-        assert result.success, f"Failed to clean up S3 bucket: {result.display()}"
-        logger.info("Successfully cleaned up S3 bucket contents")
-
+        # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
+        migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         final_snapshot_config = {
             'snapshot_name': f'final-snapshot-{pytest.unique_id}',  # Use unique ID to avoid conflicts
             's3': {
-                'repo_uri': LARGE_SNAPSHOT_S3_URI,  # New folder
-                'aws_region': LARGE_SNAPSHOT_AWS_REGION,
+                'repo_uri': updated_s3_uri,  # New folder
+                'aws_region': region,
                 'role': migrationAssistant_deployTimeRole
             }
         }
