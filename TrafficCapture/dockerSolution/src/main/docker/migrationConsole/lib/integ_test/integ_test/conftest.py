@@ -39,6 +39,24 @@ def pytest_addoption(parser):
                      help="Specify the Migration ALB endpoint for the source capture proxy")
     parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
                      help="Specify the Migration ALB endpoint for the target proxy")
+    parser.addoption("--num_shards", action="store", type=int, default=10,
+                     help="Index setting for number of shards")
+    parser.addoption("--multiplication_factor", action="store", type=int, default=1000,
+                     help="Transformer multiplication factor")
+    parser.addoption("--batch_count", action="store", type=int, default=3,
+                     help="Number of bulk ingestion batches")
+    parser.addoption("--docs_per_batch", action="store", type=int, default=100,
+                     help="Number of documents per batch for Bulk Ingest")
+    parser.addoption("--backfill_timeout_hours", action="store", type=int, default=45,
+                     help="Timeout for backfill completion in hours")
+    parser.addoption("--transformation_directory", action="store", default="/shared-logs-output/test-transformations",
+                     help="Directory for transformation files")
+    parser.addoption("--large_snapshot_s3_uri", action="store", default="s3://test-large-snapshot-bucket/es56-snapshot/",
+                     help="S3 URI for large snapshot")
+    parser.addoption("--large_snapshot_aws_region", action="store", default="us-east-1",
+                     help="AWS region for S3 Bucket of large snapshot")
+    parser.addoption("--large_snapshot_rate_mb_per_node", action="store", type=int, default=2000,
+                     help="Rate for large snapshot creation")
 
 
 def pytest_configure(config):

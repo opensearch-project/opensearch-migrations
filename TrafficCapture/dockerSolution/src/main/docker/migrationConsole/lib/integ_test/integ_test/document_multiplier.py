@@ -19,33 +19,33 @@ import time
 import shutil
 import os
 
-# Global environment variables
-NUM_SHARDS = int(os.getenv("NUM_SHARDS", 10)) # Index setting for number of shards
-MULTIPLICATION_FACTOR = int(os.getenv("MULTIPLICATION_FACTOR", 1000)) # Transformer multiplication factor
-BATCH_COUNT = int(os.getenv("BATCH_COUNT", 3)) # Number of bulk ingestion batches
-DOCS_PER_BATCH = int(os.getenv("DOCS_PER_BATCH", 100)) # Number of documents per batch for Bulk Ingest
-BACKFILL_TIMEOUT_HOURS = int(os.getenv("BACKFILL_TIMEOUT_HOURS", 45)) # Timeout for backfill completion in hours
-TRANSFORMATION_DIRECTORY = str(os.getenv("TRANSFORMATION_DIRECTORY", "/shared-logs-output/test-transformations"))  # Directory for transformation files
-TRANSFORMATION_FILE_PATH = str(os.path.join(TRANSFORMATION_DIRECTORY, "transformation.json"))  # Path to the transformation file
-LARGE_SNAPSHOT_S3_URI = str(os.getenv("LARGE_SNAPSHOT_S3_URI", "s3://test-large-snapshot-bucket/es56-snapshot/"))  # S3 URI for large snapshot
-LARGE_SNAPSHOT_AWS_REGION = str(os.getenv("LARGE_SNAPSHOT_AWS_REGION", "us-east-1"))  # AWS region for S3 Bucket of large snapshot
-LARGE_SNAPSHOT_RATE_MB_PER_NODE = int(os.getenv("LARGE_SNAPSHOT_RATE_MB_PER_NODE", 2000))  # Rate for large snapshot creation
+# Test configuration from pytest options
+@pytest.fixture(scope="class")
+def get_test_config(request):
+    return {
+        'NUM_SHARDS': request.config.getoption("--num_shards"),
+        'MULTIPLICATION_FACTOR': request.config.getoption("--multiplication_factor"),
+        'BATCH_COUNT': request.config.getoption("--batch_count"),
+        'DOCS_PER_BATCH': request.config.getoption("--docs_per_batch"),
+        'BACKFILL_TIMEOUT_HOURS': request.config.getoption("--backfill_timeout_hours"),
+        'TRANSFORMATION_DIRECTORY': request.config.getoption("--transformation_directory"),
+        'LARGE_SNAPSHOT_S3_URI': request.config.getoption("--large_snapshot_s3_uri"),
+        'LARGE_SNAPSHOT_AWS_REGION': request.config.getoption("--large_snapshot_aws_region"),
+        'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node")
+    }
 
 # Constants
 PILOT_INDEX = "pilot_index"  # Name of the index used for testing
 
-#Calculated values
-TOTAL_SOURCE_DOCS = BATCH_COUNT * DOCS_PER_BATCH  
-EXPECTED_TOTAL_TARGET_DOCS = TOTAL_SOURCE_DOCS * MULTIPLICATION_FACTOR
-
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
 
-def preload_data_cluster_es56(source_cluster: Cluster):
+def preload_data_cluster_es56(source_cluster: Cluster, get_test_config):
+    config = get_test_config
     # Create source index with settings for ES 5.6
     index_settings_es56 = {
         "settings": {
-            "number_of_shards": str(NUM_SHARDS),
+            "number_of_shards": str(config['NUM_SHARDS']),
             "number_of_replicas": "0"
         },
         "mappings": {
@@ -78,9 +78,9 @@ def preload_data_cluster_es56(source_cluster: Cluster):
     ops.create_index_es56(cluster=source_cluster, index_name=PILOT_INDEX, data=json.dumps(index_settings_es56))
     
     # Create documents with timestamp in bulk
-    for j in range(BATCH_COUNT):
+    for j in range(config['BATCH_COUNT']):
         bulk_data = []
-        for i in range(DOCS_PER_BATCH):
+        for i in range(config['DOCS_PER_BATCH']):
             doc_id = f"doc_{j}_{i}"
             bulk_data.extend([
                 {"index": {"_index": PILOT_INDEX, "_type": "doc", "_id": doc_id}},
@@ -114,7 +114,7 @@ def preload_data_cluster_es56(source_cluster: Cluster):
         )
 
 
-def setup_test_environment(source_cluster: Cluster):
+def setup_test_environment(source_cluster: Cluster, get_test_config):
     """Setup test data"""
     # Confirm cluster connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
@@ -129,22 +129,23 @@ def setup_test_environment(source_cluster: Cluster):
     
     # Cleanup generated transformation files
     try:
-        shutil.rmtree(TRANSFORMATION_DIRECTORY)
-        logger.info("Removed existing " + TRANSFORMATION_DIRECTORY + " directory")
+        shutil.rmtree(get_test_config['TRANSFORMATION_DIRECTORY'])
+        logger.info("Removed existing " + get_test_config['TRANSFORMATION_DIRECTORY'] + " directory")
     except FileNotFoundError:
         logger.info("No transformation files detected to cleanup")
 
     # Transformer structure
+    config = get_test_config
     transform_config = {
     "JsonJSTransformerProvider": {
-        "initializationScript": "const MULTIPLICATION_FACTOR = " + str(MULTIPLICATION_FACTOR)+ "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
+        "initializationScript": "const MULTIPLICATION_FACTOR = " + str(config['MULTIPLICATION_FACTOR'])+ "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
         "bindingsObject": "{}"
         }
     }
-    ops.create_transformation_json_file([transform_config], TRANSFORMATION_FILE_PATH)
+    ops.create_transformation_json_file([transform_config], os.path.join(config['TRANSFORMATION_DIRECTORY'], "transformation.json"))
 
     # preload data on source cluster 
-    preload_data_cluster_es56(source_cluster)
+    preload_data_cluster_es56(source_cluster, get_test_config)
     
     # Refresh indices before creating initial snapshot
     execute_api_call(
@@ -152,11 +153,11 @@ def setup_test_environment(source_cluster: Cluster):
         method=HttpMethod.POST,
         path="/_refresh"
     )
-    logger.info(f"Created {TOTAL_SOURCE_DOCS} documents in bulk in index %s", PILOT_INDEX)
+    logger.info(f"Created {config['BATCH_COUNT'] * config['DOCS_PER_BATCH']} documents in bulk in index %s", PILOT_INDEX)
 
 
 @pytest.fixture(scope="class")
-def setup_backfill(request):
+def setup_backfill(get_test_config, request):
     """Test setup with backfill lifecycle management"""
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
@@ -164,7 +165,7 @@ def setup_backfill(request):
     pytest.unique_id = unique_id
 
     # Preload data on pilot index
-    setup_test_environment(source_cluster=pytest.console_env.source_cluster)
+    setup_test_environment(source_cluster=pytest.console_env.source_cluster, get_test_config=get_test_config)
 
     # Get components
     backfill: Backfill = pytest.console_env.backfill
@@ -229,8 +230,9 @@ class BackfillTest(unittest.TestCase):
             logger.error(f"Error getting cluster stats: {str(e)}")
             return 0, 0
         
-    def setup_s3_bucket(self, account_number: str, region: str):
+    def setup_s3_bucket(self, account_number: str, region: str, get_test_config):
         """Check and create S3 bucket to store large snapshot"""
+        config = get_test_config
         bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
         
         # Check if bucket exists
@@ -284,17 +286,18 @@ class BackfillTest(unittest.TestCase):
         
         return f"s3://{bucket_name}/es56-snapshot/"
 
-    def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = BACKFILL_TIMEOUT_HOURS):
+    def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None, get_test_config=None):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
+        config = get_test_config
         previous_count = 0
         stable_count = 0
         required_stable_checks = 3  # Need 3 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
         start_time = time.time()
-        timeout_seconds = timeout_hours * 3600
+        timeout_seconds = timeout_hours * 3600 if timeout_hours else config['BACKFILL_TIMEOUT_HOURS'] * 3600
         
         while True:  
             if time.time() - start_time > timeout_seconds:
-                raise TimeoutError(f"Backfill monitoring timed out after {timeout_hours} hours. Last count: {previous_count:,}")
+                raise TimeoutError(f"Backfill monitoring timed out after {timeout_hours if timeout_hours else config['BACKFILL_TIMEOUT_HOURS']} hours. Last count: {previous_count:,}")
 
             cluster_response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{pilot_index}/_count?format=json")
             current_count = cluster_response.json()['count']
@@ -315,8 +318,8 @@ class BackfillTest(unittest.TestCase):
             elapsed_hours = (time.time() - start_time) / 3600
             logger.info(f"Backfill Progress - {elapsed_hours:.2f} hours elapsed:")
             logger.info(f"- Current doc count: {current_count:,}")
-            logger.info(f"- Target doc count: {EXPECTED_TOTAL_TARGET_DOCS:,}")
-            logger.info(f"- Progress: {(current_count/EXPECTED_TOTAL_TARGET_DOCS*100):.2f}%")
+            logger.info(f"- Target doc count: {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,}")
+            logger.info(f"- Progress: {(current_count/(config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']))*100:.2f}%")
             logger.info(f"- Bulk loader active: {bulk_loader_active}")
             
             stuck_count = 0
@@ -326,14 +329,14 @@ class BackfillTest(unittest.TestCase):
                 stable_count = 0
                 stuck_count = 0
             # Only consider it stable if count matches previous and is non-zero
-            elif current_count == EXPECTED_TOTAL_TARGET_DOCS:
+            elif current_count == config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:
                 stable_count += 1
-                logger.info(f"Count stable at target {EXPECTED_TOTAL_TARGET_DOCS:,} for {stable_count}/{required_stable_checks} checks")
+                logger.info(f"Count stable at target {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,} for {stable_count}/{required_stable_checks} checks")
                 if stable_count >= required_stable_checks:
-                    logger.info(f"Document count reached target {EXPECTED_TOTAL_TARGET_DOCS:,} and stabilized for {required_stable_checks} consecutive checks")
+                    logger.info(f"Document count reached target {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,} and stabilized for {required_stable_checks} consecutive checks")
                     return
             # If count is less than expected and not zero, check for stuck condition
-            elif 0 < current_count < EXPECTED_TOTAL_TARGET_DOCS:
+            elif 0 < current_count < config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:
                 if current_count == previous_count:
                     stuck_count += 1
                     logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/10 checks")
@@ -349,7 +352,8 @@ class BackfillTest(unittest.TestCase):
             previous_count = current_count
             time.sleep(30)
 
-    def test_data_multiplication(self):
+    @pytest.mark.usefixtures("setup_backfill")
+    def test_data_multiplication(self, get_test_config, request):
         """Monitor backfill progress and report final stats"""
         source = pytest.console_env.source_cluster
         index_name = PILOT_INDEX
@@ -368,8 +372,9 @@ class BackfillTest(unittest.TestCase):
 
         # Start backfill
         logger.info("\n=== Starting Backfill Process ===")
-        logger.info(f"Expected Document Multiplication Factor: {MULTIPLICATION_FACTOR}")
-        logger.info(f"Expected Final Document Count: {TOTAL_SOURCE_DOCS * MULTIPLICATION_FACTOR:,}")
+        config = get_test_config
+        logger.info(f"Expected Document Multiplication Factor: {config['MULTIPLICATION_FACTOR']}")
+        logger.info(f"Expected Final Document Count: {config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR']:,}")
         logger.info("Starting backfill...")
         backfill_start_result: CommandResult = backfill.start()
         assert backfill_start_result.success, f"Failed to start backfill: {backfill_start_result.error}"
@@ -381,7 +386,7 @@ class BackfillTest(unittest.TestCase):
 
         # Wait for backfill to complete
         logger.info("\n=== Monitoring Backfill Progress ===")
-        self.wait_for_backfill_completion(source, index_name)
+        self.wait_for_backfill_completion(source, index_name, request=request, get_test_config=get_test_config)
 
         # Get final stats
         logger.info("\n=== Final Cluster Stats ===")
@@ -400,7 +405,7 @@ class BackfillTest(unittest.TestCase):
 
         # Assert that documents were actually migrated
         assert final_doc_count > 0, "No documents were migrated to target index"
-        assert final_doc_count == EXPECTED_TOTAL_TARGET_DOCS, f"Document count mismatch: source={initial_doc_count}, target={final_doc_count}"
+        assert final_doc_count == config['BATCH_COUNT'] * config['DOCS_PER_BATCH'] * config['MULTIPLICATION_FACTOR'], f"Document count mismatch: source={initial_doc_count}, target={final_doc_count}"
 
         # Stop backfill
         logger.info("\n=== Stopping Backfill ===")
@@ -425,8 +430,8 @@ class BackfillTest(unittest.TestCase):
         migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         # Extract account ID from the role ARN
         account_number = migrationAssistant_deployTimeRole.split(':')[4]
-        region = LARGE_SNAPSHOT_AWS_REGION
-        updated_s3_uri = self.setup_s3_bucket(account_number, region)
+        region = get_test_config['LARGE_SNAPSHOT_AWS_REGION']
+        updated_s3_uri = self.setup_s3_bucket(account_number, region, get_test_config)
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
         # Delete the existing snapshot and snapshot repo from the cluster
@@ -446,7 +451,7 @@ class BackfillTest(unittest.TestCase):
         final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.source_cluster)
         final_snapshot_result: CommandResult = final_snapshot.create(
             wait=True,
-            max_snapshot_rate_mb_per_node=LARGE_SNAPSHOT_RATE_MB_PER_NODE
+            max_snapshot_rate_mb_per_node=get_test_config['LARGE_SNAPSHOT_RATE_MB_PER_NODE']
         )
         assert final_snapshot_result.success, f"Failed to create final snapshot: {final_snapshot_result.error}"
         logger.info("Final Snapshot after migration and multiplication was created successfully")
