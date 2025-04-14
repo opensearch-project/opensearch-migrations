@@ -2,11 +2,11 @@ conditionalPackageInstalls:
   bulkLoader: true
   grafana: false
   jaeger: false
-  kafka: false
+  kafka: true
   migrationConsole: true
   prometheus: false
-  proxy: false
-  replayer: false
+  proxy: true
+  replayer: true
   sharedConfigs: true
   snapshotVolume: true
   logsVolume: true
@@ -17,27 +17,22 @@ shared-configs:
     sourceCluster:
       allowRuntimeOverride: true
       object:
-        endpoint: "https://search-test-large-snapshot3-es56-r3bsjpvx477msw2t2yreuk77l4.aos.us-east-1.on.aws"
-        allowInsecure: true
-        authType: "sigv4"
-        region: "us-east-1"
-        serviceSigningName: "es"
-        version: "ES_5.6"
-    targetCluster:
-      allowRuntimeOverride: true
-      object:
-        endpoint: "https://search-test-large-snapshot3-es56-r3bsjpvx477msw2t2yreuk77l4.aos.us-east-1.on.aws"
-        allowInsecure: true
-        authType: "sigv4"
-        region: "us-east-1"
-        serviceSigningName: "es"
-        version: "ES_5.6"
-      default:
         endpoint: "http://ma-capture-proxy:9200"
         directEndpoint: "http://elasticsearch-master:9200"
         allowInsecure: true
         authType: "no_auth"
-        version: "ES_5.6"
+        version: "ES_7.10"
+    targetCluster:
+      allowRuntimeOverride: true
+      object:
+        endpoint: "https://opensearch-cluster-master:9200"
+        allowInsecure: true
+        authType: "basic_auth"
+        basicAuthUsername: "admin"
+        basicAuthPassword: "myStrongPassword123!"
+        # Should be in sync with above username/password
+        basicAuthHeader: "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
+        version: "OS_2.19"
     kafkaBrokers:
       allowRuntimeOverride: false
       object:
@@ -54,7 +49,7 @@ shared-configs:
       object:
         clusterAwarenessAttributes: 1
         metadataType: "from_snapshot"
-        sourceClusterVersion: "ES_5.6"
+        sourceClusterVersion: "ES_7.10"
 #    metricsSource:
 #      allowRuntimeOverride: false
 #      object:
@@ -104,22 +99,18 @@ bulk-document-loader:
       configMapName: "target-cluster"
       configMapKey: "allowInsecure"
       parameterType: booleanFlag
+    targetUsername:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "basicAuthUsername"
+    targetPassword:
+      source: otherConfig
+      configMapName: "target-cluster"
+      configMapKey: "basicAuthPassword"
     sourceVersion:
       source: otherConfig
       configMapName: "source-cluster"
       configMapKey: "version"
-    docTransformerConfigFile:
-      source: parameterConfig
-      value: "/shared-logs-output/test-transformations/transformation.json"
-      allowRuntimeOverride: true
-    targetAwsServiceSigningName:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "serviceSigningName"
-    targetAwsRegion:
-      source: otherConfig
-      configMapName: "target-cluster"
-      configMapKey: "region"
 
 replayer:
   sharedLogsVolumeEnabled: true
