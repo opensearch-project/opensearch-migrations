@@ -20,11 +20,11 @@ import {
     ClusterNoAuth,
     MigrationSSMParameter,
     parseClusterDefinition,
-    parseRemovalPolicy,
+    parseRemovalPolicy, parseSnapshotDefinition,
     validateFargateCpuArch
 } from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ClientOptions, ClusterYaml, ServicesYaml} from "./migration-services-yaml";
+import {ClientOptions, ClusterYaml, ServicesYaml, SnapshotYaml} from "./migration-services-yaml";
 import { CdkLogger } from "./cdk-logger";
 
 export interface StackPropsExt extends StackProps {
@@ -139,7 +139,11 @@ export class StackComposer {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const defaultValues: Record<string, any> = defaultValuesJson
-        const region = props.env?.region
+        if (!props.env?.region) {
+            throw new Error('Missing at least one of required fields [region] in props.env. ' +
+                'Has AWS been configured for this environment?');
+        }
+        const region = props.env.region
         const defaultDeployId = 'default'
 
         const contextId = scope.node.tryGetContext("contextId")
@@ -185,8 +189,6 @@ export class StackComposer {
         const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
         const mskBrokersPerAZCount = this.getContextForType('mskBrokersPerAZCount', 'number', defaultValues, contextJSON)
-        const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
-        const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
         const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
         const artifactBucketRemovalPolicy = this.getContextForType('artifactBucketRemovalPolicy', 'string', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
@@ -350,7 +352,9 @@ export class StackComposer {
         if (vpcEnabled || addOnMigrationDeployId) {
             networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
                 vpcId: vpcId,
+                vpcSubnetIds: vpcSubnetIds,
                 vpcAZCount: vpcAZCount,
+                streamingSourceType: streamingSourceType,
                 targetClusterEndpoint: preexistingOrContainerTargetEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
@@ -378,8 +382,20 @@ export class StackComposer {
             servicesYaml.client_options.user_agent_extra = props.migrationsUserAgent
         }
 
-        // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
-        // created Domain like below or an imported one
+        const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
+        let snapshotYaml
+        if (existingSnapshotDefinition) {
+            if(!sourceCluster?.version) {
+                throw new Error("The `sourceCluster` object must be provided with a `version` field when using an external snapshot to ensure proper parsing of " +
+                    "the snapshot based on cluster version. See options.md for more details.")
+            }
+            snapshotYaml = parseSnapshotDefinition(existingSnapshotDefinition)
+        } else {
+            snapshotYaml = new SnapshotYaml();
+            snapshotYaml.snapshot_name = "rfs-snapshot"
+        }
+        servicesYaml.snapshot = snapshotYaml
+
         let openSearchStack
         if (!preexistingOrContainerTargetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
@@ -409,8 +425,7 @@ export class StackComposer {
                 appLogEnabled: loggingAppLogEnabled,
                 appLogGroup: loggingAppLogGroupARN,
                 nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
-                vpc: networkStack ? networkStack.vpc : undefined,
-                vpcSubnetIds: vpcSubnetIds,
+                vpcDetails: networkStack ? networkStack.vpcDetails : undefined,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
                 domainAZCount: domainAZCount,
                 domainRemovalPolicy: domainRemovalPolicy,
@@ -431,12 +446,10 @@ export class StackComposer {
         let migrationStack
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 mskImportARN: mskARN,
                 mskBrokersPerAZCount: mskBrokersPerAZCount,
-                mskSubnetIds: mskSubnetIds,
-                mskAZCount: mskAZCount,
                 replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
                 artifactBucketRemovalPolicy: artifactBucketRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
@@ -448,12 +461,18 @@ export class StackComposer {
             this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
             servicesYaml.kafka = migrationStack.kafkaYaml;
+            if (!existingSnapshotDefinition) {
+                snapshotYaml.s3 = {
+                    repo_uri: `s3://${migrationStack.artifactBucketName}/rfs-snapshot-repo`,
+                    aws_region: region
+                };
+            }
         }
 
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
             osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
                 description: "This stack contains resources for the OpenSearch Container ECS service",
                 stage: stage,
@@ -474,7 +493,7 @@ export class StackComposer {
         let kafkaBrokerStack
         if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
             kafkaBrokerStack = new KafkaStack(scope, "kafka", {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
                 description: "This stack contains resources for the Kafka Broker ECS service",
                 stage: stage,
@@ -490,7 +509,7 @@ export class StackComposer {
         let reindexFromSnapshotStack
         if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
                 sourceClusterVersion: sourceCluster?.version,
@@ -502,19 +521,18 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 env: props.env,
                 maxShardSizeGiB: reindexFromSnapshotMaxShardSizeGiB,
-                reindexFromSnapshotWorkerSize
+                reindexFromSnapshotWorkerSize,
+                snapshotYaml: servicesYaml.snapshot
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(reindexFromSnapshotStack)
             servicesYaml.backfill = reindexFromSnapshotStack.rfsBackfillYaml;
-            servicesYaml.snapshot = reindexFromSnapshotStack.rfsSnapshotYaml;
-
         }
 
         let captureProxyESStack
         if (captureProxyESServiceEnabled && networkStack && migrationStack) {
             captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyESExtraArgs,
@@ -533,7 +551,7 @@ export class StackComposer {
         let trafficReplayerStack
         if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 clusterAuthDetails: servicesYaml.target_cluster.auth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
@@ -558,7 +576,7 @@ export class StackComposer {
         let elasticsearchStack
         if (elasticsearchServiceEnabled && networkStack && migrationStack) {
             elasticsearchStack = new ElasticsearchStack(scope, "elasticsearch", {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 stackName: `OSMigrations-${stage}-${region}-Elasticsearch`,
                 description: "This stack contains resources for a testing mock Elasticsearch single node cluster ECS service",
                 stage: stage,
@@ -574,7 +592,7 @@ export class StackComposer {
         let captureProxyStack
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
                 },
@@ -598,7 +616,7 @@ export class StackComposer {
         if (targetClusterProxyServiceEnabled && networkStack && migrationStack) {
             targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
                 serviceName: "target-cluster-proxy",
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
                     securityGroupMigrationSSMParameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
@@ -622,7 +640,7 @@ export class StackComposer {
         if (migrationConsoleServiceEnabled && networkStack && migrationStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
-                vpc: networkStack.vpc,
+                vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,

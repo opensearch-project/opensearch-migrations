@@ -94,12 +94,7 @@ function rewriteDocRequest(match, inputMap) {
     return inputMap.request;
 }
 
-
-function rewriteBulk(match, context) {
-    const lines = context.request.payload.inlinedJsonSequenceBodies;
-    const newLines = [];
-    let ndi = 0;
-
+function getDefaultIndicesBulk(match) {
     let defaultSourceIndex = null;
     let defaultType = "_doc";
     if (match.length === 3) {
@@ -107,59 +102,77 @@ function rewriteBulk(match, context) {
         defaultSourceIndex = match[1];
         defaultType = match[2];
     } else if (match.length === 2) {
-        // Case: /{index}/_bulk (default type _doc)
+        // Case: /{index}/_bulk
         defaultSourceIndex = match[1];
     }
+    return { defaultSourceIndex, defaultType };
+}
+
+function processBulkCommand(lines, ndi, defaultSourceIndex, defaultType, defaultTargetIndex, context) {
+    const command = lines[ndi++];
+    const commandType = command.keys().next().value;
+    let commandParameters = command[commandType] || {};
+
+    // Retrieve doc if available and not a 'delete' command.
+    let doc = commandType !== 'delete' && ndi < lines.length ? lines[ndi++] : null;
+
+    const sourceIndex = commandParameters._index || defaultSourceIndex;
+    const typeName = commandParameters._type ?? defaultType;
+    const targetIndex = convertSourceIndexToTarget(
+        sourceIndex,
+        typeName,
+        context.index_mappings,
+        context.regex_mappings
+    );
+    if (!targetIndex) {
+        return { ndi, commands: [] };
+    }
+
+    const targetIndexInBulk = targetIndex !== defaultTargetIndex ? targetIndex : null;
+    commandParameters = retargetCommandParameters(commandParameters, targetIndexInBulk);
+    const updatedCommand = { [commandType]: commandParameters };
+
+    const commands = [updatedCommand];
+    if (doc) {
+        commands.push(doc);
+    }
+    return { ndi, commands };
+}
+
+function rewriteBulk(match, context) {
+    const lines = context.request.payload.inlinedJsonSequenceBodies;
+    const newLines = [];
+    let ndi = 0;
+
+    const { defaultSourceIndex, defaultType } = getDefaultIndicesBulk(match);
 
     let defaultTargetIndex = null;
     if (defaultSourceIndex) {
-        defaultTargetIndex = convertSourceIndexToTarget(defaultSourceIndex,
+        defaultTargetIndex = convertSourceIndexToTarget(
+            defaultSourceIndex,
             defaultType,
-            context.index_mappings,
-            context.regex_mappings);
-        const patternToReplace = /^.*\/(.*\/)?_bulk/;
-        // Replace the pattern in the URI with the converted target index, if available.
-        // If no valid conversion is found, remove the source index/type segment and default to '/_bulk'.
-        context.request.URI = defaultTargetIndex
-            ? context.request.URI.replace(patternToReplace, `/${defaultTargetIndex}/_bulk`)
-            : context.request.URI.replace(patternToReplace, "/_bulk");
-    }
-
-    while (ndi < lines.length) {
-        const command = lines[ndi++];
-        const commandType = command.keys().next().value;
-        let commandParameters = command[commandType] || {};
-
-        // Next line is doc if it's not a 'delete' command.
-        let doc = null;
-        if (commandType !== 'delete' && ndi < lines.length) {
-            doc = lines[ndi++];
-        }
-
-        // Use command index or default source index if available
-        const sourceIndex = commandParameters._index || defaultSourceIndex;
-        // Use provided _type if exists, otherwise use the defaultType
-        const typeName = commandParameters._type ?? defaultType;
-
-        // Convert source index to target index.
-        const targetIndex = convertSourceIndexToTarget(
-            sourceIndex,
-            typeName,
             context.index_mappings,
             context.regex_mappings
         );
+        const replacement = defaultTargetIndex
+            ? `/${defaultTargetIndex}/_bulk`
+            : "/_bulk";
+        context.request.URI = context.request.URI.replace(BULK_URI_INDEX_PATTERN_REGEX, replacement);
+    }
 
-        // If no valid target index, skip.
-        if (!targetIndex) {
-            continue;
+    while (ndi < lines.length) {
+        const result = processBulkCommand(
+            lines,
+            ndi,
+            defaultSourceIndex,
+            defaultType,
+            defaultTargetIndex,
+            context
+        );
+        ndi = result.ndi;
+        if (result.commands.length > 0) {
+            newLines.push(...result.commands);
         }
-
-        // Update command parameters and ensure they're correctly inserted
-        const targetIndexInBulk = targetIndex !== defaultTargetIndex ? targetIndex : null;
-        commandParameters = retargetCommandParameters(commandParameters, targetIndexInBulk);
-        const updatedCommand = { [commandType]: commandParameters };
-        newLines.push(updatedCommand);
-        if (doc) newLines.push(doc);
     }
 
     context.request.payload.inlinedJsonSequenceBodies = newLines;
@@ -240,7 +253,7 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
 
     const newProperties = {}
     for (const [sourceType,] of targetIndicesMap) {
-        for (fieldName of oldMappings[sourceType].properties.keys()) {
+        for (const fieldName of oldMappings[sourceType].properties.keys()) {
             if (newProperties[fieldName]) {
                 const previouslyProcessedFieldDef = newProperties[fieldName];
                 const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];
@@ -281,55 +294,13 @@ const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
 const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^/]*)/;
 const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/_bulk/;
 const INDEX_TYPE_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/([^/]+)\/_bulk/;
+const BULK_URI_INDEX_PATTERN_REGEX = /^.+\/(?:[^/]+\/)?_bulk/;
 
 function processMetadataRequest(document, context) {
-    let mappings = document?.body?.mappings;
+    let mappings = normalizeMappings(document?.body?.mappings);
 
-    // Normalize mappings to an object
-    if (Array.isArray(mappings)) {
-        // If it's an array, convert it to a map by merging entries
-        const merged = new Map();
-        for (const mapping of mappings) {
-            for (const [key, value] of mapping.entries()) {
-                merged.set(key, value);
-            }
-        }
-        mappings = merged;
-        }
-
-    if (!mappings || (mappings.properties && !mappings.properties?.properties)) {
-        // No Type Exists either because mappings doesn't exist,
-        // or properties directly under mappings (and did not find a type named "properties")
-
-        const typeName = "_doc";
-
-        // Convert source index to target index.
-        const targetIndex = convertSourceIndexToTarget(
-            document.name,
-            typeName,
-            context.index_mappings,
-            context.regex_mappings
-        );
-
-        if (targetIndex) {
-            document.name = targetIndex;
-            // Transform composed_of names if present to make valid index_templates
-            if (document.body?.composed_of && Array.isArray(document.body.composed_of)) {
-                document.body.composed_of = document.body.composed_of.map(compName => {
-                    const transformed = convertSourceIndexToTarget(
-                        compName,
-                        "_doc",
-                        context.index_mappings,
-                        context.regex_mappings
-                    );
-                    return transformed || compName;
-                });
-            }
-
-            return [document];
-        }
-        // Index excluded, skip
-        return [];
+    if (shouldProcessAsDoc(mappings)) {
+        return processAsDoc(document, context);
     }
 
     const creationObjects = new Map();
@@ -340,29 +311,75 @@ function processMetadataRequest(document, context) {
             context.index_mappings,
             context.regex_mappings
         );
+        if (!targetIndex) continue;
 
-        if (targetIndex) {
-            if (creationObjects.has(targetIndex)) {
-                const existing = creationObjects.get(targetIndex);
-                const body = existing.get('body');
-                const mappingsMap = body.get('mappings');
-                const docMapping = mappingsMap.get('_doc');
-
-                // Merge the 'properties' Maps:
-                const existingProperties = docMapping.get('properties');
-                const newProperties = mappingValue.get('properties');
-                const mergedProperties = new Map([...existingProperties, ...newProperties]);
-                docMapping.set('properties', mergedProperties);
-            } else {
-                const newMetadataItem = deepCloneMap(document);
-                newMetadataItem.set('name', targetIndex);
-                // Replace the mappings with a new Map containing '_doc'
-                newMetadataItem.get('body').set('mappings', new Map([['_doc', mappingValue]]));
-                creationObjects.set(targetIndex, newMetadataItem);
-            }
+        if (creationObjects.has(targetIndex)) {
+            mergeProperties(creationObjects.get(targetIndex), mappingValue);
+        } else {
+            const newMetadataItem = deepCloneMap(document);
+            newMetadataItem.set('name', targetIndex);
+            newMetadataItem.get('body').set('mappings', new Map([['_doc', mappingValue]]));
+            creationObjects.set(targetIndex, newMetadataItem);
         }
     }
     return [...creationObjects.values()];
+}
+
+function normalizeMappings(mappings) {
+    if (Array.isArray(mappings)) {
+        const merged = new Map();
+        for (const mapping of mappings) {
+            for (const [key, value] of mapping.entries()) {
+                merged.set(key, value);
+            }
+        }
+        return merged;
+    }
+    return mappings;
+}
+
+function shouldProcessAsDoc(mappings) {
+    // No type exists if mappings is falsy OR if mappings has a "properties" key
+    // that does not itself have a nested "properties" object.
+    return (!mappings || (mappings.properties && !mappings.properties?.properties));
+}
+
+function processAsDoc(document, context) {
+    const typeName = "_doc";
+    const targetIndex = convertSourceIndexToTarget(
+        document.name,
+        typeName,
+        context.index_mappings,
+        context.regex_mappings
+    );
+    if (!targetIndex) return [];
+    document.name = targetIndex;
+    processComposedOf(document.body, context);
+    return [document];
+}
+
+function processComposedOf(body, context) {
+    if (body?.composed_of && Array.isArray(body.composed_of)) {
+        body.composed_of = body.composed_of.map(compName => {
+            const transformed = convertSourceIndexToTarget(
+                compName,
+                "_doc",
+                context.index_mappings,
+                context.regex_mappings
+            );
+            return transformed || compName;
+        });
+    }
+}
+
+function mergeProperties(existingMetadata, mappingValue) {
+    const body = existingMetadata.get('body');
+    const mappingsMap = body.get('mappings');
+    const docMapping = mappingsMap.get('_doc');
+    const existingProperties = docMapping.get('properties');
+    const newProperties = mappingValue.get('properties');
+    const mergedProperties = new Map([...existingProperties, ...newProperties]);
+    docMapping.set('properties', mergedProperties);
 }
 
 // Helper function to deep clone a Map, including nested Maps/objects

@@ -92,8 +92,8 @@ public class S3Repo implements SourceRepo {
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region) {
         S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
-            .credentialsProvider(DefaultCredentialsProvider.create())
             .region(Region.of(s3Region))
+            .credentialsProvider(DefaultCredentialsProvider.create())
             .retryConfiguration(r -> r.numRetries(3))
             .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
             .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)

@@ -49,7 +49,7 @@ FROM_SNAPSHOT_SCHEMA = {
 SCHEMA = {
     "from_snapshot": FROM_SNAPSHOT_SCHEMA,
     "otel_endpoint": {"type": "string", "required": False},
-    "min_replicas": {"type": "integer", "min": 0, "required": False},
+    "cluster_awareness_attributes": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
     "component_template_allowlist": list_schema(required=False),
@@ -76,14 +76,14 @@ class Metadata:
             raise ValueError("No snapshot is specified or can be assumed "
                              "for the metadata migration to use.")
 
-        self._min_replicas = config.get("min_replicas", 0)
+        self._awareness_attributes = config.get("cluster_awareness_attributes", 0)
         self._index_allowlist = config.get("index_allowlist", None)
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
         self._otel_endpoint = config.get("otel_endpoint", None)
         self._source_cluster_version = config.get("source_cluster_version", None)
 
-        logger.debug(f"Min replicas: {self._min_replicas}")
+        logger.debug(f"Cluster awareness attributes: {self._awareness_attributes}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
         logger.debug(f"Index template allowlist: {self._index_template_allowlist}")
         logger.debug(f"Component template allowlist: {self._component_template_allowlist}")
@@ -185,7 +185,7 @@ class Metadata:
             command: None,
             "--snapshot-name": self._snapshot_name,
             "--target-host": self._target_cluster.endpoint,
-            "--min-replicas": self._min_replicas
+            "--cluster-awareness-attributes": self._awareness_attributes
         })
 
         if self._snapshot_location == 's3':

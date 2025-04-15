@@ -1,5 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {ISecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {
     Cluster,
     ContainerImage, CpuArchitecture,
@@ -25,7 +26,7 @@ import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-el
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceName: string,
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly securityGroups: ISecurityGroup[],
     readonly cpuArchitecture: CpuArchitecture,
     readonly dockerImageName: string,
@@ -54,7 +55,7 @@ export class MigrationServiceCore extends Stack {
     createService(props: MigrationServiceCoreProps) {
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
-            vpc: props.vpc
+            vpc: props.vpcDetails.vpc
         })
 
         this.serviceTaskRole = props.taskRole ? props.taskRole : createDefaultECSTaskRole(this, props.serviceName)
@@ -161,7 +162,7 @@ export class MigrationServiceCore extends Stack {
             desiredCount: props.taskInstanceCount,
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
-            vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
+            vpcSubnets: props.vpcDetails.subnetSelection,
         });
 
         // Add any ServiceManagedVolumes to the service, if they exist

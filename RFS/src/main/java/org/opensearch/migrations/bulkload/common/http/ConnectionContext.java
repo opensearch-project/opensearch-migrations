@@ -2,10 +2,12 @@ package org.opensearch.migrations.bulkload.common.http;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Path;
 import java.time.Clock;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
+import com.beust.jcommander.converters.PathConverter;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -29,6 +31,8 @@ public class ConnectionContext {
     private final RequestTransformer requestTransformer;
     private final boolean compressionSupported;
     private final boolean awsSpecificAuthentication;
+
+    private TlsCredentialsProvider tlsCredentialsProvider;
 
     private ConnectionContext(IParams params) {
         assert params.getHost() != null : "host is null";
@@ -79,6 +83,23 @@ public class ConnectionContext {
             requestTransformer = new NoAuthTransformer();
         }
         compressionSupported = params.isCompressionEnabled();
+
+        validateClientCertPairPresence(params);
+
+        if (isTlsCredentialsEnabled(params)) {
+            tlsCredentialsProvider = new FileTlsCredentialsProvider(
+                params.getCaCert(),
+                params.getClientCert(),
+                params.getClientCertKey());
+        }
+    }
+
+    /**
+     * Sets the TLS credentials provider.
+     * NOTE: This method is only intended for testing purposes.
+     */
+    public void setTlsCredentialsProvider(TlsCredentialsProvider tlsCredentialsProvider) {
+        this.tlsCredentialsProvider = tlsCredentialsProvider;
     }
 
     public interface IParams {
@@ -91,6 +112,12 @@ public class ConnectionContext {
         String getAwsRegion();
 
         String getAwsServiceSigningName();
+
+        Path getCaCert();
+
+        Path getClientCert();
+
+        Path getClientCertKey();
 
         boolean isCompressionEnabled();
 
@@ -120,6 +147,27 @@ public class ConnectionContext {
             description = "Optional.  The target password; if not provided, will assume no auth on target",
             required = false)
         public String password = null;
+
+        @Parameter(
+            names = {"--target-cacert", "--targetCaCert" },
+            description = "Optional. The target CA certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path caCert = null;
+
+        @Parameter(
+            names = {"--target-client-cert", "--targetClientCert" },
+            description = "Optional. The target client TLS certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCert = null;
+
+        @Parameter(
+            names = {"--target-client-cert-key", "--targetClientCertKey" },
+            description = "Optional. The target client TLS certificate key",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCertKey = null;
 
         @Parameter(
             names = {"--target-aws-region", "--targetAwsRegion" },
@@ -179,6 +227,27 @@ public class ConnectionContext {
         public String password = null;
 
         @Parameter(
+            names = {"--source-cacert", "--sourceCaCert" },
+            description = "Optional. The source CA certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path caCert = null;
+
+        @Parameter(
+            names = {"--source-client-cert", "--sourceClientCert" },
+            description = "Optional. The source client TLS certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCert = null;
+
+        @Parameter(
+            names = {"--source-client-cert-key", "--sourceClientCertKey" },
+            description = "Optional. The source client TLS certificate key",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCertKey = null;
+
+        @Parameter(
             names = {"--source-aws-region", "--sourceAwsRegion" },
             description = "Optional. The source aws region, e.g. 'us-east-1'. Required if sigv4 auth is used",
             required = false)
@@ -202,5 +271,16 @@ public class ConnectionContext {
             // No compression on source due to no ingestion
             return false;
         }
+    }
+
+    private static void validateClientCertPairPresence(IParams params) {
+        if ((params.getClientCert() != null) ^ (params.getClientCertKey() != null)) {
+            throw new IllegalArgumentException(
+                    "Both clientCert and clientCertKey must be provided together, or neither.");
+        }
+    }
+
+    private static boolean isTlsCredentialsEnabled(IParams params) {
+        return (params.getCaCert() != null)  || (params.getClientCert() != null && params.getClientCertKey() != null);
     }
 }

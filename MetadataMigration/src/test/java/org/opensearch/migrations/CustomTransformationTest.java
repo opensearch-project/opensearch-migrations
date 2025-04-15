@@ -32,8 +32,11 @@ class CustomTransformationTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         // Transformations are differentiated only by source, so lock to a specific target.
-        var target = SupportedClusters.targets().stream().limit(1).findFirst().get();
-        return SupportedClusters.sources().stream()
+        var target = SearchClusterContainer.OS_LATEST;
+        return SupportedClusters.supportedSources(false)
+                .stream()
+                // The TypeMappingSanitizationTransformerProvider is not supported on 2.x source
+                .filter(source -> !VersionMatchers.isOS_2_X.test(source.getVersion()))
                 .map(sourceCluster -> Arguments.of(sourceCluster, target));
     }
 

@@ -15,5 +15,5 @@ dependencies:
   - name: opensearch
     alias: target
     condition: conditionalPackageInstalls.target
-    version: "2.23.1"
+    version: "2.32.0"
     repository: "https://opensearch-project.github.io/helm-charts/"

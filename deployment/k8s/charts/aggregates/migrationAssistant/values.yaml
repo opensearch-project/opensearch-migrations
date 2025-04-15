@@ -32,7 +32,7 @@ shared-configs:
         basicAuthPassword: "myStrongPassword123!"
         # Should be in sync with above username/password
         basicAuthHeader: "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
-        version: "OS_2.16"
+        version: "OS_2.19"
     kafkaBrokers:
       allowRuntimeOverride: false
       object:
@@ -41,16 +41,14 @@ shared-configs:
     snapshot:
       allowRuntimeOverride: true
       object:
-        #otelEndpoint: "http://localhost:4317"
         repoPath: "/snapshot"
         snapshotName: "migration-assistant-snapshot"
         snapshotType: "fs"
     metadataMigration:
       allowRuntimeOverride: true
       object:
-        minReplicas: 0
+        clusterAwarenessAttributes: 1
         metadataType: "from_snapshot"
-        #otelEndpoint: "http://localhost:4317"
         sourceClusterVersion: "ES_7.10"
 #    metricsSource:
 #      allowRuntimeOverride: false
@@ -110,13 +108,9 @@ bulk-document-loader:
       configMapName: "target-cluster"
       configMapKey: "basicAuthPassword"
     sourceVersion:
-      source: parameterConfig
-      value: "ES_7.10"
-      allowRuntimeOverride: true
-    docTransformerConfigFile:
-      source: parameterConfig
-      value: "/shared-logs-output/test-transformations/transformation.json"
-      allowRuntimeOverride: true
+      source: otherConfig
+      configMapName: "source-cluster"
+      configMapKey: "version"
 
 replayer:
   sharedLogsVolumeEnabled: true
@@ -142,10 +136,6 @@ replayer:
     speedupFactor:
       source: parameterConfig
       value: 10
-      allowRuntimeOverride: true
-    transformerConfigFile:
-      source: parameterConfig
-      value: "/shared-logs-output/test-transformations/transformation.json"
       allowRuntimeOverride: true
 
 captured-traffic-kafka-cluster:

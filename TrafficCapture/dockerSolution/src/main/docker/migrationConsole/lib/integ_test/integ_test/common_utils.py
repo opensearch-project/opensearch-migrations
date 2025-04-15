@@ -1,10 +1,8 @@
 import time
 import logging
 from requests.exceptions import ConnectionError, SSLError
-from unittest import TestCase
 from console_link.middleware.clusters import call_api
 from console_link.models.cluster import HttpMethod, Cluster
-from console_link.models.replayer_base import Replayer, ReplayStatus
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +26,7 @@ class ClusterAPIRequestError(Exception):
     pass
 
 
-class ReplayerNotActiveError(Exception):
+class ServiceStatusError(Exception):
     pass
 
 
@@ -72,23 +70,17 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
     return last_response
 
 
-def wait_for_running_replayer(replayer: Replayer,
-                              test_case: TestCase = None,
-                              max_attempts: int = 25,
-                              delay: float = 3.0):
+def wait_for_service_status(status_func, desired_status, max_attempts: int = 25, delay: float = 3.0):
     error_message = ""
     for attempt in range(1, max_attempts + 1):
-        cmd_result = replayer.get_status()
+        cmd_result = status_func()
         status = cmd_result.value[0]
-        logger.debug(f"Received status {status} for Replayer on attempt {attempt}")
-        if status == ReplayStatus.RUNNING:
+        logger.debug(f"Received status {status} on attempt {attempt}")
+        if status == desired_status:
             return
-        error_message = (f"Received replayer status of {status} but expecting to receive: {ReplayStatus.RUNNING} "
+        error_message = (f"Received status of {status} but expecting to receive: {desired_status} "
                          f"after {max_attempts} attempts")
         if attempt != max_attempts:
             error_message = ""
             time.sleep(delay)
-    if test_case:
-        test_case.fail(error_message)
-    else:
-        raise ReplayerNotActiveError(error_message)
+    raise ServiceStatusError(error_message)

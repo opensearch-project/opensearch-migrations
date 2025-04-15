@@ -1,13 +1,12 @@
 package org.opensearch.migrations.bulkload.lucene.version_7;
 
 import java.io.IOException;
-import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.AllArgsConstructor;
+import shadow.lucene7.org.apache.lucene.index.FilterCodecReader;
 import shadow.lucene7.org.apache.lucene.index.LeafReader;
-import shadow.lucene7.org.apache.lucene.index.SegmentCommitInfo;
 import shadow.lucene7.org.apache.lucene.index.SegmentReader;
 
 @AllArgsConstructor
@@ -31,24 +30,27 @@ public class LeafReader7 implements LuceneLeafReader {
         return wrapped.getContext().toString();
     }
 
-    private Optional<SegmentReader> getSegmentReader() {
-        if (wrapped instanceof SegmentReader) {
-            return Optional.of(((SegmentReader)wrapped));
+    private SegmentReader getSegmentReader() {
+        var reader = wrapped;
+        if (reader instanceof FilterCodecReader) {
+            return (SegmentReader) ((FilterCodecReader) reader).getDelegate();
         }
-        return Optional.empty();
+        if (reader instanceof SegmentReader) {
+            return (SegmentReader) reader;
+        }
+        throw new IllegalStateException("Expected to extract SegmentReader but got " +
+                reader.getClass() + " from " + wrapped.getClass());
     }
 
     public String getSegmentName() { 
         return getSegmentReader()
-            .map(SegmentReader::getSegmentName)
-            .orElse(null);
+            .getSegmentName();
     }
 
     public String getSegmentInfoString() {
         return getSegmentReader()
-            .map(SegmentReader::getSegmentInfo)
-            .map(SegmentCommitInfo::toString)
-            .orElse(null);
+            .getSegmentInfo()
+            .toString();
     }
 
     public String toString() {

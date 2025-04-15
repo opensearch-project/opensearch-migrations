@@ -26,7 +26,7 @@ snapshot:
   otel_endpoint: "http://otel-collector:4317"
 metadata_migration:
   from_snapshot:
-  min_replicas: 0
+  cluster_awareness_attributes: 0
   otel_endpoint: "http://otel-collector:4317"
 kafka:
   broker_endpoints: "kafka:9092"

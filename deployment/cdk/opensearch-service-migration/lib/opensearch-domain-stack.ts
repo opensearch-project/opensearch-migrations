@@ -1,10 +1,9 @@
 import {Construct} from "constructs";
+import {VpcDetails} from "./network-stack";
 import {
   EbsDeviceVolumeType,
   ISecurityGroup,
-  IVpc,
   SecurityGroup,
-  SubnetFilter,
   SubnetSelection
 } from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
@@ -53,8 +52,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly appLogEnabled?: boolean,
   readonly appLogGroup?: string,
   readonly nodeToNodeEncryptionEnabled?: boolean,
-  readonly vpc?: IVpc,
-  readonly vpcSubnetIds?: string[],
+  readonly vpcDetails?: VpcDetails,
   readonly vpcSecurityGroupIds?: string[],
   readonly domainAZCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy,
@@ -166,11 +164,8 @@ export class OpenSearchDomainStack extends Stack {
     // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
     // to the Domain as it has existing behavior to select private subnets from a given VPC
     let domainSubnets: SubnetSelection[]|undefined;
-    if (props.vpc && props.vpcSubnetIds) {
-      const selectSubnets = props.vpc.selectSubnets({
-        subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
-      })
-      domainSubnets = [selectSubnets]
+    if (props.vpcDetails) {
+      domainSubnets = [props.vpcDetails.subnetSelection]
     }
 
     // Retrieve existing SGs to apply to VPC Domain endpoints
@@ -226,7 +221,7 @@ export class OpenSearchDomainStack extends Stack {
         appLogEnabled: props.appLogEnabled,
         appLogGroup: appLG
       },
-      vpc: props.vpc,
+      vpc: props.vpcDetails?.vpc,
       vpcSubnets: domainSubnets,
       securityGroups: securityGroups,
       zoneAwareness: zoneAwarenessConfig,
