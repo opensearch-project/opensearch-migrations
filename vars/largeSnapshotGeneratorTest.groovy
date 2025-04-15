@@ -10,7 +10,7 @@ def call(Map config = [:]) {
     def migration_cdk_context = """
         {
           "document-multiplier-rfs": {
-            "stage": "dev",
+            "stage": "${params.STAGE}",
             "artifactBucketRemovalPolicy": "DESTROY",
             "captureProxyServiceEnabled": false,
             "targetClusterProxyServiceEnabled": false,
