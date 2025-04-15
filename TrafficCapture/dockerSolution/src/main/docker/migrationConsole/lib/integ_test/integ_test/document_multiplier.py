@@ -285,6 +285,17 @@ def setup_test_environment(source_cluster: Cluster, test_config):
     logger.info("Clearing indices and snapshots before starting test...")
     try:
         clear_cluster(source_cluster)
+        # Directly delete the index to ensure it's gone
+        logger.info(f"Explicitly deleting {PILOT_INDEX} if it exists...")
+        try:
+            execute_api_call(
+                cluster=source_cluster,
+                method=HttpMethod.DELETE,
+                path=f"/{PILOT_INDEX}"
+            )
+            logger.info(f"Successfully deleted {PILOT_INDEX}")
+        except Exception as e:
+            logger.info(f"Index delete returned: {str(e)}, continuing...")
     except Exception as e:
         logger.warning(f"Non-fatal error during cluster cleanup: {str(e)}. Continuing with test...")
     
