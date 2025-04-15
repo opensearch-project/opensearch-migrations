@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -12,16 +10,24 @@ import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
 
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Factory for creating packet consumers that transform HTTP content using a per-thread {@link IJsonTransformer}.
+ * <p>
+ * The {@link ThreadSafeTransformerWrapper} ensures each thread gets its own transformer instance.
+ * It is important to call {@link #close()} once a thread is done using the factory to release any
+ * thread-local resources deterministically.
+ * <p>
+ * Failure to call {@code close()} may result in delayed cleanup in long-lived thread pools.
+ */
 @Slf4j
 public class PacketToTransformingHttpHandlerFactory
     implements PacketConsumerFactory<TransformedOutputAndResult<ByteBufList>>, AutoCloseable {
 
-    // Using ThreadLocal to ensure thread safety with the json transformers which will be reused
-    private final ThreadLocal<IJsonTransformer> localJsonTransformer;
-    private final Set<AutoCloseable> closeableResources = ConcurrentHashMap.newKeySet();
+    private final ThreadSafeTransformerWrapper threadSafeTransformer;
 
     // The authTransformerFactory is ThreadSafe and getAuthTransformer will be called for every request
     private final IAuthTransformerFactory authTransformerFactory;
@@ -30,7 +36,7 @@ public class PacketToTransformingHttpHandlerFactory
         Supplier<IJsonTransformer> jsonTransformerSupplier,
         IAuthTransformerFactory authTransformerFactory
     ) {
-        this.localJsonTransformer = ThreadLocal.withInitial(jsonTransformerSupplier);
+        this.threadSafeTransformer = new ThreadSafeTransformerWrapper(jsonTransformerSupplier);
         this.authTransformerFactory = authTransformerFactory;
     }
 
@@ -40,7 +46,7 @@ public class PacketToTransformingHttpHandlerFactory
     ) {
         log.trace("creating HttpJsonTransformingConsumer");
         return new HttpJsonTransformingConsumer<>(
-            localJsonTransformer.get(),
+            threadSafeTransformer,
             authTransformerFactory,
             new TransformedPacketReceiver(),
             httpTransactionContext
@@ -49,9 +55,6 @@ public class PacketToTransformingHttpHandlerFactory
 
     @Override
     public void close() throws Exception {
-        for (AutoCloseable resource : closeableResources) {
-            resource.close();
-        }
-        localJsonTransformer.remove();
+        threadSafeTransformer.close();
     }
 }

@@ -14,6 +14,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,8 +24,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Consumes request-response tuples, applies JSON transformation, and logs structured summaries.
+ * <p>
+ * Each thread gets its own {@link IJsonTransformer} instance via {@link ThreadSafeTransformerWrapper},
+ * which must be properly closed to avoid memory retention in thread-local storage.
+ * <p>
+ * The {@link #close()} method should be called from each thread that uses this consumer,
+ * ideally during thread shutdown or in a {@code finally} block, to release per-thread transformer instances.
+ */
 @Slf4j
-public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts> {
+public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts>, AutoCloseable {
     public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
     public static final String TRANSACTION_SUMMARY_LOGGER = "TransactionSummaryLogger";
     private static final String MISSING_STR = "-";
@@ -34,7 +44,8 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
 
     private final Logger tupleLogger;
     private final Logger progressLogger;
-    private final ThreadLocal<IJsonTransformer> tupleTransformer;
+
+    private final ThreadSafeTransformerWrapper threadSafeTransformer;
 
     private final AtomicInteger tupleCounter;
 
@@ -43,7 +54,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         this.progressLogger = progressLogger != null ? progressLogger : makeTransactionSummaryLogger();
         tupleCounter = new AtomicInteger();
         Supplier<IJsonTransformer> jsonTransformerSupplier = tupleTransformerSupplier != null ? tupleTransformerSupplier : () -> NOOP_JSON_TRANSFORMER ;
-        this.tupleTransformer = ThreadLocal.withInitial(jsonTransformerSupplier);
+        this.threadSafeTransformer = new ThreadSafeTransformerWrapper(jsonTransformerSupplier);
     }
 
     // set this up so that the preamble prints out once, right after we have a logger
@@ -144,7 +155,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         if (tupleLogger.isInfoEnabled()) {
             try {
                 var originalTuple = toJSONObject(tuple, parsedMessages);
-                Object transformedTuple = tupleTransformer.get().transformJson(originalTuple);
+                Object transformedTuple = threadSafeTransformer.transformJson(originalTuple);
                 var tupleString = PLAIN_MAPPER.writeValueAsString(transformedTuple);
                 tupleLogger.atInfo().setMessage("{}").addArgument(tupleString).log();
             } catch (Exception e) {
@@ -242,5 +253,10 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
             .filter(Predicate.not(String::isEmpty))
             .findFirst()
             .orElse(MISSING_STR);
+    }
+
+    @Override
+    public void close() throws Exception {
+        threadSafeTransformer.close();
     }
 }

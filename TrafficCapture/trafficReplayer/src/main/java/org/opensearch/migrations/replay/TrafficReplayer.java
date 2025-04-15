@@ -437,9 +437,9 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-
-            var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer(null, null,
-                () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)));
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
+                    () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
+            var tupleWriter = new TupleParserChainConsumer(resultsToLogsConsumer);
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 serverTimeout,
