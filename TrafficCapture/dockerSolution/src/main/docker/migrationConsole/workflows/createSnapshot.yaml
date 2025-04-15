@@ -70,7 +70,7 @@ spec:
           factor: 2
           maxDuration: "300"
       steps:
-        - - name: status-snapshot-console-check
+        - - name: check-snapshot-completion
             templateRef:
               name: migration-console-template
               template: run-console-with-config

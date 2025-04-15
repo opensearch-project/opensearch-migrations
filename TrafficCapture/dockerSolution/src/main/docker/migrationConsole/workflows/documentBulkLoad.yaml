@@ -108,7 +108,7 @@ spec:
             value: ""
             description: "Indices to migrate"
       steps:
-        - - name: create-replicaset
+        - - name: create-rfs-replicaset
             template: create-rs
             arguments:
               parameters:
@@ -169,7 +169,7 @@ spec:
                 - name: config-contents
                   value: "{{steps.setup-wait-for-completion.outputs.parameters.config-contents}}"
 
-        - - name: cleanup-replicaset
+        - - name: cleanup-rfs-replicaset
             template: delete-rs
             arguments:
               parameters:
@@ -365,7 +365,7 @@ spec:
           factor: 2
           maxDuration: "300"
       steps:
-        - - name: check-completion
+        - - name: check-rfs-completion
             templateRef:
               name: migration-console-template
               template: run-console-with-config
