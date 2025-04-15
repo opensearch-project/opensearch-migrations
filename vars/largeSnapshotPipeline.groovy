@@ -202,13 +202,40 @@ def call(Map config = [:]) {
                     }
                 }
             }
+            
+            stage('Cleanup Deployment') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        dir('test') {
+                            script {
+                                // Allow overwriting this step
+                                if (config.cleanupStep) {
+                                    config.cleanupStep()
+                                } else {
+                                    echo "Cleaning up all deployed stacks on stage: ${stage}"
+                                    dir('cleanupDeployment') {
+                                        sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
+                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${stage}"
+                                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                                sh "sudo --preserve-env ${command}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+
         post {
             always {
                 timeout(time: 10, unit: 'MINUTES') {
                     dir('test') {
                         script {
-                            // Allow overwriting this step
+                            echo "Pipeline execution complete"
                             if (config.finishStep) {
                                 config.finishStep()
                             } else {
