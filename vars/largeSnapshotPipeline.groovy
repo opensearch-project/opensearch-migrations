@@ -53,8 +53,8 @@ def call(Map config = [:]) {
         }
 
         options {
-            // Acquire lock on a given deployment stage
-            lock(label: params.STAGE, quantity: 1, variable: 'stage')
+            // Acquire lock on a fixed resource name but store the stage parameter
+            lock(resource: 'large-snapshot-generator', variable: 'lockId')
             timeout(time: 30, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
         }
@@ -140,14 +140,14 @@ def call(Map config = [:]) {
                                 if (config.deployStep) {
                                     config.deployStep()
                                 } else {
-                                    echo "Acquired deployment stage: ${stage}"
+                                    echo "Acquired deployment stage: ${params.STAGE}"
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
                                     def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
-                                            "--stage ${stage} " +
+                                            "--stage ${params.STAGE} " +
                                             "--migrations-git-url ${params.GIT_REPO_URL} " +
                                             "--migrations-git-branch ${params.GIT_BRANCH}"
                                     if (skipCaptureProxyOnNodeSetup) {
@@ -179,7 +179,7 @@ def call(Map config = [:]) {
                                 } else {
                                     echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
-                                    def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", stage)
+                                    def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", params.STAGE)
                                     def command = "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
                                             "--num_shards=${env.NUM_SHARDS} " +
                                             "--multiplication_factor=${env.MULTIPLICATION_FACTOR} " +
@@ -189,14 +189,14 @@ def call(Map config = [:]) {
                                             "--large_snapshot_rate_mb_per_node=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE} " +
                                             "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
                                             "--unique_id ${testUniqueId} " +
-                                            "--stage ${stage} " +
+                                            "--stage ${params.STAGE} " +
                                             "--rfs_workers ${env.RFS_WORKERS} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
                                             sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
                                                     "--test-result-file ${test_result_file} " +
-                                                    "--stage ${stage}"
+                                                    "--stage ${params.STAGE}"
                                         }
                                     }
                                 }
@@ -215,10 +215,10 @@ def call(Map config = [:]) {
                                 if (config.cleanupStep) {
                                     config.cleanupStep()
                                 } else {
-                                    echo "Cleaning up all deployed stacks on stage: ${stage}"
+                                    echo "Cleaning up all deployed stacks on stage: ${params.STAGE}"
                                     dir('cleanupDeployment') {
                                         sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
-                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${stage}"
+                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${params.STAGE}"
                                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                                 sh "sudo --preserve-env ${command}"
