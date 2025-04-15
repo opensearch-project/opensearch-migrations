@@ -62,6 +62,7 @@ public class ThreadSafeTransformerWrapper implements IJsonTransformer {
         var transformer = threadLocalHolder.get();
         if (transformer != null) {
             transformer.close();
+            threadLocalHolder.remove();
         }
     }
 
