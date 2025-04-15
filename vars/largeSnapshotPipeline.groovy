@@ -56,7 +56,7 @@ def call(Map config = [:]) {
 
         options {
             // Acquire lock on a fixed resource name but store the stage parameter
-            lock(resource: 'large-snapshot-generator', variable: 'lockId')
+            lock(resource: "${params.STAGE}", variable: 'lockId')
             timeout(time: 30, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
         }
