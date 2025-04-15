@@ -40,6 +40,7 @@ def call(Map config = [:]) {
             string(name: 'BACKFILL_TIMEOUT_HOURS', defaultValue: '45', description: 'Backfill timeout in hours')
             string(name: 'LARGE_SNAPSHOT_RATE_MB_PER_NODE', defaultValue: '2000', description: 'Rate for large snapshot creation in MB per node')
             string(name: 'RFS_WORKERS', defaultValue: '8', description: 'Number of RFS workers to scale to')
+            choice(name: 'CLUSTER_VERSION', choices: ['ES5x', 'ES6x', 'ES7x', 'OS2x'], description: 'Target cluster version for data format')
         }
 
         environment {
@@ -50,6 +51,7 @@ def call(Map config = [:]) {
             BACKFILL_TIMEOUT_HOURS = "${params.BACKFILL_TIMEOUT_HOURS}"
             LARGE_SNAPSHOT_RATE_MB_PER_NODE = "${params.LARGE_SNAPSHOT_RATE_MB_PER_NODE}"
             RFS_WORKERS = "${params.RFS_WORKERS}"
+            CLUSTER_VERSION = "${params.CLUSTER_VERSION}"
         }
 
         options {
@@ -191,6 +193,7 @@ def call(Map config = [:]) {
                                             "--unique_id ${testUniqueId} " +
                                             "--stage ${params.STAGE} " +
                                             "--rfs_workers ${env.RFS_WORKERS} " +
+                                            "--cluster_version ${env.CLUSTER_VERSION} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {

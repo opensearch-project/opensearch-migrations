@@ -34,7 +34,8 @@ def test_config(request):
         'LARGE_SNAPSHOT_AWS_REGION': request.config.getoption("--large_snapshot_aws_region"),
         'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node"),
         'RFS_WORKERS': request.config.getoption("--rfs_workers"),
-        'STAGE': request.config.getoption("--stage")
+        'STAGE': request.config.getoption("--stage"),
+        'CLUSTER_VERSION': request.config.getoption("--cluster_version")
     }
 
 # Constants
@@ -45,7 +46,7 @@ ops = DefaultOperationsLibrary()
 
 def preload_data_cluster_es56(source_cluster: Cluster, test_config):
     config = test_config
-    # Create source index with settings for ES 5.6
+    # Create source index with settings for ES 5.6 and ES 6.8
     index_settings_es56 = {
         "settings": {
             "number_of_shards": str(config['NUM_SHARDS']),
@@ -78,7 +79,7 @@ def preload_data_cluster_es56(source_cluster: Cluster, test_config):
     }
 
     logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_es56)
-    ops.create_index_es56(cluster=source_cluster, index_name=PILOT_INDEX, data=json.dumps(index_settings_es56))
+    ops.create_custom_index(cluster=source_cluster, index_name=PILOT_INDEX, data=json.dumps(index_settings_es56))
     
     # Create documents with timestamp in bulk
     for j in range(config['BATCH_COUNT']):
@@ -87,6 +88,163 @@ def preload_data_cluster_es56(source_cluster: Cluster, test_config):
             doc_id = f"doc_{j}_{i}"
             bulk_data.extend([
                 {"index": {"_index": PILOT_INDEX, "_type": "doc", "_id": doc_id}},
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "value": f"test_value_{i}",
+                    "doc_number": i,
+                    "description": f"This is a detailed description for document {doc_id} containing information about the test data and its purpose in the large snapshot creation process.",
+                    "metadata": {
+                        "tags": [f"tag1_{i}", f"tag2_{i}", f"tag3_{i}"],
+                        "category": f"category_{i % 10}",
+                        "subcategories": [f"subcat1_{i % 5}", f"subcat2_{i % 5}"],
+                        "attributes": [f"attr1_{i % 8}", f"attr2_{i % 8}"],
+                        "status": f"status_{i % 6}",
+                        "version": f"1.{i % 10}.{i % 5}",
+                        "region": f"region_{i % 12}",
+                        "details": f"Detailed metadata information for document {doc_id} including test parameters."
+                    },
+                    "content": f"Main content for document {doc_id}. This section contains the primary information and data relevant to the testing process. The content is designed to create minimal document for migration and multiplication.",
+                    "additional_info": f"Supplementary information for document {doc_id} providing extra context and details about the test data."
+                }
+            ])
+
+        # Bulk index documents
+        execute_api_call(
+            cluster=source_cluster,
+            method=HttpMethod.POST,
+            path="/_bulk",
+            data="\n".join(json.dumps(d) for d in bulk_data) + "\n",
+            headers={"Content-Type": "application/x-ndjson"}
+        )
+
+
+def preload_data_cluster_es710(source_cluster: Cluster, test_config):
+    config = test_config
+    # Create source index with settings for ES 7.10
+    index_settings_es710 = {
+        "settings": {
+            "number_of_shards": str(config['NUM_SHARDS']),
+            "number_of_replicas": "0"
+        },
+        "mappings": {  
+            "properties": {
+                "timestamp": {"type": "date"},
+                "value": {"type": "keyword"},
+                "doc_number": {"type": "integer"},
+                "description": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
+                "metadata": {
+                    "properties": {  
+                        "tags": {"type": "keyword"},
+                        "category": {"type": "keyword"},
+                        "subcategories": {"type": "keyword"},
+                        "attributes": {"type": "keyword"},
+                        "status": {"type": "keyword"},
+                        "version": {"type": "keyword"},
+                        "region": {"type": "keyword"},
+                        "details": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}}
+                    }
+                },
+                "content": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
+                "additional_info": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}}
+            }
+        }
+    }
+
+    logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_es710)
+    ops.create_custom_index(cluster=source_cluster, index_name=PILOT_INDEX, body=index_settings_es710)
+    
+    # Create documents with timestamp in bulk for ES 7.10
+    for j in range(config['BATCH_COUNT']):
+        bulk_data = []
+        for i in range(config['DOCS_PER_BATCH']):
+            doc_id = f"doc_{j}_{i}"
+            bulk_data.extend([
+                {"index": {"_index": PILOT_INDEX, "_id": doc_id}},  
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "value": f"test_value_{i}",
+                    "doc_number": i,
+                    "description": f"This is a detailed description for document {doc_id} containing information about the test data and its purpose in the large snapshot creation process.",
+                    "metadata": {
+                        "tags": [f"tag1_{i}", f"tag2_{i}", f"tag3_{i}"],
+                        "category": f"category_{i % 10}",
+                        "subcategories": [f"subcat1_{i % 5}", f"subcat2_{i % 5}"],
+                        "attributes": [f"attr1_{i % 8}", f"attr2_{i % 8}"],
+                        "status": f"status_{i % 6}",
+                        "version": f"1.{i % 10}.{i % 5}",
+                        "region": f"region_{i % 12}",
+                        "details": f"Detailed metadata information for document {doc_id} including test parameters."
+                    },
+                    "content": f"Main content for document {doc_id}. This section contains the primary information and data relevant to the testing process. The content is designed to create minimal document for migration and multiplication.",
+                    "additional_info": f"Supplementary information for document {doc_id} providing extra context and details about the test data."
+                }
+            ])
+
+        # Bulk index documents
+        execute_api_call(
+            cluster=source_cluster,
+            method=HttpMethod.POST,
+            path="/_bulk",
+            data="\n".join(json.dumps(d) for d in bulk_data) + "\n",
+            headers={"Content-Type": "application/x-ndjson"}
+        )
+
+
+def preload_data_cluster_os217(source_cluster: Cluster, test_config):
+    config = test_config
+
+    # Index settings for OpenSearch 2.17
+    index_settings_os217 = {
+        "settings": {
+            "number_of_shards": str(config['NUM_SHARDS']),
+            "number_of_replicas": "0"
+        },
+        "mappings": {
+            "properties": {
+                "timestamp": {"type": "date"},
+                "value": {"type": "keyword"},
+                "doc_number": {"type": "integer"},
+                "description": {
+                    "type": "text",
+                    "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+                },
+                "metadata": {
+                    "properties": {
+                        "tags": {"type": "keyword"},
+                        "category": {"type": "keyword"},
+                        "subcategories": {"type": "keyword"},
+                        "attributes": {"type": "keyword"},
+                        "status": {"type": "keyword"},
+                        "version": {"type": "keyword"},
+                        "region": {"type": "keyword"},
+                        "details": {
+                            "type": "text",
+                            "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+                        }
+                    }
+                },
+                "content": {
+                    "type": "text",
+                    "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+                },
+                "additional_info": {
+                    "type": "text",
+                    "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+                }
+            }
+        }
+    }
+
+    logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_os217)
+    ops.create_custom_index(cluster=source_cluster, index_name=PILOT_INDEX, body=index_settings_os217)
+
+    # Create documents with timestamp in bulk for OS 2.17
+    for j in range(config['BATCH_COUNT']):
+        bulk_data = []
+        for i in range(config['DOCS_PER_BATCH']):
+            doc_id = f"doc_{j}_{i}"
+            bulk_data.extend([
+                {"index": {"_index": PILOT_INDEX, "_id": doc_id}},
                 {
                     "timestamp": datetime.now().isoformat(),
                     "value": f"test_value_{i}",
@@ -147,8 +305,22 @@ def setup_test_environment(source_cluster: Cluster, test_config):
     }
     ops.create_transformation_json_file([transform_config], os.path.join(config['TRANSFORMATION_DIRECTORY'], "transformation.json"))
 
-    # preload data on source cluster 
-    preload_data_cluster_es56(source_cluster, test_config)
+    # Select appropriate preload function based on cluster version
+    cluster_version = config['CLUSTER_VERSION']
+    logger.info(f"Using cluster version: {cluster_version}")
+    
+    if cluster_version == "ES5x" or cluster_version == "ES6x":
+        logger.info("Using ES5.x/ES6.x preload function")
+        preload_data_cluster_es56(source_cluster, test_config)
+    elif cluster_version == "ES7x":
+        logger.info("Using ES7.x preload function")
+        preload_data_cluster_es710(source_cluster, test_config)
+    elif cluster_version == "OS2x":
+        logger.info("Using OpenSearch 2.x preload function")
+        preload_data_cluster_os217(source_cluster, test_config)
+    else:
+        logger.warning(f"Unknown cluster version '{cluster_version}', defaulting to ES5.x/ES6.x")
+        preload_data_cluster_es56(source_cluster, test_config)
     
     # Refresh indices before creating initial snapshot
     execute_api_call(
