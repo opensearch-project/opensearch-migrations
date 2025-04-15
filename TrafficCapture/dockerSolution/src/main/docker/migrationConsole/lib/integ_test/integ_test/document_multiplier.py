@@ -33,7 +33,8 @@ def test_config(request):
         'LARGE_SNAPSHOT_S3_URI': request.config.getoption("--large_snapshot_s3_uri"),
         'LARGE_SNAPSHOT_AWS_REGION': request.config.getoption("--large_snapshot_aws_region"),
         'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node"),
-        'RFS_WORKERS': request.config.getoption("--rfs_workers")
+        'RFS_WORKERS': request.config.getoption("--rfs_workers"),
+        'STAGE': request.config.getoption("--stage")
     }
 
 # Constants
@@ -413,7 +414,8 @@ class BackfillTest(unittest.TestCase):
     def setup_s3_bucket(self, account_number: str, region: str, test_config):
         """Check and create S3 bucket to store large snapshot"""
         config = test_config
-        bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
+        stage = config['STAGE']
+        bucket_name = f"migration-jenkins-snapshot-{account_number}-{stage}-{region}"
         
         # Check if bucket exists
         logger.info(f"Checking if S3 bucket {bucket_name} exists in region {region}...")
