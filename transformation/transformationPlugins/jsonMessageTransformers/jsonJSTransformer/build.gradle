@@ -1,5 +1,4 @@
 plugins {
-    id 'java'
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
     id 'de.undercouch.download' version '5.4.0'  // For downloading JS packages

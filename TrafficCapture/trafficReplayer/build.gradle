@@ -10,7 +10,6 @@
  */
 
 plugins {
-    id 'java'
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'

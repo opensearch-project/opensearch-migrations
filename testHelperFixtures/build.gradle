@@ -13,7 +13,6 @@ import org.opensearch.migrations.common.CommonUtils
 
 
 plugins {
-    id 'java'
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'

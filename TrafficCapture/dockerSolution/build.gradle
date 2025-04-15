@@ -1,5 +1,4 @@
 plugins {
-    id 'java'
     id 'org.opensearch.migrations.java-library-conventions'
     id "com.avast.gradle.docker-compose"
     id 'com.bmuschko.docker-remote-api'

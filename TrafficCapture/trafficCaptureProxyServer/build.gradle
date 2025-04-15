@@ -4,7 +4,6 @@
 
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
-    id 'java'
     id 'io.freefair.lombok'
 }
 
