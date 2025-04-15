@@ -32,7 +32,8 @@ def test_config(request):
         'TRANSFORMATION_DIRECTORY': request.config.getoption("--transformation_directory"),
         'LARGE_SNAPSHOT_S3_URI': request.config.getoption("--large_snapshot_s3_uri"),
         'LARGE_SNAPSHOT_AWS_REGION': request.config.getoption("--large_snapshot_aws_region"),
-        'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node")
+        'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node"),
+        'RFS_WORKERS': request.config.getoption("--rfs_workers")
     }
 
 # Constants
@@ -311,7 +312,9 @@ class BackfillTest(unittest.TestCase):
 
         # Scale backfill workers
         logger.info("Scaling backfill...")
-        backfill_scale_result: CommandResult = backfill.scale(units=8)
+        rfs_workers = self.config['RFS_WORKERS']
+        logger.info(f"Scaling to {rfs_workers} RFS workers")
+        backfill_scale_result: CommandResult = backfill.scale(units=rfs_workers)
         assert backfill_scale_result.success, f"Failed to scale backfill: {backfill_scale_result.error}"
 
         # Wait for backfill to complete

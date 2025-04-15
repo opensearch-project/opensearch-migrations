@@ -57,6 +57,8 @@ def pytest_addoption(parser):
                      help="AWS region for S3 Bucket of large snapshot")
     parser.addoption("--large_snapshot_rate_mb_per_node", action="store", type=int, default=2000,
                      help="Rate for large snapshot creation")
+    parser.addoption("--rfs_workers", action="store", type=int, default=8,
+                     help="Number of RFS workers to scale to")
 
 
 def pytest_configure(config):

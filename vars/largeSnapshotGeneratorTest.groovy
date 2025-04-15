@@ -70,6 +70,7 @@ def call(Map config = [:]) {
               DOCS_PER_BATCH: params.DOCS_PER_BATCH,
               BACKFILL_TIMEOUT_HOURS: params.BACKFILL_TIMEOUT_HOURS,
               LARGE_SNAPSHOT_RATE_MB_PER_NODE: params.LARGE_SNAPSHOT_RATE_MB_PER_NODE,
+              RFS_WORKERS: params.RFS_WORKERS,
             ]
     )
 }

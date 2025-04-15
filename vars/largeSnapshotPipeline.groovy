@@ -39,6 +39,7 @@ def call(Map config = [:]) {
             string(name: 'DOCS_PER_BATCH', defaultValue: '100', description: 'Documents per batch')
             string(name: 'BACKFILL_TIMEOUT_HOURS', defaultValue: '45', description: 'Backfill timeout in hours')
             string(name: 'LARGE_SNAPSHOT_RATE_MB_PER_NODE', defaultValue: '2000', description: 'Rate for large snapshot creation in MB per node')
+            string(name: 'RFS_WORKERS', defaultValue: '8', description: 'Number of RFS workers to scale to')
         }
 
         environment {
@@ -48,6 +49,7 @@ def call(Map config = [:]) {
             DOCS_PER_BATCH = "${params.DOCS_PER_BATCH}"
             BACKFILL_TIMEOUT_HOURS = "${params.BACKFILL_TIMEOUT_HOURS}"
             LARGE_SNAPSHOT_RATE_MB_PER_NODE = "${params.LARGE_SNAPSHOT_RATE_MB_PER_NODE}"
+            RFS_WORKERS = "${params.RFS_WORKERS}"
         }
 
         options {
@@ -188,6 +190,7 @@ def call(Map config = [:]) {
                                             "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
                                             "--unique_id ${testUniqueId} " +
                                             "--stage ${stage} " +
+                                            "--rfs_workers ${env.RFS_WORKERS} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
