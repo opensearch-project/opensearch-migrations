@@ -6,6 +6,10 @@ public class ObjectNodeUtils {
     private ObjectNodeUtils() {}
 
     public static void removeFieldsByPath(ObjectNode node, String path) {
+        if (node == null) {
+            return;
+        }
+
         var pathParts = path.split("\\.");
 
         if (pathParts.length == 1) {

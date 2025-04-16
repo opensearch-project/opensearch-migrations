@@ -273,7 +273,6 @@ subprojects {
         }
 
         def excludedProjectPaths = [
-                ':RFS',
                 ':TrafficCapture',
                 ':TrafficCapture:dockerSolution',
         ]
