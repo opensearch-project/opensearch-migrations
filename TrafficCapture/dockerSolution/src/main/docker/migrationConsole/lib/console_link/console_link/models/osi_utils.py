@@ -60,7 +60,11 @@ class OpenSearchIngestionMigrationProps:
 
 def get_assume_role_session(role_arn, session_name) -> boto3.Session:
     sts_client = boto3.client('sts')
-    response = sts_client.assume_role(RoleArn=role_arn, RoleSessionName=session_name)
+    response = sts_client.assume_role(
+        RoleArn=role_arn,
+        RoleSessionName=session_name,
+        DurationSeconds=43200
+    )
 
     # Create a new session with the assumed role's credentials
     credentials = response['Credentials']
