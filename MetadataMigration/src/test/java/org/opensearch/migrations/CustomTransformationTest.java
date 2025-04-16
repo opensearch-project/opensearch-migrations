@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.io.File;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -7,6 +8,7 @@ import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
@@ -15,6 +17,7 @@ import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -29,6 +32,9 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Tag("isolatedTest")
 @Slf4j
 class CustomTransformationTest extends BaseMigrationTest {
+
+    @TempDir
+    protected File localDirectory;
 
     private static Stream<Arguments> scenarios() {
         // Transformations are differentiated only by source, so lock to a specific target.
@@ -123,8 +129,11 @@ class CustomTransformationTest extends BaseMigrationTest {
             "  }\n" +
             "]";
 
-        var snapshotName = createSnapshot("custom_transformation_snap");
-        var arguments = prepareSnapshotMigrationArgs(snapshotName);
+        var snapshotName = "custom_transformation_snap";
+        var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
+        sourceCluster.copySnapshotData(localDirectory.toString());
+        var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters

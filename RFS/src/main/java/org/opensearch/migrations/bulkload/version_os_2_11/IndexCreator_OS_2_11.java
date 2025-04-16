@@ -41,10 +41,16 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             ObjectNodeUtils.removeFieldsByPath(settings, field);
         }
 
+        ObjectNode mappings = indexMetadata.getMappings();
+        String[] problemMappingFields = { "_all" };
+        for (var field : problemMappingFields) {
+            ObjectNodeUtils.removeFieldsByPath(mappings, field);
+        }
+
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
         body.set("aliases", indexMetadata.getAliases());
-        body.set("mappings", index.getMappings());
+        body.set("mappings", mappings);
         body.set("settings", settings);
 
         try {
