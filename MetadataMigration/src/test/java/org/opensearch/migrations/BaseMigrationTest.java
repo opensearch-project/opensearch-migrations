@@ -1,27 +1,18 @@
 package org.opensearch.migrations;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.util.List;
 import java.util.Scanner;
 import java.util.concurrent.CompletableFuture;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs.MetadataCustomTransformationParams;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.Getter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Base test class providing shared setup and utility methods for migration tests.
