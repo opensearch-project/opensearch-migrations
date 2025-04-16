@@ -558,8 +558,7 @@ class BackfillTest(unittest.TestCase):
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
         final_snapshot_config = {
-            'repo_name': migrationAssistant_repoName,
-            'snapshot_name': 'large-snapshot',  
+            'snapshot_name': 'large-snapshot',
             's3': {
                 'repo_uri': updated_s3_uri,  
                 'role': migrationAssistant_deployTimeRole,
