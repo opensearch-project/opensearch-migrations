@@ -319,14 +319,14 @@ def setup_test_environment(source_cluster: Cluster, test_config):
     # Select appropriate preload function based on cluster version
     cluster_version = config['CLUSTER_VERSION']
     logger.info(f"Using cluster version: {cluster_version}")
-    
-    if cluster_version == "ES5x" or cluster_version == "ES6x":
+
+    if cluster_version == "es5x" or cluster_version == "es6x":
         logger.info("Using ES5.x/ES6.x preload function")
         preload_data_cluster_es56(source_cluster, test_config)
-    elif cluster_version == "ES7x":
+    elif cluster_version == "es7x":
         logger.info("Using ES7.x preload function")
         preload_data_cluster_es710(source_cluster, test_config)
-    elif cluster_version == "OS2x":
+    elif cluster_version == "os2x":
         logger.info("Using OpenSearch 2.x preload function")
         preload_data_cluster_os217(source_cluster, test_config)
     else:
@@ -558,9 +558,11 @@ class BackfillTest(unittest.TestCase):
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
         final_snapshot_config = {
-            'snapshot_name': f'final-snapshot-{pytest.unique_id}',  
+            'repo_name': migrationAssistant_repoName,
+            'snapshot_name': 'large-snapshot',  
             's3': {
                 'repo_uri': updated_s3_uri,  
+                'role': migrationAssistant_deployTimeRole,
                 'aws_region': region,
                 'role': migrationAssistant_deployTimeRole
             }
@@ -596,10 +598,10 @@ class BackfillTest(unittest.TestCase):
         
     def setup_s3_bucket(self, account_number: str, region: str, test_config):
         """Check and create S3 bucket to store large snapshot"""
-        config = test_config
-        stage = config['STAGE']
-        bucket_name = f"migration-jenkins-snapshot-{account_number}-{stage}-{region}"
-        
+        cluster_version = test_config['CLUSTER_VERSION']
+        bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
+        snapshot_folder = f"large-snapshot-{cluster_version}"
+
         # Check if bucket exists
         logger.info(f"Checking if S3 bucket {bucket_name} exists in region {region}...")
         check_bucket_cmd = CommandRunner(
@@ -609,20 +611,21 @@ class BackfillTest(unittest.TestCase):
                 "--bucket": bucket_name
             }
         )
+        
         try:
             check_result = check_bucket_cmd.run()
             bucket_exists = check_result.success
         except CommandRunnerError:
             bucket_exists = False
-        
+            
         if bucket_exists:
             logger.info(f"S3 bucket {bucket_name} already exists.")
             logger.info("\n=== Cleaning up S3 bucket contents ===")
             s3_cleanup_cmd = CommandRunner(
                 command_root="aws",
                 command_args={
-                "__positional__": ["s3", "rm", f"s3://{bucket_name}/es56-snapshot/"],
-                "--recursive": None  
+                    "__positional__": ["s3", "rm", f"s3://{bucket_name}/{snapshot_folder}/"],
+                    "--recursive": None
                 }
             )
             cleanup_result = s3_cleanup_cmd.run()
@@ -649,4 +652,4 @@ class BackfillTest(unittest.TestCase):
             assert create_result.success, f"Failed to create S3 bucket: {create_result.display()}"
             logger.info(f"S3 bucket {bucket_name} created successfully.")
         
-        return f"s3://{bucket_name}/es56-snapshot/"
+        return f"s3://{bucket_name}/{snapshot_folder}/"

@@ -59,8 +59,8 @@ def pytest_addoption(parser):
                      help="Rate for large snapshot creation")
     parser.addoption("--rfs_workers", action="store", type=int, default=8,
                      help="Number of RFS workers to scale to")
-    parser.addoption("--cluster_version", action="store", default="ES5x",
-                     help="Target cluster version (ES5x, ES6x, ES7x, OS2x)")
+    parser.addoption("--cluster_version", action="store", default="es5x",
+                     help="Target cluster version (es5x, es6x, es7x, os2x)")
 
 
 def pytest_configure(config):

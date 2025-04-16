@@ -40,7 +40,7 @@ def call(Map config = [:]) {
             string(name: 'BACKFILL_TIMEOUT_HOURS', defaultValue: '45', description: 'Backfill timeout in hours')
             string(name: 'LARGE_SNAPSHOT_RATE_MB_PER_NODE', defaultValue: '2000', description: 'Rate for large snapshot creation in MB per node')
             string(name: 'RFS_WORKERS', defaultValue: '8', description: 'Number of RFS workers to scale to')
-            choice(name: 'CLUSTER_VERSION', choices: ['ES5x', 'ES6x', 'ES7x', 'OS2x'], description: 'Target cluster version for data format')
+            choice(name: 'CLUSTER_VERSION', choices: ['es5x', 'es6x', 'es7x', 'os2x'], description: 'Target cluster version for data format')
         }
 
         environment {
