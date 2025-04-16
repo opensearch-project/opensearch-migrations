@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -11,6 +12,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.SneakyThrows;
@@ -18,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -35,6 +38,9 @@ import static org.hamcrest.Matchers.hasItems;
 @Tag("isolatedTest")
 @Slf4j
 class EndToEndTest extends BaseMigrationTest {
+
+    @TempDir
+    protected File localDirectory;
 
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(false).stream()
@@ -122,12 +128,15 @@ class EndToEndTest extends BaseMigrationTest {
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);
 
-        final MigrateOrEvaluateArgs arguments;
+        MigrateOrEvaluateArgs arguments;
 
         switch (medium) {
             case SnapshotImage:
-                var snapshotName = createSnapshot("my_snap_" + command.name().toLowerCase());
-                arguments = prepareSnapshotMigrationArgs(snapshotName);
+                var snapshotName = "my_snap_" + command.name().toLowerCase();
+                var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+                createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
+                sourceCluster.copySnapshotData(localDirectory.toString());
+                arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
                 break;
 
             case Http:

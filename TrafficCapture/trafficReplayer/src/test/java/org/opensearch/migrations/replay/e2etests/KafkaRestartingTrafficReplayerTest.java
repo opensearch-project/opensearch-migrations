@@ -185,6 +185,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         }
     }
 
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     Producer<String, byte[]> buildKafkaProducer() {
         var kafkaProps = new Properties();
         kafkaProps.put(
@@ -206,7 +207,6 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
             return new KafkaProducer(kafkaProps);
         } catch (Exception e) {
             log.atError().setCause(e).log();
-            System.exit(1);
             throw e;
         }
     }

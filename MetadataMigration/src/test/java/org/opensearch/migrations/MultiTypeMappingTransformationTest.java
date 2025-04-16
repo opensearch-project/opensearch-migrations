@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.io.File;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -7,6 +8,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +16,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -30,6 +33,11 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Slf4j
 class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
+    @TempDir
+    private File legacySnapshotDirectory;
+    @TempDir
+    private File sourceSnapshotDirectory;
+
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_LATEST));
@@ -43,9 +51,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         final SearchClusterContainer.ContainerVersion legacyVersion,
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        var legacySnapshotRepo = "repo";
-        var legacySnapshotName = "snapshot";
-        var originalIndexName = "test_index";
+        var testData = new TestData();
         try (
             final var legacyCluster = new SearchClusterContainer(legacyVersion)
         ) {
@@ -53,11 +59,11 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
             var legacyClusterOperations = new ClusterOperations(legacyCluster);
 
-            createDocumentsWithManyTypes(originalIndexName, legacyClusterOperations);
+            createDocumentsWithManyTypes(testData.indexName, legacyClusterOperations);
 
-            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
-            legacyClusterOperations.takeSnapshot(legacySnapshotRepo, legacySnapshotName, originalIndexName);
-            legacyCluster.copySnapshotData(localDirectory.toString());
+            legacyClusterOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
+            legacyClusterOperations.takeSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName, testData.indexName);
+            legacyCluster.copySnapshotData(legacySnapshotDirectory.toString());
         }
 
         try (
@@ -66,31 +72,30 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
-
             startClusters();
 
-            sourceCluster.putSnapshotData(localDirectory.toString());
+            sourceCluster.putSnapshotData(legacySnapshotDirectory.toString());
+            sourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, testData.legacySnapshotRepo);
+            sourceOperations.restoreSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
+            sourceOperations.deleteSnapshot(testData.legacySnapshotRepo, testData.legacySnapshotName);
 
-            var upgradedSourceOperations = new ClusterOperations(sourceCluster);
-
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacySnapshotRepo);
-            upgradedSourceOperations.restoreSnapshot(legacySnapshotRepo, legacySnapshotName);
-
-            var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
+            var checkIndexUpgraded = sourceOperations.get("/" + testData.indexName);
             assertThat(checkIndexUpgraded.getKey(), equalTo(200));
-            assertThat(checkIndexUpgraded.getValue(), containsString(originalIndexName));
+            assertThat(checkIndexUpgraded.getValue(), containsString(testData.indexName));
 
-            var updatedSnapshotName = createSnapshot("union-snapshot");
-            var arguments = prepareSnapshotMigrationArgs(updatedSnapshotName);
+            var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, testData.snapshotName, testSnapshotContext);
+            sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
-            configureDataFilters(originalIndexName, arguments);
+            var arguments = prepareSnapshotMigrationArgs(testData.snapshotName, sourceSnapshotDirectory.toString());
+            configureDataFilters(testData.indexName, arguments);
             arguments.metadataCustomTransformationParams = useTransformationResource("es2-transforms.json");
 
             var result = executeMigration(arguments, MetadataCommands.MIGRATE);
-            checkResult(result, originalIndexName);
+            checkResult(result, testData.indexName);
         }
     }
-    
+
     private void createDocumentsWithManyTypes(String originalIndexName, ClusterOperations indexCreatedOperations) {
         indexCreatedOperations.createIndex(originalIndexName);
         indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
@@ -173,5 +178,12 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             assertThat(res.getKey(), equalTo(400));
             assertThat(res.getValue(), containsString("mapper [field1] cannot be changed from type [long] to [float]"));
         }
+    }
+
+    private static class TestData {
+        final String legacySnapshotRepo = "legacy_repo";
+        final String legacySnapshotName = "legacy_snapshot";
+        final String snapshotName = "union_snapshot";
+        final String indexName = "test_index";
     }
 }
