@@ -419,7 +419,6 @@ gradle.projectsEvaluated {
             if (task.name == "isolatedTest") {
                 isolatedTestsTasks.add(task)
             } else {
-                println "adding Test-type task = ${task}"
                 sharedProcessTestsTasks.add(task)
             }
         }
