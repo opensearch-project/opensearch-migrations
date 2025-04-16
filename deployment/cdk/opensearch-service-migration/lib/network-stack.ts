@@ -233,7 +233,7 @@ export class NetworkStack extends Stack {
                         cidrMask: 24,
                     },
                 ],
-                natGateways: 0,
+                natGateways: 1,  // We need at least one NAT gateway for the private subnets to have outbound internet access
             });
             // Only create interface endpoints if VPC not imported
             this.createVpcEndpoints(vpc);
