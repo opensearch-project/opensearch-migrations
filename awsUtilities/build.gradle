@@ -10,9 +10,8 @@
  */
 
 plugins {
-    id 'io.freefair.lombok'
-    id 'jacoco'
     id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
 }
 
 dependencies {
