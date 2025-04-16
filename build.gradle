@@ -2,7 +2,7 @@ import groovy.json.JsonOutput
 
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
-//    id "com.dorongold.task-tree" version "2.1.1"
+//    id "com.dorongold.task-tree" version "4.0.1"
     id "com.diffplug.spotless" version '7.0.2'
     id 'io.freefair.lombok' version '8.13.1' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
@@ -411,27 +411,37 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
 }
 
 gradle.projectsEvaluated {
-    List<Task> isolatedTestsTasks = []
-    List<Task> sharedProcessTestsTasks = []
+    Set<Task> isolatedTestsTasks = [] as Set
+    Set<Task> sharedProcessTestsTasks = [] as Set
+
     subprojects { subproject ->
+        // Collect all Test type tasks
         subproject.tasks.withType(Test).all { task ->
             if (task.name == "isolatedTest") {
                 isolatedTestsTasks.add(task)
             } else {
+                println "adding Test-type task = ${task}"
                 sharedProcessTestsTasks.add(task)
             }
         }
+
+        // Collect tasks named 'test' (no need to check for duplicates with Sets)
+        subproject.tasks.matching { task ->
+            task.name == 'test' && !(task instanceof Test)
+        }.configureEach { task ->
+            println "adding task named 'test' = ${task}"
+            sharedProcessTestsTasks.add(task)
+        }
     }
-    isolatedTestsTasks.sort { task -> task.project.name }
 
     // Create a sequential dependency chain
     Task previousTask = null
-    isolatedTestsTasks.each { task ->
+    isolatedTestsTasks.toList().sort { task -> task.project.name }.each { task ->
         sharedProcessTestsTasks.forEach {task.mustRunAfter(it) }
         if (previousTask != null) {
             task.mustRunAfter(previousTask)
         }
-        previousTask = task
+        previousTask = task as Task
     }
 
     tasks.register("allTests") {
