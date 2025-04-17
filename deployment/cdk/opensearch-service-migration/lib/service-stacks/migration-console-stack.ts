@@ -20,7 +20,6 @@ import {Fn, RemovalPolicy} from "aws-cdk-lib";
 import {ClusterYaml, MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
-import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -136,8 +135,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
-            { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
-            { id: "sharedLogsAccessSG", param: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID }
+            { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID }
         ].map(({ id, param }) =>
             SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
                 ...props,
@@ -157,9 +155,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 ...props,
                 parameter: MigrationSSMParameter.KAFKA_BROKERS,
             }) : "";
-
-        const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
-
 
         const ecsClusterArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
@@ -260,7 +255,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
+        let servicePolicies = [openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             // only add secrets policies if they're non-null
             ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
@@ -290,7 +285,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
             "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
             "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
-            "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
         }
 
 
@@ -330,8 +324,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,
-            volumes: [sharedLogFileSystem.asVolume()],
-            mountPoints: [sharedLogFileSystem.asMountPoint()],
             environment: environment,
             taskRole: serviceTaskRole,
             taskRolePolicies: servicePolicies,

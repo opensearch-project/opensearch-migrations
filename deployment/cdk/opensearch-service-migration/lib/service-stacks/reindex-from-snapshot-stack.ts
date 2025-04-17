@@ -21,7 +21,6 @@ import {
 } from "../common-utilities";
 import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
-import { SharedLogFileSystem } from "../components/shared-log-file-system";
 import * as rfsDashboard from '../components/reindex-from-snapshot-dashboard.json';
 import { MigrationDashboard } from '../constructs/migration-dashboard';
 
@@ -51,10 +50,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", getMigrationStringParameterValue(this, {
                 ...props,
                 parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
-            })),
-            SecurityGroup.fromSecurityGroupId(this, "sharedLogsAccessSG", getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID,
             })),
         ]
 
@@ -114,10 +109,9 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         }
         command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
 
-        const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
-        const servicePolicies = [sharedLogFileSystem.asPolicyStatement(), s3AccessPolicy, openSearchPolicy, openSearchServerlessPolicy];
+        const servicePolicies = [s3AccessPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.password_from_secret_arn ?
             getSecretAccessPolicy(props.clusterAuthDetails.basicAuth.password_from_secret_arn) : null;
@@ -125,8 +119,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             servicePolicies.push(getSecretsPolicy);
         }
 
-        const volumes = [sharedLogFileSystem.asVolume()];
-        const mountPoints = [sharedLogFileSystem.asMountPoint()];
+        const volumes = [];
+        const mountPoints = [];
 
         // Calculate the volume size based on the max shard size
         // Have space for the snapshot and an unpacked copy, with buffer
@@ -203,7 +197,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 "RFS_TARGET_USER": targetUser,
                 "RFS_TARGET_PASSWORD": targetPassword,
                 "RFS_TARGET_PASSWORD_ARN": targetPasswordArn,
-                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/reindex-from-snapshot-${props.defaultDeployId}`,
             },
             ...props
         });

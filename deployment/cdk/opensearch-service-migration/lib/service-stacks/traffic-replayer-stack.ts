@@ -17,7 +17,6 @@ import {StreamingSourceType} from "../streaming-source-type";
 import {Duration, SecretValue} from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ECSReplayerYaml } from "../migration-services-yaml";
-import { SharedLogFileSystem } from "../components/shared-log-file-system";
 import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import { CdkLogger } from "../cdk-logger";
 import * as CaptureReplayDashboard from '../components/capture-replay-dashboard.json';
@@ -46,16 +45,12 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
             { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
-            { id: "sharedLogsAccessSG", param: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID }
         ].map(({ id, param }) =>
             SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
                 ...props,
                 parameter: param,
             }))
         );
-
-        const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
-
 
         const secretAccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
@@ -67,7 +62,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         })
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
+        let servicePolicies = [secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskConsumerPolicies)
@@ -132,12 +127,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             dockerImageName: "migrations/traffic_replayer:latest",
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
-            volumes: [sharedLogFileSystem.asVolume()],
-            mountPoints: [sharedLogFileSystem.asMountPoint()],
             taskRolePolicies: servicePolicies,
-            environment: {
-                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`
-            },
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,

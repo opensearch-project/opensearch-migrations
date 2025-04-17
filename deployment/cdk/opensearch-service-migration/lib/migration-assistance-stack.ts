@@ -106,7 +106,6 @@ export class MigrationAssistanceStack extends Stack {
         super(scope, id, props);
 
         const bucketRemovalPolicy = parseRemovalPolicy('artifactBucketRemovalPolicy', props.artifactBucketRemovalPolicy)
-        const replayerEFSRemovalPolicy = parseRemovalPolicy('replayerOutputEFSRemovalPolicy', props.replayerOutputEFSRemovalPolicy)
 
         const streamingSecurityGroup = new SecurityGroup(this, 'trafficStreamSourceSG', {
             vpc: props.vpcDetails.vpc,
@@ -122,32 +121,6 @@ export class MigrationAssistanceStack extends Stack {
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             this.createMSKResources(props, streamingSecurityGroup)
         }
-
-        const sharedLogsSG = new SecurityGroup(this, 'sharedLogsSG', {
-            vpc: props.vpcDetails.vpc,
-            allowAllOutbound: false,
-            allowAllIpv6Outbound: false,
-        });
-        sharedLogsSG.addIngressRule(sharedLogsSG, Port.allTraffic());
-
-        createMigrationStringParameter(this, sharedLogsSG.securityGroupId, {
-            ...props,
-            parameter: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID
-        });
-
-        // Create an EFS file system for Traffic Replayer output
-        const sharedLogsEFS = new FileSystem(this, 'sharedLogsEFS', {
-            vpc: props.vpcDetails.vpc,
-            vpcSubnets: props.vpcDetails.subnetSelection,
-            securityGroup: sharedLogsSG,
-            removalPolicy: replayerEFSRemovalPolicy,
-            lifecyclePolicy: LifecyclePolicy.AFTER_1_DAY, // Cost break even is at 26 downloads / month
-            throughputMode: ThroughputMode.BURSTING, // Best cost characteristics for write heavy, short-lived data
-        });
-        createMigrationStringParameter(this, sharedLogsEFS.fileSystemId, {
-            ...props,
-            parameter: MigrationSSMParameter.SHARED_LOGS_EFS_ID
-        });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
             vpc: props.vpcDetails.vpc,
