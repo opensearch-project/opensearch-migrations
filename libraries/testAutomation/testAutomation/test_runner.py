@@ -13,6 +13,8 @@ from typing import List, Optional
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.11"]
+VALID_TARGET_VERSIONS = ["OS_2.19"]
 SOURCE_RELEASE_NAME = "source"
 TARGET_RELEASE_NAME = "target"
 MA_RELEASE_NAME = "ma"
@@ -213,6 +215,18 @@ def parse_args() -> argparse.Namespace:
         description="Process inputs for test automation runner"
     )
     parser.add_argument(
+        "--source-version",
+        choices=VALID_SOURCE_VERSIONS,
+        default="ES_5.6",
+        help=f"Source version to use. Must be one of: {', '.join(VALID_SOURCE_VERSIONS)}"
+    )
+    parser.add_argument(
+        "--target-version",
+        choices=VALID_TARGET_VERSIONS,
+        default="OS_2.19",
+        help=f"Target version to use. Must be one of: {', '.join(VALID_TARGET_VERSIONS)}"
+    )
+    parser.add_argument(
         "--skip-delete",
         action="store_true",
         help="If set, skip deletion operations."
@@ -247,18 +261,24 @@ def main() -> None:
     elasticsearch_cluster_chart_path = f"{helm_charts_base_path}/components/elasticsearchCluster"
     opensearch_cluster_chart_path = f"{helm_charts_base_path}/components/opensearchCluster"
 
-    # Currently utilizes a single test cluster environment, but should be expanded to allow a matrix of cases based
-    # on provided source and target version
-    ma_chart_values_path = "es-5-values.yaml"
-    es_5_6_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
-                     f"environments/es-5-6-single-node-cluster.yaml")
-    os_2_19_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
+    if args.source_version == "ES_5.6":
+        ma_chart_values_path = "es-5-to-os-2-values.yaml"
+        source_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
+                         f"environments/es-5-6-single-node-cluster.yaml")
+    elif args.source_version == "ES_8.11":
+        ma_chart_values_path = "es-8-to-os-2-values.yaml"
+        source_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
+                     f"environments/es-8-latest-single-node-cluster.yaml")
+    else:
+        raise RuntimeError(f"Unexpected source version: {args.source_version} provided")
+
+    target_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
                       f"environments/os-2-latest-single-node-cluster.yaml")
-    test_cluster_env = TestClusterEnvironment(source_version="ES_5.6",
-                                              source_helm_values_path=es_5_6_values,
+    test_cluster_env = TestClusterEnvironment(source_version=args.source_version,
+                                              source_helm_values_path=source_values,
                                               source_chart_path=elasticsearch_cluster_chart_path,
-                                              target_version="OS_2.19",
-                                              target_helm_values_path=os_2_19_values,
+                                              target_version=args.target_version,
+                                              target_helm_values_path=target_values,
                                               target_chart_path=opensearch_cluster_chart_path)
 
     test_runner = TestRunner(k8s_service=k8s_service,
