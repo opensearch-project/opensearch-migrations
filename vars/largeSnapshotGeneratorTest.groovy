@@ -68,7 +68,7 @@ def call(Map config = [:]) {
             "dedicatedManagerNodeCount": 3,
             "dedicatedManagerNodeType": "m7i.xlarge.search",
             "ebsEnabled": false,
-            "openAccessPolicyEnabled": true,
+            "openAccessPolicyEnabled": false,
             "domainRemovalPolicy": "DESTROY",
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,
@@ -88,7 +88,7 @@ def call(Map config = [:]) {
     """
 
     largeSnapshotPipeline(
-            sourceContext: source_cdk_context,
+            sourceContext: migration_cdk_context,
             migrationContext: migration_cdk_context,
             migrationContextId: migrationContextId,
             defaultStageId: 'dev',
