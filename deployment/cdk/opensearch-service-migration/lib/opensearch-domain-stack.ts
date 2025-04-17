@@ -194,8 +194,8 @@ export class OpenSearchDomainStack extends Stack {
       capacity: {
         dataNodeInstanceType: props.dataNodeInstanceType,
         dataNodes: props.dataNodes,
-        masterNodeInstanceType: props.dedicatedManagerNodeType || "m7i.xlarge.search",
-        masterNodes: props.dedicatedManagerNodeCount || 3,
+        masterNodeInstanceType: props.dedicatedManagerNodeType,
+        masterNodes: props.dedicatedManagerNodeCount,
         warmInstanceType: props.warmInstanceType,
         warmNodes: props.warmNodes
       },
