@@ -56,7 +56,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly vpc?: IVpc,
   readonly vpcSubnetIds?: string[],
   readonly vpcSecurityGroupIds?: string[],
-  readonly domainAZCount?: number,
+  readonly vpcAZCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy,
   readonly domainAccessSecurityGroupParameter?: string
 
@@ -160,8 +160,8 @@ export class OpenSearchDomainStack extends Stack {
         secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
       })
     }
-    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.domainAZCount && props.domainAZCount > 1 ?
-        {enabled: true, availabilityZoneCount: props.domainAZCount} : undefined
+    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.vpcAZCount && props.vpcAZCount > 1 ?
+        {enabled: true, availabilityZoneCount: props.vpcAZCount} : undefined
 
     // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
     // to the Domain as it has existing behavior to select private subnets from a given VPC
