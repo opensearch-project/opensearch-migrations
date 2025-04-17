@@ -196,7 +196,7 @@ def call(Map config = [:]) {
                                             "--stage ${params.STAGE} " +
                                             "--rfs_workers ${env.RFS_WORKERS} " +
                                             "--cluster_version ${env.CLUSTER_VERSION} " +
-                                            "--large_snapshot_aws_region us-east-1 " +
+                                            "--large_snapshot_aws_region ${params.REGION} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 43200, roleSessionName: 'jenkins-session') {

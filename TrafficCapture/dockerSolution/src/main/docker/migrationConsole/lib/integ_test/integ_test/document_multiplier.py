@@ -547,7 +547,7 @@ class BackfillTest(unittest.TestCase):
         migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         # Extract account ID from the role ARN
         account_number = migrationAssistant_deployTimeRole.split(':')[4]
-        region = "us-east-1"
+        region = self.config['LARGE_SNAPSHOT_AWS_REGION']
         updated_s3_uri = self.setup_s3_bucket(account_number, region, self.config)
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
