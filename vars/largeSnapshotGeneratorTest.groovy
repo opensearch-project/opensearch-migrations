@@ -10,22 +10,27 @@ def call(Map config = [:]) {
     // Map the cluster version parameter to the actual engine version
     def engineVersion = ""
     def distributionVersion = ""
+    def distributionType = ""
     switch (params.CLUSTER_VERSION) {
         case 'es5x':
             engineVersion = "ELASTICSEARCH_5.6"
             distributionVersion = "5.6"
+            distributionType = "elasticsearch"
             break
         case 'es6x':
             engineVersion = "ELASTICSEARCH_6.7"
             distributionVersion = "6.7"
+            distributionType = "elasticsearch"
             break
         case 'es7x':
             engineVersion = "ELASTICSEARCH_7.10"
             distributionVersion = "7.10"
+            distributionType = "elasticsearch"
             break
         case 'os2x':
             engineVersion = "OPENSEARCH_2.11"
             distributionVersion = "2.11"
+            distributionType = "opensearch"
             break
         default:
             throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
@@ -60,6 +65,8 @@ def call(Map config = [:]) {
             "otelCollectorEnabled": true,
             "engineVersion": "${engineVersion}",
             "distributionVersion": "${distributionVersion}",
+            "osDistribution": "${distributionType}",
+            "distributionType": "${distributionType}",
             "domainName": "${params.CLUSTER_VERSION}-test-jenkins-${params.STAGE}",
             "dataNodeCount": 30,
             "dataNodeType": "i4i.8xlarge.search",
