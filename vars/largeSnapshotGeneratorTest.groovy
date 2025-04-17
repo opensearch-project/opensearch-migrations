@@ -60,7 +60,7 @@ def call(Map config = [:]) {
             "otelCollectorEnabled": true,
             "engineVersion": "${engineVersion}",
             "distVersion": "${distVersion}",
-            "domainName": "${params.CLUSTER_VERSION}-test-jenkins-${params.STAGE}",
+            "domainName": "${params.CLUSTER_VERSION}-jenkins-test",
             "dataNodeCount": 30,
             "dataNodeType": "i4i.8xlarge.search",
             "masterEnabled": true,
