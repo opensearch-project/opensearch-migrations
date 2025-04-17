@@ -18,7 +18,7 @@ requests.packages.urllib3.disable_warnings()  # ignore: type
 logger = logging.getLogger(__name__)
 
 AuthMethod = Enum("AuthMethod", ["NO_AUTH", "BASIC_AUTH", "SIGV4"])
-HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
+HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE", "HEAD"])
 
 
 NO_AUTH_SCHEMA = {
