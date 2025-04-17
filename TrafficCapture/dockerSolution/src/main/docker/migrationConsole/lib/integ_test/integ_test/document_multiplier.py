@@ -286,22 +286,6 @@ def setup_test_environment(source_cluster: Cluster, test_config):
         source_cluster = env.target_cluster
         if source_cluster is None:
             raise Exception("Neither source nor target cluster is available")
-        
-        # Configure SigV4 authentication for the cluster if no_auth is being used
-        if hasattr(source_cluster, 'no_auth') and getattr(source_cluster, 'no_auth') is not None:
-            logger.info("Configuring SigV4 authentication for target cluster...")
-            # Extract region from the endpoint URL
-            import re
-            endpoint = source_cluster.endpoint
-            region_match = re.search(r'\.([a-z0-9-]+)\.es\.amazonaws\.com', endpoint)
-            region = region_match.group(1) if region_match else test_config.get('LARGE_SNAPSHOT_AWS_REGION', 'us-west-2')
-            
-            # Configure SigV4 authentication
-            source_cluster.auth_type = 'sigv4'
-            source_cluster.region = region
-            source_cluster.service = 'es'
-            source_cluster.no_auth = None
-            logger.info(f"Configured SigV4 authentication for region {region}")
     
     # Confirm cluster connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
