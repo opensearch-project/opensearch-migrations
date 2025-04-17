@@ -1,6 +1,5 @@
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {Port, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {FileSystem, LifecyclePolicy, ThroughputMode} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
