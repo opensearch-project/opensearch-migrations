@@ -17,6 +17,7 @@ SNAPSHOT_SCHEMA = {
         'type': 'dict',
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
+            'snapshot_repo_name': {'type': 'string', 'required': False},
             'otel_endpoint': {'type': 'string', 'required': False},
             's3': {
                 'type': 'dict',
@@ -48,6 +49,9 @@ class Snapshot(ABC):
         v = Validator(SNAPSHOT_SCHEMA)
         if not v.validate({'snapshot': config}):
             raise ValueError("Invalid config file for snapshot", v.errors)
+        self.snapshot_name = config['snapshot_name']
+        self.snapshot_repo_name = config.get("snapshot_repo_name", "migration_assistant_repo")
+        self.otel_endpoint = config.get("otel_endpoint", None)
 
     @abstractmethod
     def create(self, *args, **kwargs) -> CommandResult:
@@ -72,6 +76,7 @@ class Snapshot(ABC):
     def _collect_universal_command_args(self) -> Dict:
         command_args = {
             "--snapshot-name": self.snapshot_name,
+            "--snapshot-repo-name": self.snapshot_repo_name,
             "--source-host": self.source_cluster.endpoint
         }
 
@@ -101,19 +106,9 @@ class Snapshot(ABC):
         return command_args
 
 
-S3_SNAPSHOT_SCHEMA = {
-    'snapshot_name': {'type': 'string', 'required': True},
-    'otel_endpoint': {'type': 'string', 'required': False},
-    's3_repo_uri': {'type': 'string', 'required': True},
-    's3_region': {'type': 'string', 'required': True}
-}
-
-
 class S3Snapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Cluster) -> None:
         super().__init__(config, source_cluster)
-        self.snapshot_name = config['snapshot_name']
-        self.otel_endpoint = config.get("otel_endpoint", None)
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
@@ -156,21 +151,19 @@ class S3Snapshot(Snapshot):
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name)
+            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot(self.source_cluster, self.snapshot_name)
+        return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot_repo(self.source_cluster)
+        return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
 class FileSystemSnapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Cluster) -> None:
         super().__init__(config, source_cluster)
-        self.snapshot_name = config['snapshot_name']
-        self.otel_endpoint = config.get("otel_endpoint", None)
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
@@ -201,18 +194,17 @@ class FileSystemSnapshot(Snapshot):
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name)
+            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot(self.source_cluster, self.snapshot_name)
+        return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot_repo(self.source_cluster)
+        return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
-def get_snapshot_status(cluster: Cluster, snapshot: str,
-                        repository: str = 'migration_assistant_repo') -> CommandResult:
+def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
     path = f"/_snapshot/{repository}/{snapshot}"
     try:
         response = cluster.call_api(path, HttpMethod.GET)
@@ -227,21 +219,6 @@ def get_snapshot_status(cluster: Cluster, snapshot: str,
         return CommandResult(success=True, value=snapshots[0].get("state"))
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get snapshot status: {str(e)}")
-
-
-def get_repository_for_snapshot(cluster: Cluster, snapshot: str) -> Optional[str]:
-    url = f"/_snapshot/*/{snapshot}"
-    response = cluster.call_api(url, HttpMethod.GET)
-    logging.debug(f"Raw response: {response.text}")
-    response.raise_for_status()
-
-    snapshot_data = response.json()
-    snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots:
-        logging.debug(f"Snapshot {snapshot} not found in any repository")
-        return None
-
-    return snapshots[0].get("repository")
 
 
 def format_date(millis: int) -> str:
@@ -300,11 +277,8 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
     )
 
 
-def get_snapshot_status_full(cluster: Cluster, snapshot: str,
-                             repository: str = 'migration_assistant_repo') -> CommandResult:
+def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
     try:
-        repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot)
-
         path = f"/_snapshot/{repository}/{snapshot}"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status response: {response.text}")
@@ -334,15 +308,13 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str,
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'migration_assistant_repo'):
-    repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot_name)
-
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str):
     path = f"/_snapshot/{repository}/{snapshot_name}"
     response = cluster.call_api(path, HttpMethod.DELETE)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str = 'migration_assistant_repo'):
+def delete_snapshot_repo(cluster: Cluster, repository: str):
     path = f"/_snapshot/{repository}"
     response = cluster.call_api(path, HttpMethod.DELETE)
     logging.debug(f"Raw delete snapshot repository status response: {response.text}")
