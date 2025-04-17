@@ -7,6 +7,26 @@ def call(Map config = [:]) {
 
     def docTransformerPath = "/shared-logs-output/test-transformations/transformation.json"
     
+    // Map the cluster version parameter to the actual engine version
+    def engineVersion = ""
+    switch (params.CLUSTER_VERSION) {
+        case 'es5x':
+            engineVersion = "ES_5.6"
+            break
+        case 'es6x':
+            engineVersion = "ES_6.7"
+            break
+        case 'es7x':
+            engineVersion = "ES_7.10"
+            break
+        case 'os2x':
+            engineVersion = "OS_2.11"
+            break
+        default:
+            throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
+    }
+
+   
     def migration_cdk_context = """
         {
           "document-multiplier-rfs": {
@@ -17,30 +37,33 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": true,
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath}",
+            "sourceClusterDeploymentEnabled": true,
             "sourceCluster": {
-                "endpoint": "https://search-test-large-snapshot3-es56-r3bsjpvx477msw2t2yreuk77l4.aos.us-east-1.on.aws",
+                "endpoint": "https://www.google.com",
                 "auth": {
                     "type": "sigv4",
                     "region": "us-east-1",
                     "serviceSigningName": "es"
                 },
-                "version": "ES_5.6"
-            },
-            "targetCluster": {
-                "endpoint": "https://search-test-large-snapshot3-es56-r3bsjpvx477msw2t2yreuk77l4.aos.us-east-1.on.aws",
-                "auth": {
-                    "type": "sigv4",
-                    "region": "us-east-1",
-                    "serviceSigningName": "es"
-                },
-                "version": "ES_5.6"
+                "version": "${engineVersion}"
             },
             "vpcEnabled": true,
+            "vpcAZCount": 3,
             "migrationAssistanceEnabled": true,
             "replayerOutputEFSRemovalPolicy": "DESTROY",
             "migrationConsoleServiceEnabled": true,
-            "otelCollectorEnabled": true
-          }
+            "otelCollectorEnabled": true,
+            "engineVersion": "${engineVersion}",
+            "domainName": "${params.CLUSTER_VERSION}-test-jenkins-${params.STAGE}",
+            "dataNodeCount": 30,
+            "dataNodeType": "i4i.8xlarge.search",
+            "masterEnabled": true,
+            "dedicatedManagerNodeCount": 3,
+            "dedicatedManagerNodeType": "m7i.xlarge.search",
+            "ebsEnabled": false,
+            "openAccessPolicyEnabled": true,
+            "domainRemovalPolicy": "DESTROY"
+            }
         }
     """
 
@@ -59,7 +82,7 @@ def call(Map config = [:]) {
             migrationContextId: migrationContextId,
             defaultStageId: 'dev',
             skipCaptureProxyOnNodeSetup: true,
-            skipSourceDeploy: true,
+            skipSourceDeploy: false,
             jobName: 'k8s-large-snapshot-test',
             testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/document_multiplier.py --config-file=/config/migration-services.yaml --log-cli-level=info',
