@@ -92,7 +92,7 @@ def call(Map config = [:]) {
             migrationContextId: migrationContextId,
             defaultStageId: 'dev',
             skipCaptureProxyOnNodeSetup: true,
-            skipSourceDeploy: false,
+            skipSourceDeploy: true,
             jobName: 'k8s-large-snapshot-test',
             testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/document_multiplier.py --config-file=/config/migration-services.yaml --log-cli-level=info',
