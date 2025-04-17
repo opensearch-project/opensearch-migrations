@@ -280,7 +280,6 @@ def setup_test_environment(source_cluster: Cluster, test_config):
     # If source_cluster is None, we'll need to get the target cluster from environment
     if source_cluster is None:
         logger.info("Source cluster is None, using target cluster instead")
-        from console_link.cli import Context
         config_path = "/config/migration_services.yaml"
         env = Context(config_path).env
         source_cluster = env.target_cluster
