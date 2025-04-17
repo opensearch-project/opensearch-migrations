@@ -147,7 +147,7 @@ def call(Map config = [:]) {
                                     echo "Acquired deployment stage: ${params.STAGE}"
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                    def baseCommand = "sudo --preserve-env AWS_REGION=${params.REGION} AWS_DEFAULT_REGION=${params.REGION} ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
@@ -163,8 +163,6 @@ def call(Map config = [:]) {
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 5400, roleSessionName: 'jenkins-session') {
                                             sh """
-                                                export AWS_REGION=${params.REGION}
-                                                export AWS_DEFAULT_REGION=${params.REGION}
                                                 ${baseCommand}
                                             """
                                         }
