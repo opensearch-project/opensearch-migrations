@@ -62,7 +62,11 @@ def call(Map config = [:]) {
             "dedicatedManagerNodeType": "m7i.xlarge.search",
             "ebsEnabled": false,
             "openAccessPolicyEnabled": true,
-            "domainRemovalPolicy": "DESTROY"
+            "domainRemovalPolicy": "DESTROY",
+            "tlsSecurityPolicy": "TLS_1_2",
+            "enforceHTTPS": true,
+            "nodeToNodeEncryptionEnabled": true,
+            "encryptionAtRestEnabled": true
             }
         }
     """
