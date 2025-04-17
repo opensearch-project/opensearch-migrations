@@ -425,7 +425,6 @@ export class StackComposer {
                 appLogGroup: loggingAppLogGroupARN,
                 nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
                 vpcDetails: networkStack ? networkStack.vpcDetails : undefined,
-                vpcAZCount: vpcAZCount,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
                 domainRemovalPolicy: domainRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
