@@ -547,7 +547,7 @@ class BackfillTest(unittest.TestCase):
         migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         # Extract account ID from the role ARN
         account_number = migrationAssistant_deployTimeRole.split(':')[4]
-        region = self.config['LARGE_SNAPSHOT_AWS_REGION']
+        region = "us-east-1"
         updated_s3_uri = self.setup_s3_bucket(account_number, region, self.config)
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
@@ -598,16 +598,19 @@ class BackfillTest(unittest.TestCase):
     def setup_s3_bucket(self, account_number: str, region: str, test_config):
         """Check and create S3 bucket to store large snapshot"""
         cluster_version = test_config['CLUSTER_VERSION']
-        bucket_name = f"migration-jenkins-snapshot-{account_number}-{region}"
+        # Always use us-east-1 for the snapshot bucket
+        snapshot_region = "us-east-1"
+        bucket_name = f"migration-jenkins-snapshot-{account_number}-{snapshot_region}"
         snapshot_folder = f"large-snapshot-{cluster_version}"
 
         # Check if bucket exists
-        logger.info(f"Checking if S3 bucket {bucket_name} exists in region {region}...")
+        logger.info(f"Checking if S3 bucket {bucket_name} exists in region {snapshot_region}...")
         check_bucket_cmd = CommandRunner(
             command_root="aws",
             command_args={
                 "__positional__": ["s3api", "head-bucket"],
-                "--bucket": bucket_name
+                "--bucket": bucket_name,
+                "--region": snapshot_region
             }
         )
         
@@ -624,7 +627,8 @@ class BackfillTest(unittest.TestCase):
                 command_root="aws",
                 command_args={
                     "__positional__": ["s3", "rm", f"s3://{bucket_name}/{snapshot_folder}/"],
-                    "--recursive": None
+                    "--recursive": None,
+                    "--region": snapshot_region
                 }
             )
             cleanup_result = s3_cleanup_cmd.run()
@@ -636,12 +640,12 @@ class BackfillTest(unittest.TestCase):
             create_args = {
                 "__positional__": ["s3api", "create-bucket"],
                 "--bucket": bucket_name,
-                "--region": region,
+                "--region": snapshot_region,
             }
             
             # Only add LocationConstraint for non-us-east-1 regions
-            if region != "us-east-1":
-                create_args["--create-bucket-configuration"] = f"LocationConstraint={region}"
+            if snapshot_region != "us-east-1":
+                create_args["--create-bucket-configuration"] = f"LocationConstraint={snapshot_region}"
                 
             create_bucket_cmd = CommandRunner(
                 command_root="aws",

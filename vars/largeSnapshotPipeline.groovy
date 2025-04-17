@@ -33,6 +33,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'test-k8s-large-snapshot', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
+            choice(name: 'REGION', choices: ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2'], description: 'AWS Region to deploy resources')
             string(name: 'NUM_SHARDS', defaultValue: '10', description: 'Number of index shards')
             string(name: 'MULTIPLICATION_FACTOR', defaultValue: '1000', description: 'Document multiplication factor')
             string(name: 'BATCH_COUNT', defaultValue: '3', description: 'Number of batches')
@@ -52,6 +53,7 @@ def call(Map config = [:]) {
             LARGE_SNAPSHOT_RATE_MB_PER_NODE = "${params.LARGE_SNAPSHOT_RATE_MB_PER_NODE}"
             RFS_WORKERS = "${params.RFS_WORKERS}"
             CLUSTER_VERSION = "${params.CLUSTER_VERSION}"
+            REGION = "${params.REGION}"
         }
 
         options {
@@ -194,9 +196,10 @@ def call(Map config = [:]) {
                                             "--stage ${params.STAGE} " +
                                             "--rfs_workers ${env.RFS_WORKERS} " +
                                             "--cluster_version ${env.CLUSTER_VERSION} " +
+                                            "--large_snapshot_aws_region us-east-1 " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 43200, roleSessionName: 'jenkins-session') {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 43200, roleSessionName: 'jenkins-session') {
                                             sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
                                                     "--test-result-file ${test_result_file} " +
                                                     "--stage ${params.STAGE}"
@@ -221,9 +224,9 @@ def call(Map config = [:]) {
                                     echo "Cleaning up all deployed stacks on stage: ${params.STAGE}"
                                     dir('cleanupDeployment') {
                                         sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
-                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${params.STAGE}"
+                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${params.STAGE} --region ${params.REGION}"
                                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
                                                 sh "sudo --preserve-env ${command}"
                                             }
                                         }

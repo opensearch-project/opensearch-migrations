@@ -36,6 +36,7 @@ def call(Map config = [:]) {
         {
           "document-multiplier-rfs": {
             "stage": "${params.STAGE}",
+            "region": "${params.REGION}",
             "artifactBucketRemovalPolicy": "DESTROY",
             "captureProxyServiceEnabled": false,
             "targetClusterProxyServiceEnabled": false,
@@ -72,7 +73,8 @@ def call(Map config = [:]) {
         {
           "source-single-node-ec2": {
             "suffix": "ec2-source-<STAGE>",
-            "networkStackSuffix": "ec2-source-<STAGE>"
+            "networkStackSuffix": "ec2-source-<STAGE>",
+            "region": "${params.REGION}"
           }
         }
     """
@@ -96,6 +98,7 @@ def call(Map config = [:]) {
               LARGE_SNAPSHOT_RATE_MB_PER_NODE: params.LARGE_SNAPSHOT_RATE_MB_PER_NODE,
               RFS_WORKERS: params.RFS_WORKERS,
               CLUSTER_VERSION: params.CLUSTER_VERSION,
+              REGION: params.REGION,
             ]
     )
 }
