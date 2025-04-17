@@ -183,7 +183,8 @@ def call(Map config = [:]) {
                                 if (config.integTestStep) {
                                     config.integTestStep()
                                 } else {
-                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}"
+                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}, LARGE_SNAPSHOT_RATE_MB_PER_NODE=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE}, RFS_WORKERS=${env.RFS_WORKERS}, CLUSTER_VERSION=${env.CLUSTER_VERSION}, REGION=${params.REGION}"
+                                    echo "Running integration tests with command: ${integTestCommand}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", params.STAGE)
                                     def command = "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
