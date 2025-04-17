@@ -34,7 +34,7 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
     caught_exception = None
     r = None
     try:
-        r = cluster.call_api(cluster_details_path, timeout=3)
+        r = cluster.call_api(cluster_details_path, timeout=20)
     except Exception as e:
         caught_exception = e
         logging.debug(f"Unable to access cluster: {cluster} with exception: {e}")
