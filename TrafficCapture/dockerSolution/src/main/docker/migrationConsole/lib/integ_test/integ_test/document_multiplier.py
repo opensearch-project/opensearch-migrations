@@ -13,7 +13,7 @@ from console_link.models.snapshot import S3Snapshot  # Import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from .default_operations import DefaultOperationsLibrary
-from .common_utils import execute_api_call, cat_indices
+from .common_utils import execute_api_call
 from datetime import datetime
 import time
 import shutil
@@ -360,6 +360,14 @@ def setup_backfill(test_config, request):
     # Log config file path
     logger.info(f"Using config file: {config_path}")
     
+    # Try to read the config file directly
+    try:
+        with open(config_path, 'r') as f:
+            config_content = f.read()
+            logger.info(f"Config file content:\n{config_content}")
+    except Exception as e:
+        logger.error(f"Failed to read config file: {str(e)}")
+    
     # Load environment
     env = Context(config_path).env
     pytest.console_env = env
@@ -385,7 +393,11 @@ def setup_backfill(test_config, request):
             
         # Try to get indices
         try:
-            indices = cat_indices(env.target_cluster, as_json=True)
+            indices = execute_api_call(
+                cluster=env.target_cluster,
+                method=HttpMethod.GET,
+                path="/_cat/indices?format=json"
+            ).json()
             logger.info(f"Target cluster indices: {indices}")
         except Exception as e:
             logger.error(f"Failed to get indices: {str(e)}")
@@ -397,8 +409,13 @@ def setup_backfill(test_config, request):
 
     # Get components
     backfill: Backfill = pytest.console_env.backfill
+    logger.info(f"Backfill object: {backfill}")
+    logger.info(f"Backfill type: {type(backfill)}")
     assert backfill is not None
+    
     snapshot: Snapshot = pytest.console_env.snapshot
+    logger.info(f"Snapshot object: {snapshot}")
+    logger.info(f"Snapshot type: {type(snapshot)}")
     assert snapshot is not None
 
     # Initialize backfill first (creates .migrations_working_state)
