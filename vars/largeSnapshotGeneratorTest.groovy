@@ -42,16 +42,6 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": true,
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath}",
-            "sourceClusterDeploymentEnabled": true,
-            "sourceCluster": {
-                "endpoint": "<DOMAIN_ENDPOINT>",
-                "auth": {
-                    "type": "sigv4",
-                    "region": "us-east-1",
-                    "serviceSigningName": "es"
-                },
-                "version": "${engineVersion}"
-            },
             "sourceClusterDeploymentEnabled": false,
             "vpcEnabled": true,
             "vpcAZCount": 2,
@@ -88,7 +78,7 @@ def call(Map config = [:]) {
     """
 
     largeSnapshotPipeline(
-            sourceContext: migration_cdk_context,
+            sourceContext: source_cdk_context,
             migrationContext: migration_cdk_context,
             migrationContextId: migrationContextId,
             defaultStageId: 'dev',
