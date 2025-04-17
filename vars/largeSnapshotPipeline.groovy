@@ -152,6 +152,7 @@ def call(Map config = [:]) {
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
                                             "--stage ${params.STAGE} " +
+                                            "--region ${params.REGION} " +
                                             "--migrations-git-url ${params.GIT_REPO_URL} " +
                                             "--migrations-git-branch ${params.GIT_BRANCH}"
                                     if (skipCaptureProxyOnNodeSetup) {
@@ -161,7 +162,7 @@ def call(Map config = [:]) {
                                         baseCommand += " --skip-source-deploy"
                                     }
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 5400, roleSessionName: 'jenkins-session') {
                                             sh baseCommand
                                         }
                                     }
