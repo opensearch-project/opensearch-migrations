@@ -277,6 +277,16 @@ def preload_data_cluster_os217(source_cluster: Cluster, test_config):
 
 def setup_test_environment(source_cluster: Cluster, test_config):
     """Setup test data"""
+    # If source_cluster is None, we'll need to get the target cluster from environment
+    if source_cluster is None:
+        logger.info("Source cluster is None, using target cluster instead")
+        from console_link.cli import Context
+        config_path = "/config/migration_services.yaml"
+        env = Context(config_path).env
+        source_cluster = env.target_cluster
+        if source_cluster is None:
+            raise Exception("Neither source nor target cluster is available")
+        
     # Confirm cluster connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
     assert source_con_result.connection_established is True
