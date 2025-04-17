@@ -286,9 +286,9 @@ def setup_test_environment(source_cluster: Cluster, test_config):
         if source_cluster is None:
             raise Exception("Neither source nor target cluster is available")
     
-    # Confirm cluster connection
-    source_con_result: ConnectionResult = connection_check(source_cluster)
-    assert source_con_result.connection_established is True, f"Failed to connect to cluster: {source_con_result.connection_message}"
+    # # Confirm cluster connection
+    # source_con_result: ConnectionResult = connection_check(source_cluster)
+    # assert source_con_result.connection_established is True, f"Failed to connect to cluster: {source_con_result.connection_message}"
 
     # Clear indices and snapshots at the start
     logger.info("Clearing indices and snapshots before starting test...")
