@@ -13,7 +13,7 @@ from console_link.models.snapshot import S3Snapshot  # Import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from .default_operations import DefaultOperationsLibrary
-from .common_utils import execute_api_call
+from .common_utils import execute_api_call, cat_indices
 from datetime import datetime
 import time
 import shutil
@@ -356,8 +356,41 @@ def setup_backfill(test_config, request):
     """Test setup with backfill lifecycle management"""
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
-    pytest.console_env = Context(config_path).env
+    
+    # Log config file path
+    logger.info(f"Using config file: {config_path}")
+    
+    # Load environment
+    env = Context(config_path).env
+    pytest.console_env = env
     pytest.unique_id = unique_id
+    
+    # Log target cluster details
+    if env.target_cluster:
+        logger.info(f"Target cluster endpoint: {env.target_cluster.endpoint}")
+        logger.info(f"Target cluster auth type: {env.target_cluster.auth_type}")
+        if hasattr(env.target_cluster, 'auth_details'):
+            logger.info(f"Target cluster auth details: {env.target_cluster.auth_details}")
+        
+        # Try to get version info
+        try:
+            version_info = execute_api_call(
+                cluster=env.target_cluster,
+                method=HttpMethod.GET,
+                path="/"
+            ).json()
+            logger.info(f"Target cluster version: {version_info.get('version', {}).get('number', 'unknown')}")
+        except Exception as e:
+            logger.error(f"Failed to get cluster version: {str(e)}")
+            
+        # Try to get indices
+        try:
+            indices = cat_indices(env.target_cluster, as_json=True)
+            logger.info(f"Target cluster indices: {indices}")
+        except Exception as e:
+            logger.error(f"Failed to get indices: {str(e)}")
+    else:
+        logger.warning("Target cluster is not configured!")
 
     # Preload data on pilot index
     setup_test_environment(source_cluster=pytest.console_env.source_cluster, test_config=test_config)
@@ -369,14 +402,24 @@ def setup_backfill(test_config, request):
     assert snapshot is not None
 
     # Initialize backfill first (creates .migrations_working_state)
-    backfill_create_result: CommandResult = backfill.create()
-    assert backfill_create_result.success
-    logger.info("Backfill initialized successfully. Created working state at %s", backfill_create_result.value)
+    try:
+        backfill_create_result: CommandResult = backfill.create()
+        logger.info(f"Backfill create result: {backfill_create_result}")
+        assert backfill_create_result.success
+        logger.info("Backfill initialized successfully. Created working state at %s", backfill_create_result.value)
+    except Exception as e:
+        logger.error(f"Failed to create backfill: {str(e)}")
+        raise
 
     # Create initial RFS snapshot and wait for completion
-    snapshot_result: CommandResult = snapshot.create(wait=True)
-    assert snapshot_result.success
-    logger.info("Snapshot creation completed successfully")
+    try:
+        snapshot_result: CommandResult = snapshot.create(wait=True)
+        logger.info(f"Snapshot create result: {snapshot_result}")
+        assert snapshot_result.success
+        logger.info("Snapshot creation completed successfully")
+    except Exception as e:
+        logger.error(f"Failed to create snapshot: {str(e)}")
+        raise
 
     yield
 
