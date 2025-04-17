@@ -42,16 +42,7 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": true,
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath}",
-            "sourceClusterDeploymentEnabled": true,
-            "sourceCluster": {
-                "endpoint": "https://www.google.com",
-                "auth": {
-                    "type": "sigv4",
-                    "region": "us-east-1",
-                    "serviceSigningName": "es"
-                },
-                "version": "${engineVersion}"
-            },
+            "sourceClusterDeploymentEnabled": false,
             "vpcEnabled": true,
             "vpcAZCount": 3,
             "migrationAssistanceEnabled": true,
