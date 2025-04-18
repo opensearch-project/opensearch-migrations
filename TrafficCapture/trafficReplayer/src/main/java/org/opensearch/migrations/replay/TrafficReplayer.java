@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import java.io.File;
+import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.time.Clock;
@@ -36,6 +38,10 @@ import com.beust.jcommander.ParametersDelegate;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.ConfigurationFactory;
+import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import software.amazon.awssdk.arns.Arn;
@@ -45,6 +51,7 @@ import software.amazon.awssdk.regions.Region;
 @Slf4j
 public class TrafficReplayer {
     private static final String ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER = "AllActiveWorkMonitor";
+    public static final String LOG4J2_PROPERTIES_FILE = "LOG4J2_PROPERTIES_FILE";
 
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
@@ -89,6 +96,21 @@ public class TrafficReplayer {
             );
         }
         return true;
+    }
+
+    public static void reloadConfiguration(String configFile) throws IOException {
+        ConfigurationSource source;
+        var file = configFile == null || configFile.isEmpty() ? null : new File(configFile);
+        if (file != null && file.exists()) {
+            source = new ConfigurationSource(file.toURI().toURL().openStream(), file.toURI().toURL());
+            LoggerContext context = (LoggerContext) LogManager.getContext(false);
+            var config = ConfigurationFactory.getInstance().getConfiguration(context, source);
+            context.start(config);
+            log.atInfo().setMessage("Successfully reloaded Log4j2 configuration from: {}")
+                .addArgument(configFile).log();
+        } else {
+            log.atInfo().setMessage("Using the default Log4j2 configuration").log();
+        }
     }
 
     public static class Parameters {
@@ -333,6 +355,8 @@ public class TrafficReplayer {
 
     public static void main(String[] args) throws Exception {
         System.err.println("Got args: " + String.join("; ", args));
+        reloadConfiguration(System.getenv(LOG4J2_PROPERTIES_FILE));
+
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
