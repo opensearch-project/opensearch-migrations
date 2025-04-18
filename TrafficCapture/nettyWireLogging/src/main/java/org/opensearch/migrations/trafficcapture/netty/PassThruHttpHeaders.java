@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
@@ -26,7 +27,7 @@ public class PassThruHttpHeaders extends DefaultHttpHeaders {
                     HttpHeaderNames.CONTENT_TRANSFER_ENCODING.toString(),
                     HttpHeaderNames.TRAILER.toString()
                 ),
-                Arrays.stream(extraHeaderNames)
+                Optional.ofNullable(extraHeaderNames).stream().flatMap(Arrays::stream)
             ).forEach(h -> caseInsensitiveHeadersMap.add(h, ""));
         }
     }

@@ -147,7 +147,9 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             var streamMgr = new TestStreamManager();
             var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
 
-            var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", "uploader"));
+
+            var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
+                .suppressCaptureHeaderPairs(Map.of("user-Agent", "uploader")).build();
             EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(
                     rootInstrumenter,
@@ -185,7 +187,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             var streamMgr = new TestStreamManager();
             var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
 
-            var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(Map.of("user-Agent", ".*uploader.*"));
+            var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
+                .suppressCaptureHeaderPairs(Map.of("user-Agent", ".*uploader.*")).build();
             EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(
                     rootInstrumenter,
