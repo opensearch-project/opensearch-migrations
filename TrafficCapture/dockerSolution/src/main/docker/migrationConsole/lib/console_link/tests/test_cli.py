@@ -305,6 +305,20 @@ def test_cli_cluster_run_curl_multiple_headers(runner, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_cluster_run_curl_head_method(runner, mocker):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'target_cluster', '/', '-X', 'HEAD'],
+                           catch_exceptions=True)
+    middleware_mock.assert_called_once()
+    model_mock.assert_called_once()
+    assert model_mock.call_args.kwargs == {'path': '/', 'method': HttpMethod.HEAD,
+                                           'data': None, 'headers': {}, 'timeout': None,
+                                           'session': None, 'raise_error': False}
+    assert result.exit_code == 0
+
+
 def test_cli_cluster_clear_indices(runner, mocker):
     mock = mocker.patch('console_link.middleware.clusters.clear_indices')
     result = runner.invoke(cli,
