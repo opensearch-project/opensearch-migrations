@@ -227,7 +227,7 @@ def call(Map config = [:]) {
                                     echo "Cleaning up all deployed stacks on stage: ${params.STAGE}"
                                     dir('cleanupDeployment') {
                                         sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
-                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${params.STAGE} --region ${params.REGION}"
+                                        def command = "pipenv run python3 cleanup_deployment.py --stage ${params.STAGE}"
                                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
                                                 sh """
