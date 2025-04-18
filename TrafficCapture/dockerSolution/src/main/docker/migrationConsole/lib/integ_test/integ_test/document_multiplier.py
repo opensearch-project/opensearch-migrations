@@ -430,12 +430,25 @@ def setup_backfill(test_config, request):
 
     # Create initial RFS snapshot and wait for completion
     try:
+        # Log snapshot settings
+        logger.info(f"Snapshot settings: {snapshot.__dict__}")
+        
+        # Try to create snapshot
+        logger.info("Creating snapshot...")
         snapshot_result: CommandResult = snapshot.create(wait=True)
         logger.info(f"Snapshot create result: {snapshot_result}")
+        
+        # Check result
+        if not snapshot_result.success:
+            logger.error(f"Snapshot creation failed with error: {snapshot_result.error}")
+            logger.error(f"Snapshot creation output: {snapshot_result.output}")
+        
         assert snapshot_result.success
         logger.info("Snapshot creation completed successfully")
     except Exception as e:
         logger.error(f"Failed to create snapshot: {str(e)}")
+        import traceback
+        logger.error(f"Snapshot creation error traceback: {traceback.format_exc()}")
         raise
 
     yield

@@ -46,11 +46,17 @@ class UnsupportedBackfillTypeError(Exception):
         super().__init__("Unsupported backfill type", supplied_backfill)
 
 
-def get_snapshot(config: Dict, source_cluster: Cluster):
+def get_snapshot(config: Dict, source_cluster: Cluster = None, target_cluster: Cluster = None):
+    # Use target_cluster as a fallback when source_cluster is not available
+    cluster_to_use = source_cluster if source_cluster is not None else target_cluster
+    
+    if cluster_to_use is None:
+        raise ValueError("Either source_cluster or target_cluster must be provided for snapshot operations")
+        
     if 'fs' in config:
-        return FileSystemSnapshot(config, source_cluster)
+        return FileSystemSnapshot(config, cluster_to_use)
     elif 's3' in config:
-        return S3Snapshot(config, source_cluster)
+        return S3Snapshot(config, cluster_to_use)
     logger.error(f"An unsupported snapshot type was provided: {config.keys()}")
     if len(config.keys()) > 1:
         raise UnsupportedSnapshotError(', '.join(config.keys()))
