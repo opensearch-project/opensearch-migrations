@@ -33,6 +33,8 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
     readonly sourceCluster?: ClusterYaml,
+    readonly sourceClusterDisabled?: boolean,
+    readonly targetCluster?: ClusterYaml,
     readonly managedServiceSourceSnapshotEnabled?: boolean
 }
 
@@ -271,7 +273,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }
 
-        if (props.managedServiceSourceSnapshotEnabled && servicesYaml.snapshot?.s3) {
+        if ((props.managedServiceSourceSnapshotEnabled || (!props.sourceClusterDisabled && props.targetCluster?.auth?.sigv4)) && servicesYaml.snapshot?.s3) {
             servicesYaml.snapshot.s3.role =
                 createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
                     this.region, props.stage, props.defaultDeployId)
