@@ -45,6 +45,15 @@ def call(Map config = [:]) {
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath}",
             "sourceClusterDeploymentEnabled": false,
             "sourceClusterDisabled": true,
+            "managedServiceSourceSnapshotEnabled": true,
+            "targetCluster": {
+              "endpoint": "<DOMAIN_ENDPOINT>",
+              "auth": {
+                "type": "sigv4",
+                "region": "${params.REGION}",
+                "service": "es"
+              }
+            },
             "vpcEnabled": true,
             "vpcAZCount": 2,
             "migrationAssistanceEnabled": true,
