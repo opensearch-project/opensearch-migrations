@@ -245,14 +245,6 @@ export class StackComposer {
         }
         const sourceClusterEndpoint = sourceCluster?.endpoint
 
-        if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
-            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
-                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
-        } else if (sourceCluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
-            managedServiceSourceSnapshotEnabled = true;
-            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
-        }
-
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         let targetClusterDefinition = this.getContextForType('targetCluster', 'object', defaultValues, contextJSON)
         const usePreexistingTargetCluster = !!(targetClusterEndpointField || targetClusterDefinition)
@@ -274,6 +266,18 @@ export class StackComposer {
         }
         const targetCluster = usePreexistingTargetCluster ? parseClusterDefinition(targetClusterDefinition) : undefined
 
+        if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
+            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
+                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        } else if (sourceCluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
+            managedServiceSourceSnapshotEnabled = true;
+            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
+        } else if (!sourceCluster && targetCluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
+            // If no source cluster is defined but target cluster uses SigV4 auth, enable snapshot role creation
+            managedServiceSourceSnapshotEnabled = true;
+            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with no source cluster but target cluster set with sigv4 auth, defaulting to true.")
+        }
+        
         // Ensure that target cluster username and password are not defined in multiple places
         if (targetCluster && (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN)) {
             throw new Error("The `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` can only be used when a domain is being " +
