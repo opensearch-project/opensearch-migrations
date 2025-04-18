@@ -157,7 +157,6 @@ export class StackComposer {
 
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
-        const domainAZCount = this.getContextForType('domainAZCount', 'number', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
         const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
         const dedicatedManagerNodeType = this.getContextForType('dedicatedManagerNodeType', 'string', defaultValues, contextJSON)
@@ -427,7 +426,6 @@ export class StackComposer {
                 nodeToNodeEncryptionEnabled: noneToNodeEncryptionEnabled,
                 vpcDetails: networkStack ? networkStack.vpcDetails : undefined,
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
-                domainAZCount: domainAZCount,
                 domainRemovalPolicy: domainRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
                 description: "This stack contains resources to create/manage an OpenSearch Service domain",
