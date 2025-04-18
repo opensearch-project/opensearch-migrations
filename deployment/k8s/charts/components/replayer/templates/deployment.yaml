@@ -47,6 +47,9 @@ spec:
             - name: shared-logs
               mountPath: /shared-logs-output
             {{- end }}
+          env:
+          - name: LOG4J2_PROPERTIES_FILE
+            value: "/shared-logs-output/replayer_log4j.properties"
       volumes:
         - name: {{ $envMountName }}
           emptyDir: {}
