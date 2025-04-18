@@ -23,6 +23,10 @@ def call(Map config = [:]) {
             engineVersion = "ES_7.10"
             distVersion = "7.10"
             break
+        case 'os1x':
+            engineVersion = "OS_1.3"
+            distVersion = "1.3"
+            break
         case 'os2x':
             engineVersion = "OS_2.11"
             distVersion = "2.11"
@@ -31,6 +35,8 @@ def call(Map config = [:]) {
             throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
     }
 
+    // Determine if node-to-node encryption should be enabled based on ES version
+    def nodeToNodeEncryption = params.CLUSTER_VERSION != 'es5x'
    
     def migration_cdk_context = """
         {
@@ -54,8 +60,8 @@ def call(Map config = [:]) {
             "engineVersion": "${engineVersion}",
             "distVersion": "${distVersion}",
             "domainName": "${params.CLUSTER_VERSION}-jenkins-test",
-            "dataNodeCount": 20,
-            "dataNodeType": "i4i.4xlarge.search",
+            "dataNodeCount": 30,
+            "dataNodeType": "i4i.8xlarge.search",
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
             "dedicatedManagerNodeType": "m7i.xlarge.search",
@@ -64,7 +70,7 @@ def call(Map config = [:]) {
             "domainRemovalPolicy": "DESTROY",
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,
-            "nodeToNodeEncryptionEnabled": true,
+            "nodeToNodeEncryptionEnabled": ${nodeToNodeEncryption},
             "encryptionAtRestEnabled": true
             }
         }

@@ -60,7 +60,7 @@ def pytest_addoption(parser):
     parser.addoption("--rfs_workers", action="store", type=int, default=8,
                      help="Number of RFS workers to scale to")
     parser.addoption("--cluster_version", action="store", default="es5x",
-                     help="Target cluster version (es5x, es6x, es7x, os2x)")
+                     help="Cluster version: es5x, es6x, es7x, os1x, os2x")
 
 
 def pytest_configure(config):

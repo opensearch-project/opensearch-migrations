@@ -337,6 +337,10 @@ def setup_test_environment(target_cluster: Cluster, test_config):
     elif cluster_version == "es7x":
         logger.info("Using ES7.x preload function")
         preload_data_cluster_es710(target_cluster, test_config)
+    elif cluster_version == "os1x":
+        logger.info("Using OpenSearch 1.x preload function")
+        # OpenSearch 1.x is compatible with ES7.x API
+        preload_data_cluster_es710(target_cluster, test_config)
     elif cluster_version == "os2x":
         logger.info("Using OpenSearch 2.x preload function")
         preload_data_cluster_os217(target_cluster, test_config)
