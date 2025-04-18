@@ -682,8 +682,9 @@ class BackfillTest(unittest.TestCase):
     def setup_s3_bucket(self, account_number: str, region: str, test_config):
         """Check and create S3 bucket to store large snapshot"""
         cluster_version = test_config['CLUSTER_VERSION']
-        # Always use us-east-1 for the snapshot bucket
-        snapshot_region = "us-east-1"
+        # Use the region passed from the parameter (same as cluster region)
+        snapshot_region = region
+        self.snapshot_region = snapshot_region
         bucket_name = f"migration-jenkins-snapshot-{account_number}-{snapshot_region}"
         snapshot_folder = f"large-snapshot-{cluster_version}"
 
