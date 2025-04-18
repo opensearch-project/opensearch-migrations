@@ -45,7 +45,6 @@ def call(Map config = [:]) {
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath}",
             "sourceClusterDeploymentEnabled": false,
             "sourceClusterDisabled": true,
-            "managedServiceSourceSnapshotEnabled": true,
             "vpcEnabled": true,
             "vpcAZCount": 2,
             "migrationAssistanceEnabled": true,
