@@ -46,14 +46,6 @@ def call(Map config = [:]) {
             "sourceClusterDeploymentEnabled": false,
             "sourceClusterDisabled": true,
             "managedServiceSourceSnapshotEnabled": true,
-            "targetCluster": {
-              "endpoint": "<DOMAIN_ENDPOINT>",
-              "auth": {
-                "type": "sigv4",
-                "region": "${params.REGION}",
-                "service": "es"
-              }
-            },
             "vpcEnabled": true,
             "vpcAZCount": 2,
             "migrationAssistanceEnabled": true,
