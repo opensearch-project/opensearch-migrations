@@ -44,7 +44,7 @@ PILOT_INDEX = "pilot_index"  # Name of the index used for testing
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
 
-def preload_data_cluster_es56(source_cluster: Cluster, test_config):
+def preload_data_cluster_es56(target_cluster: Cluster, test_config):
     config = test_config
     # Create source index with settings for ES 5.6 and ES 6.8
     index_settings_es56 = {
@@ -79,7 +79,7 @@ def preload_data_cluster_es56(source_cluster: Cluster, test_config):
     }
 
     logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_es56)
-    ops.create_custom_index(cluster=source_cluster, index_name=PILOT_INDEX, data=json.dumps(index_settings_es56))
+    ops.create_custom_index(cluster=target_cluster, index_name=PILOT_INDEX, data=json.dumps(index_settings_es56))
     
     # Create documents with timestamp in bulk
     for j in range(config['BATCH_COUNT']):
@@ -110,7 +110,7 @@ def preload_data_cluster_es56(source_cluster: Cluster, test_config):
 
         # Bulk index documents
         execute_api_call(
-            cluster=source_cluster,
+            cluster=target_cluster,
             method=HttpMethod.POST,
             path="/_bulk",
             data="\n".join(json.dumps(d) for d in bulk_data) + "\n",
@@ -118,7 +118,7 @@ def preload_data_cluster_es56(source_cluster: Cluster, test_config):
         )
 
 
-def preload_data_cluster_es710(source_cluster: Cluster, test_config):
+def preload_data_cluster_es710(target_cluster: Cluster, test_config):
     config = test_config
     # Create source index with settings for ES 7.10
     index_settings_es710 = {
@@ -151,7 +151,7 @@ def preload_data_cluster_es710(source_cluster: Cluster, test_config):
     }
 
     logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_es710)
-    ops.create_custom_index(cluster=source_cluster, index_name=PILOT_INDEX, body=index_settings_es710)
+    ops.create_custom_index(cluster=target_cluster, index_name=PILOT_INDEX, body=index_settings_es710)
     
     # Create documents with timestamp in bulk for ES 7.10
     for j in range(config['BATCH_COUNT']):
@@ -182,7 +182,7 @@ def preload_data_cluster_es710(source_cluster: Cluster, test_config):
 
         # Bulk index documents
         execute_api_call(
-            cluster=source_cluster,
+            cluster=target_cluster,
             method=HttpMethod.POST,
             path="/_bulk",
             data="\n".join(json.dumps(d) for d in bulk_data) + "\n",
@@ -190,7 +190,7 @@ def preload_data_cluster_es710(source_cluster: Cluster, test_config):
         )
 
 
-def preload_data_cluster_os217(source_cluster: Cluster, test_config):
+def preload_data_cluster_os217(target_cluster: Cluster, test_config):
     config = test_config
 
     # Index settings for OpenSearch 2.17
@@ -236,7 +236,7 @@ def preload_data_cluster_os217(source_cluster: Cluster, test_config):
     }
 
     logger.info("Creating index %s with settings: %s", PILOT_INDEX, index_settings_os217)
-    ops.create_custom_index(cluster=source_cluster, index_name=PILOT_INDEX, body=index_settings_os217)
+    ops.create_custom_index(cluster=target_cluster, index_name=PILOT_INDEX, body=index_settings_os217)
 
     # Create documents with timestamp in bulk for OS 2.17
     for j in range(config['BATCH_COUNT']):
@@ -267,7 +267,7 @@ def preload_data_cluster_os217(source_cluster: Cluster, test_config):
 
         # Bulk index documents
         execute_api_call(
-            cluster=source_cluster,
+            cluster=target_cluster,
             method=HttpMethod.POST,
             path="/_bulk",
             data="\n".join(json.dumps(d) for d in bulk_data) + "\n",
@@ -275,30 +275,32 @@ def preload_data_cluster_os217(source_cluster: Cluster, test_config):
         )
 
 
-def setup_test_environment(source_cluster: Cluster, test_config):
+def setup_test_environment(target_cluster: Cluster, test_config):
     """Setup test data"""
-    # If source_cluster is None, we'll need to get the target cluster from environment
-    if source_cluster is None:
-        logger.info("Source cluster is None, using target cluster instead")
+    # If target_cluster is None, we'll need to get the target cluster from environment
+    if target_cluster is None:
+        logger.info("Target cluster is None, using target cluster from environment instead")
         config_path = "/config/migration_services.yaml"
         env = Context(config_path).env
-        source_cluster = env.target_cluster
-        if source_cluster is None:
-            raise Exception("Neither source nor target cluster is available")
+        target_cluster = env.target_cluster
+        if target_cluster is None:
+            raise Exception("Target cluster is not available")
+
+    logger.info(f"Using cluster endpoint: {target_cluster.endpoint}")
     
     # # Confirm cluster connection
-    # source_con_result: ConnectionResult = connection_check(source_cluster)
-    # assert source_con_result.connection_established is True, f"Failed to connect to cluster: {source_con_result.connection_message}"
+    # target_con_result: ConnectionResult = connection_check(target_cluster)
+    # assert target_con_result.connection_established is True, f"Failed to connect to cluster: {target_con_result.connection_message}"
 
     # Clear indices and snapshots at the start
     logger.info("Clearing indices and snapshots before starting test...")
     try:
-        clear_cluster(source_cluster)
+        clear_cluster(target_cluster)
         # Directly delete the index to ensure it's gone
         logger.info(f"Explicitly deleting {PILOT_INDEX} if it exists...")
         try:
             execute_api_call(
-                cluster=source_cluster,
+                cluster=target_cluster,
                 method=HttpMethod.DELETE,
                 path=f"/{PILOT_INDEX}"
             )
@@ -331,20 +333,20 @@ def setup_test_environment(source_cluster: Cluster, test_config):
 
     if cluster_version == "es5x" or cluster_version == "es6x":
         logger.info("Using ES5.x/ES6.x preload function")
-        preload_data_cluster_es56(source_cluster, test_config)
+        preload_data_cluster_es56(target_cluster, test_config)
     elif cluster_version == "es7x":
         logger.info("Using ES7.x preload function")
-        preload_data_cluster_es710(source_cluster, test_config)
+        preload_data_cluster_es710(target_cluster, test_config)
     elif cluster_version == "os2x":
         logger.info("Using OpenSearch 2.x preload function")
-        preload_data_cluster_os217(source_cluster, test_config)
+        preload_data_cluster_os217(target_cluster, test_config)
     else:
         logger.warning(f"Unknown cluster version '{cluster_version}', defaulting to ES5.x/ES6.x")
-        preload_data_cluster_es56(source_cluster, test_config)
+        preload_data_cluster_es56(target_cluster, test_config)
     
     # Refresh indices before creating initial snapshot
     execute_api_call(
-        cluster=source_cluster,
+        cluster=target_cluster,
         method=HttpMethod.POST,
         path="/_refresh"
     )
@@ -405,7 +407,7 @@ def setup_backfill(test_config, request):
         logger.warning("Target cluster is not configured!")
 
     # Preload data on pilot index
-    setup_test_environment(source_cluster=pytest.console_env.source_cluster, test_config=test_config)
+    setup_test_environment(target_cluster=pytest.console_env.target_cluster, test_config=test_config)
 
     # Get components
     backfill: Backfill = pytest.console_env.backfill
@@ -553,7 +555,7 @@ class BackfillTest(unittest.TestCase):
 
     def test_data_multiplication(self):
         """Monitor backfill progress and report final stats"""
-        source = pytest.console_env.source_cluster
+        source = pytest.console_env.target_cluster
         index_name = PILOT_INDEX
         backfill = pytest.console_env.backfill
 
@@ -648,7 +650,7 @@ class BackfillTest(unittest.TestCase):
                 'role': migrationAssistant_deployTimeRole
             }
         }
-        final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.source_cluster)
+        final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.target_cluster)
         final_snapshot_result: CommandResult = final_snapshot.create(
             wait=True,
             max_snapshot_rate_mb_per_node=self.config['LARGE_SNAPSHOT_RATE_MB_PER_NODE']
