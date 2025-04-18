@@ -33,7 +33,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'test-k8s-large-snapshot', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
-            choice(name: 'REGION', choices: ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2'], description: 'AWS Region to deploy resources')
+            choice(name: 'DEPLOY_REGION', choices: ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2'], description: 'AWS Region to deploy resources')
             string(name: 'NUM_SHARDS', defaultValue: '10', description: 'Number of index shards')
             string(name: 'MULTIPLICATION_FACTOR', defaultValue: '1000', description: 'Document multiplication factor')
             string(name: 'BATCH_COUNT', defaultValue: '3', description: 'Number of batches')
@@ -53,7 +53,7 @@ def call(Map config = [:]) {
             LARGE_SNAPSHOT_RATE_MB_PER_NODE = "${params.LARGE_SNAPSHOT_RATE_MB_PER_NODE}"
             RFS_WORKERS = "${params.RFS_WORKERS}"
             CLUSTER_VERSION = "${params.CLUSTER_VERSION}"
-            REGION = "${params.REGION}"
+            DEPLOY_REGION = "${params.DEPLOY_REGION}"
         }
 
         options {
@@ -147,7 +147,7 @@ def call(Map config = [:]) {
                                     echo "Acquired deployment stage: ${params.STAGE}"
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo --preserve-env AWS_REGION=${params.REGION} AWS_DEFAULT_REGION=${params.REGION} ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                    def baseCommand = "sudo --preserve-env AWS_REGION=${params.DEPLOY_REGION} AWS_DEFAULT_REGION=${params.DEPLOY_REGION} ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
@@ -161,7 +161,7 @@ def call(Map config = [:]) {
                                         baseCommand += " --skip-source-deploy"
                                     }
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.DEPLOY_REGION}", duration: 5400, roleSessionName: 'jenkins-session') {
                                             sh """
                                                 ${baseCommand}
                                             """
@@ -183,7 +183,7 @@ def call(Map config = [:]) {
                                 if (config.integTestStep) {
                                     config.integTestStep()
                                 } else {
-                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}, LARGE_SNAPSHOT_RATE_MB_PER_NODE=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE}, RFS_WORKERS=${env.RFS_WORKERS}, CLUSTER_VERSION=${env.CLUSTER_VERSION}, REGION=${params.REGION}"
+                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}, LARGE_SNAPSHOT_RATE_MB_PER_NODE=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE}, RFS_WORKERS=${env.RFS_WORKERS}, CLUSTER_VERSION=${env.CLUSTER_VERSION}, DEPLOY_REGION=${params.DEPLOY_REGION}"
                                     echo "Running integration tests with command: ${integTestCommand}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", params.STAGE)
@@ -199,10 +199,10 @@ def call(Map config = [:]) {
                                             "--stage ${params.STAGE} " +
                                             "--rfs_workers ${env.RFS_WORKERS} " +
                                             "--cluster_version ${env.CLUSTER_VERSION} " +
-                                            "--large_snapshot_aws_region ${params.REGION} " +
+                                            "--deploy_region ${params.DEPLOY_REGION} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 43200, roleSessionName: 'jenkins-session') {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.DEPLOY_REGION}", duration: 43200, roleSessionName: 'jenkins-session') {
                                             sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
                                                     "--test-result-file ${test_result_file} " +
                                                     "--stage ${params.STAGE}"
@@ -229,10 +229,10 @@ def call(Map config = [:]) {
                                         sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
                                         def command = "pipenv run python3 cleanup_deployment.py --stage ${params.STAGE}"
                                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.DEPLOY_REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
                                                 sh """
-                                                    export AWS_REGION=${params.REGION}
-                                                    export AWS_DEFAULT_REGION=${params.REGION}
+                                                    export AWS_REGION=${params.DEPLOY_REGION}
+                                                    export AWS_DEFAULT_REGION=${params.DEPLOY_REGION}
                                                     sudo --preserve-env ${command}
                                                 """
                                             }

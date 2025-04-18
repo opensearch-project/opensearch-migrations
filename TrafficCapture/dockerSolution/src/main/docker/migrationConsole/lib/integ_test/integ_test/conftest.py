@@ -53,8 +53,8 @@ def pytest_addoption(parser):
                      help="Directory for transformation files")
     parser.addoption("--large_snapshot_s3_uri", action="store", default="s3://test-large-snapshot-bucket/es56-snapshot/",
                      help="S3 URI for large snapshot")
-    parser.addoption("--large_snapshot_aws_region", action="store", default="us-east-1",
-                     help="AWS region for S3 Bucket of large snapshot")
+    parser.addoption("--deploy_region", action="store", default="us-east-1",
+                     help="AWS region for deployment")
     parser.addoption("--large_snapshot_rate_mb_per_node", action="store", type=int, default=2000,
                      help="Rate for large snapshot creation")
     parser.addoption("--rfs_workers", action="store", type=int, default=8,

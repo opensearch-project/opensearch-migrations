@@ -15,5 +15,5 @@ largeSnapshotGeneratorTest(
         LARGE_SNAPSHOT_RATE_MB_PER_NODE: params.LARGE_SNAPSHOT_RATE_MB_PER_NODE,
         RFS_WORKERS: params.RFS_WORKERS,
         CLUSTER_VERSION: params.CLUSTER_VERSION,
-        REGION: params.REGION,
+        REGION: params.DEPLOY_REGION,
 )
