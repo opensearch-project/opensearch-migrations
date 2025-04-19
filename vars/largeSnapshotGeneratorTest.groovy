@@ -105,7 +105,8 @@ def call(Map config = [:]) {
               LARGE_SNAPSHOT_RATE_MB_PER_NODE: params.LARGE_SNAPSHOT_RATE_MB_PER_NODE,
               RFS_WORKERS: params.RFS_WORKERS,
               CLUSTER_VERSION: params.CLUSTER_VERSION,
-              REGION: params.DEPLOY_REGION,
+              DEPLOY_REGION: params.DEPLOY_REGION,
+              SNAPSHOT_REGION: params.SNAPSHOT_REGION,
             ]
     )
 }

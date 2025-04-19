@@ -32,6 +32,7 @@ def test_config(request):
         'TRANSFORMATION_DIRECTORY': request.config.getoption("--transformation_directory"),
         'LARGE_SNAPSHOT_S3_URI': request.config.getoption("--large_snapshot_s3_uri"),
         'DEPLOY_REGION': request.config.getoption("--deploy_region"),
+        'SNAPSHOT_REGION': request.config.getoption("--snapshot_region"),
         'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node"),
         'RFS_WORKERS': request.config.getoption("--rfs_workers"),
         'STAGE': request.config.getoption("--stage"),
@@ -635,8 +636,8 @@ class BackfillTest(unittest.TestCase):
         migrationAssistant_deployTimeRole = snapshot.config['s3']['role']
         # Extract account ID from the role ARN
         account_number = migrationAssistant_deployTimeRole.split(':')[4]
-        deploy_region = self.config['DEPLOY_REGION']
-        updated_s3_uri = self.setup_s3_bucket(account_number, deploy_region, self.config)
+        snapshot_region = self.config['SNAPSHOT_REGION']
+        updated_s3_uri = self.setup_s3_bucket(account_number, snapshot_region, self.config)
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
         # Delete the existing snapshot and snapshot repo from the cluster
@@ -645,13 +646,14 @@ class BackfillTest(unittest.TestCase):
 
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
+        large_snapshot_role = f"arn:aws:iam::{account_number}:role/LargeSnapshotAccessRole"
         final_snapshot_config = {
             'snapshot_name': 'large-snapshot',
             's3': {
                 'repo_uri': updated_s3_uri,  
-                'role': migrationAssistant_deployTimeRole,
-                'aws_region': deploy_region,
-                'role': migrationAssistant_deployTimeRole
+                'role': large_snapshot_role,
+                'aws_region': snapshot_region,
+                'endpoint': f"s3.{snapshot_region}.amazonaws.com"
             }
         }
         final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.target_cluster)
@@ -683,12 +685,9 @@ class BackfillTest(unittest.TestCase):
             logger.error(f"Error getting cluster stats: {str(e)}")
             return 0, 0
         
-    def setup_s3_bucket(self, account_number: str, deploy_region: str, test_config):
+    def setup_s3_bucket(self, account_number: str, snapshot_region: str, test_config):
         """Check and create S3 bucket to store large snapshot"""
         cluster_version = test_config['CLUSTER_VERSION']
-        # Use the region passed from the parameter (same as cluster region)
-        snapshot_region = deploy_region
-        self.snapshot_region = snapshot_region
         bucket_name = f"migration-jenkins-snapshot-{account_number}-{snapshot_region}"
         snapshot_folder = f"large-snapshot-{cluster_version}"
 

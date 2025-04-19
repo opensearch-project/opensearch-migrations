@@ -34,6 +34,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'test-k8s-large-snapshot', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(name: 'DEPLOY_REGION', choices: ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2'], description: 'AWS Region to deploy resources')
+            choice(name: 'SNAPSHOT_REGION', choices: ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2'], description: 'AWS Region for taking the final snapshot')
             string(name: 'NUM_SHARDS', defaultValue: '10', description: 'Number of index shards')
             string(name: 'MULTIPLICATION_FACTOR', defaultValue: '1000', description: 'Document multiplication factor')
             string(name: 'BATCH_COUNT', defaultValue: '3', description: 'Number of batches')
@@ -54,6 +55,7 @@ def call(Map config = [:]) {
             RFS_WORKERS = "${params.RFS_WORKERS}"
             CLUSTER_VERSION = "${params.CLUSTER_VERSION}"
             DEPLOY_REGION = "${params.DEPLOY_REGION}"
+            SNAPSHOT_REGION = "${params.SNAPSHOT_REGION}"
         }
 
         options {
@@ -200,6 +202,7 @@ def call(Map config = [:]) {
                                             "--rfs_workers ${env.RFS_WORKERS} " +
                                             "--cluster_version ${env.CLUSTER_VERSION} " +
                                             "--deploy_region ${params.DEPLOY_REGION} " +
+                                            "--snapshot_region ${params.SNAPSHOT_REGION} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.DEPLOY_REGION}", duration: 43200, roleSessionName: 'jenkins-session') {

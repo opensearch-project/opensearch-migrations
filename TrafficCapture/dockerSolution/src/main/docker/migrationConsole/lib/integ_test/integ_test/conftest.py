@@ -55,6 +55,8 @@ def pytest_addoption(parser):
                      help="S3 URI for large snapshot")
     parser.addoption("--deploy_region", action="store", default="us-east-1",
                      help="AWS region for deployment")
+    parser.addoption("--snapshot_region", action="store", default="us-east-1",
+                     help="AWS region for taking the final snapshot")
     parser.addoption("--large_snapshot_rate_mb_per_node", action="store", type=int, default=2000,
                      help="Rate for large snapshot creation")
     parser.addoption("--rfs_workers", action="store", type=int, default=8,
