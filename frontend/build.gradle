@@ -30,8 +30,6 @@ def buildOutputs = [
     'build/site'
 ]
 
-def transformation_playground_path = "./transformation-playground"
-
 
 tasks.register('buildFrontend', NpmTask) {
     args = ['run', 'build']
@@ -56,17 +54,6 @@ Use `npm` locally for detailed work in this project, gradle tasks are used for c
 The following is a list of npm commands to execute:
         """
     }
-}
-
-tasks.register('buildPlayground', NpmTask) {
-    args = ['run', '--prefix', transformation_playground_path, 'build']
-    inputs.files fileTree(dir: transformation_playground_path, include: buildInputs, exclude: buildExclusions)
-    outputs.files fileTree(dir: transformation_playground_path, include: buildOutputs, exclude: buildExclusions)
-}
-
-tasks.register('lintPlayground', NpmTask) {
-    args =  ['run', '--prefix', transformation_playground_path, 'lint']
-    inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
 }
 
 assemble.dependsOn 'buildFrontend'
