@@ -30,7 +30,7 @@ dependencies:
 
   - name: strimzi-kafka-operator
     condition: conditionalPackageInstalls.kafkaOperator
-    version: 0.43.0
+    version: 0.45.0
     repository: "https://strimzi.io/charts/"
 
 

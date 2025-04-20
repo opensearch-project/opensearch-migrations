@@ -100,14 +100,26 @@ snapshotBucketConfiguration:
 
 argo-workflows:
   fullnameOverride: "argo"
+  images:
+    pullPolicy: IfNotPresent
   controller:
     containerSecurityContext:
       runAsNonRoot: true
       allowPrivilegeEscalation: false
     clusterWorkflowTemplates:
       enabled: false
-    metricsConfig: # to publish
+    metricsConfig:
       enabled: true
+    resourceRateLimit: { "limit": 10.0, "burst": 25 }
+    workflowWorkers: 16
+  mainContainer:
+    env:
+      - name: RESOURCE_STATE_CHECK_INTERVAL
+        value: "1s"
+  executor:
+    env:
+      - name: RESOURCE_STATE_CHECK_INTERVAL
+        value: "1s"
   server:
     extraArgs:
       - --auth-mode=server

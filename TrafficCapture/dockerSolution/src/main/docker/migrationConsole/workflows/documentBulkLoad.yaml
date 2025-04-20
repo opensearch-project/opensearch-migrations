@@ -199,7 +199,7 @@ spec:
           - name: index-allowlist
       resource:
         action: create
-        setOwnerReference: true  # delete this replicaset when the workflow is deleted
+        setOwnerReference: true
         manifest: |
           apiVersion: apps/v1
           kind: ReplicaSet
