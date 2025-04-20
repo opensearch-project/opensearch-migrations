@@ -35,9 +35,9 @@ class HeaderValueFilteringCapturePredicateTest {
             build(b->b.protocolPattern("HTTP/1.0")).apply(req));
 
         Assertions.assertEquals(RequestCapturePredicate.CaptureDirective.DROP,
-            build(b->b.firstLinePattern("GET /thing.*")).apply(req));
+            build(b->b.methodAndPathPattern("GET /thing.*")).apply(req));
         Assertions.assertEquals(RequestCapturePredicate.CaptureDirective.CAPTURE,
-            build(b->b.firstLinePattern("POST /thing/.*")).apply(req));
+            build(b->b.methodAndPathPattern("POST /thing/.*")).apply(req));
     }
 
     private static HeaderValueFilteringCapturePredicate

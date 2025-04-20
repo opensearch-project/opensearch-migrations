@@ -178,23 +178,23 @@ public class CaptureProxy {
             description = "The regex pattern to test against the METHOD value of the incoming HTTP request.  "
                 + "When the incoming request has the method that matches the regex, it will be passed "
                 + "through to the service but will NOT be captured.  " +
-                "E.g. 'GET' to ignore capturing all non-mutating traffic.")
+                "E.g. 'GET' to ignore capturing GET requests.")
         public String suppressMethod;
         @Parameter(required = false,
             names = "--suppressCaptureForUriPath",
             description = "The regex pattern to test against the PATH value of the incoming HTTP request.  "
                 + "When the incoming request has a path that matches the regex, it will be passed "
                 + "through to the service but will NOT be captured.  " +
-                "E.g. '/_cat/*' to ignore capturing all non-mutating traffic.")
+                "E.g. '/_cat/*' to ignore capturing traffic that doesn't begin with the path '/_cat/'.")
         public String suppressUriPath;
         @Parameter(required = false,
-            names = "--suppressCaptureForUriPath",
-            description = "The regex pattern to test against the first line of the incoming HTTP request.  "
+            names = "--suppressMethodAndPath",
+            description = "The regex pattern to test against the HTTP method and uri path of the incoming HTTP request.  "
                 + "When the incoming request has a METHOD and PATH that matches the regex, it will be passed "
                 + "through to the service but will NOT be captured.  " +
                 "E.g. '(.* /ephemeral/*|GET /_cat/.*)' to ignore capturing all traffic for '/ephemeral' AND " +
                 "all GET requests to /_cat/.*")
-        public String suppressStartLine;
+        public String suppressMethodAndPath;
     }
 
     static Parameters parseArgs(String[] args) {
@@ -434,7 +434,7 @@ public class CaptureProxy {
             var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
                 .methodPattern(params.suppressMethod)
                 .pathPattern(params.suppressUriPath)
-                .firstLinePattern(params.suppressStartLine)
+                .methodAndPathPattern(params.suppressMethodAndPath)
                 .protocolPattern("HTTP/2.*")
                 .suppressCaptureHeaderPairs(convertPairListToMap(params.suppressCaptureHeaderPairs))
                 .build();

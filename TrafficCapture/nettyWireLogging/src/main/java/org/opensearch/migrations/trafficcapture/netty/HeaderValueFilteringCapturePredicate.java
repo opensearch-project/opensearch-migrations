@@ -13,14 +13,14 @@ public class HeaderValueFilteringCapturePredicate extends RequestCapturePredicat
     private final Pattern method;
     private final Pattern path;
     private final Pattern protocol;
-    private final Pattern firstLinePattern;
+    private final Pattern methodAndPathPattern;
     private final Map<String, Pattern> headerToPredicateRegexMap;
 
     @Builder
     public HeaderValueFilteringCapturePredicate(String methodPattern,
                                                 String pathPattern,
                                                 String protocolPattern,
-                                                String firstLinePattern,
+                                                String methodAndPathPattern,
                                                 Map<String, String> suppressCaptureHeaderPairs) {
         super(new PassThruHttpHeaders.HttpHeadersToPreserve(
             Optional.ofNullable(suppressCaptureHeaderPairs)
@@ -30,7 +30,7 @@ public class HeaderValueFilteringCapturePredicate extends RequestCapturePredicat
         this.method               = methodPattern == null   ? null : Pattern.compile(methodPattern);
         this.path                 = pathPattern == null     ? null : Pattern.compile(pathPattern);
         this.protocol             = protocolPattern == null ? null : Pattern.compile(protocolPattern);
-        this.firstLinePattern     = firstLinePattern == null ? null : Pattern.compile(firstLinePattern);
+        this.methodAndPathPattern = methodAndPathPattern == null ? null : Pattern.compile(methodAndPathPattern);
         headerToPredicateRegexMap = suppressCaptureHeaderPairs == null ? null :
             suppressCaptureHeaderPairs.entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, kvp -> Pattern.compile(kvp.getValue())));
@@ -42,7 +42,7 @@ public class HeaderValueFilteringCapturePredicate extends RequestCapturePredicat
             patternMatches(method,           () -> request.method().name()) ||
             patternMatches(path,             request::uri) ||
             patternMatches(protocol,         () -> request.protocolVersion().text()) ||
-            patternMatches(firstLinePattern, () -> request.method().name()+" "+request.uri()) ||
+            patternMatches(methodAndPathPattern, () -> request.method().name()+" "+request.uri()) ||
             headersMatch(request) ?
                 CaptureDirective.DROP : CaptureDirective.CAPTURE;
     }
