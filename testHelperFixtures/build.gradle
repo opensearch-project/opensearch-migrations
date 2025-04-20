@@ -35,6 +35,9 @@ dependencies {
     testImplementation libs.log4j.api
     testImplementation libs.log4j.core
     testImplementation libs.log4j.slf4j2.impl
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.engine
+    testImplementation libs.junit.jupiter.params
     testFixturesImplementation libs.log4j.api
     testFixturesImplementation libs.log4j.core
     testFixturesImplementation libs.log4j.slf4j2.impl

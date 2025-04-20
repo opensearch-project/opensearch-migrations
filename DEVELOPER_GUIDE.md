@@ -1,13 +1,18 @@
 # Development Guide
 
 ## Table of Contents
-1. [Prerequisites](#prerequisites)
-2. [Project Structure](#project-structure)
-3. [Building the Project](#building-the-project)
-4. [Running Tests](#running-tests)
-5. [Code Style](#code-style)
-6. [Pre-commit Hooks](#pre-commit-hooks)
-7. [Publishing](#publishing)
+- [Development Guide](#development-guide)
+  - [Table of Contents](#table-of-contents)
+  - [Prerequisites](#prerequisites)
+  - [Project Structure](#project-structure)
+  - [Building the Project](#building-the-project)
+  - [Running Tests](#running-tests)
+  - [Code Style](#code-style)
+  - [Pre-Commit Hooks](#pre-commit-hooks)
+  - [Publishing](#publishing)
+  - [Development Environments](#development-environments)
+    - [VSCode](#vscode)
+      - [Python](#python)
 
 ## Prerequisites
 
@@ -110,4 +115,20 @@ To include a test Fixture dependency, define the import similar to the following
 
 ```groovy
 testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')
+```
+
+## Development Environments
+
+### VSCode
+
+#### Python
+
+Settings.json files are already set up in the project, make sure that venv environments are created in all folders with pipfile.  Bootstrap your environment by running the following command that creates all the environments.
+
+```bash
+find . -name Pipfile -not -path "*/cdk.out/*"  | while read pipfile; do
+  dir=$(dirname "$pipfile")
+  echo "Setting up .venv in $dir"
+  (cd "$dir" && PIPENV_IGNORE_VIRTUALENVS=1 PIPENV_VENV_IN_PROJECT=1 pipenv install)
+done
 ```

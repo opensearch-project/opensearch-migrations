@@ -38,7 +38,8 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
             + "  \"settings\": {\n"
             + "   \"index\": {"
             + "    \"number_of_shards\": 1,\n"
-            + "    \"number_of_replicas\": 1\n"
+            + "    \"number_of_replicas\": 1,\n"
+            + "    \"refresh_interval\": \"30s\"\n"
             + "   }\n"
             + "  },\n"
             + "  \"mappings\": {\n"
@@ -68,7 +69,11 @@ public class OpenSearchWorkCoordinator_ES_6_8 extends OpenSearchWorkCoordinator 
             + "}\n";
         }
         protected String getPathForUpdates(String workItemId) {
-            return indexName + "/doc/" + workItemId + "/_update";
+            return indexName + "/doc/" + workItemId + "/_update?refresh=true";
+        }
+
+        protected String getPathForBulkUpdates() {
+            return indexName + "/doc/_bulk?refresh=true";
         }
 
         protected String getPathForSingleDocumentUpdateByQuery() { return indexName + "/_update_by_query?refresh=true&size=1"; }

@@ -1,8 +1,11 @@
 import logging
+from ..common_utils import wait_for_service_status
 from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X
 from .ma_test_base import MATestBase
 from console_link.environment import Environment
 from console_link.models.command_result import CommandResult
+from console_link.models.replayer_base import ReplayStatus
+from console_link.models.backfill_base import BackfillStatus
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +17,11 @@ class Test0004MultiTypeUnionMigration(MATestBase):
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
+        description = "Performs metadata, backfill, and replayer migrations with a multi-type union transformation."
         super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
+                         description=description,
                          allow_source_target_combinations=allow_combinations,
                          run_isolated=run_isolated)
         self.index_name = f"test_0004_{self.unique_id}"
@@ -76,6 +81,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                                             doc_id=self.doc_id2, max_attempts=10, delay=3.0)
         backfill_stop_result: CommandResult = self.backfill.stop()
         assert backfill_stop_result.success
+        wait_for_service_status(status_func=lambda: self.backfill.get_status(), desired_status=BackfillStatus.STOPPED)
 
     def replay_before(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
@@ -92,6 +98,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                                             doc_id=self.doc_id4, max_attempts=20, delay=3.0)
         replayer_stop_result = self.replayer.stop()
         assert replayer_stop_result.success
+        wait_for_service_status(status_func=lambda: self.replayer.get_status(), desired_status=ReplayStatus.STOPPED)
 
 
 class Test0005MultiTypeSplitMigration(MATestBase):
@@ -101,9 +108,11 @@ class Test0005MultiTypeSplitMigration(MATestBase):
             (ElasticsearchV5_X, OpensearchV2_X),
         ]
         run_isolated = True
+        description = "Performs metadata, backfill, and replayer migrations with a multi-type split transformation."
         super().__init__(console_config_path=console_config_path,
                          console_link_env=console_link_env,
                          unique_id=unique_id,
+                         description=description,
                          allow_source_target_combinations=allow_combinations,
                          run_isolated=run_isolated)
         self.index_name = f"test_0005_{self.unique_id}"
@@ -167,6 +176,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                             doc_id=self.doc_id2, max_attempts=10, delay=3.0)
         backfill_stop_result: CommandResult = self.backfill.stop()
         assert backfill_stop_result.success
+        wait_for_service_status(status_func=lambda: self.backfill.get_status(), desired_status=BackfillStatus.STOPPED)
 
     def replay_before(self):
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
@@ -181,3 +191,6 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                                             doc_id=self.doc_id3, max_attempts=20, delay=3.0)
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.split_index_name2,
                                             doc_id=self.doc_id4, max_attempts=20, delay=3.0)
+        replayer_stop_result = self.replayer.stop()
+        assert replayer_stop_result.success
+        wait_for_service_status(status_func=lambda: self.replayer.get_status(), desired_status=ReplayStatus.STOPPED)

@@ -26,12 +26,12 @@ public class WorkCoordinatorFactory {
             long tolerableClientServerClockDifferenceSeconds,
             String workerId
         ) {
-        if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
+        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
                 indexNameAppendage,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId);
-        } else if (VersionMatchers.isES_6_X.test(version)) {
+        } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
             return new OpenSearchWorkCoordinator_ES_6_8(httpClient,
                 indexNameAppendage,
                 tolerableClientServerClockDifferenceSeconds,
@@ -48,14 +48,14 @@ public class WorkCoordinatorFactory {
             Clock clock,
             Consumer<WorkItemAndDuration> workItemConsumer
         ) {
-        if (VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version)) {
+        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
                 indexNameAppendage,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId,
                 clock,
                 workItemConsumer);
-        } else if (VersionMatchers.isES_6_X.test(version)) {
+        } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
             return new OpenSearchWorkCoordinator_ES_6_8(httpClient,
                 indexNameAppendage,
                 tolerableClientServerClockDifferenceSeconds,
@@ -66,6 +66,7 @@ public class WorkCoordinatorFactory {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
     }
+
 
     public String getFinalIndexName() {
         return OpenSearchWorkCoordinator.getFinalIndexName(indexNameAppendage);

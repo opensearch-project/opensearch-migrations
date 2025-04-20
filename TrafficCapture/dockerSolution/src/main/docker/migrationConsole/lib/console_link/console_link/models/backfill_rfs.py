@@ -153,7 +153,7 @@ class K8sRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
         logger.info("Getting status of RFS backfill")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
         if not deployment_status:
@@ -167,6 +167,8 @@ class K8sRFSBackfill(RFSBackfill):
                 shard_status = None
             if shard_status:
                 status_str += f"\n{shard_status}"
+        if deployment_status.terminating > 0 and deployment_status.desired == 0:
+            return CommandResult(True, (BackfillStatus.TERMINATING, status_str))
         if deployment_status.running > 0:
             return CommandResult(True, (BackfillStatus.RUNNING, status_str))
         if deployment_status.pending > 0:
@@ -210,7 +212,7 @@ class ECSRFSBackfill(RFSBackfill):
                                archive_dir_path=archive_dir_path,
                                archive_file_name=archive_file_name)
 
-    def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check=False, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
         if not instance_statuses:
@@ -273,7 +275,7 @@ def get_detailed_status_dict(target_cluster: Cluster, session_name: str) -> Opti
         "in progress": in_progress_query,
         "unclaimed": unclaimed_query
     }
-    values = {key: parse_query_response(queries[key], target_cluster, key) for key in queries.keys()}
+    values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
     logger.info(f"Values: {values}")
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")
@@ -359,9 +361,9 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
         outfile.write("\n]")  # Close the JSON array
 
 
-def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
+def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: str) -> Optional[int]:
     try:
-        response = cluster.call_api("/.migrations_working_state/_search", data=json.dumps(query),
+        response = cluster.call_api("/" + index_name + "/_search", data=json.dumps(query),
                                     headers={'Content-Type': 'application/json'})
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")

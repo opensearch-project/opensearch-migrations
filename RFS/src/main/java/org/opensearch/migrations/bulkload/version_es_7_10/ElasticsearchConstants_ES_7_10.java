@@ -32,8 +32,6 @@ public class ElasticsearchConstants_ES_7_10 {
         // Taken from:
         // https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/common/lucene/Lucene.java#L110
         SOFT_DELETES_FIELD = "__soft_deletes";
-
-        // Soft Deletes were added in 7.0
         SOFT_DELETES_POSSIBLE = true;
     }
 

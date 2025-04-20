@@ -49,6 +49,22 @@ In all other cases, the required components of each cluster object are:
     3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
     4. Basic auth with password in secrets manager (recommended): `{"type": "basic", "username": "admin", "passwordFromSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"}`
 
+### Snapshot Definition Options
+
+| Name     | Type   | Example                                                                                                                          | Description                                                                                        |
+|----------|--------|----------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| snapshot | object | {"snapshotName": "test-snapshot", "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo", "s3Region": "us-east-2"} | A json object for defining the details of an existing S3 snapshot. See below for detailed options. |
+
+#### Structure of the snapshot object
+
+A snapshot should only be configured when the user has an existing snapshot they want to utilize for performing an RFS backfill or Metadata migration instead of creating a snapshot with the Migration Assistant.
+
+In such case, the required fields in the snapshot object are:
+
+- `snapshotName` -- the name of the existing snapshot that was created
+- `s3Uri` -- the `s3://` URI path to where the snapshot repo exists in the given S3 bucket
+- `s3Region` -- the region where the S3 bucket is located
+
 ### Reindex from Snapshot (RFS) Service Options
 
 | Name                                | Type    | Example                                                              | Description                                                                                                                                                                                                                                                                          |
@@ -62,19 +78,18 @@ In all other cases, the required components of each cluster object are:
 
 ### VPC Options
 
-| Name       | Type    | Example                 | Description                                                                                                                               |
-| ---------- | ------- | ----------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| vpcEnabled | boolean | true                    | Enable VPC to place Domain and Migration resources in. If a `vpcId` is not provided a new VPC will be created                             |
-| vpcId      | string  | "vpc-123456789abcdefgh" | Specify an existing VPC to place the domain inside of                                                                                     |
-| vpcAZCount | number  | 2                       | The number of Availability Zones for the created VPC. **Note**: Only applicable if creating a new VPC (thus `vpcId` must not be provided) |
+| Name         | Type         | Example                                                  | Description                                                                                                     |
+|--------------|--------------|----------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------|
+| vpcEnabled   | boolean      | true                                                     | Enable VPC to place Domain and Migration resources in. If a `vpcId` is not provided a new VPC will be created   |
+| vpcId        | string       | "vpc-123456789abcdefgh"                                  | Specify an existing VPC to place the domain inside of                                                           |
+| vpcSubnetIds | string array | ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"] | Specify the subnet IDs of an existing VPC to place the migration resources in. Requires `vpcId` to be specified |
+| vpcAZCount   | number       | 2                                                        | The number of Availability Zones to utilize for a created or imported VPC                                       |
 
 ### MSK(Kafka) Options
 
 | Name                             | Type         | Example                                                                                                 | Description                                                                                                                                                                                        |
 | -------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | mskBrokersPerAZCount             | number       | 1                                                                                                       | The number of broker nodes per MSK Availability Zone                                                                                                                                               |
-| mskSubnetIds                     | string array | ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"]                                                | Specify the subnet IDs of an existing VPC to place MSK brokers in. **NOTE** MSK currently requires either 2 or 3 subnets to be specified and EACH subnet should use a different Availability Zone. |
-| mskAZCount                       | number       | 2                                                                                                       | The number of Availability Zones for the MSK cluster to use. **NOTE** This value must be 2 or 3                                                                                                    |
 | mskARN (Not currently available) | string       | `"arn:aws:kafka:us-east-2:12345678912:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"` | Supply an existing MSK cluster ARN to use. **NOTE** As MSK is using an L1 construct this is not currently available for use                                                                        |
 
 ## Options being deprecated
@@ -110,7 +125,6 @@ A number of options are currently available but deprecated. While they function 
 | loggingAppLogEnabled                            | boolean      | true                                                                                                                                                                                                                         | Specify if Amazon OpenSearch Service application logging should be set up                                                                                                                                                                                    |
 | loggingAppLogGroupARN                           | string       | `"arn:aws:logs:us-east-1:12345678912:log-group:test-log-group:*"`                                                                                                                                                            | Supply the CloudWatch log group to use for application logging. If not provided and application logs are enabled, a CloudWatch log group will be created                                                                                                     |
 | nodeToNodeEncryptionEnabled                     | boolean      | true                                                                                                                                                                                                                         | Specify if node to node encryption should be enabled                                                                                                                                                                                                         |
-| vpcSubnetIds                                    | string array | ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"]                                                                                                                                                                     | Specify the subnet IDs of an existing VPC to place the Domain in. Requires `vpcId` to be specified                                                                                                                                                           |
 | vpcSecurityGroupIds                             | string array | ["sg-123456789abcdefgh", "sg-223456789abcdefgh"]                                                                                                                                                                             | Specify the Security Groups that will be associated with the VPC endpoints for the Domain. Requires `vpcId` to be specified                                                                                                                                  |
 | domainAZCount                                   | number       | 2                                                                                                                                                                                                                            | The number of Availability Zones for the Domain to place nodes into                                                                                                                                                                                          |
 | openAccessPolicyEnabled                         | boolean      | false                                                                                                                                                                                                                        | Applies an open access policy to the Domain. **NOTE**: This setting should only be used for Domains placed within a VPC, and is applicable to many use cases where access controlled by Security Groups on the VPC is sufficient.                            |

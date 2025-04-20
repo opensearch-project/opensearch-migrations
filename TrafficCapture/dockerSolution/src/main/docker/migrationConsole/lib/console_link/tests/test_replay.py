@@ -1,4 +1,5 @@
 import json
+from kubernetes import config
 import pathlib
 
 import pytest
@@ -15,6 +16,13 @@ from console_link.models.replayer_docker import DockerReplayer
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
+
+
+@pytest.fixture(autouse=True)
+def mock_kube_config(monkeypatch):
+    # Prevent actual config loading
+    monkeypatch.setattr(config, "load_incluster_config", lambda: None)
+    monkeypatch.setattr(config, "load_kube_config", lambda: None)
 
 
 @pytest.fixture

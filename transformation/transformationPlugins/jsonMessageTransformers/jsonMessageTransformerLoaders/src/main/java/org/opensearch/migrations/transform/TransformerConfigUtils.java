@@ -18,20 +18,19 @@ public final class TransformerConfigUtils {
                 isConfigured(params.getTransformerConfigEncoded()) +
                 isConfigured(params.getTransformerConfig());
         if (configuredCount > 1) {
-            System.err.println("Specify only one of " +
+            throw new TooManyTransformationConfigSourcesException("Specify only one of " +
                     "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config-base64" + ", " +
                     "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config" + ", or " +
                     "--" + params.getTransformerConfigParameterArgPrefix() + "-transformer-config-file" +
                     ". Both Kebab case and lower Camel case are supported.");
-            System.exit(4);
         }
 
         if (params.getTransformerConfigFile() != null && !params.getTransformerConfigFile().isBlank()) {
+            var configFile = Paths.get(params.getTransformerConfigFile());
             try {
-                return Files.readString(Paths.get(params.getTransformerConfigFile()), StandardCharsets.UTF_8);
+                return Files.readString(configFile, StandardCharsets.UTF_8);
             } catch (IOException e) {
-                System.err.println("Error reading transformer configuration file: " + e.getMessage());
-                System.exit(5);
+                throw new UnableToReadTransformationConfigException(configFile.toString(), e);
             }
         }
 
@@ -46,4 +45,15 @@ public final class TransformerConfigUtils {
         return null;
     }
 
+    public static class TooManyTransformationConfigSourcesException extends RuntimeException {
+        public TooManyTransformationConfigSourcesException(final String msg) {
+            super(msg);
+        }
+    }
+
+    public static class UnableToReadTransformationConfigException extends RuntimeException {
+        public UnableToReadTransformationConfigException(final String filePath, final Throwable cause) {
+            super("Unable to read transformation config: " + filePath, cause);
+        }
+    }
 }

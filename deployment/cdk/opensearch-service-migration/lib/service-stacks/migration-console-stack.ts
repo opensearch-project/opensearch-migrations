@@ -1,5 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
@@ -23,7 +24,7 @@ import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly migrationConsoleEnableOSI: boolean,
@@ -194,10 +195,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN,
         });
-        const artifactS3AnyObjectPath = `${artifactS3Arn}/*`;
-        const artifactS3PublishPolicy = new PolicyStatement({
+        const s3AccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [artifactS3Arn, artifactS3AnyObjectPath],
+            resources: ["*"],
             actions: [
                 "s3:*"
             ]
@@ -261,7 +261,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             // only add secrets policies if they're non-null
             ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
             ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])

@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.common.http;
 
+import java.nio.file.Path;
+
 import lombok.Builder;
 import lombok.Getter;
 
@@ -14,4 +16,8 @@ public class ConnectionContextTestParams implements ConnectionContext.IParams {
     @Builder.Default
     private boolean insecure = true;
     private boolean compressionEnabled;
+
+    private Path caCert;
+    private Path clientCert;
+    private Path clientCertKey;
 }

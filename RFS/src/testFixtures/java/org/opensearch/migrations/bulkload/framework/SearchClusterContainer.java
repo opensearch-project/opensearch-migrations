@@ -42,6 +42,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
         Version.fromString("ES 5.6.16")
     );
+
     public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
         "elasticsearch:2.4.6",
         Version.fromString("ES 2.4.6"),
@@ -63,7 +64,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     private enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
             "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "ES_JAVA_OPTS", "-Xms512m -Xmx512m")),
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
+            "index.store.type", "mmapfs",
+            "bootstrap.system_call_filter", "false"
+        )),
         ELASTICSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("xpack.security.enabled", "false")
@@ -110,6 +114,20 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
         this.containerVersion = version;
     }
+
+    public SearchClusterContainer(final ContainerVersion version, Map<String, String> supplementaryEnvVariables) {
+        super(DockerImageName.parse(version.imageName));
+        var builder = this.withExposedPorts(9200, 9300);
+
+        var combinedEnvVariables = new ImmutableMap.Builder<String, String>().putAll(
+                                        version.getInitializationType().getEnvVariables()).putAll(
+                                        supplementaryEnvVariables
+                                    ).build();
+        builder.withEnv(combinedEnvVariables)
+                .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
+        this.containerVersion = version;
+    }
+
 
     public void copySnapshotData(final String directory) {
         try {

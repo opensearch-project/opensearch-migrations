@@ -2,6 +2,9 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -9,8 +12,9 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.NoopTransformerProvider;
+import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
 
-import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -19,26 +23,53 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
-@RequiredArgsConstructor
 public class DocumentReindexer {
+    private static final Supplier<IJsonTransformer> NOOP_TRANSFORMER_SUPPLIER = () -> new NoopTransformerProvider().createTransformer(null);
 
     protected final OpenSearchClient client;
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
     private final int maxConcurrentWorkItems;
-    private final Supplier<IJsonTransformer> transformerSupplier;
+    private final ThreadSafeTransformerWrapper threadSafeTransformer;
+    private final boolean isNoopTransformer;
+
+    public DocumentReindexer(OpenSearchClient client,
+               int maxDocsPerBulkRequest,
+               long maxBytesPerBulkRequest,
+               int maxConcurrentWorkItems,
+               Supplier<IJsonTransformer> transformerSupplier) {
+        this.client = client;
+        this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
+        this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
+        this.maxConcurrentWorkItems = maxConcurrentWorkItems;
+        this.isNoopTransformer = transformerSupplier == null;
+        this.threadSafeTransformer = new ThreadSafeTransformerWrapper((this.isNoopTransformer) ? NOOP_TRANSFORMER_SUPPLIER : transformerSupplier);
+    }
 
     public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
-        // Transformers cannot be used simultaneously
-        var threadSafeTransformer = ThreadLocal.withInitial(transformerSupplier);
-        var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
+        // Create executor with hook for threadSafeTransformer cleaner
+        AtomicInteger id = new AtomicInteger();
+        int transformationParallelizationFactor = Runtime.getRuntime().availableProcessors();
+        ExecutorService executor = Executors.newFixedThreadPool(transformationParallelizationFactor, r -> {
+            int threadNum = id.incrementAndGet();
+            return new Thread(() -> {
+                try {
+                    r.run();
+                } finally {
+                    threadSafeTransformer.close();
+                }
+            }, "DocumentBulkAggregator-" + threadNum);
+        });
+        Scheduler scheduler = Schedulers.fromExecutor(executor);
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
             .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
-
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
-            .doFinally(s -> scheduler.dispose());
+            .doFinally(signalType -> {
+                scheduler.dispose();
+                executor.shutdown();
+            });
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
@@ -56,13 +87,11 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    List<RfsDocument> transformDocumentBatch(ThreadLocal<IJsonTransformer> transformerLocal, List<RfsLuceneDocument> docs, String indexName) {
-        var transformer = transformerLocal.get();
-
+    List<RfsDocument> transformDocumentBatch(IJsonTransformer transformer, List<RfsLuceneDocument> docs, String indexName) {
         var originalDocs = docs.stream().map(doc ->
                         RfsDocument.fromLuceneDocument(doc, indexName))
                 .collect(Collectors.toList());
-        if (transformer != null) {
+        if (!isNoopTransformer) {
             return RfsDocument.transform(transformer, originalDocs);
         }
         return originalDocs;

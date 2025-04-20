@@ -14,10 +14,10 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     public static final String INDEX_TEMPLATE_KEY_STR = "index_template";
     public static final String TEMPLATES_KEY_STR = "templates";
     public static final String COMPONENT_TEMPLATE_KEY_STR = "component_template";
-    private final int awarenessAttributeDimensionality;
+    private final int awarenessAttributes;
 
-    public Transformer_ES_7_10_OS_2_11(int awarenessAttributeDimensionality) {
-        this.awarenessAttributeDimensionality = awarenessAttributeDimensionality;
+    public Transformer_ES_7_10_OS_2_11(int awarenessAttributes) {
+        this.awarenessAttributes = awarenessAttributes;
     }
 
     @Override
@@ -33,7 +33,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 log.atDebug().setMessage("Original template: {}").addArgument(template).log();
                 TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
                 TransformFunctions.removeIntermediateMappingsLevels(template);
-                TransformFunctions.fixReplicasForDimensionality(templatesRoot, awarenessAttributeDimensionality);
+                TransformFunctions.fixReplicasForDimensionality(templatesRoot, awarenessAttributes);
                 log.atDebug().setMessage("Transformed template: {}").addArgument(template).log();
                 templatesRoot.set(templateName, template);
             });
@@ -55,7 +55,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 log.atDebug().setMessage("Original index template: {}").addArgument(template).log();
                 TransformFunctions.removeIntermediateIndexSettingsLevel(templateSubRoot); // run before
                                                                                           // fixNumberOfReplicas
-                TransformFunctions.fixReplicasForDimensionality(templateSubRoot, awarenessAttributeDimensionality);
+                TransformFunctions.fixReplicasForDimensionality(templateSubRoot, awarenessAttributes);
                 log.atDebug().setMessage("Transformed index template: {}").addArgument(template).log();
                 indexTemplateValuesRoot.set(templateName, template);
             });
@@ -95,7 +95,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
-        TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
+        TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributes);
 
         log.atDebug().setMessage("Transformed Object: {}").addArgument(newRoot).log();
         return List.of(copy);

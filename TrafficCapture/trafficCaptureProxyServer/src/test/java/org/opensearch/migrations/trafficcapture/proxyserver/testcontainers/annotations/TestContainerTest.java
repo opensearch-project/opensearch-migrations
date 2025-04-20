@@ -12,7 +12,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Inherited
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ ElementType.TYPE })
-@Tag("longTest")
+@Tag("isolatedTest")
 @Testcontainers(disabledWithoutDocker = true, parallel = true)
 public @interface TestContainerTest {
 }

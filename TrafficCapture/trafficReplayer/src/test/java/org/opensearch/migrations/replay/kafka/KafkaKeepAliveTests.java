@@ -24,13 +24,13 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
-@Tag("requiresDocker")
+@Tag("isolatedTest")
 public class KafkaKeepAliveTests extends InstrumentationTest {
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
     public static final String HEARTBEAT_INTERVAL_MS_KEY = "heartbeat.interval.ms";
@@ -47,7 +47,7 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
     @Container
     // see
     // https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private final KafkaContainer embeddedKafkaBroker = new KafkaContainer(SharedDockerImageNames.KAFKA);
+    private final ConfluentKafkaContainer embeddedKafkaBroker = new ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
 
     private KafkaTrafficCaptureSource kafkaSource;
 
@@ -90,7 +90,6 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
     }
 
     @Test
-    @Tag("longTest")
     public void testTimeoutsDontOccurForSlowPolls() throws Exception {
         var pollIntervalMs = Optional.ofNullable(kafkaProperties.get(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY))
             .map(s -> Integer.valueOf((String) s))
@@ -118,7 +117,6 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
     }
 
     @Test
-    @Tag("longTest")
     public void testBlockedReadsAndBrokenCommitsDontCauseReordering() throws Exception {
         for (int i = 0; i < 2; ++i) {
             KafkaTestUtils.produceKafkaRecord(testTopicName, kafkaProducer, 1 + i, sendCompleteCount).get();

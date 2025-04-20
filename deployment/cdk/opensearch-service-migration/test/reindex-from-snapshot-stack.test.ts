@@ -217,6 +217,80 @@ describe('ReindexFromSnapshotStack Tests', () => {
     ]);
   });
 
+  test('ReindexFromSnapshotStack sets correct RFS command from custom SnapshotYaml', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      snapshot: {
+        "snapshotName": "test-snapshot",
+        "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo",
+        "s3Region": "us-east-2"
+      },
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      migrationAssistanceEnabled: true,
+      fineGrainedManagerUserName: "test-user",
+      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+      nodeToNodeEncryptionEnabled: true,
+      encryptionAtRestEnabled: true,
+      enforceHTTPS: true
+    };
+
+    const stacks = createStackComposer(contextOptions);
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    const template = Template.fromStack(reindexStack);
+
+    const taskDefinitionCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: taskDefinitionCapture,
+    });
+
+    const containerDefinitions = taskDefinitionCapture.asArray();
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
+      {
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo\" --s3-region us-east-2 --snapshot-name test-snapshot --lucene-dir \"/storage/lucene\" --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.10\""
+            ],
+          ],
+        }
+      },
+      {
+        Name: 'RFS_TARGET_USER',
+        Value: 'test-user'
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD_ARN',
+        Value: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret'
+      },
+      {
+        Name: 'SHARED_LOGS_DIR_PATH',
+        Value: '/shared-logs-output/reindex-from-snapshot-default'
+      }
+    ]);
+  });
+
   test('ReindexFromSnapshotStack sets correct YAML configurations', () => {
     const contextOptions = {
       vpcEnabled: true,
@@ -236,11 +310,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
 
     expect(reindexStack.rfsBackfillYaml.ecs.cluster_name).toBe('migration-unit-test-ecs-cluster');
     expect(reindexStack.rfsBackfillYaml.ecs.service_name).toBe('migration-unit-test-reindex-from-snapshot');
-    expect(reindexStack.rfsSnapshotYaml.s3).toEqual({
-      repo_uri: expect.stringMatching(/s3:\/\/migration-artifacts-.*-unit-test-.*/),
-      aws_region: expect.any(String),
-    });
-    expect(reindexStack.rfsSnapshotYaml.snapshot_name).toBe('rfs-snapshot');
   });
 
   test('ReindexFromSnapshotStack correctly overrides with extraArgs', () => {

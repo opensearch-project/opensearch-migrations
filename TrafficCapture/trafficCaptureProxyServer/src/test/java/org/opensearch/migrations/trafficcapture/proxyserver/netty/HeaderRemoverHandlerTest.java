@@ -12,6 +12,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -58,6 +59,61 @@ class HeaderRemoverHandlerTest {
     public void throwsOnHostFormatError() {
         Assertions.assertThrows(IllegalArgumentException.class, () -> new HeaderRemoverHandler("host"));
         Assertions.assertThrows(IllegalArgumentException.class, () -> new HeaderRemoverHandler("h: "));
+    }
+
+    @Test
+    public void multipleRequestsCheck_headerRemover_withComplexBody_andVerifiedChunkedResponse() {
+        EmbeddedChannel channel = new EmbeddedChannel(
+                new HeaderRemoverHandler("host:")
+        );
+
+        // Complex body with fake headers in body
+        var body = "line1\r\nHost: fake.value\r\nPOST /oops HTTP/1.1\r\n\r\nEND";
+        var contentLength = body.getBytes(StandardCharsets.UTF_8).length;
+        var requestWithHost = String.join("\r\n",
+                "POST /submit HTTP/1.1",
+                "Host: example.com",
+                "Content-Length: " + contentLength,
+                "",
+                body
+        );
+        var expectedWithoutHost = String.join("\r\n",
+                "POST /submit HTTP/1.1",
+                "Content-Length: " + contentLength,
+                "",
+                body
+        );
+
+        // Break dummy response into two parts
+        var responsePart1 = "HTTP/1.1 200 OK\r\n";
+        var responsePart2 = "Content-Length: 0\r\n\r\n";
+        var fullResponse = responsePart1 + responsePart2;
+
+        try {
+            for (int i = 0; i < 5; i++) {
+                // Send request
+                channel.writeInbound(Unpooled.wrappedBuffer(requestWithHost.getBytes(StandardCharsets.UTF_8)));
+
+                // Validate host header was removed
+                ByteBuf inbound = channel.readInbound();
+                Assertions.assertEquals(expectedWithoutHost, inbound.toString(StandardCharsets.UTF_8));
+                inbound.release();
+
+                // Simulate partial writes of response
+                channel.writeOutbound(Unpooled.copiedBuffer(responsePart1, StandardCharsets.UTF_8));
+                channel.writeOutbound(Unpooled.copiedBuffer(responsePart2, StandardCharsets.UTF_8));
+
+                // Aggregate outbound response
+                ByteBuf out1 = channel.readOutbound();
+                ByteBuf out2 = channel.readOutbound();
+
+                ByteBuf fullOut = Unpooled.wrappedBuffer(out1, out2);
+                Assertions.assertEquals(fullResponse, fullOut.toString(StandardCharsets.UTF_8));
+                fullOut.release();
+            }
+        } finally {
+            channel.finishAndReleaseAll();
+        }
     }
 
     @Test

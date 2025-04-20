@@ -245,15 +245,14 @@ public class ParsedHttpMessagesAsDicts {
     }
 
     private static void encodeBinaryPayloadIfExists(HttpJsonMessageWithFaultingPayload message) {
-        if (message.payload() != null) {
-            if (message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
-                var byteBufBinaryBody = (ByteBuf) message.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
-                assert !message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY) :
-                    "Expected " + JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY + " to not exist.";
-                message.payload().put(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY, byteBufToBase64String(byteBufBinaryBody));
-                message.payload().remove(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
-                byteBufBinaryBody.release();
-            }
+        if (message.payload() != null &&
+                message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
+            var byteBufBinaryBody = (ByteBuf) message.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            assert !message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY) :
+                "Expected " + JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY + " to not exist.";
+            message.payload().put(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY, byteBufToBase64String(byteBufBinaryBody));
+            message.payload().remove(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            byteBufBinaryBody.release();
         }
     }
 }
