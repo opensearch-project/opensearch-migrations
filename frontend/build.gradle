@@ -31,6 +31,7 @@ def buildOutputs = [
 ]
 
 tasks.register('buildFrontend', NpmTask) {
+    dependsOn 'npmInstall'
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.files fileTree(dir: '.', include: buildOutputs, exclude: buildExclusions)
