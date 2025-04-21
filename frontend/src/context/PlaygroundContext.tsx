@@ -54,7 +54,7 @@ type ActionType =
   | { type: "ADD_OUTPUT_DOCUMENT"; payload: OutputDocument }
   | { type: "UPDATE_OUTPUT_DOCUMENT"; payload: OutputDocument }
   | { type: "REMOVE_OUTPUT_DOCUMENT"; payload: string }
-  | { type: "CLEAR_OUTPUT_DOCUMENTS"; payload?: undefined }
+  | { type: "CLEAR_OUTPUT_DOCUMENTS"; payload: undefined }
   | { type: "SET_STATE"; payload: Partial<PlaygroundState> };
 
 const playgroundReducer = (
