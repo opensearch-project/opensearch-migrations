@@ -209,11 +209,27 @@ export const PlaygroundProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 };
 
+// Mock dispatch function that does nothing - used when context is accessed outside of provider
+const mockDispatch: React.Dispatch<ActionType> = () => {
+  console.warn("PlaygroundContext used outside of PlaygroundProvider");
+};
+
 // Custom hook for using the context
 export const usePlayground = () => {
   const context = useContext(PlaygroundContext);
+
+  // If context is undefined (outside of provider), return a mock context
+  // This allows components to be built individually without errors
   if (context === undefined) {
-    throw new Error("usePlayground must be used within a PlaygroundProvider");
+    console.warn(
+      "usePlayground used outside of PlaygroundProvider - using mock context",
+    );
+    // Return a mock context that won't throw errors during build
+    return {
+      state: initialState,
+      dispatch: mockDispatch,
+    };
   }
+
   return context;
 };

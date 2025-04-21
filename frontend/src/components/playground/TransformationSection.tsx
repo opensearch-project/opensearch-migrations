@@ -5,13 +5,10 @@ import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
-import {
-  PlaygroundProvider,
-  usePlayground,
-} from "../../context/PlaygroundContext";
+import { usePlayground } from "../../context/PlaygroundContext";
 import { usePlaygroundActions } from "../../hooks/usePlaygroundActions";
 
-function TransformationSectionContent() {
+export default function TransformationSection() {
   const { state } = usePlayground();
   const { addTransformation } = usePlaygroundActions();
 
@@ -32,13 +29,5 @@ function TransformationSectionContent() {
         <Button onClick={handleAddTransformation}>Add Transformation</Button>
       </SpaceBetween>
     </Container>
-  );
-}
-
-export default function TransformationSection() {
-  return (
-    <PlaygroundProvider>
-      <TransformationSectionContent />
-    </PlaygroundProvider>
   );
 }

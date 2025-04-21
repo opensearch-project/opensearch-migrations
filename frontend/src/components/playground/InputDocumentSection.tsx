@@ -1,15 +1,13 @@
+import React from "react";
 import Container from "@cloudscape-design/components/container";
 import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
-import {
-  PlaygroundProvider,
-  usePlayground,
-} from "../../context/PlaygroundContext";
+import { usePlayground } from "../../context/PlaygroundContext";
 import { usePlaygroundActions } from "../../hooks/usePlaygroundActions";
 
-function InputDocumentSectionContent() {
+export default function InputDocumentSection() {
   const { state } = usePlayground();
   const { addInputDocument } = usePlaygroundActions();
 
@@ -28,13 +26,5 @@ function InputDocumentSectionContent() {
         <Button onClick={handleAddDocument}>Add Input Document</Button>
       </SpaceBetween>
     </Container>
-  );
-}
-
-export default function InputDocumentSection() {
-  return (
-    <PlaygroundProvider>
-      <InputDocumentSectionContent />
-    </PlaygroundProvider>
   );
 }
