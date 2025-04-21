@@ -30,7 +30,6 @@ def buildOutputs = [
     'build/site'
 ]
 
-
 tasks.register('buildFrontend', NpmTask) {
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
@@ -40,6 +39,7 @@ tasks.register('buildFrontend', NpmTask) {
 tasks.register('lintFrontend', NpmTask) {
     args =  ['run', 'lint']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
+    dependsOn 'buildFrontend'
 }
 
 tasks.register('cleanFrontend', Delete) {
