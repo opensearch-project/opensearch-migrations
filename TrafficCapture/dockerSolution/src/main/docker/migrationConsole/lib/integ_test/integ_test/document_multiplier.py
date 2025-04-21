@@ -500,6 +500,7 @@ class BackfillTest(unittest.TestCase):
         required_stable_checks = 3  # Need 3 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
         start_time = time.time()
         timeout_seconds = timeout_hours * 3600 if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS'] * 3600
+        stuck_count = 0
         
         while True:  
             if time.time() - start_time > timeout_seconds:
@@ -528,7 +529,6 @@ class BackfillTest(unittest.TestCase):
             logger.info(f"- Progress: {(current_count/(self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']))*100:.2f}%")
             logger.info(f"- Bulk loader active: {bulk_loader_active}")
             
-            stuck_count = 0
             # Don't consider it stable if count is 0 and bulk loader is still active
             if current_count == 0 and bulk_loader_active:
                 logger.info("Waiting for documents to start appearing...")
@@ -545,8 +545,8 @@ class BackfillTest(unittest.TestCase):
             elif 0 < current_count < self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:
                 if current_count == previous_count:
                     stuck_count += 1
-                    logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/10 checks")
-                    if stuck_count >= 10:
+                    logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/60 checks")
+                    if stuck_count >= 60:
                         raise SystemExit(f"Document count has been stuck at {current_count:,} for too long. Possible issue with backfill.")
                 else:
                     stuck_count = 0

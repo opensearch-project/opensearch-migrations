@@ -79,6 +79,12 @@ public class CreateSnapshot {
         public String s3RoleArn;
 
         @Parameter(
+                names = {"--s3-endpoint" },
+                required = false,
+                description = "The S3 endpoint URL to use for the S3 bucket, like: s3.us-west-2.amazonaws.com")
+        public String s3Endpoint;
+
+        @Parameter(
                 names = {"--index-allowlist"},
                 required = false,
                 description = "A comma separated list of indices to include in the snapshot. If not provided, all indices are included.")
@@ -155,6 +161,7 @@ public class CreateSnapshot {
                 arguments.indexAllowlist,
                 arguments.maxSnapshotRateMBPerNode,
                 arguments.s3RoleArn,
+                arguments.s3Endpoint,
                 context
             );
         }

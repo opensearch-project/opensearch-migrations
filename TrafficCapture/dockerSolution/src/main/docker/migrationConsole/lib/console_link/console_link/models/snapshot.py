@@ -23,7 +23,8 @@ SNAPSHOT_SCHEMA = {
                 'schema': {
                     'repo_uri': {'type': 'string', 'required': True},
                     'aws_region': {'type': 'string', 'required': True},
-                    'role': {'type': 'string', 'required': False}
+                    'role': {'type': 'string', 'required': False},
+                    'endpoint': {'type': 'string', 'required': False}
                 }
             },
             'fs': {
@@ -105,7 +106,8 @@ S3_SNAPSHOT_SCHEMA = {
     'snapshot_name': {'type': 'string', 'required': True},
     'otel_endpoint': {'type': 'string', 'required': False},
     's3_repo_uri': {'type': 'string', 'required': True},
-    's3_region': {'type': 'string', 'required': True}
+    's3_region': {'type': 'string', 'required': True},
+    's3_endpoint': {'type': 'string', 'required': False}
 }
 
 
@@ -117,6 +119,7 @@ class S3Snapshot(Snapshot):
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
+        self.s3_endpoint = config['s3'].get('endpoint')
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.cluster, Cluster)
@@ -126,6 +129,9 @@ class S3Snapshot(Snapshot):
             "--s3-repo-uri": self.s3_repo_uri,
             "--s3-region": self.s3_region,
         }
+
+        if self.s3_endpoint:
+            s3_command_args["--s3-endpoint"] = self.s3_endpoint
 
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)
