@@ -16,6 +16,8 @@ elasticsearch:
   extraEnvs:
     - name: "node.roles"
       value: "master,data,data_content,data_hot,data_warm,data_cold,ingest,ml,remote_cluster_client,transform"
+    - name: "discovery.seed_hosts" # Remove this setting for single node cluster to prevent warning
+      value: "[]"
     - name: "path.repo"
       value: "/snapshot"
   extraVolumes:

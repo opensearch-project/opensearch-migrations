@@ -13,7 +13,7 @@ from typing import List, Optional
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.11"]
+VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.18"]
 VALID_TARGET_VERSIONS = ["OS_2.19"]
 SOURCE_RELEASE_NAME = "source"
 TARGET_RELEASE_NAME = "target"
@@ -265,7 +265,7 @@ def main() -> None:
         ma_chart_values_path = "es-5-to-os-2-values.yaml"
         source_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
                          f"environments/es-5-6-single-node-cluster.yaml")
-    elif args.source_version == "ES_8.11":
+    elif args.source_version == "ES_8.18":
         ma_chart_values_path = "es-8-to-os-2-values.yaml"
         source_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
                      f"environments/es-8-latest-single-node-cluster.yaml")
