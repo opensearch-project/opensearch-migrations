@@ -1,7 +1,8 @@
 import pytest
 from unittest.mock import MagicMock
-from console_link.middleware.clusters import clear_snapshots
+
 from console_link.models.cluster import Cluster
+from console_link.models.snapshot import S3Snapshot
 import requests
 import logging
 
@@ -55,14 +56,37 @@ def mock_cluster_with_snapshots(mocker):
     return cluster
 
 
-def test_clear_snapshots_repository_missing(mock_cluster_with_missing_repo, caplog):
-    with caplog.at_level(logging.INFO, logger='console_link.middleware.clusters'):
-        clear_snapshots(mock_cluster_with_missing_repo, 'migration_assistant_repo')
+
+def test_delete_all_snapshots_repository_missing(mock_cluster_with_missing_repo, caplog):
+    config = {
+        "snapshot": {
+            "otel_endpoint": "http://otel:1111",
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    snapshot = S3Snapshot(config=config["snapshot"], source_cluster=mock_cluster_with_missing_repo)
+    with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
+        snapshot.delete_all_snapshots(cluster=mock_cluster_with_missing_repo, repository=snapshot.snapshot_repo_name)
         assert "Repository 'migration_assistant_repo' is missing. Skipping snapshot clearing." in caplog.text
 
 
-def test_clear_snapshots_success(mock_cluster_with_snapshots, caplog):
-    with caplog.at_level(logging.INFO, logger='console_link.middleware.clusters'):
-        clear_snapshots(mock_cluster_with_snapshots, 'migration_assistant_repo')
+def test_delete_all_snapshots_success(mock_cluster_with_snapshots, caplog):
+    config = {
+        "snapshot": {
+            "otel_endpoint": "http://otel:1111",
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    snapshot = S3Snapshot(config=config["snapshot"], source_cluster=mock_cluster_with_snapshots)
+    with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
+        snapshot.delete_all_snapshots(cluster=mock_cluster_with_snapshots, repository=snapshot.snapshot_repo_name)
         assert "Deleted snapshot: snapshot_1 from repository 'migration_assistant_repo'." in caplog.text
         assert "Deleted snapshot: snapshot_2 from repository 'migration_assistant_repo'." in caplog.text

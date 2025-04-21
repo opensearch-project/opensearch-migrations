@@ -474,9 +474,13 @@ export function parseSnapshotDefinition(json: any): SnapshotYaml {
     if (!snapshotName || !s3Region || !s3Uri) {
         throw new Error('Missing at least one of the required snapshot fields: snapshotName, s3Region, s3Uri');
     }
+    const snapshotRepoName = json.snapshotRepoName
     const snapshotYaml = new SnapshotYaml()
     snapshotYaml.snapshot_name = snapshotName
     snapshotYaml.s3 = {repo_uri: s3Uri, aws_region: s3Region}
+    if (snapshotRepoName) {
+        snapshotYaml.snapshot_repo_name = snapshotRepoName
+    }
     return snapshotYaml
 }
 

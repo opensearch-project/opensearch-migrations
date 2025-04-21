@@ -1,6 +1,7 @@
 import datetime
 import logging
 from abc import ABC, abstractmethod
+from requests.exceptions import HTTPError
 from typing import Dict, Optional
 
 from cerberus import Validator
@@ -66,6 +67,11 @@ class Snapshot(ABC):
     @abstractmethod
     def delete(self, *args, **kwargs) -> CommandResult:
         """Delete a snapshot."""
+        pass
+
+    @abstractmethod
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        """Delete all snapshots in the snapshot repository."""
         pass
 
     @abstractmethod
@@ -157,6 +163,9 @@ class S3Snapshot(Snapshot):
     def delete(self, *args, **kwargs) -> CommandResult:
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
+
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
@@ -199,6 +208,9 @@ class FileSystemSnapshot(Snapshot):
 
     def delete(self, *args, **kwargs) -> CommandResult:
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
@@ -312,9 +324,68 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str):
     path = f"/_snapshot/{repository}/{snapshot_name}"
     response = cluster.call_api(path, HttpMethod.DELETE)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
+    logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str):
-    path = f"/_snapshot/{repository}"
-    response = cluster.call_api(path, HttpMethod.DELETE)
-    logging.debug(f"Raw delete snapshot repository status response: {response.text}")
+def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
+    logger.info(f"Clearing snapshots from repository '{repository}'")
+    """
+    Clears all snapshots from the specified repository.
+
+    :param cluster: Cluster object to interact with the Elasticsearch cluster.
+    :param repository: Name of the snapshot repository to clear snapshots from.
+    :raises Exception: For general errors during snapshot clearing, except when the repository is missing.
+    """
+    try:
+        # List all snapshots in the repository
+        snapshots_path = f"/_snapshot/{repository}/_all"
+        response = cluster.call_api(snapshots_path, raise_error=True)
+        logger.debug(f"Raw response: {response.json()}")
+        snapshots = response.json().get("snapshots", [])
+        logger.info(f"Found {len(snapshots)} snapshots in repository '{repository}'.")
+
+        if not snapshots:
+            logger.info(f"No snapshots found in repository '{repository}'.")
+            return
+
+        # Delete each snapshot
+        for snapshot in snapshots:
+            snapshot_name = snapshot["snapshot"]
+            delete_snapshot(cluster, snapshot_name, repository)
+
+    except Exception as e:
+        # Handle 404 errors specifically for missing repository
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            error_details = e.response.json().get('error', {})
+            if error_details.get('type') == 'repository_missing_exception':
+                logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
+                return
+        # Re-raise other errors
+        logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
+        raise e
+
+
+def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
+    logger.info(f"Deleting repository '{repository}'")
+    """
+    Delete repository. Should be empty before execution.
+
+    :param cluster: Cluster object to interact with the Elasticsearch cluster.
+    :param repository: Name of the snapshot repository to delete.
+    :raises Exception: For general errors during repository deleting, except when the repository is missing.
+    """
+    try:
+        delete_path = f"/_snapshot/{repository}"
+        response = cluster.call_api(delete_path, method=HttpMethod.DELETE, raise_error=True)
+        logging.debug(f"Raw delete snapshot repository status response: {response.text}")
+        logger.info(f"Deleted repository: {repository}.")
+    except Exception as e:
+        # Handle 404 errors specifically for missing repository
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            error_details = e.response.json().get('error', {})
+            if error_details.get('type') == 'repository_missing_exception':
+                logger.info(f"Repository '{repository}' is missing. Skipping delete.")
+                return
+        # Re-raise other errors
+        logger.error(f"Error deleting repository '{repository}': {e}")
+        raise e
