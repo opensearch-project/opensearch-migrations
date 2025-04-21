@@ -260,8 +260,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
+        const passRolePolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [`arn:aws:iam::${this.account}:role/*`],
+            actions: ['iam:PassRole']
+        });
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy, passRolePolicy,
             // only add secrets policies if they're non-null
             ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
             ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
