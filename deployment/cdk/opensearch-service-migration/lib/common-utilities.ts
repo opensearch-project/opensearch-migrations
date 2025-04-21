@@ -211,9 +211,16 @@ export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string,
         resources: [`*`],
     }));
 
-    // The Migration Console Role needs to be able to pass the snapshot role
+    // The Migration Console Role needs to be able to pass the snapshot role as well as any other role
     const requestingRole = Role.fromRoleArn(scope, 'RequestingRole', migrationConsoleTaskRoleArn);
     snapshotRole.grantPassRole(requestingRole);
+    
+    // Also grant broader permission to pass any role (needed for other operations like multiplier test for cross-region snapshot creation)
+    requestingRole.addToPrincipalPolicy(new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['iam:PassRole'],
+        resources: [`arn:aws:iam::${Stack.of(scope).account}:role/*`]
+    }));
 
     return snapshotRole
 }
