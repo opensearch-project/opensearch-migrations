@@ -28,8 +28,8 @@ def call(Map config = [:]) {
             distVersion = "1.3"
             break
         case 'os2x':
-            engineVersion = "OS_2.11"
-            distVersion = "2.11"
+            engineVersion = "OS_2.17"
+            distVersion = "2.17"
             break
         default:
             throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
@@ -60,8 +60,8 @@ def call(Map config = [:]) {
             "engineVersion": "${engineVersion}",
             "distVersion": "${distVersion}",
             "domainName": "${params.CLUSTER_VERSION}-jenkins-test",
-            "dataNodeCount": 30,
-            "dataNodeType": "i4i.8xlarge.search",
+            "dataNodeCount": 50,
+            "dataNodeType": "i4i.4xlarge.search",
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
             "dedicatedManagerNodeType": "m7i.xlarge.search",

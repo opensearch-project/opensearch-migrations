@@ -647,13 +647,28 @@ class BackfillTest(unittest.TestCase):
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
         large_snapshot_role = f"arn:aws:iam::{account_number}:role/LargeSnapshotAccessRole"
+        snapshot_name = 'large-snapshot'
+        snapshot_repo = 'migration_assistant_repo'
+        endpoint = f"s3.{snapshot_region}.amazonaws.com"
+        
+        # Print all parameters for better logging and debugging
+        logger.info(f"Snapshot Parameters:")
+        logger.info(f"  - Snapshot Name: {snapshot_name}")
+        logger.info(f"  - Repository Name: {snapshot_repo}")
+        logger.info(f"  - S3 Bucket: {updated_s3_uri.split('/')[2]}")
+        logger.info(f"  - S3 URI: {updated_s3_uri}")
+        logger.info(f"  - S3 Region: {snapshot_region}")
+        logger.info(f"  - S3 Endpoint: {endpoint}")
+        logger.info(f"  - IAM Role: {large_snapshot_role}")
+        logger.info(f"  - Max Snapshot Rate (MB/Node): {self.config['LARGE_SNAPSHOT_RATE_MB_PER_NODE']}")
+        
         final_snapshot_config = {
-            'snapshot_name': 'large-snapshot',
+            'snapshot_name': snapshot_name,
             's3': {
                 'repo_uri': updated_s3_uri,  
                 'role': large_snapshot_role,
                 'aws_region': snapshot_region,
-                'endpoint': f"s3.{snapshot_region}.amazonaws.com"
+                'endpoint': endpoint
             }
         }
         final_snapshot = S3Snapshot(final_snapshot_config, pytest.console_env.target_cluster)
@@ -663,6 +678,16 @@ class BackfillTest(unittest.TestCase):
         )
         assert final_snapshot_result.success, f"Failed to create final snapshot: {final_snapshot_result.error}"
         logger.info("Final Snapshot after migration and multiplication was created successfully")
+        
+        # Add detailed success information for easier snapshot retrieval
+        logger.info("\n=== Final Snapshot Details ===")
+        logger.info(f"Snapshot successfully stored at:")
+        logger.info(f"  - S3 Bucket: {updated_s3_uri.split('/')[2]}")
+        logger.info(f"  - S3 Path: {updated_s3_uri}")
+        logger.info(f"  - Snapshot Name: {snapshot_name}")
+        logger.info(f"  - Repository Name: {snapshot_repo}")
+        logger.info(f"  - Region: {snapshot_region}")
+        logger.info(f"To retrieve this snapshot, use the S3 URI: {updated_s3_uri}")
 
         logger.info("\n=== Test Completed Successfully ===")
         logger.info("Document multiplication verified with correct count")
