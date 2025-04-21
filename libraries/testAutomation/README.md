@@ -12,7 +12,7 @@ pipenv install
 
 To run the test automation library, a command like below can be used:
 ```shell
-pipenv run app
+pipenv run app --source-version=ES_5.6
 ```
 
 Or to execute a specific test

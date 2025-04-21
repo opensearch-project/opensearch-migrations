@@ -1,8 +1,12 @@
 def call(Map config = [:]) {
-    def jobName = config.jobName
-    if (jobName == null || jobName.isEmpty()) {
-        throw new RuntimeException("The jobName argument must be provided to k8sLocalDeployment()");
+    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
+        if (!config[key]) {
+            throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
+        }
     }
+    def jobName = config.jobName
+    def sourceVersion = config.sourceVersion
+    def targetVersion = config.targetVersion
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -73,7 +77,7 @@ def call(Map config = [:]) {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "sudo -u ec2-user pipenv install --deploy"
-                                sh "sudo -u ec2-user pipenv run app --skip-delete"
+                                sh "sudo -u ec2-user pipenv run app --source-version=$sourceVersion --target-version=$targetVersion --skip-delete"
                             }
                         }
                     }
