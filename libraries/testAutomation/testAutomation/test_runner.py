@@ -268,12 +268,12 @@ def main() -> None:
     elif args.source_version == "ES_8.18":
         ma_chart_values_path = "es-8-to-os-2-values.yaml"
         source_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
-                     f"environments/es-8-latest-single-node-cluster.yaml")
+                         f"environments/es-8-latest-single-node-cluster.yaml")
     else:
         raise RuntimeError(f"Unexpected source version: {args.source_version} provided")
 
     target_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
-                      f"environments/os-2-latest-single-node-cluster.yaml")
+                     f"environments/os-2-latest-single-node-cluster.yaml")
     test_cluster_env = TestClusterEnvironment(source_version=args.source_version,
                                               source_helm_values_path=source_values,
                                               source_chart_path=elasticsearch_cluster_chart_path,
