@@ -545,3 +545,11 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         new_signature = new_signature_match.group(1)
 
         assert original_signature == new_signature, "Signatures do not match"
+
+
+def test_call_api_with_head_method(requests_mock):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    requests_mock.head(f"{cluster.endpoint}/test_api")
+
+    response = clusters_.call_api(cluster, '/test_api', HttpMethod.HEAD)
+    assert response.status_code == 200

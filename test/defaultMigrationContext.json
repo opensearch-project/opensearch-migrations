@@ -19,7 +19,6 @@
     "nodeToNodeEncryptionEnabled": true,
     "encryptionAtRestEnabled": true,
     "vpcAZCount": 2,
-    "domainAZCount": 2,
     "mskAZCount": 2,
     "replayerOutputEFSRemovalPolicy": "DESTROY"
   }
