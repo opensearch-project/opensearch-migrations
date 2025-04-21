@@ -24,22 +24,16 @@ dependencies {
     testImplementation libs.junit.jupiter.params
     testImplementation libs.slf4j.api
     testRuntimeOnly libs.junit.jupiter.engine
+    implementation project(path: ':transformation:standardJavascriptTransforms', configuration: 'jsResources')
 }
 
-/**
- * Task to download JS Packages
- * This task is used to download any JS packages that the JsonJSTransformer plugin needs
- * to run. It downloads the packages and makes them available to the plugins.
- *
- * Example of how to use this task to download a JS package:
- *
- * Note: should probably be moved to output to the build directory
- *
- * task downloadJSPackages(type: Download) {
- *     src 'https://cdn.jsdelivr.net/npm/liquidjs/dist/liquid.browser.min.js'
- *     dest new File(projectDir, 'src/main/resources/liquid.min.js')
- *     overwrite true
- * }
- *
- * processResources.dependsOn downloadJSPackages
- */
+
+// Process JS resources
+processResources {
+    from(project(':transformation:standardJavascriptTransforms').buildDir.toString() + '/dist') {
+        into 'js' // should be within the build area
+    }
+
+    // Ensure the packageJs task runs before this
+    dependsOn ':transformation:standardJavascriptTransforms:packageJs'
+}

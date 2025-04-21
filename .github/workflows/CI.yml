@@ -157,7 +157,7 @@ jobs:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
       - name: Restore Docker Cache
-        uses: ScribeMD/docker-cache@0.5.0
+        uses: AndreKurait/docker-cache@0.6.0
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           # Delegate cache saving to python-e2e-tests
@@ -260,7 +260,7 @@ jobs:
         with:
           python-version: ${{ env.python-version }}
       - name: Cache Docker Images
-        uses: ScribeMD/docker-cache@0.5.0
+        uses: AndreKurait/docker-cache@0.6.0
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           # Only save cache on push events
