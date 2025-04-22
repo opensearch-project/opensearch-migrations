@@ -1,15 +1,13 @@
 #!/bin/bash
 
 broker_endpoints="${MIGRATION_KAFKA_BROKER_ENDPOINTS}"
-msk_auth_settings=""
-kafka_command_settings=""
+kafka_command_config=""
+kafka_consumer_config=""
 s3_bucket_name=""
-partition_offsets=""
-partition_limits=""
 
 if [ -n "$ECS_AGENT_URI" ]; then
-    msk_auth_settings="--kafka-traffic-enable-msk-auth"
-    kafka_command_settings="--command-config aws/msk-iam-auth.properties"
+    kafka_command_config="--command-config aws/msk-iam-auth.properties"
+    kafka_consumer_config="--consumer.config aws/msk-iam-auth.properties"
     account_id=$(aws sts get-caller-identity --query Account --output text)
     s3_bucket_name="migration-artifacts-$account_id-$MIGRATION_STAGE-$AWS_REGION"
 fi
@@ -20,7 +18,7 @@ enable_s3=false
 
 usage() {
   echo ""
-  echo "Utility script for exporting all currently detected Kafka records to a gzip file, and allowing the option to store this archive file on S3."
+  echo "Utility script for exporting Kafka records to a gzip file, including the option to store this archive file on S3."
   echo ""
   echo "Usage: "
   echo "  ./kafkaExport.sh [OPTIONS] [-- EXTRA_ARGS]"
@@ -35,7 +33,7 @@ usage() {
   echo ""
   echo "Examples:"
   echo "  To export 2 messages from a topic from the beginning"
-  echo "    ./kafkaExport.sh -- --group foo2 --max-messages 2 --from-beginning"
+  echo "    ./kafkaExport.sh -- --max-messages 2 --from-beginning"
   echo ""
   echo "  To export messages from a partition from a specific offset"
   echo "    ./kafkaExport.sh -- --partition 0  --offset 30"
@@ -78,38 +76,50 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Printing existing offsets in topic
-all_consumers_partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_settings"))
+all_consumers_partition_offsets=$(./kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$broker_endpoints" --topic "$topic" --time -1 $(echo "$kafka_command_config"))
 comma_sep_all_consumers_partition_offsets="${all_consumers_partition_offsets// /,}"
 echo "Existing offsets from current Kafka topic across all consumer groups: "
 echo "$comma_sep_all_consumers_partition_offsets"
+echo ""
 
 epoch_ts=$(date +%s)
-dir_name="kafka_export_$epoch_ts"
-mkdir -p $dir_name
 archive_name="kafka_export_from_migration_console_$epoch_ts.proto.gz"
+s3_bucket_uri="s3://$s3_bucket_name/kafka-exports/$archive_name"
 group="exportFromMigrationConsole_$(hostname -s)_$$_$epoch_ts"
-echo "Group name: $group"
 
 SCRIPT_DIR="$(dirname "$0")"
 ABS_SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
-export CLASSPATH="$CLASSPATH:${ABS_SCRIPT_DIR}/kafkaCommandLineFormatter.jar"
+export CLASSPATH="$CLASSPATH:$(find "$ABS_SCRIPT_DIR" -name 'kafkaCommandLineFormatter-*.jar' | head -n 1)"
+
+echo "Starting kafka export to $archive_name"
+# Build the command as an array
+cmd=(
+  timeout "$timeout_seconds"
+  ./kafka/bin/kafka-console-consumer.sh
+  --bootstrap-server "$broker_endpoints"
+  --topic "$topic"
+  --group "$group"
+  --property print.key=false
+  --property print.timestamp=false
+  --formatter org.opensearch.migrations.utils.kafka.Base64Formatter
+  --property print.value=true
+  --property value.deserializer=org.apache.kafka.common.serialization.ByteArrayDeserializer
+)
+
+# Add dynamic parts
+read -ra kafka_args <<< "$kafka_consumer_config"
+cmd+=("${kafka_args[@]}")
+cmd+=("${EXTRA_ARGS[@]}")
+
+# Print the full command as one string
+echo "Running command:"
+printf '%q ' "${cmd[@]}"
+echo "| gzip -c -9 > \"$archive_name\""
+echo ""
 
 # Execute the command
-set -o xtrace
-timeout "$timeout_seconds" \
-./kafka/bin/kafka-console-consumer.sh \
---bootstrap-server "$broker_endpoints" \
---topic "$topic" \
---property print.key=false \
---property print.timestamp=false \
---formatter org.opensearch.migrations.utils.kafka.Base64Formatter \
---property print.value=true \
---property value.deserializer=org.apache.kafka.common.serialization.ByteArrayDeserializer \
-$(echo "$kafka_command_settings") \
-"${EXTRA_ARGS[@]}" | \
-gzip -c -9 > "$dir_name/$archive_name"
-set +o xtrace
+"${cmd[@]}" | gzip -c -9 > "$archive_name"
 
 if [ "$enable_s3" = true ]; then
-  aws s3 mv "$dir_name/$archive_name" "s3://$s3_bucket_name" && echo "Export has been created: s3://$s3_bucket_name/$archive_name"
+  aws s3 mv "$archive_name" "$s3_bucket_uri" && echo "Export moved to S3: $s3_bucket_uri"
 fi
