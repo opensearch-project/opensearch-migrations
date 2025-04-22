@@ -185,7 +185,7 @@ def call(Map config = [:]) {
                                 if (config.integTestStep) {
                                     config.integTestStep()
                                 } else {
-                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}, LARGE_SNAPSHOT_RATE_MB_PER_NODE=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE}, RFS_WORKERS=${env.RFS_WORKERS}, CLUSTER_VERSION=${env.CLUSTER_VERSION}, DEPLOY_REGION=${params.DEPLOY_REGION}"
+                                    echo "Running with NUM_SHARDS=${env.NUM_SHARDS}, MULTIPLICATION_FACTOR=${env.MULTIPLICATION_FACTOR}, BATCH_COUNT=${env.BATCH_COUNT}, DOCS_PER_BATCH=${env.DOCS_PER_BATCH}, BACKFILL_TIMEOUT_HOURS=${env.BACKFILL_TIMEOUT_HOURS}, LARGE_SNAPSHOT_RATE_MB_PER_NODE=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE}, RFS_WORKERS=${env.RFS_WORKERS}, CLUSTER_VERSION=${env.CLUSTER_VERSION}, DEPLOY_REGION=${env.DEPLOY_REGION}, SNAPSHOT_REGION=${env.SNAPSHOT_REGION}"
                                     echo "Running integration tests with command: ${integTestCommand}"
                                     def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", params.STAGE)
@@ -198,17 +198,17 @@ def call(Map config = [:]) {
                                             "--large_snapshot_rate_mb_per_node=${env.LARGE_SNAPSHOT_RATE_MB_PER_NODE} " +
                                             "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
                                             "--unique_id ${testUniqueId} " +
-                                            "--stage ${params.STAGE} " +
+                                            "--stage ${env.STAGE} " +
                                             "--rfs_workers ${env.RFS_WORKERS} " +
                                             "--cluster_version ${env.CLUSTER_VERSION} " +
-                                            "--deploy_region ${params.DEPLOY_REGION} " +
-                                            "--snapshot_region ${params.SNAPSHOT_REGION} " +
+                                            "--deploy_region ${env.DEPLOY_REGION} " +
+                                            "--snapshot_region ${env.SNAPSHOT_REGION} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.DEPLOY_REGION}", duration: 43200, roleSessionName: 'jenkins-session') {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${env.DEPLOY_REGION}", duration: 43200, roleSessionName: 'jenkins-session') {
                                             sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
                                                     "--test-result-file ${test_result_file} " +
-                                                    "--stage ${params.STAGE}"
+                                                    "--stage ${env.STAGE}"
                                         }
                                     }
                                 }
