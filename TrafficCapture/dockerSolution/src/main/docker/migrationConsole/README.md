@@ -11,7 +11,7 @@ cd /root/kafka-tools
 ```
 
 ### Perform the desired Kafka export
-There are many different parameters that can be provided to configure the export to be taken. Most of these parameters are from the `kafka-console-consumer.sh` utility that comes packaged with Kafka which we allow passing to this utility after the `--` separator. More details on the available arguments for this script can be found [here]("https://docs.confluent.io/kafka/operations-tools/kafka-tools.html?#kafka-console-consumer-sh"). See some specific examples below:
+There are many different parameters that can be provided to configure the export to be taken. Most of these parameters are from the `kafka-console-consumer.sh` utility that comes packaged with Kafka which we allow passing to this utility after the `--` separator. More details on the available arguments for this script can be found [here](https://docs.confluent.io/kafka/operations-tools/kafka-tools.html?#kafka-console-consumer-sh). See some specific examples below:
 
 Export all current Kafka records as well as records that get added during the 2-minute limit (if possible) and store the gzip export in S3
 ```shell
