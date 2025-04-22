@@ -64,7 +64,7 @@ def call(Map config = [:]) {
             "dataNodeType": "r6gd.4xlarge.search",
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
-            "dedicatedManagerNodeType": "m7i.xlarge.search",
+            "dedicatedManagerNodeType": "m6g.xlarge.search",
             "ebsEnabled": false,
             "openAccessPolicyEnabled": false,
             "domainRemovalPolicy": "DESTROY",
