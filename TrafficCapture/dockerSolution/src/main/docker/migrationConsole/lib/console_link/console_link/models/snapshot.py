@@ -166,10 +166,12 @@ class S3Snapshot(Snapshot):
         return get_snapshot_status(self.cluster, self.snapshot_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot(self.cluster, self.snapshot_name)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot(self.cluster, self.snapshot_name, timeout=timeout)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot_repo(self.cluster)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot_repo(self.cluster, timeout=timeout)
 
 
 class FileSystemSnapshot(Snapshot):
@@ -211,17 +213,19 @@ class FileSystemSnapshot(Snapshot):
         return get_snapshot_status(self.cluster, self.snapshot_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot(self.cluster, self.snapshot_name)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot(self.cluster, self.snapshot_name, timeout=timeout)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot_repo(self.cluster)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot_repo(self.cluster, timeout=timeout)
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str,
-                        repository: str = 'migration_assistant_repo') -> CommandResult:
+                        repository: str = 'migration_assistant_repo', timeout: int = 300) -> CommandResult:
     path = f"/_snapshot/{repository}/{snapshot}"
     try:
-        response = cluster.call_api(path, HttpMethod.GET)
+        response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
         logging.debug(f"Raw get snapshot status response: {response.text}")
         response.raise_for_status()
 
@@ -235,9 +239,9 @@ def get_snapshot_status(cluster: Cluster, snapshot: str,
         return CommandResult(success=False, value=f"Failed to get snapshot status: {str(e)}")
 
 
-def get_repository_for_snapshot(cluster: Cluster, snapshot: str) -> Optional[str]:
+def get_repository_for_snapshot(cluster: Cluster, snapshot: str, timeout: int = 300) -> Optional[str]:
     url = f"/_snapshot/*/{snapshot}"
-    response = cluster.call_api(url, HttpMethod.GET)
+    response = cluster.call_api(url, HttpMethod.GET, timeout=timeout)
     logging.debug(f"Raw response: {response.text}")
     response.raise_for_status()
 
@@ -307,12 +311,12 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
 
 
 def get_snapshot_status_full(cluster: Cluster, snapshot: str,
-                             repository: str = 'migration_assistant_repo') -> CommandResult:
+                             repository: str = 'migration_assistant_repo', timeout: int = 300) -> CommandResult:
     try:
-        repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot)
+        repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot, timeout=timeout)
 
         path = f"/_snapshot/{repository}/{snapshot}"
-        response = cluster.call_api(path, HttpMethod.GET)
+        response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
         logging.debug(f"Raw get snapshot status response: {response.text}")
         response.raise_for_status()
 
@@ -325,7 +329,7 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str,
         state = snapshot_info.get("state")
 
         path = f"/_snapshot/{repository}/{snapshot}/_status"
-        response = cluster.call_api(path, HttpMethod.GET)
+        response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
 
@@ -340,15 +344,15 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str,
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'migration_assistant_repo'):
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'migration_assistant_repo', timeout: int = 1200):
     repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot_name)
 
     path = f"/_snapshot/{repository}/{snapshot_name}"
-    response = cluster.call_api(path, HttpMethod.DELETE)
+    response = cluster.call_api(path, HttpMethod.DELETE, timeout=timeout)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str = 'migration_assistant_repo'):
+def delete_snapshot_repo(cluster: Cluster, repository: str = 'migration_assistant_repo', timeout: int = 1200):
     path = f"/_snapshot/{repository}"
-    response = cluster.call_api(path, HttpMethod.DELETE)
+    response = cluster.call_api(path, HttpMethod.DELETE, timeout=timeout)
     logging.debug(f"Raw delete snapshot repository status response: {response.text}")
