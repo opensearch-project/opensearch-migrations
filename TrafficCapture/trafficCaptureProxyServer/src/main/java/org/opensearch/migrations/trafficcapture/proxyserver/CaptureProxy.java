@@ -172,6 +172,29 @@ public class CaptureProxy {
                 + "pattern.  When the incoming request has a header that matches the regex, it will be passed "
                 + "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
         public List<String> suppressCaptureHeaderPairs = new ArrayList<>();
+        @Parameter(required = false,
+            names = "--suppressCaptureForMethod",
+            arity = 1,
+            description = "The regex pattern to test against the METHOD value of the incoming HTTP request.  "
+                + "When the incoming request has the method that matches the regex, it will be passed "
+                + "through to the service but will NOT be captured.  " +
+                "E.g. 'GET' to ignore capturing GET requests.")
+        public String suppressMethod;
+        @Parameter(required = false,
+            names = "--suppressCaptureForUriPath",
+            description = "The regex pattern to test against the PATH value of the incoming HTTP request.  "
+                + "When the incoming request has a path that matches the regex, it will be passed "
+                + "through to the service but will NOT be captured.  " +
+                "E.g. '/_cat/*' to ignore capturing traffic that doesn't begin with the path '/_cat/'.")
+        public String suppressUriPath;
+        @Parameter(required = false,
+            names = "--suppressMethodAndPath",
+            description = "The regex pattern to test against the HTTP method and uri path of the incoming HTTP request.  "
+                + "When the incoming request has a METHOD and PATH that matches the regex, it will be passed "
+                + "through to the service but will NOT be captured.  " +
+                "E.g. '(.* /ephemeral/*|GET /_cat/.*)' to ignore capturing all traffic for '/ephemeral' AND " +
+                "all GET requests to /_cat/.*")
+        public String suppressMethodAndPath;
     }
 
     static Parameters parseArgs(String[] args) {
@@ -408,9 +431,13 @@ public class CaptureProxy {
                     throw Lombok.sneakyThrow(e);
                 }
             }).orElse(null);
-            var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(
-                convertPairListToMap(params.suppressCaptureHeaderPairs)
-            );
+            var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
+                .methodPattern(params.suppressMethod)
+                .pathPattern(params.suppressUriPath)
+                .methodAndPathPattern(params.suppressMethodAndPath)
+                .protocolPattern("HTTP/2.*")
+                .suppressCaptureHeaderPairs(convertPairListToMap(params.suppressCaptureHeaderPairs))
+                .build();
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
                     params.headerOverrides, getConnectionCaptureFactory(params, ctx));

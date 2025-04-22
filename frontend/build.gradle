@@ -1,0 +1,62 @@
+plugins {
+    id 'com.github.node-gradle.node' version '7.1.0'
+}
+
+node {
+    version = '20.12.2'
+    npmVersion = '10.5.0'
+    download = true
+}
+
+def buildInputs = [
+    'package.json',
+    'package-lock.json',
+    'next-config.ts',
+    'postcss.config.mjs',
+    'tailwind.config.ts',
+    'tsconfig.json',
+    'src/**',
+    'public/**'
+]
+
+def buildExclusions = [
+    '.gradle',
+    '.next',
+    'node_modules',
+]
+
+def buildOutputs = [
+    '.next',
+    'build/site'
+]
+
+tasks.register('buildFrontend', NpmTask) {
+    dependsOn 'npmInstall'
+    args = ['run', 'build']
+    inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
+    outputs.files fileTree(dir: '.', include: buildOutputs, exclude: buildExclusions)
+}
+
+tasks.register('lintFrontend', NpmTask) {
+    args =  ['run', 'lint']
+    inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
+    dependsOn 'buildFrontend'
+}
+
+tasks.register('cleanFrontend', Delete) {
+    delete buildOutputs
+}
+
+tasks.register('helpFrontend', NpmTask) {
+    args =  ['run']
+    doFirst {
+        println """
+Use `npm` locally for detailed work in this project, gradle tasks are used for continuous integration testing and deployment.
+The following is a list of npm commands to execute:
+        """
+    }
+}
+
+assemble.dependsOn 'buildFrontend'
+check.dependsOn 'lintFrontend'
+clean.dependsOn 'cleanFrontend'
