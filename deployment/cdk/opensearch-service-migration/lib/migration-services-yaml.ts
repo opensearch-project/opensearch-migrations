@@ -89,7 +89,7 @@ export class S3SnapshotYaml {
 export class SnapshotYaml {
     snapshot_name = '';
     otel_endpoint = '';
-    snapshot_repo_name? = '';
+    snapshot_repo_name = '';
     s3?: S3SnapshotYaml;
     fs?: FileSystemSnapshotYaml;
 
@@ -97,7 +97,6 @@ export class SnapshotYaml {
         return {
             snapshot_name: this.snapshot_name,
             otel_endpoint: this.otel_endpoint,
-            // TODO check this is valid
             snapshot_repo_name: this.snapshot_repo_name,
             // This conditinally includes the s3 and fs parameters if they're defined,
             // but does not add the keys otherwise

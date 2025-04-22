@@ -56,12 +56,12 @@ def mock_cluster_with_snapshots(mocker):
     return cluster
 
 
-
 def test_delete_all_snapshots_repository_missing(mock_cluster_with_missing_repo, caplog):
     config = {
         "snapshot": {
             "otel_endpoint": "http://otel:1111",
             "snapshot_name": "reindex_from_snapshot",
+            "snapshot_repo_name": "test-repo",
             "s3": {
                 "repo_uri": "s3://my-bucket",
                 "aws_region": "us-east-1"
@@ -71,7 +71,7 @@ def test_delete_all_snapshots_repository_missing(mock_cluster_with_missing_repo,
     snapshot = S3Snapshot(config=config["snapshot"], source_cluster=mock_cluster_with_missing_repo)
     with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
         snapshot.delete_all_snapshots(cluster=mock_cluster_with_missing_repo, repository=snapshot.snapshot_repo_name)
-        assert "Repository 'migration_assistant_repo' is missing. Skipping snapshot clearing." in caplog.text
+        assert "Repository 'test-repo' is missing. Skipping snapshot clearing." in caplog.text
 
 
 def test_delete_all_snapshots_success(mock_cluster_with_snapshots, caplog):

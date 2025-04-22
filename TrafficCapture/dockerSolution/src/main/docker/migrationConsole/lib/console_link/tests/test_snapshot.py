@@ -9,7 +9,7 @@ from console_link.models.command_result import CommandResult
 from console_link.models.factories import (UnsupportedSnapshotError,
                                            get_snapshot)
 from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
-                                          Snapshot, delete_snapshot)
+                                          Snapshot)
 from tests.utils import create_valid_cluster
 
 
@@ -437,6 +437,20 @@ def test_snapshot_delete(request, snapshot_fixture):
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_delete_all_snapshots(request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
+    source_cluster.call_api.return_value.json = lambda: {"snapshots": [{"snapshot": "test_snapshot"}]}
+    source_cluster.call_api.return_value.text = str({"snapshots": [{"snapshot": "test_snapshot"}]})
+    snapshot.delete_all_snapshots()
+    source_cluster.call_api.assert_called()
+    source_cluster.call_api.assert_has_calls([
+        mock.call('/_snapshot/migration_assistant_repo/_all', raise_error=True),
+        mock.call('/_snapshot/migration_assistant_repo/test_snapshot', HttpMethod.DELETE),
+    ])
+
+
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_delete_repo(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -460,19 +474,6 @@ def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     assert not result.success
     for element in fake_command:
         assert element in result.value
-
-
-def test_get_snapshot_repository_via_delete(s3_snapshot):
-    mock_cluster = s3_snapshot.source_cluster
-    mock_cluster.call_api.return_value.json = lambda: {"snapshots": [{"snapshot": "test_snapshot"}]}
-    mock_cluster.call_api.return_value.text = str({"snapshots": [{"snapshot": "test_snapshot"}]})
-    delete_snapshot(mock_cluster, s3_snapshot.snapshot_name, repository="*")
-
-    mock_cluster.call_api.assert_called()
-    mock_cluster.call_api.calls_args_list = [
-        ('/_snapshot/*/test_snapshot', HttpMethod.GET),  # This is the get_snapshot_repository call
-        ('/_snapshot/None/test_snapshot', HttpMethod.DELETE)  # This is the delete_snapshot call
-    ]
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])

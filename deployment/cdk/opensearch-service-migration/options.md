@@ -51,9 +51,9 @@ In all other cases, the required components of each cluster object are:
 
 ### Snapshot Definition Options
 
-| Name     | Type   | Example                                                                                                                          | Description                                                                                        |
-|----------|--------|----------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
-| snapshot | object | {"snapshotName": "test-snapshot", "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo", "s3Region": "us-east-2"} | A json object for defining the details of an existing S3 snapshot. See below for detailed options. |
+| Name     | Type   | Example                                                                                                                                                                    | Description                                                                                        |
+|----------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| snapshot | object | {"snapshotName": "test-snapshot", "snapshotRepoName": "test-snapshot-repo", "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo", "s3Region": "us-east-2"} | A json object for defining the details of an existing S3 snapshot. See below for detailed options. |
 
 #### Structure of the snapshot object
 
@@ -62,6 +62,7 @@ A snapshot should only be configured when the user has an existing snapshot they
 In such case, the required fields in the snapshot object are:
 
 - `snapshotName` -- the name of the existing snapshot that was created
+- `snapshotRepoName` -- the name of the existing snapshot repository that contains the given `snapshotName`
 - `s3Uri` -- the `s3://` URI path to where the snapshot repo exists in the given S3 bucket
 - `s3Region` -- the region where the S3 bucket is located
 

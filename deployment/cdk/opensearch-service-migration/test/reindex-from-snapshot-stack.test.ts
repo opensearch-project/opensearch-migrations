@@ -227,6 +227,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       snapshot: {
         "snapshotName": "test-snapshot",
+        "snapshotRepoName": "test-repo",
         "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo",
         "s3Region": "us-east-2"
       },
