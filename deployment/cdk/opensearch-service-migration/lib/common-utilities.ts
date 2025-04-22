@@ -215,7 +215,7 @@ export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string,
     const requestingRole = Role.fromRoleArn(scope, 'RequestingRole', migrationConsoleTaskRoleArn);
     snapshotRole.grantPassRole(requestingRole);
     
-    // Also grant broader permission to pass any role (needed for other operations like multiplier test for cross-region snapshot creation)
+    // Grant broader permission to pass any role in the account, enabling support for user-provided snapshot roles at runtime
     requestingRole.addToPrincipalPolicy(new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['iam:PassRole'],
