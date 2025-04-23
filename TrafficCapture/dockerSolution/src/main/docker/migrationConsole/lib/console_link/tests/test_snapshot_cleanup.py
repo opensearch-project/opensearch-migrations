@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from console_link.models.cluster import Cluster
 from console_link.models.snapshot import S3Snapshot
+from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 import requests
 import logging
 
@@ -24,7 +25,7 @@ def mock_cluster_with_missing_repo(mocker):
         json_data={
             'error': {
                 'type': 'repository_missing_exception',
-                'reason': '[migration_assistant_repo] missing'
+                'reason': f'[{DEFAULT_SNAPSHOT_REPO_NAME}] missing'
             }
         }
     )
@@ -88,5 +89,5 @@ def test_delete_all_snapshots_success(mock_cluster_with_snapshots, caplog):
     snapshot = S3Snapshot(config=config["snapshot"], source_cluster=mock_cluster_with_snapshots)
     with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
         snapshot.delete_all_snapshots(cluster=mock_cluster_with_snapshots, repository=snapshot.snapshot_repo_name)
-        assert "Deleted snapshot: snapshot_1 from repository 'migration_assistant_repo'." in caplog.text
-        assert "Deleted snapshot: snapshot_2 from repository 'migration_assistant_repo'." in caplog.text
+        assert f"Deleted snapshot: snapshot_1 from repository '{snapshot.snapshot_repo_name}'." in caplog.text
+        assert f"Deleted snapshot: snapshot_2 from repository '{snapshot.snapshot_repo_name}'." in caplog.text

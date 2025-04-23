@@ -62,8 +62,10 @@ def test_snapshot_status(request, snapshot_fixture):
     assert isinstance(result, CommandResult)
     assert result.success
     assert result.value == "SUCCESS"
-    source_cluster.call_api.assert_called_once_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}",
-                                                    HttpMethod.GET)
+    source_cluster.call_api.assert_called_once_with(
+        f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
+        HttpMethod.GET
+    )
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
@@ -120,8 +122,10 @@ def test_snapshot_status_full(request, snapshot_fixture):
 
     assert "N/A" not in result.value
 
-    source_cluster.call_api.assert_called_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}/_status",
-                                               HttpMethod.GET)
+    source_cluster.call_api.assert_called_with(
+        f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}/_status",
+        HttpMethod.GET
+    )
 
 
 def test_s3_snapshot_init_succeeds():
@@ -432,7 +436,7 @@ def test_snapshot_delete(request, snapshot_fixture):
     source_cluster = snapshot.source_cluster
     snapshot.delete()
     source_cluster.call_api.assert_called_once()
-    source_cluster.call_api.assert_called_with(f"/_snapshot/migration_assistant_repo/{snapshot.snapshot_name}",
+    source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
                                                HttpMethod.DELETE)
 
 
@@ -445,8 +449,8 @@ def test_snapshot_delete_all_snapshots(request, snapshot_fixture):
     snapshot.delete_all_snapshots()
     source_cluster.call_api.assert_called()
     source_cluster.call_api.assert_has_calls([
-        mock.call('/_snapshot/migration_assistant_repo/_all', raise_error=True),
-        mock.call('/_snapshot/migration_assistant_repo/test_snapshot', HttpMethod.DELETE),
+        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True),
+        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot', HttpMethod.DELETE),
     ])
 
 
@@ -456,7 +460,7 @@ def test_snapshot_delete_repo(request, snapshot_fixture):
     source_cluster = snapshot.source_cluster
     snapshot.delete_snapshot_repo()
     source_cluster.call_api.assert_called_once()
-    source_cluster.call_api.assert_called_with("/_snapshot/migration_assistant_repo",
+    source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}",
                                                method=HttpMethod.DELETE,
                                                raise_error=True)
 

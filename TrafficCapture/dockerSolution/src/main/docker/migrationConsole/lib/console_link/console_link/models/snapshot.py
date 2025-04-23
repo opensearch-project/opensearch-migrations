@@ -9,6 +9,8 @@ from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,7 @@ class Snapshot(ABC):
         if not v.validate({'snapshot': config}):
             raise ValueError("Invalid config file for snapshot", v.errors)
         self.snapshot_name = config['snapshot_name']
-        self.snapshot_repo_name = config.get("snapshot_repo_name", "migration_assistant_repo")
+        self.snapshot_repo_name = config.get("snapshot_repo_name", DEFAULT_SNAPSHOT_REPO_NAME)
         self.otel_endpoint = config.get("otel_endpoint", None)
 
     @abstractmethod
