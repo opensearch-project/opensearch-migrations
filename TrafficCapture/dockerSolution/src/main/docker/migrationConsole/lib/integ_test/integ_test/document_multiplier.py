@@ -593,14 +593,17 @@ class BackfillTest(unittest.TestCase):
                         path="/_cat/indices/.migrations_working_state?format=json"
                     )
                     
-                    if response.status_code == 404 or (response.status_code == 200 and len(response.json()) == 0):
-                        logger.info("Migrations working state index has been deleted")
+                    if response.status_code == 404:
+                        logger.info("Migrations working state index has been deleted (404 response)")
                         index_deleted = True
-                        break  # Exit the loop once index is confirmed deleted
+                    elif response.status_code == 200 and len(response.json()) == 0:
+                        logger.info("Migrations working state index has been deleted (empty response)")
+                        index_deleted = True
                     else:
                         logger.info("Waiting for migrations working state index to be deleted...")
                 except Exception as e:
-                    logger.warning(f"Error checking index status: {e}")
+                    if "404" not in str(e):
+                        logger.warning(f"Error checking index status: {e}")
                 
                 last_check_time = current_time
                     
@@ -692,8 +695,33 @@ class BackfillTest(unittest.TestCase):
         logger.info(f"Updated S3 URI: {updated_s3_uri}")
 
         # Delete the existing snapshot and snapshot repo from the cluster
-        snapshot.delete()
-        snapshot.delete_snapshot_repo()
+        max_retries = 5
+        retry_interval = 10
+        snapshotdeletion_success = False
+
+        for attempt in range(max_retries):
+            try:
+                snapshot.delete()
+                snapshot.delete_snapshot_repo()
+                snapshotdeletion_success = True
+                logger.info("Successfully deleted existing snapshot and repository")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Attempt {attempt + 1}/{max_retries} to delete snapshot failed: {str(e)}")
+                    # Run aws configure to refresh credentials
+                    aws_cmd = CommandRunner(
+                        command_root="aws",
+                        command_args={
+                            "__positional__": ["configure", "list"],
+                            "--profile": "default"
+                        }
+                    )
+                    aws_cmd.run()
+                    time.sleep(retry_interval)
+                else:
+                    logger.error(f"Failed to delete snapshot after {max_retries} attempts: {str(e)}")
+                    raise
 
         # Create final snapshot
         logger.info("\n=== Creating Final Snapshot ===")
