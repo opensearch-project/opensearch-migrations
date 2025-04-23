@@ -8,26 +8,34 @@ def call(Map config = [:]) {
     def docTransformerPath = "/shared-logs-output/test-transformations/transformation.json"
     
     // Map the cluster version parameter to the actual engine version
-    def engineVersion = ""
-    def distVersion = ""
+    String engineVersion
+    String distVersion
+    String dataNodeType
+    String dedicatedManagerNodeType
+    boolean ebsEnabled = false
+    Integer ebsVolumeSize = null
+
     switch (params.CLUSTER_VERSION) {
         case 'es5x':
             engineVersion = "ES_5.6"
             distVersion = "5.6"
-            dataNodeType = "c5.4xlarge.search"
+            dataNodeType = "r5.4xlarge.search"
             dedicatedManagerNodeType = "m4.xlarge.search"
+            ebsEnabled = true
             break
         case 'es6x':
-            engineVersion = "ES_6.7"
-            distVersion = "6.7"
-            dataNodeType = "c5.4xlarge.search"
+            engineVersion = "ES_6.8"
+            distVersion = "6.8"
+            dataNodeType = "r5.4xlarge.search"
             dedicatedManagerNodeType = "m5.xlarge.search"
+            ebsEnabled = true
+            ebsVolumeSize = 200
             break
         case 'es7x':
             engineVersion = "ES_7.10"
             distVersion = "7.10"
-            dataNodeType = "i3.4xlarge.search"
-            dedicatedManagerNodeType = "m5.xlarge.search"
+            dataNodeType = "r6gd.4xlarge.search"
+            dedicatedManagerNodeType = "m6g.xlarge.search"
             break
         case 'os1x':
             engineVersion = "OS_1.3"
@@ -75,7 +83,8 @@ def call(Map config = [:]) {
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
             "dedicatedManagerNodeType": "${dedicatedManagerNodeType}",
-            "ebsEnabled": false,
+            "ebsEnabled": ${ebsEnabled},
+            ${ebsVolumeSize ? '"ebsVolumeSize": ' + ebsVolumeSize + ',' : ''}
             "openAccessPolicyEnabled": false,
             "domainRemovalPolicy": "DESTROY",
             "tlsSecurityPolicy": "TLS_1_2",
