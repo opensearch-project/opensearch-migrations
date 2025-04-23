@@ -72,5 +72,5 @@ spec:
         parameters:
           - name: snapshot-config
             valueFrom:
-              expression: "inputs.parameters['existing-snapshot'] != ''? inputs.parameters['existing-snapshot'] : inputs.parameters['create-snapshot-output']"
+              expression: "inputs.parameters['existing-snapshot'] != '' ? inputs.parameters['existing-snapshot'] : inputs.parameters['create-snapshot-output']"
       steps: [[]]

@@ -39,8 +39,12 @@ spec:
         args:
           - |
             set -e -x
-            cat <<'EOF' > /config/migration_services.yaml
-            {{inputs.parameters.config-contents}}
+            
+            # Save pod name to output path
+            echo $HOSTNAME > /tmp/podname
+            
+            base64 -d > /config/migration_services.yaml << EOF
+            {{= toBase64(inputs.parameters['config-contents']) }}
             EOF
             
             . /etc/profile.d/venv.sh
@@ -52,6 +56,60 @@ spec:
             echo ---
             
             {{inputs.parameters.command}}
+
+    - name: deploy-console-with-config
+      inputs:
+        parameters:
+          - name: command
+          - name: config-contents
+      outputs:
+        parameters:
+          - name: deployment-name
+            valueFrom:
+              jsonPath: '{.metadata.name}'
+      resource:
+        action: create
+        setOwnerReference: true
+        successCondition: status.availableReplicas > 0
+#        failureCondition: status.unavailableReplicas > 0
+        manifest: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            generateName: user-env-
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: user-environment
+            template:
+              metadata:
+                labels:
+                  app: user-environment
+              spec:
+                containers:
+                  - name: main
+                    image: migrations/migration_console:latest
+                    imagePullPolicy: IfNotPresent
+                    command:
+                      - "/bin/sh"
+                      - "-c"
+                      - |
+                        set -e -x
+          
+                        base64 -d > /config/migration_services.yaml << EOF
+                        {{= toBase64(inputs.parameters['config-contents']) }}
+                        EOF
+                      
+                        . /etc/profile.d/venv.sh
+                        source /.venv/bin/activate
+                      
+                        echo file dump
+                        echo ---
+                        cat /config/migration_services.yaml
+                        echo ---
+          
+                        {{inputs.parameters.command}}
 
     - name: run-console
       inputs:
@@ -76,6 +134,41 @@ spec:
                   value: "{{inputs.parameters.snapshot-info}}"
         - - name: run-console-with-config
             template: run-console-with-config
+            arguments:
+              parameters:
+                - name: config-contents
+                  value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
+                - name: command
+                  value: "{{inputs.parameters.command}}"
+
+    - name: deploy-console
+      inputs:
+        parameters:
+          - name: command
+          - name: source-cluster
+            default: ""
+          - name: target-cluster
+            default: ""
+          - name: snapshot-info
+            default: ""
+      outputs:
+        parameters:
+          - name: deployment-name
+            valueFrom:
+              expression: "steps['deploy-console-with-config'].outputs.parameters['deployment-name']"
+      steps:
+        - - name: get-console-config
+            template: get-console-config
+            arguments:
+              parameters:
+                - name: source-cluster
+                  value: "{{inputs.parameters.source-cluster}}"
+                - name: target-cluster
+                  value: "{{inputs.parameters.target-cluster}}"
+                - name: snapshot-info
+                  value: "{{inputs.parameters.snapshot-info}}"
+        - - name: deploy-console-with-config
+            template: deploy-console-with-config
             arguments:
               parameters:
                 - name: config-contents

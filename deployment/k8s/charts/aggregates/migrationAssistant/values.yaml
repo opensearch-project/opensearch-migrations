@@ -8,7 +8,7 @@ conditionalPackageInstalls:
   proxy: false
 
   # migration support packages
-  migrationConsole: true
+  migrationConsole: false
   sharedConfigs: true
   snapshotVolume: false
   logsVolume: false
@@ -70,11 +70,7 @@ etcd:
 #  sharedLogsPvc: "shared-logs-pvc"
 
 
-captured-traffic-kafka-cluster:
-  environment: test
-
-  clusterName: captured-traffic
-
+strimzi-kafka-operator:
   replicas: 1
   storageType: ephemeral
   storageSize: 100Gi
@@ -82,6 +78,37 @@ captured-traffic-kafka-cluster:
   dedicatedController:
     replicas: 1
     storageSize: 10Gi
+
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    timeoutSeconds: 3
+    failureThreshold: 1
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    timeoutSeconds: 3
+    failureThreshold: 1
+
+  kafka:
+    template:
+      pod:
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 1
+
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 2
+      timeoutSeconds: 3
+      failureThreshold: 1
+    livenessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 2
+      timeoutSeconds: 3
+      failureThreshold: 1
 
 localstack:
   image:

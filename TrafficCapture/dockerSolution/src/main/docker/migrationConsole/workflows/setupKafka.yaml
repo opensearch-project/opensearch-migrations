@@ -23,31 +23,36 @@ spec:
           - name: bootstrap-servers
             valueFrom:
               expression: >-
-                (steps['deploy-kafka-cluster-kraft'] == nil ? steps['deploy-kafka-cluster-zookeper'] : steps['deploy-kafka-cluster-kraft']).outputs.parameters['brokers']
-      steps:
-        - - name: deploy-kafka-node-pool
+                (tasks['deploy-kafka-cluster-kraft'].status == "Skipped" ? tasks['deploy-kafka-cluster-zookeeper'] : tasks['deploy-kafka-cluster-kraft']).outputs.parameters['brokers']
+      dag:
+        tasks:
+          - name: deploy-kafka-node-pool
             template: deploy-kafka-node-pool
             when: "{{inputs.parameters.use-kraft}} == true"
             arguments:
               parameters:
                 - name: kafka-name
                   value: "{{inputs.parameters.kafka-name}}"
-        - - name: deploy-kafka-cluster-kraft
+
+          - name: deploy-kafka-cluster-kraft
             template: deploy-kafka-cluster-kraft
             when: "{{inputs.parameters.use-kraft}} == true"
             arguments:
               parameters:
                 - name: kafka-name
                   value: "{{inputs.parameters.kafka-name}}"
-        - - name: deploy-kafka-cluster-zookeeper
+
+          - name: deploy-kafka-cluster-zookeeper
             template: deploy-kafka-cluster-zookeeper
             when: "{{inputs.parameters.use-kraft}} == false"
             arguments:
               parameters:
                 - name: kafka-name
                   value: "{{inputs.parameters.kafka-name}}"
-        - - name: topic-deploy
+
+          - name: topic-deploy
             template: topic-deploy
+            depends: "deploy-kafka-cluster-kraft || deploy-kafka-cluster-zookeeper"
             arguments:
               parameters:
                 - name: kafka-name
@@ -69,8 +74,9 @@ spec:
             value: ""
           - name: topic-replicas
             value: ""
-      steps:
-        - - name: create-kafka-topic
+      dag:
+        tasks:
+          - name: create-kafka-topic
             template: create-kafka-topic
             arguments:
               parameters:
@@ -83,34 +89,6 @@ spec:
                 - name: topic-replicas
                   value: "{{inputs.parameters.topic-replicas}}"
 
-    - name: deploy-kafka-node-pool
-      inputs:
-        parameters:
-          - name: kafka-name
-      resource:
-        action: apply
-        setOwnerReference: true
-        manifest: |
-          apiVersion: kafka.strimzi.io/v1beta2
-          kind: KafkaNodePool
-          metadata:
-            name: dual-role
-            labels:
-              strimzi.io/cluster: {{inputs.parameters.kafka-name}}
-          spec:
-            replicas: 1
-            roles:
-              - controller
-              - broker
-            storage:
-              type: jbod
-              volumes:
-                - id: 0
-                  type: persistent-claim
-                  size: 5Gi
-                  deleteClaim: false
-                  kraftMetadata: shared
-
     - name: deploy-kafka-cluster-zookeeper
       inputs:
         parameters:
@@ -119,7 +97,7 @@ spec:
         parameters:
           - name: brokers
             valueFrom:
-              jsonPath: "{.status.listeners[?(@.name=='tls')].bootstrapServers}"
+              jsonPath: "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
       resource:
         action: create
         setOwnerReference: true
@@ -155,6 +133,35 @@ spec:
               topicOperator: {}
               userOperator: {}
 
+
+    - name: deploy-kafka-node-pool
+      inputs:
+        parameters:
+          - name: kafka-name
+      resource:
+        action: apply
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaNodePool
+          metadata:
+            name: dual-role
+            labels:
+              strimzi.io/cluster: {{inputs.parameters.kafka-name}}
+          spec:
+            replicas: 1
+            roles:
+              - controller
+              - broker
+            storage:
+              type: jbod
+              volumes:
+                - id: 0
+                  type: persistent-claim
+                  size: 5Gi
+                  deleteClaim: false
+                  kraftMetadata: shared
+
     - name: deploy-kafka-cluster-kraft
       inputs:
         parameters:
@@ -163,7 +170,7 @@ spec:
         parameters:
           - name: brokers
             valueFrom:
-              jsonPath: "{.status.listeners[?(@.name=='tls')].bootstrapServers}"
+              jsonPath: "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
       resource:
         action: apply
         setOwnerReference: true
@@ -180,7 +187,21 @@ spec:
             kafka:
               version: 3.9.0
               metadataVersion: 3.9-IV0
+              readinessProbe:
+                initialDelaySeconds: 1
+                periodSeconds: 2
+                timeoutSeconds: 2
+                failureThreshold: 1
+              livenessProbe:
+                initialDelaySeconds: 1
+                periodSeconds: 2
+                timeoutSeconds: 2
+                failureThreshold: 2
               listeners:
+                - name: plain
+                  port: 9092
+                  type: internal
+                  tls: false
                 - name: tls
                   port: 9093
                   type: internal
