@@ -18,6 +18,8 @@ spec:
                   "password": "admin"
               }
           }
+      - name: session-name
+        value: test
       - name: topic-partitions
         value: 2
       - name: provided-kafka-bootstrap-servers

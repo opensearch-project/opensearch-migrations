@@ -5,21 +5,24 @@ metadata:
 spec:
   entrypoint: run-all
   serviceAccountName: argo-workflow-executor
-
   templates:
     - name: run-all
+      failFast: true
       inputs:
         parameters:
+          - name: session-name
             # temporary - just to launch a migration console
           - name: source-config
             value: ""
             # Kafka setup
           - name: provided-kafka-bootstrap-servers
             value: ""
+          - name: provided-kafka-k8s-name
+            value: ""
           - name: kafka-prefix
             value: "ct"
           - name: topic-name
-            value: "logging-traffic-topic"
+            value: ""
           - name: topic-partitions
             value: ""
             # Proxy setup
@@ -32,36 +35,50 @@ spec:
           - name: id-generator
             template: do-nothing
 
-          - name: kafka-setup
+          - name: kafka-cluster-setup
             templateRef:
               name: kafka-setup
-              template: cluster-topic-deploy
+              template: cluster-deploy
             when: "'{{inputs.parameters.provided-kafka-bootstrap-servers}}' == ''"
             dependencies: [ id-generator ]
             arguments:
               parameters:
                 - name: kafka-name
                   value: "{{inputs.parameters.kafka-prefix}}-{{=last(split(tasks['id-generator'].id, '-'))}}"
-                - name: topic-name
-                  value: "{{inputs.parameters.topic-name}}"
-                - name: topic-partitions
-                  value: "{{inputs.parameters.topic-partitions}}"
 
           - name: get-brokers-list
             template: get-brokers-list
-            dependencies: [ kafka-setup ]
+            dependencies: [ kafka-cluster-setup ]
             arguments:
               parameters:
+                - name: created-kafka-name
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.kafka-name}}"
                 - name: created-bootstrap-servers
-                  value: "{{tasks.kafka-setup.outputs.parameters.bootstrap-servers}}"
+                  value: "{{tasks.kafka-cluster-setup.outputs.parameters.bootstrap-servers}}"
                 - name: provided-kafka-bootstrap-servers
                   value: "{{inputs.parameters.provided-kafka-bootstrap-servers}}"
+                - name: provided-kafka-k8s-name
+                  value: "{{inputs.parameters.provided-kafka-k8s-name}}"
+
+          - name: kafka-topic-setup
+            templateRef:
+              name: kafka-setup
+              template: create-kafka-topic
+            dependencies: [ get-brokers-list ]
+            arguments:
+              parameters:
+                - name: kafka-name
+                  value: "{{tasks.get-brokers-list.outputs.parameters.kafka-name}}"
+                - name: topic-name
+                  value: "{{=let v=inputs.parameters['topic-name']; v == '' ? inputs.parameters['session-name'] : v}}"
+                - name: topic-partitions
+                  value: "{{inputs.parameters.topic-partitions}}"
 
           - name: deploy-capture-proxy
             templateRef:
               name: capture-proxy
               template: deploy-capture-proxy
-            dependencies: [ get-brokers-list ]
+            dependencies: [ get-brokers-list, kafka-topic-setup ]
             arguments:
               parameters:
                 - name: backside-uri-string
@@ -73,13 +90,25 @@ spec:
                 - name: kafka-connection
                   value: "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}"
                 - name: kafka-topic
-                  value: "{{inputs.parameters.topic-name}}"
+                  value: "{{tasks.kafka-topic-setup.outputs.parameters.topic-name}}"
+
+          - name: deploy-capture-proxy-service
+            templateRef:
+              name: capture-proxy
+              template: deploy-service
+            dependencies: [ deploy-capture-proxy ]
+            arguments:
+              parameters:
+                - name: session-name
+                  value: "{{inputs.parameters.session-name}}"
+                - name: frontside-port
+                  value: "{{inputs.parameters.proxy-listen-port}}"
 
           - name: deploy-replayer
             templateRef:
               name: replayer
               template: deploy-replayer
-            dependencies: [ get-brokers-list ]
+            dependencies: [ get-brokers-list, kafka-topic-setup ]
             arguments:
               parameters:
                 - name: target-url
@@ -93,11 +122,11 @@ spec:
                 - name: kafka-traffic-brokers
                   value: "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}"
                 - name: kafka-traffic-topic
-                  value: "logging-traffic-topic"
+                  value: "{{tasks.kafka-topic-setup.outputs.parameters.topic-name}}"
                 - name: kafka-traffic-group-id
                   value: "{{tasks.id-generator.id}}"
                 - name: replicas
-                  value: 2
+                  value: "2"
 
           - name: run-migration-console
             templateRef:
@@ -106,25 +135,38 @@ spec:
             dependencies: [ get-brokers-list ]
             arguments:
               parameters:
+                - name: name
+                  value: "diagnostic-console-{{inputs.parameters.session-name}}"
                 - name: source-cluster
-                  value: "{{inputs.parameters.source-config}}"
+                  value: "{{=replace(inputs.parameters['source-config'], fromJSON(inputs.parameters['source-config'])['endpoint'], 'http://' + inputs.parameters['session-name'] + ':9200')}}"
                 - name: target-cluster
                   value: "{{inputs.parameters.replayer-target-config}}"
+                - name: kafka-info
+                  value: |
+                    {
+                      "broker_endpoints": "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}",
+                      "standard": ""
+                    }
                 - name: command
                   value: tail -f /dev/null
 
           - name: get-user-satisfied-confirmation
             template: get-user-satisfied-confirmation
-            dependencies: [ deploy-capture-proxy, deploy-replayer, run-migration-console ]
+            dependencies: [ deploy-capture-proxy-service, deploy-replayer, run-migration-console ]
 
     - name: get-brokers-list
       steps: [[]]
       inputs:
           parameters:
             - name: created-bootstrap-servers
+            - name: created-kafka-name
             - name: provided-kafka-bootstrap-servers
+            - name: provided-kafka-k8s-name
       outputs:
         parameters:
+          - name: kafka-name
+            valueFrom:
+              expression: "inputs.parameters['provided-kafka-k8s-name'] == '' ? inputs.parameters['created-kafka-name'] : inputs.parameters['provided-kafka-k8s-name']"
           - name: bootstrap-servers
             valueFrom:
               expression: "inputs.parameters['provided-kafka-bootstrap-servers'] == '' ? inputs.parameters['created-bootstrap-servers'] : inputs.parameters['provided-kafka-bootstrap-servers']"

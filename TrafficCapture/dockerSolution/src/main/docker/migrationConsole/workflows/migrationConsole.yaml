@@ -8,23 +8,27 @@ spec:
     - name: get-console-config
       inputs:
         parameters:
-          - name: source-cluster
-            default: ""
-            description: "Source cluster configuration (JSON)"
-          - name: target-cluster
-            default: ""
-            description: "Target cluster configuration (JSON)"
-          - name: snapshot-info
-            default: ""
+          - name: kafka-info
+            value: ""
             description: "Snapshot configuration information (JSON)"
+          - name: source-cluster
+            value: ""
+            description: "Source cluster configuration (JSON)"
+          - name: snapshot-info
+            value: ""
+            description: "Snapshot configuration information (JSON)"
+          - name: target-cluster
+            value: ""
+            description: "Target cluster configuration (JSON)"
       outputs:
         parameters:
           - name: config-contents
             valueFrom:
               expression: >-
+                (inputs.parameters['kafka-info']     != "" ? "kafka: " +          inputs.parameters['kafka-info'] + "\n" : "") + 
                 (inputs.parameters['source-cluster'] != "" ? "source_cluster: " + inputs.parameters['source-cluster'] + "\n" : "") + 
-                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " + inputs.parameters['target-cluster'] + "\n" : "") + 
-                (inputs.parameters['snapshot-info'] != "" ? "snapshot: " + inputs.parameters['snapshot-info'] + "\n" : "")
+                (inputs.parameters['snapshot-info']  != "" ? "snapshot: " +       inputs.parameters['snapshot-info'] + "\n" : "") +
+                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " + inputs.parameters['target-cluster'] + "\n" : "")
       steps: [[]]
 
     - name: run-console-with-config
@@ -62,6 +66,7 @@ spec:
         parameters:
           - name: command
           - name: config-contents
+          - name: name
       outputs:
         parameters:
           - name: deployment-name
@@ -71,12 +76,11 @@ spec:
         action: create
         setOwnerReference: true
         successCondition: status.availableReplicas > 0
-#        failureCondition: status.unavailableReplicas > 0
         manifest: |
           apiVersion: apps/v1
           kind: Deployment
           metadata:
-            generateName: user-env-
+            name: {{inputs.parameters.name}}
           spec:
             replicas: 1
             selector:
@@ -116,12 +120,14 @@ spec:
         parameters:
           - name: command
           - name: source-cluster
-            default: ""
+            value: ""
           - name: target-cluster
-            default: ""
+            value: ""
           - name: snapshot-info
-            default: ""
-      steps:
+            value: ""
+          - name: kafka-info
+            value: ""
+        steps:
         - - name: get-console-config
             template: get-console-config
             arguments:
@@ -132,6 +138,8 @@ spec:
                   value: "{{inputs.parameters.target-cluster}}"
                 - name: snapshot-info
                   value: "{{inputs.parameters.snapshot-info}}"
+                - name: kafka-info
+                  value: "{{inputs.parameters.kafka-info}}"
         - - name: run-console-with-config
             template: run-console-with-config
             arguments:
@@ -145,12 +153,16 @@ spec:
       inputs:
         parameters:
           - name: command
-          - name: source-cluster
-            default: ""
-          - name: target-cluster
-            default: ""
+          - name: kafka-info
+            value: ""
+          - name: name
+            value: ""
           - name: snapshot-info
-            default: ""
+            value: ""
+          - name: source-cluster
+            value: ""
+          - name: target-cluster
+            value: ""
       outputs:
         parameters:
           - name: deployment-name
@@ -161,16 +173,20 @@ spec:
             template: get-console-config
             arguments:
               parameters:
+                - name: kafka-info
+                  value: "{{inputs.parameters.kafka-info}}"
+                - name: snapshot-info
+                  value: "{{inputs.parameters.snapshot-info}}"
                 - name: source-cluster
                   value: "{{inputs.parameters.source-cluster}}"
                 - name: target-cluster
                   value: "{{inputs.parameters.target-cluster}}"
-                - name: snapshot-info
-                  value: "{{inputs.parameters.snapshot-info}}"
         - - name: deploy-console-with-config
             template: deploy-console-with-config
             arguments:
               parameters:
+                - name: name
+                  value: "{{=let n=inputs.parameters.name; n == '' ? 'diagnostic-console-' + workflow.uid : n}}"
                 - name: config-contents
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command

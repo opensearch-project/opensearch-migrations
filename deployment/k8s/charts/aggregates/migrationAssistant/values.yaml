@@ -2,20 +2,13 @@ conditionalPackageInstalls:
   # required migration infrastructure components
   argoWorkflows: true
   etcd: true
-
   # optional migration components
   kafkaOperator: true
-  proxy: false
-
   # migration support packages
   migrationConsole: false
-  sharedConfigs: true
-  snapshotVolume: false
   logsVolume: false
-
   # Test packages
   localstack: true
-
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false

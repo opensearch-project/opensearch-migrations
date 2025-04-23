@@ -3,23 +3,21 @@ kind: WorkflowTemplate
 metadata:
   name: kafka-setup
 spec:
-  entrypoint: cluster-topic-deploy
+  entrypoint: cluster-deploy
   serviceAccountName: argo-workflow-executor
 
   templates:
-    - name: cluster-topic-deploy
+    - name: cluster-deploy
       inputs:
         parameters:
           - name: kafka-name
-          - name: topic-name
-          - name: topic-partitions
-            value: ""
-          - name: topic-replicas
-            value: ""
           - name: use-kraft
             value: "true"
       outputs:
         parameters:
+          - name: kafka-name
+            valueFrom:
+              expression: "inputs.parameters['kafka-name']"
           - name: bootstrap-servers
             valueFrom:
               expression: >-
@@ -50,44 +48,6 @@ spec:
                 - name: kafka-name
                   value: "{{inputs.parameters.kafka-name}}"
 
-          - name: topic-deploy
-            template: topic-deploy
-            depends: "deploy-kafka-cluster-kraft || deploy-kafka-cluster-zookeeper"
-            arguments:
-              parameters:
-                - name: kafka-name
-                  value: "{{inputs.parameters.kafka-name}}"
-                - name: topic-name
-                  value: "{{inputs.parameters.topic-name}}"
-                - name: topic-partitions
-                  value: "{{inputs.parameters.topic-partitions}}"
-                - name: topic-replicas
-                  value: "{{inputs.parameters.topic-replicas}}"
-
-    # Topic deployment template
-    - name: topic-deploy
-      inputs:
-        parameters:
-          - name: kafka-name
-          - name: topic-name
-          - name: topic-partitions
-            value: ""
-          - name: topic-replicas
-            value: ""
-      dag:
-        tasks:
-          - name: create-kafka-topic
-            template: create-kafka-topic
-            arguments:
-              parameters:
-                - name: kafka-name
-                  value: "{{inputs.parameters.kafka-name}}"
-                - name: topic-name
-                  value: "{{inputs.parameters.topic-name}}"
-                - name: topic-partitions
-                  value: "{{inputs.parameters.topic-partitions}}"
-                - name: topic-replicas
-                  value: "{{inputs.parameters.topic-replicas}}"
 
     - name: deploy-kafka-cluster-zookeeper
       inputs:
@@ -234,6 +194,11 @@ spec:
           - name: default-topic-replicas
             value: "1"
             description: "Default number of replicas for the created topic, which will be applied when the topic-replicas is empty or nil."
+      outputs:
+        parameters:
+          - name: topic-name
+            valueFrom:
+              jsonPath: "{.status.topicName}"
       resource:
         action: apply
         setOwnerReference: true

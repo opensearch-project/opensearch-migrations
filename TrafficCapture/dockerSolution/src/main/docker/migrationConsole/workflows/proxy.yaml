@@ -6,34 +6,36 @@ spec:
   entrypoint: deploy-capture-proxy
   serviceAccountName: argo-workflow-executor
 
-  onExit: create-service
-  arguments:
-    parameters:
-      - name: frontside-port
-        value: "{{workflow.inputs.parameters.frontside-port}}"
-
   templates:
-    - name: create-service
+    - name: deploy-service
       inputs:
         parameters:
           - name: frontside-port
+          - name: session-name
+            value: ""
+      outputs:
+        parameters:
+          - name: endpoint
+            valueFrom:
+              jsonPath: '{.metadata.name}'
+      successCondition: status.loadBalancer.ingress
       resource:
         action: create
         setOwnerReference: true
+        flags: [ "--validate=false" ]  # Add this line to disable validation
         manifest: |
           apiVersion: v1
           kind: Service
           metadata:
-            name: capture-proxy
+            name: {{=let v=inputs.parameters['session-name']; v != '' ? v : 'capture-proxy'}}
             labels:
               app: proxy
           spec:
             selector:
-              matchLabels:
-                app: proxy
+              app: proxy  # Selector should match pod labels directly, not use matchLabels
             ports:
-            - port: {{inputs.parameters.frontside-port}}
-              targetPort: {{inputs.parameters.frontside-port}}
+            - port: 9200
+              targetPort: 9200
             type: LoadBalancer
           
 
@@ -62,6 +64,8 @@ spec:
           - name: kafka-client-id
             value: ""
           - name: kafka-connection
+            value: ""
+          - name: kafka-topic
             value: ""
           - name: msk-auth-enabled
             value: ""
@@ -139,6 +143,8 @@ spec:
                       value: "{{inputs.parameters.kafka-properties-file}}"
                     - name: KAFKA_CONNECTION
                       value: "{{inputs.parameters.kafka-connection}}"
+                    - name: KAFKA_TOPIC
+                      value: "{{inputs.parameters.kafka-topic}}"
                     - name: SSL_CONFIG_FILE_PATH
                       value: "{{inputs.parameters.ssl-config-file-path}}"
                     - name: OTEL_COLLECTOR_ENDPOINT
@@ -168,6 +174,7 @@ spec:
                       ARGS="${ARGS}${KAFKA_PROPERTIES_FILE:+ --kafkaConfigFile $KAFKA_PROPERTIES_FILE}"
                       ARGS="${ARGS}${KAFKA_CLIENT_ID:+ --kafkaClientId $KAFKA_CLIENT_ID}"
                       ARGS="${ARGS}${KAFKA_CONNECTION:+ --kafkaConnection $KAFKA_CONNECTION}"
+                      ARGS="${ARGS}${KAFKA_TOPIC:+ --kafkaTopic KAFKA_TOPIC}"
                       ARGS="${ARGS}${SSL_CONFIG_FILE_PATH:+ --sslConfigFile $SSL_CONFIG_FILE_PATH}"
                       ARGS="${ARGS}${MAXIMUM_TRAFFIC_STREAM_SIZE:+ --maxTrafficBufferSize $MAXIMUM_TRAFFIC_STREAM_SIZE}"
                       ARGS="${ARGS}${NUM_THREADS:+ --numThreads $NUM_THREADS}"

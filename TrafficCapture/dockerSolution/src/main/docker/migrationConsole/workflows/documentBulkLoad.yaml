@@ -20,7 +20,7 @@ spec:
             description: "Name of the unique session to disambiguate coordinating indices"
           - name: optional-configs
             description: "JSON Key-Value form of all of the optional parameters to run-bulk-load"
-            default: ""
+            value: ""
       steps:
         - - name: run-bulk-load
             template: run-bulk-load

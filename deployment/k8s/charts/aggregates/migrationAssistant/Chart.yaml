@@ -5,14 +5,6 @@ type: application
 appVersion: "1.16.0"
 
 dependencies:
-  - name: shared-configs
-    condition: conditionalPackageInstalls.sharedConfigs
-    version: "0.1.0"
-    repository: "file://../../sharedResources/sharedConfigs"
-  - name: snapshot-volume
-    version: "0.1.0"
-    repository: "file://../../sharedResources/snapshotVolume"
-    condition: conditionalPackageInstalls.snapshotVolume
   - name: logs-volume
     version: "0.1.0"
     repository: "file://../../sharedResources/logsVolume"
@@ -23,16 +15,10 @@ dependencies:
     version: "0.1.0"
     repository: "file://../../components/migrationConsole"
 
-  - name: capture-proxy
-    condition: conditionalPackageInstalls.proxy
-    version: "0.1.0"
-    repository: "file://../../components/captureProxy"
-
   - name: strimzi-kafka-operator
     condition: conditionalPackageInstalls.kafkaOperator
     version: 0.45.0
     repository: "https://strimzi.io/charts/"
-
 
   - name: argo-workflows
     condition: conditionalPackageInstalls.argoWorkflows

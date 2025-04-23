@@ -23,8 +23,13 @@ rules:
 
   # Add permissions for pods and pod logs (needed for Argo workflow execution)
   - apiGroups: [""]
-    resources: ["pods", "pods/log"]
+    resources: ["pods", "pods/log", "services"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # For services
+  - apiGroups: [ "apiextensions.k8s.io" ]
+    resources: [ "customresourcedefinitions" ]
+    verbs: [ "create", "get", "list", "watch", "update", "patch", "delete" ]
 
   # Kafka resources permissions
   - apiGroups: ["kafka.strimzi.io"]

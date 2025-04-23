@@ -103,6 +103,11 @@ public class CaptureProxy {
             description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
         public String kafkaConnection;
         @Parameter(required = false,
+            names = { "--kafkaTopic" },
+            arity = 1,
+            description = "Name of the topic to write captured traffic to.")
+        public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
+        @Parameter(required = false,
             names = { "--enableMSKAuth" },
             arity = 0,
             description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
@@ -313,6 +318,7 @@ public class CaptureProxy {
                 rootContext,
                 nodeId,
                 new KafkaProducer<>(buildKafkaProperties(params)),
+                params.kafakTopicName,
                 params.maximumTrafficStreamSize
             );
         } else if (params.noCapture) {
