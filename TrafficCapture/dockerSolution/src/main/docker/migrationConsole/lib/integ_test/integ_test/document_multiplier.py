@@ -596,13 +596,20 @@ class BackfillTest(unittest.TestCase):
                     if response.status_code == 404:
                         logger.info("Migrations working state index has been deleted (404 response)")
                         index_deleted = True
+                        break
                     elif response.status_code == 200 and len(response.json()) == 0:
                         logger.info("Migrations working state index has been deleted (empty response)")
                         index_deleted = True
+                        break
                     else:
                         logger.info("Waiting for migrations working state index to be deleted...")
                 except Exception as e:
-                    if "404" not in str(e):
+                    # Check if the error is a 404 response
+                    if '"status":404' in str(e) or 'index_not_found_exception' in str(e):
+                        logger.info("Migrations working state index has been deleted (404 exception)")
+                        index_deleted = True
+                        break
+                    else:
                         logger.warning(f"Error checking index status: {e}")
                 
                 last_check_time = current_time
