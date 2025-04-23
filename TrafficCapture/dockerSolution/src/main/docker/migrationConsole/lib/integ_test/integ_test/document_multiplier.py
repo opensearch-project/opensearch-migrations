@@ -583,9 +583,11 @@ class BackfillTest(unittest.TestCase):
                 if isinstance(archive_result.value, str) and "working_state_backup" in archive_result.value:
                     logger.info(f"Working state archived to: {archive_result.value}")
                     archive_success = True
+                    index_deleted = True  # Archive success means index was deleted
+                    break
 
-            # Check if migrations working state index exists - but not too frequently
-            if not index_deleted and (current_time - last_check_time) >= 5:  # Check every 5 seconds
+            # Only check index if archive wasn't successful
+            if not archive_success and not index_deleted and (current_time - last_check_time) >= 5:  # Check every 5 seconds
                 try:
                     response = execute_api_call(
                         cluster=pytest.console_env.target_cluster,

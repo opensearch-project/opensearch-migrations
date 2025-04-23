@@ -14,22 +14,32 @@ def call(Map config = [:]) {
         case 'es5x':
             engineVersion = "ES_5.6"
             distVersion = "5.6"
+            dataNodeType = "i3.4xlarge.search"
+            dedicatedManagerNodeType = "m4.xlarge.search"
             break
         case 'es6x':
             engineVersion = "ES_6.7"
             distVersion = "6.7"
+            dataNodeType = "i3.4xlarge.search"
+            dedicatedManagerNodeType = "m5.xlarge.search"
             break
         case 'es7x':
             engineVersion = "ES_7.10"
             distVersion = "7.10"
+            dataNodeType = "i3.4xlarge.search"
+            dedicatedManagerNodeType = "m5.xlarge.search"
             break
         case 'os1x':
             engineVersion = "OS_1.3"
             distVersion = "1.3"
+            dataNodeType = "r6gd.4xlarge.search"
+            dedicatedManagerNodeType = "m6g.xlarge.search"
             break
         case 'os2x':
             engineVersion = "OS_2.17"
             distVersion = "2.17"
+            dataNodeType = "r6gd.4xlarge.search"
+            dedicatedManagerNodeType = "m6g.xlarge.search"
             break
         default:
             throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
@@ -61,10 +71,10 @@ def call(Map config = [:]) {
             "distVersion": "${distVersion}",
             "domainName": "${params.CLUSTER_VERSION}-jenkins-test",
             "dataNodeCount": 60,
-            "dataNodeType": "r6gd.4xlarge.search",
+            "dataNodeType": "${dataNodeType}",
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
-            "dedicatedManagerNodeType": "m6g.xlarge.search",
+            "dedicatedManagerNodeType": "${dedicatedManagerNodeType}",
             "ebsEnabled": false,
             "openAccessPolicyEnabled": false,
             "domainRemovalPolicy": "DESTROY",
