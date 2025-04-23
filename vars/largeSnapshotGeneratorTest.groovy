@@ -14,13 +14,13 @@ def call(Map config = [:]) {
         case 'es5x':
             engineVersion = "ES_5.6"
             distVersion = "5.6"
-            dataNodeType = "i3.4xlarge.search"
+            dataNodeType = "c5.4xlarge.search"
             dedicatedManagerNodeType = "m4.xlarge.search"
             break
         case 'es6x':
             engineVersion = "ES_6.7"
             distVersion = "6.7"
-            dataNodeType = "i3.4xlarge.search"
+            dataNodeType = "c5.4xlarge.search"
             dedicatedManagerNodeType = "m5.xlarge.search"
             break
         case 'es7x':
