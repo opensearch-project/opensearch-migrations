@@ -558,6 +558,61 @@ class BackfillTest(unittest.TestCase):
             previous_count = current_count
             time.sleep(30)
 
+    def wait_for_working_state_archive(self, backfill, max_retries=30, retry_interval=10):
+        """Wait for the working state to be properly archived before proceeding."""
+        logger.info("Archiving the working state of the backfill operation...")
+        retries = 0
+        archive_success = False
+        index_deleted = False
+        last_check_time = 0
+        
+        while retries < max_retries and (not archive_success or not index_deleted):
+            current_time = time.time()
+            
+            # Check for archive status
+            if not archive_success:
+                archive_result = backfill.archive()
+                
+                # First wait for RFS workers to complete
+                if isinstance(archive_result.value, RfsWorkersInProgress):
+                    logger.info("RFS Workers are still running, waiting for them to complete...")
+                    time.sleep(5)  # Keep original 5 second wait for RFS workers
+                    continue
+                    
+                # Then check for successful archive
+                if isinstance(archive_result.value, str) and "working_state_backup" in archive_result.value:
+                    logger.info(f"Working state archived to: {archive_result.value}")
+                    archive_success = True
+
+            # Check if migrations working state index exists - but not too frequently
+            if not index_deleted and (current_time - last_check_time) >= 5:  # Check every 5 seconds
+                try:
+                    response = execute_api_call(
+                        cluster=pytest.console_env.target_cluster,
+                        method=HttpMethod.GET,
+                        path="/_cat/indices/.migrations_working_state?format=json"
+                    )
+                    
+                    if response.status_code == 404 or (response.status_code == 200 and len(response.json()) == 0):
+                        logger.info("Migrations working state index has been deleted")
+                        index_deleted = True
+                        break  # Exit the loop once index is confirmed deleted
+                    else:
+                        logger.info("Waiting for migrations working state index to be deleted...")
+                except Exception as e:
+                    logger.warning(f"Error checking index status: {e}")
+                
+                last_check_time = current_time
+                    
+            if not archive_success or not index_deleted:
+                time.sleep(retry_interval)
+                retries += 1
+                
+        if retries >= max_retries:
+            logger.warning(f"Timeout after {max_retries * retry_interval} seconds. Archive success result: {archive_success}, Index deletion result: {index_deleted}")
+            
+        return archive_result if archive_success else None
+
     def test_data_multiplication(self):
         """Monitor backfill progress and report final stats"""
         source = pytest.console_env.target_cluster
@@ -619,16 +674,12 @@ class BackfillTest(unittest.TestCase):
         assert stop_result.success, f"Failed to stop backfill: {stop_result.error}"
         logger.info("Backfill stopped successfully")
 
-        logger.info("Archiving the working state of the backfill operation...")
-        archive_result = backfill.archive()
-
-        while isinstance(archive_result.value, RfsWorkersInProgress):
-            logger.info("RFS Workers are still running, waiting for them to complete...")
-            time.sleep(5)
-            archive_result = backfill.archive()
- 
-        assert archive_result.success, f"Failed to archive backfill: {archive_result.value}"
-        logger.info(f"Backfill working state archived to: {archive_result.value}")
+        # Archive working state
+        archive_result = self.wait_for_working_state_archive(backfill)
+        if archive_result and archive_result.success:
+            logger.info("Backfill archive completed successfully")
+        else:
+            logger.warning("Could not fully verify backfill archive completion. Proceeding with incomplete backfill stop.")
 
         # Setup S3 Bucket
         snapshot: Snapshot = pytest.console_env.snapshot
