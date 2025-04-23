@@ -15,11 +15,13 @@ import lombok.experimental.UtilityClass;
 public class SupportedClusters {
     public static List<ContainerVersion> sources() {
         return List.of(
-            SearchClusterContainer.ES_V5_6_16,
-            SearchClusterContainer.ES_V6_8_23,
-            SearchClusterContainer.ES_V7_10_2,
-            SearchClusterContainer.ES_V7_17,
-            SearchClusterContainer.OS_V1_3_16
+            // Include ES 8.17.5 for testing
+            SearchClusterContainer.ES_V8_17
+            // SearchClusterContainer.ES_V7_17,
+            // SearchClusterContainer.ES_V7_10_2,
+            // SearchClusterContainer.ES_V6_8_23,
+            // SearchClusterContainer.ES_V5_6_16,
+            // SearchClusterContainer.OS_V1_3_16
         );
     }
 
