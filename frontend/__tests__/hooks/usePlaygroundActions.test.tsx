@@ -6,7 +6,7 @@ import { PlaygroundContext, initialState } from "@/context/PlaygroundContext";
 import {
   createInputDocument,
   createTransformation,
-} from "../__utils__/playgroundFactories";
+} from "@tests/__utils__/playgroundFactories";
 
 const TEST_UUID = "test-uuid";
 const TEST_DOC_NAME = "Test Document";
@@ -25,7 +25,6 @@ describe("usePlaygroundActions", () => {
   // Create a wrapper with a mock dispatch function for testing dispatched actions
   const createMockWrapper = () => {
     const mockDispatch = jest.fn();
-
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <PlaygroundContext.Provider
         value={{
@@ -36,7 +35,6 @@ describe("usePlaygroundActions", () => {
         {children}
       </PlaygroundContext.Provider>
     );
-
     return { wrapper, mockDispatch };
   };
 

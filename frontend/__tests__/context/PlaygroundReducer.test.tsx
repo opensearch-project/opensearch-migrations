@@ -4,7 +4,7 @@ import {
   createTransformation,
   createOutputDocument,
   createTestState,
-} from "../__utils__/playgroundFactories";
+} from "@tests/__utils__/playgroundFactories";
 
 describe("PlaygroundReducer", () => {
   describe("ADD_INPUT_DOCUMENT", () => {

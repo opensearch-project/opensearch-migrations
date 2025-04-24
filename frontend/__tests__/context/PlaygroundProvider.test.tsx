@@ -5,7 +5,7 @@ import { PlaygroundProvider } from "@/context/PlaygroundProvider";
 import {
   createInputDocument,
   createTransformation,
-} from "../__utils__/playgroundFactories";
+} from "@tests/__utils__/playgroundFactories";
 
 // Mock localStorage
 const localStorageMock = (() => {
