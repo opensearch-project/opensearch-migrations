@@ -305,6 +305,7 @@ jobs:
         npm-project:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
+          - ./frontend
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
