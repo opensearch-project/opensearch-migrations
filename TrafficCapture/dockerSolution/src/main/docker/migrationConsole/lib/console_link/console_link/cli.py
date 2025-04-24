@@ -276,7 +276,6 @@ def unregister_snapshot_repo_cmd(ctx, acknowledge_risk: bool):
         if not confirmed:
             click.echo("Aborting the command to remove snapshot repository.")
             return
-    #_external_snapshots_check(ctx.env.snapshot)
     logger.info("Removing snapshot repository")
     result = snapshot_.delete_snapshot_repo(ctx.env.snapshot)
     click.echo(result.value)
