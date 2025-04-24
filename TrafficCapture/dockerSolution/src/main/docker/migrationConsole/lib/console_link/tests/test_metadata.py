@@ -395,8 +395,6 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         "bazzy"  # Lone value, will be ignored
     ])
 
-    print(mock.call_args_list)
-
     mock.assert_called_once_with([
         '/root/metadataMigration/bin/MetadataMigration',
         "evaluate",

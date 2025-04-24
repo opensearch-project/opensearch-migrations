@@ -392,6 +392,7 @@ export class StackComposer {
         } else {
             snapshotYaml = new SnapshotYaml();
             snapshotYaml.snapshot_name = "rfs-snapshot"
+            snapshotYaml.snapshot_repo_name = "migration_assistant_repo"
         }
         servicesYaml.snapshot = snapshotYaml
 

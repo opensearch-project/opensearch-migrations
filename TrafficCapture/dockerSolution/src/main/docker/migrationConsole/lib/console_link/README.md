@@ -75,6 +75,7 @@ replay:
     service-name: "migrations-dev-replayer-service"
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
+  snapshot_repo_name: "my-snapshot-repo"
   s3:
       repo_uri: "s3://my-snapshot-bucket"
       aws_region: "us-east-2"
@@ -200,6 +201,7 @@ backfill:
 The snapshot configuration specifies a local filesystem or an s3 snapshot that will be created by the `snapshot create` command, and (if not overridden) used as the source for the `metadata migrate` command. In a docker migration, it may also be used as the source for backfill via reindex-from-snapshot. If metadata migration and reindex-from-snapshot are not being used, this block is optional.
 
 - `snapshot_name`: required, name of the snapshot
+- `snapshot_repo_name`: optional, name of the snapshot repository
 
 Exactly one of the following blocks must be present:
 

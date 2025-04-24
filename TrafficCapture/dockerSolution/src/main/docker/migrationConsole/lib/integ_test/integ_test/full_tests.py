@@ -50,6 +50,8 @@ def initialize(request):
     replayer: Replayer = pytest.console_env.replay
     assert replayer is not None
     kafka: Kafka = pytest.console_env.kafka
+    snapshot: Snapshot = pytest.console_env.snapshot
+    assert snapshot is not None
 
     # Confirm source and target connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
@@ -58,7 +60,7 @@ def initialize(request):
     assert target_con_result.connection_established is True
 
     # Clear Cluster
-    clear_cluster(source_cluster)
+    clear_cluster(source_cluster, snapshot)
     clear_cluster(target_cluster)
 
     # Delete existing Kafka topic to clear records

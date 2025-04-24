@@ -116,6 +116,30 @@ snapshot:
     assert result.exit_code == 1
     assert isinstance(result.exception, SystemExit)
 
+
+def test_cli_snapshot_when_source_cluster_not_defined_raises_error(runner, tmp_path):
+    no_source_cluster_with_snapshot = """
+target_cluster:
+  endpoint: "https://opensearchtarget:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "myStrongPassword123!"
+snapshot:
+  snapshot_name: "test_snapshot"
+  fs:
+    repo_path: "/snapshot/test-console"
+  otel_endpoint: "http://otel-collector:4317"
+  """
+    yaml_path = tmp_path / "services.yaml"
+    with open(yaml_path, 'w') as f:
+        f.write(no_source_cluster_with_snapshot)
+
+    result = runner.invoke(cli, ['--config-file', str(yaml_path), 'snapshot', 'create'],
+                           catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "Snapshot commands require a source cluster to be defined" in result.output
+
 # The following tests are mostly smoke-tests with a goal of covering every CLI command and option.
 # They generally mock functions either at the logic or the model layer, though occasionally going all the way to
 # an external endpoint call.

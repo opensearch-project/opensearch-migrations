@@ -57,6 +57,7 @@ public class TestCreateSnapshot {
     @Test
     public void testRepoRegisterAndSnapshotCreateRequests() throws Exception {
         var snapshotName = "my_snap";
+        var snapshotRepoName = "my_snapshot_repo";
 
         ArrayList<Map.Entry<FullHttpRequest, String>> capturedRequestList = new ArrayList<>();
         try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
@@ -82,6 +83,7 @@ public class TestCreateSnapshot {
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new S3SnapshotCreator(
                     snapshotName,
+                    snapshotRepoName,
                     sourceClient,
                     "s3://new-bucket/path-to-repo",
                     "us-east-2",
@@ -95,7 +97,7 @@ public class TestCreateSnapshot {
             FullHttpRequest createSnapshotRequest = capturedRequestList.get(1).getKey();
             String createSnapshotRequestContent = capturedRequestList.get(1).getValue();
 
-            Assertions.assertEquals("/_snapshot/migration_assistant_repo", registerRepoRequest.uri());
+            Assertions.assertEquals("/_snapshot/" + snapshotRepoName, registerRepoRequest.uri());
             Assertions.assertEquals(HttpMethod.PUT, registerRepoRequest.method());
 
             ObjectMapper objectMapper = new ObjectMapper();
@@ -118,7 +120,7 @@ public class TestCreateSnapshot {
                             .put("ignore_unavailable", true)
                             .put("include_global_state", true);
 
-            Assertions.assertEquals("/_snapshot/migration_assistant_repo/" + snapshotName, createSnapshotRequest.uri());
+            Assertions.assertEquals( "/_snapshot/" + snapshotRepoName + "/" + snapshotName, createSnapshotRequest.uri());
             Assertions.assertEquals(HttpMethod.PUT, createSnapshotRequest.method());
             Assertions.assertEquals(expectedCreateSnapshotRequest, actualCreateSnapshotRequest);
         }
@@ -127,6 +129,7 @@ public class TestCreateSnapshot {
     @Test
     public void testSnapshotCreateWithIndexAllowlist() throws Exception {
         var snapshotName = "my_snap";
+        var snapshotRepoName = "my_snapshot_repo";
         var indexAllowlist = List.of("allowed_index_1", "allowed_index_2");
 
         final AtomicReference<FullHttpRequest> createSnapshotRequest = new AtomicReference<>();
@@ -139,7 +142,7 @@ public class TestCreateSnapshot {
                     } else if (Objects.equals(fl.uri(), "/_cluster/settings?include_defaults=true")) {
                         return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
                                 "OK", 200);
-                    } else if (fl.uri().equals("/_snapshot/migration_assistant_repo/" + snapshotName)) {
+                    } else if (fl.uri().equals("/_snapshot/" + snapshotRepoName + "/" + snapshotName)) {
                         createSnapshotRequest.set(fl);
                         createSnapshotRequestContent.set(fl.content().toString(StandardCharsets.UTF_8));
                     }
@@ -156,6 +159,7 @@ public class TestCreateSnapshot {
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new S3SnapshotCreator(
                     snapshotName,
+                    snapshotRepoName,
                     sourceClient,
                     "s3://new-bucket",
                     "us-east-2",

@@ -111,6 +111,7 @@ public class EndToEndTest extends SourceTestBase {
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
+            var snapshotRepoName = "my_snap_repo";
             var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                     .host(sourceCluster.getUrl())
                     .insecure(true)
@@ -119,6 +120,7 @@ public class EndToEndTest extends SourceTestBase {
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new FileSystemSnapshotCreator(
                 snapshotName,
+                snapshotRepoName,
                 sourceClient,
                 SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
                 List.of(),
