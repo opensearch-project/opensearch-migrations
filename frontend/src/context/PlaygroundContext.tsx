@@ -40,7 +40,7 @@ const initialState: PlaygroundState = {
   outputDocuments: [],
 };
 
-type ActionType =
+export type ActionType =
   | { type: "ADD_INPUT_DOCUMENT"; payload: InputDocument }
   | { type: "UPDATE_INPUT_DOCUMENT"; payload: InputDocument }
   | { type: "REMOVE_INPUT_DOCUMENT"; payload: string }
@@ -57,7 +57,7 @@ type ActionType =
   | { type: "CLEAR_OUTPUT_DOCUMENTS"; payload: undefined }
   | { type: "SET_STATE"; payload: Partial<PlaygroundState> };
 
-const playgroundReducer = (
+export const playgroundReducer = (
   state: PlaygroundState,
   action: ActionType,
 ): PlaygroundState => {
