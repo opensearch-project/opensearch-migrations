@@ -22,6 +22,7 @@ def call(Map config = [:]) {
             dataNodeType = "r5.4xlarge.search"
             dedicatedManagerNodeType = "m4.xlarge.search"
             ebsEnabled = true
+            ebsVolumeSize = 300
             break
         case 'es6x':
             engineVersion = "ES_6.8"
@@ -29,7 +30,7 @@ def call(Map config = [:]) {
             dataNodeType = "r5.4xlarge.search"
             dedicatedManagerNodeType = "m5.xlarge.search"
             ebsEnabled = true
-            ebsVolumeSize = 200
+            ebsVolumeSize = 300
             break
         case 'es7x':
             engineVersion = "ES_7.10"
@@ -66,7 +67,7 @@ def call(Map config = [:]) {
             "targetClusterProxyServiceEnabled": false,
             "trafficReplayerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": true,
-            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath}",
+            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-file ${docTransformerPath} --source-version ${engineVersion}",
             "sourceClusterDeploymentEnabled": false,
             "sourceClusterDisabled": true,
             "vpcEnabled": true,
