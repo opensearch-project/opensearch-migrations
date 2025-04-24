@@ -3,7 +3,7 @@ def call(Map config = [:]) {
             gitUrl: config.gitUrl,
             gitBranch: config.gitBranch,
             jobName: 'elasticsearch-8x-k8s-local-test',
-            sourceVersion: 'ES_8.18',
-            targetVersion: 'OS_2.19'
+            sourceVersion: 'ES_8.x',
+            targetVersion: 'OS_2.x'
     )
 }
