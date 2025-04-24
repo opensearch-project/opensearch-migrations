@@ -51,8 +51,10 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
     def test_before(self):
         self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
         # Current test structure requires a transformation config
-        noop_transform = self.source_operations.get_noop_transformation()
-        self.source_operations.create_transformation_json_file(transform_config_data=[noop_transform],
+        union_transform = self.source_operations.get_type_mapping_only_union_transformation(
+            cluster_version=self.source_version
+        )
+        self.source_operations.create_transformation_json_file(transform_config_data=[union_transform],
                                                                file_path_to_create=self.transform_config_file)
 
     def metadata_migrate(self):
