@@ -49,7 +49,7 @@ def call(Map config = [:]) {
             dedicatedManagerNodeType = "m6g.xlarge.search"
             ebsEnabled = true
             ebsVolumeSize = 1024
-            dataNodeCount = 15
+            dataNodeCount = 16
             break
         case 'os2x':
             engineVersion = "OS_2.17"
@@ -58,7 +58,7 @@ def call(Map config = [:]) {
             dedicatedManagerNodeType = "m6g.xlarge.search"
             ebsEnabled = true
             ebsVolumeSize = 1024
-            dataNodeCount = 15
+            dataNodeCount = 16
             break
         default:
             throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
