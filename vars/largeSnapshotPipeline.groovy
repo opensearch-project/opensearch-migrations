@@ -34,7 +34,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'test-k8s-large-snapshot', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(name: 'DEPLOY_REGION', choices: ['us-west-1', 'us-west-2'], description: 'AWS Region to deploy resources')
-            choice(name: 'SNAPSHOT_REGION', choices: ['us-east-1'], description: 'AWS Region for taking the final snapshot')
+            choice(name: 'SNAPSHOT_REGION', choices: ['us-east-1', 'us-west-2'], description: 'AWS Region for taking the final snapshot')
             string(name: 'NUM_SHARDS', defaultValue: '10', description: 'Number of index shards')
             string(name: 'MULTIPLICATION_FACTOR', defaultValue: '1000', description: 'Document multiplication factor')
             string(name: 'BATCH_COUNT', defaultValue: '3', description: 'Number of batches')
