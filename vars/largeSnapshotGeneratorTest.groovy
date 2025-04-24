@@ -24,7 +24,7 @@ def call(Map config = [:]) {
             ebsEnabled = true
             break
         case 'es6x':
-            engineVersion = "ELASTICSEARCH_6_8"
+            engineVersion = "ES_6.8"
             distVersion = "6.8"
             dataNodeType = "r5.4xlarge.search"
             dedicatedManagerNodeType = "m5.xlarge.search"
