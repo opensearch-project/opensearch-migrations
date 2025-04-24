@@ -78,7 +78,7 @@ def call(Map config = [:]) {
             "engineVersion": "${engineVersion}",
             "distVersion": "${distVersion}",
             "domainName": "${params.CLUSTER_VERSION}-jenkins-test",
-            "dataNodeCount": 60,
+            "dataNodeCount": 40,
             "dataNodeType": "${dataNodeType}",
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
