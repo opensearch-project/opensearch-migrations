@@ -14,6 +14,7 @@ def call(Map config = [:]) {
     String dedicatedManagerNodeType
     boolean ebsEnabled = false
     Integer ebsVolumeSize = null
+    Integer dataNodeCount = null
 
     switch (params.CLUSTER_VERSION) {
         case 'es5x':
@@ -23,6 +24,7 @@ def call(Map config = [:]) {
             dedicatedManagerNodeType = "m4.xlarge.search"
             ebsEnabled = true
             ebsVolumeSize = 300
+            dataNodeCount = 60
             break
         case 'es6x':
             engineVersion = "ES_6.8"
@@ -31,24 +33,32 @@ def call(Map config = [:]) {
             dedicatedManagerNodeType = "m5.xlarge.search"
             ebsEnabled = true
             ebsVolumeSize = 300
+            dataNodeCount = 60
             break
         case 'es7x':
             engineVersion = "ES_7.10"
             distVersion = "7.10"
             dataNodeType = "r6gd.4xlarge.search"
             dedicatedManagerNodeType = "m6g.xlarge.search"
+            dataNodeCount = 60
             break
         case 'os1x':
             engineVersion = "OS_1.3"
             distVersion = "1.3"
-            dataNodeType = "r6gd.4xlarge.search"
+            dataNodeType = "r6g.4xlarge.search"
             dedicatedManagerNodeType = "m6g.xlarge.search"
+            ebsEnabled = true
+            ebsVolumeSize = 1024
+            dataNodeCount = 15
             break
         case 'os2x':
             engineVersion = "OS_2.17"
             distVersion = "2.17"
-            dataNodeType = "r6gd.4xlarge.search"
+            dataNodeType = "r6g.4xlarge.search"
             dedicatedManagerNodeType = "m6g.xlarge.search"
+            ebsEnabled = true
+            ebsVolumeSize = 1024
+            dataNodeCount = 15
             break
         default:
             throw new RuntimeException("Unsupported CLUSTER_VERSION: ${params.CLUSTER_VERSION}")
@@ -79,7 +89,7 @@ def call(Map config = [:]) {
             "engineVersion": "${engineVersion}",
             "distVersion": "${distVersion}",
             "domainName": "${params.CLUSTER_VERSION}-jenkins-test",
-            "dataNodeCount": 40,
+            "dataNodeCount": ${dataNodeCount},
             "dataNodeType": "${dataNodeType}",
             "masterEnabled": true,
             "dedicatedManagerNodeCount": 3,
