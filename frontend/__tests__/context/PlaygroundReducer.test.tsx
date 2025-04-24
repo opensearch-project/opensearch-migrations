@@ -1,27 +1,16 @@
+import { playgroundReducer } from "@/context/PlaygroundContext";
 import {
-  playgroundReducer,
-  PlaygroundState,
-} from "../../src/context/PlaygroundContext";
-
-// Helper function to create a test state
-const createTestState = (
-  overrides: Partial<PlaygroundState> = {}
-): PlaygroundState => ({
-  inputDocuments: [],
-  transformations: [],
-  outputDocuments: [],
-  ...overrides,
-});
+  createInputDocument,
+  createTransformation,
+  createOutputDocument,
+  createTestState,
+} from "../__utils__/playgroundFactories";
 
 describe("PlaygroundReducer", () => {
   describe("ADD_INPUT_DOCUMENT", () => {
     it("should add a new input document to the state", () => {
       const initialState = createTestState();
-      const newDocument = {
-        id: "test-id",
-        name: "Test Document",
-        content: "Test content",
-      };
+      const newDocument = createInputDocument();
 
       const action = {
         type: "ADD_INPUT_DOCUMENT" as const,
@@ -36,20 +25,18 @@ describe("PlaygroundReducer", () => {
 
   describe("UPDATE_INPUT_DOCUMENT", () => {
     it("should update an existing input document", () => {
-      const existingDocument = {
-        id: "test-id",
+      const existingDocument = createInputDocument("test-id", {
         name: "Original Name",
         content: "Original content",
-      };
+      });
       const initialState = createTestState({
         inputDocuments: [existingDocument],
       });
 
-      const updatedDocument = {
-        id: "test-id",
+      const updatedDocument = createInputDocument("test-id", {
         name: "Updated Name",
         content: "Updated content",
-      };
+      });
       const action = {
         type: "UPDATE_INPUT_DOCUMENT" as const,
         payload: updatedDocument,
@@ -61,25 +48,16 @@ describe("PlaygroundReducer", () => {
     });
 
     it("should not modify other documents when updating one", () => {
-      const document1 = {
-        id: "id-1",
-        name: "Document 1",
-        content: "Content 1",
-      };
-      const document2 = {
-        id: "id-2",
-        name: "Document 2",
-        content: "Content 2",
-      };
+      const document1 = createInputDocument("id-1");
+      const document2 = createInputDocument("id-2");
       const initialState = createTestState({
         inputDocuments: [document1, document2],
       });
 
-      const updatedDocument = {
-        id: "id-1",
+      const updatedDocument = createInputDocument("id-1", {
         name: "Updated Document 1",
         content: "Updated Content 1",
-      };
+      });
       const action = {
         type: "UPDATE_INPUT_DOCUMENT" as const,
         payload: updatedDocument,
@@ -94,16 +72,8 @@ describe("PlaygroundReducer", () => {
 
   describe("REMOVE_INPUT_DOCUMENT", () => {
     it("should remove an input document by id", () => {
-      const document1 = {
-        id: "id-1",
-        name: "Document 1",
-        content: "Content 1",
-      };
-      const document2 = {
-        id: "id-2",
-        name: "Document 2",
-        content: "Content 2",
-      };
+      const document1 = createInputDocument("id-1");
+      const document2 = createInputDocument("id-2");
       const initialState = createTestState({
         inputDocuments: [document1, document2],
       });
@@ -119,18 +89,8 @@ describe("PlaygroundReducer", () => {
     });
 
     it("should clear output documents when removing an input document", () => {
-      const document = {
-        id: "id-1",
-        name: "Document 1",
-        content: "Content 1",
-      };
-      const outputDocument = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      const document = createInputDocument("id-1");
+      const outputDocument = createOutputDocument();
       const initialState = createTestState({
         inputDocuments: [document],
         outputDocuments: [outputDocument],
@@ -150,11 +110,7 @@ describe("PlaygroundReducer", () => {
   describe("ADD_TRANSFORMATION", () => {
     it("should add a new transformation to the state", () => {
       const initialState = createTestState();
-      const newTransformation = {
-        id: "transform-1",
-        name: "Test Transformation",
-        content: "Test script",
-      };
+      const newTransformation = createTransformation();
 
       const action = {
         type: "ADD_TRANSFORMATION" as const,
@@ -167,22 +123,12 @@ describe("PlaygroundReducer", () => {
     });
 
     it("should clear output documents when adding a transformation", () => {
-      const outputDocument = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      const outputDocument = createOutputDocument();
       const initialState = createTestState({
         outputDocuments: [outputDocument],
       });
 
-      const newTransformation = {
-        id: "transform-2",
-        name: "Test Transformation",
-        content: "Test script",
-      };
+      const newTransformation = createTransformation("transform-2");
       const action = {
         type: "ADD_TRANSFORMATION" as const,
         payload: newTransformation,
@@ -196,20 +142,18 @@ describe("PlaygroundReducer", () => {
 
   describe("UPDATE_TRANSFORMATION", () => {
     it("should update an existing transformation", () => {
-      const existingTransformation = {
-        id: "transform-1",
+      const existingTransformation = createTransformation("transform-1", {
         name: "Original Name",
         content: "Original script",
-      };
+      });
       const initialState = createTestState({
         transformations: [existingTransformation],
       });
 
-      const updatedTransformation = {
-        id: "transform-1",
+      const updatedTransformation = createTransformation("transform-1", {
         name: "Updated Name",
         content: "Updated script",
-      };
+      });
       const action = {
         type: "UPDATE_TRANSFORMATION" as const,
         payload: updatedTransformation,
@@ -221,28 +165,20 @@ describe("PlaygroundReducer", () => {
     });
 
     it("should clear output documents when updating a transformation", () => {
-      const transformation = {
-        id: "transform-1",
+      const transformation = createTransformation("transform-1", {
         name: "Original Name",
         content: "Original script",
-      };
-      const outputDocument = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      });
+      const outputDocument = createOutputDocument();
       const initialState = createTestState({
         transformations: [transformation],
         outputDocuments: [outputDocument],
       });
 
-      const updatedTransformation = {
-        id: "transform-1",
+      const updatedTransformation = createTransformation("transform-1", {
         name: "Updated Name",
         content: "Updated script",
-      };
+      });
       const action = {
         type: "UPDATE_TRANSFORMATION" as const,
         payload: updatedTransformation,
@@ -256,16 +192,8 @@ describe("PlaygroundReducer", () => {
 
   describe("REMOVE_TRANSFORMATION", () => {
     it("should remove a transformation by id", () => {
-      const transformation1 = {
-        id: "transform-1",
-        name: "Transformation 1",
-        content: "Script 1",
-      };
-      const transformation2 = {
-        id: "transform-2",
-        name: "Transformation 2",
-        content: "Script 2",
-      };
+      const transformation1 = createTransformation("transform-1");
+      const transformation2 = createTransformation("transform-2");
       const initialState = createTestState({
         transformations: [transformation1, transformation2],
       });
@@ -281,18 +209,8 @@ describe("PlaygroundReducer", () => {
     });
 
     it("should clear output documents when removing a transformation", () => {
-      const transformation = {
-        id: "transform-1",
-        name: "Transformation 1",
-        content: "Script 1",
-      };
-      const outputDocument = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      const transformation = createTransformation("transform-1");
+      const outputDocument = createOutputDocument();
       const initialState = createTestState({
         transformations: [transformation],
         outputDocuments: [outputDocument],
@@ -311,21 +229,9 @@ describe("PlaygroundReducer", () => {
 
   describe("REORDER_TRANSFORMATION", () => {
     it("should reorder transformations", () => {
-      const transformation1 = {
-        id: "transform-1",
-        name: "Transformation 1",
-        content: "Script 1",
-      };
-      const transformation2 = {
-        id: "transform-2",
-        name: "Transformation 2",
-        content: "Script 2",
-      };
-      const transformation3 = {
-        id: "transform-3",
-        name: "Transformation 3",
-        content: "Script 3",
-      };
+      const transformation1 = createTransformation("transform-1");
+      const transformation2 = createTransformation("transform-2");
+      const transformation3 = createTransformation("transform-3");
       const initialState = createTestState({
         transformations: [transformation1, transformation2, transformation3],
       });
@@ -343,23 +249,9 @@ describe("PlaygroundReducer", () => {
     });
 
     it("should clear output documents when reordering transformations", () => {
-      const transformation1 = {
-        id: "transform-1",
-        name: "Transformation 1",
-        content: "Script 1",
-      };
-      const transformation2 = {
-        id: "transform-2",
-        name: "Transformation 2",
-        content: "Script 2",
-      };
-      const outputDocument = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      const transformation1 = createTransformation("transform-1");
+      const transformation2 = createTransformation("transform-2");
+      const outputDocument = createOutputDocument();
       const initialState = createTestState({
         transformations: [transformation1, transformation2],
         outputDocuments: [outputDocument],
@@ -380,13 +272,7 @@ describe("PlaygroundReducer", () => {
   describe("ADD_OUTPUT_DOCUMENT", () => {
     it("should add a new output document to the state", () => {
       const initialState = createTestState();
-      const newOutputDocument = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      const newOutputDocument = createOutputDocument();
 
       const action = {
         type: "ADD_OUTPUT_DOCUMENT" as const,
@@ -401,24 +287,19 @@ describe("PlaygroundReducer", () => {
 
   describe("UPDATE_OUTPUT_DOCUMENT", () => {
     it("should update an existing output document", () => {
-      const existingOutputDocument = {
-        id: "output-1",
+      const existingOutputDocument = createOutputDocument("output-1", {
         name: "Original Output",
         content: "Original output content",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
+      });
       const initialState = createTestState({
         outputDocuments: [existingOutputDocument],
       });
 
-      const updatedOutputDocument = {
-        id: "output-1",
+      const updatedOutputDocument = createOutputDocument("output-1", {
         name: "Updated Output",
         content: "Updated output content",
-        sourceInputId: "id-1",
         transformationsApplied: ["transform-1", "transform-2"],
-      };
+      });
       const action = {
         type: "UPDATE_OUTPUT_DOCUMENT" as const,
         payload: updatedOutputDocument,
@@ -432,20 +313,11 @@ describe("PlaygroundReducer", () => {
 
   describe("REMOVE_OUTPUT_DOCUMENT", () => {
     it("should remove an output document by id", () => {
-      const outputDocument1 = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
-      const outputDocument2 = {
-        id: "output-2",
-        name: "Output 2",
-        content: "Output Content 2",
+      const outputDocument1 = createOutputDocument("output-1");
+      const outputDocument2 = createOutputDocument("output-2", {
         sourceInputId: "id-2",
         transformationsApplied: ["transform-2"],
-      };
+      });
       const initialState = createTestState({
         outputDocuments: [outputDocument1, outputDocument2],
       });
@@ -463,20 +335,11 @@ describe("PlaygroundReducer", () => {
 
   describe("CLEAR_OUTPUT_DOCUMENTS", () => {
     it("should clear all output documents", () => {
-      const outputDocument1 = {
-        id: "output-1",
-        name: "Output 1",
-        content: "Output Content 1",
-        sourceInputId: "id-1",
-        transformationsApplied: ["transform-1"],
-      };
-      const outputDocument2 = {
-        id: "output-2",
-        name: "Output 2",
-        content: "Output Content 2",
+      const outputDocument1 = createOutputDocument("output-1");
+      const outputDocument2 = createOutputDocument("output-2", {
         sourceInputId: "id-2",
         transformationsApplied: ["transform-2"],
-      };
+      });
       const initialState = createTestState({
         outputDocuments: [outputDocument1, outputDocument2],
       });
@@ -494,16 +357,8 @@ describe("PlaygroundReducer", () => {
   describe("SET_STATE", () => {
     it("should set partial state", () => {
       const initialState = createTestState();
-      const inputDocument = {
-        id: "id-1",
-        name: "Document 1",
-        content: "Content 1",
-      };
-      const transformation = {
-        id: "transform-1",
-        name: "Transformation 1",
-        content: "Script 1",
-      };
+      const inputDocument = createInputDocument("id-1");
+      const transformation = createTransformation("transform-1");
 
       const action = {
         type: "SET_STATE" as const,

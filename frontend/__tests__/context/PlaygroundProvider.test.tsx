@@ -1,11 +1,11 @@
 import React from "react";
 import { render, act } from "@testing-library/react";
+import { usePlayground } from "@/context/PlaygroundContext";
+import { PlaygroundProvider } from "@/context/PlaygroundProvider";
 import {
-  PlaygroundProvider,
-  usePlayground,
-  InputDocument,
-  Transformation,
-} from "../../src/context/PlaygroundContext";
+  createInputDocument,
+  createTransformation,
+} from "../__utils__/playgroundFactories";
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -45,6 +45,32 @@ const TestConsumer: React.FC<{
 };
 
 describe("PlaygroundProvider", () => {
+  // Helper function to render the provider and return necessary objects
+  function renderProvider() {
+    const onStateReceived = jest.fn();
+    const onDispatchReceived = jest.fn();
+    let dispatchFn: any;
+
+    const renderResult = render(
+      <PlaygroundProvider>
+        <TestConsumer
+          onStateReceived={onStateReceived}
+          onDispatchReceived={(dispatch) => {
+            onDispatchReceived(dispatch);
+            dispatchFn = dispatch;
+          }}
+        />
+      </PlaygroundProvider>
+    );
+
+    return {
+      onStateReceived,
+      onDispatchReceived,
+      dispatchFn,
+      ...renderResult,
+    };
+  }
+
   beforeEach(() => {
     // Clear localStorage before each test
     localStorageMock.clear();
@@ -52,17 +78,7 @@ describe("PlaygroundProvider", () => {
   });
 
   it("should provide initial state when localStorage is empty", () => {
-    const onStateReceived = jest.fn();
-    const onDispatchReceived = jest.fn();
-
-    render(
-      <PlaygroundProvider>
-        <TestConsumer
-          onStateReceived={onStateReceived}
-          onDispatchReceived={onDispatchReceived}
-        />
-      </PlaygroundProvider>
-    );
+    const { onStateReceived, onDispatchReceived } = renderProvider();
 
     expect(onStateReceived).toHaveBeenCalledWith({
       inputDocuments: [],
@@ -75,35 +91,21 @@ describe("PlaygroundProvider", () => {
 
   it("should load state from localStorage on mount", () => {
     // Setup localStorage with some initial state
+    const inputDoc = createInputDocument("doc-1", {
+      name: "Document 1",
+      content: "Content 1",
+    });
+    const transformation = createTransformation("transform-1", {
+      name: "Transformation 1",
+      content: "Script 1",
+    });
     const savedState = {
-      inputDocuments: [
-        {
-          id: "doc-1",
-          name: "Document 1",
-          content: "Content 1",
-        },
-      ],
-      transformations: [
-        {
-          id: "transform-1",
-          name: "Transformation 1",
-          content: "Script 1",
-        },
-      ],
+      inputDocuments: [inputDoc],
+      transformations: [transformation],
     };
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify(savedState));
 
-    const onStateReceived = jest.fn();
-    const onDispatchReceived = jest.fn();
-
-    render(
-      <PlaygroundProvider>
-        <TestConsumer
-          onStateReceived={onStateReceived}
-          onDispatchReceived={onDispatchReceived}
-        />
-      </PlaygroundProvider>
-    );
+    const { onStateReceived } = renderProvider();
 
     // First call is with initial state, second call is after loading from localStorage
     expect(onStateReceived).toHaveBeenCalledTimes(2);
@@ -115,31 +117,13 @@ describe("PlaygroundProvider", () => {
   });
 
   it("should save state to localStorage when it changes", () => {
-    const onStateReceived = jest.fn();
-    const onDispatchReceived = jest.fn();
-    let dispatchFn: any;
-
-    render(
-      <PlaygroundProvider>
-        <TestConsumer
-          onStateReceived={onStateReceived}
-          onDispatchReceived={(dispatch) => {
-            onDispatchReceived(dispatch);
-            dispatchFn = dispatch;
-          }}
-        />
-      </PlaygroundProvider>
-    );
-
-    // Clear the initial localStorage calls
-    jest.clearAllMocks();
+    const { dispatchFn } = renderProvider();
 
     // Add an input document
-    const newDocument: InputDocument = {
-      id: "doc-1",
+    const newDocument = createInputDocument("doc-1", {
       name: "Document 1",
       content: "Content 1",
-    };
+    });
 
     act(() => {
       dispatchFn({
@@ -158,11 +142,10 @@ describe("PlaygroundProvider", () => {
     );
 
     // Add a transformation
-    const newTransformation: Transformation = {
-      id: "transform-1",
+    const newTransformation = createTransformation("transform-1", {
       name: "Transformation 1",
       content: "Script 1",
-    };
+    });
 
     act(() => {
       dispatchFn({
