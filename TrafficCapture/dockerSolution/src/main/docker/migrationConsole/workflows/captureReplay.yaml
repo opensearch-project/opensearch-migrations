@@ -33,7 +33,13 @@ spec:
       dag:
         tasks:
           - name: id-generator
-            template: do-nothing
+            template: id-generator
+            arguments:
+              parameters:
+                - name: service-name
+                  value: "{{inputs.parameters.session-name}}"
+                - name: proxy-endpoint
+                  value: "http://{{inputs.parameters.session-name}}:{{inputs.parameters.proxy-listen-port}}"
 
           - name: kafka-cluster-setup
             templateRef:
@@ -92,15 +98,15 @@ spec:
                 - name: kafka-topic
                   value: "{{tasks.kafka-topic-setup.outputs.parameters.topic-name}}"
 
-          - name: deploy-capture-proxy-service
+          - name: proxy-service
             templateRef:
               name: capture-proxy
               template: deploy-service
             dependencies: [ deploy-capture-proxy ]
             arguments:
               parameters:
-                - name: session-name
-                  value: "{{inputs.parameters.session-name}}"
+                - name: service-name
+                  value: "{{tasks.id-generator.outputs.parameters.service-name}}"
                 - name: frontside-port
                   value: "{{inputs.parameters.proxy-listen-port}}"
 
@@ -138,7 +144,7 @@ spec:
                 - name: name
                   value: "diagnostic-console-{{inputs.parameters.session-name}}"
                 - name: source-cluster
-                  value: "{{=replace(inputs.parameters['source-config'], fromJSON(inputs.parameters['source-config'])['endpoint'], 'http://' + inputs.parameters['session-name'] + ':9200')}}"
+                  value: "{{=replace(inputs.parameters['source-config'], fromJSON(inputs.parameters['source-config'])['endpoint'], tasks['id-generator'].outputs.parameters['proxy-endpoint'])}}"
                 - name: target-cluster
                   value: "{{inputs.parameters.replayer-target-config}}"
                 - name: kafka-info
@@ -152,7 +158,7 @@ spec:
 
           - name: get-user-satisfied-confirmation
             template: get-user-satisfied-confirmation
-            dependencies: [ deploy-capture-proxy-service, deploy-replayer, run-migration-console ]
+            dependencies: [ proxy-service, deploy-replayer, run-migration-console ]
 
     - name: get-brokers-list
       steps: [[]]
@@ -174,5 +180,17 @@ spec:
     - name: get-user-satisfied-confirmation
       suspend: {}
 
-    - name: do-nothing
-      steps: [ [ ] ]
+    - name: id-generator
+      inputs:
+        parameters:
+          - name: proxy-endpoint
+          - name: service-name
+      outputs:
+        parameters:
+          - name: proxy-endpoint
+            valueFrom:
+              expression: "inputs.parameters['proxy-endpoint']"
+          - name: service-name
+            valueFrom:
+              expression: "inputs.parameters['service-name']"
+      steps: [[]]

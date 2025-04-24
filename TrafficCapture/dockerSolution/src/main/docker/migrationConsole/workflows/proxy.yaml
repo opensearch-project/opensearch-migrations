@@ -11,8 +11,28 @@ spec:
       inputs:
         parameters:
           - name: frontside-port
-          - name: session-name
+          - name: service-name
             value: ""
+      outputs:
+        parameters:
+          - name: endpoint
+            valueFrom:
+              expression: "steps['create-service'].outputs.parameters['endpoint'] + ':' + inputs.parameters['frontside-port']"
+      steps:
+        - - name: create-service
+            template: create-service
+            arguments:
+              parameters:
+                - name: frontside-port
+                  value: "{{inputs.parameters.frontside-port}}"
+                - name: service-name
+                  value: "{{inputs.parameters.service-name}}"
+
+    - name: create-service
+      inputs:
+        parameters:
+          - name: frontside-port
+          - name: service-name
       outputs:
         parameters:
           - name: endpoint
@@ -22,20 +42,20 @@ spec:
       resource:
         action: create
         setOwnerReference: true
-        flags: [ "--validate=false" ]  # Add this line to disable validation
+        flags: [ "--validate=false" ]  # validation requires Cluster permissions rather than just namespace permissions
         manifest: |
           apiVersion: v1
           kind: Service
           metadata:
-            name: {{=let v=inputs.parameters['session-name']; v != '' ? v : 'capture-proxy'}}
+            name: {{inputs.parameters.service-name}}
             labels:
               app: proxy
           spec:
             selector:
               app: proxy  # Selector should match pod labels directly, not use matchLabels
             ports:
-            - port: 9200
-              targetPort: 9200
+            - port: {{inputs.parameters.frontside-port}}
+              targetPort: {{inputs.parameters.frontside-port}}
             type: LoadBalancer
           
 
@@ -174,7 +194,7 @@ spec:
                       ARGS="${ARGS}${KAFKA_PROPERTIES_FILE:+ --kafkaConfigFile $KAFKA_PROPERTIES_FILE}"
                       ARGS="${ARGS}${KAFKA_CLIENT_ID:+ --kafkaClientId $KAFKA_CLIENT_ID}"
                       ARGS="${ARGS}${KAFKA_CONNECTION:+ --kafkaConnection $KAFKA_CONNECTION}"
-                      ARGS="${ARGS}${KAFKA_TOPIC:+ --kafkaTopic KAFKA_TOPIC}"
+                      ARGS="${ARGS}${KAFKA_TOPIC:+ --kafkaTopic $KAFKA_TOPIC}"
                       ARGS="${ARGS}${SSL_CONFIG_FILE_PATH:+ --sslConfigFile $SSL_CONFIG_FILE_PATH}"
                       ARGS="${ARGS}${MAXIMUM_TRAFFIC_STREAM_SIZE:+ --maxTrafficBufferSize $MAXIMUM_TRAFFIC_STREAM_SIZE}"
                       ARGS="${ARGS}${NUM_THREADS:+ --numThreads $NUM_THREADS}"
