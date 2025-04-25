@@ -18,6 +18,10 @@ This package contains utilities for working with Kafka in relation to the Migrat
               advertisedPort: 9092
 ```
 
+```shell
+kubectl -n ma port-forward svc/captured-traffic-broker-external-0 9092:10092
+```
+
 To run: 
 ```shell
 ./gradlew :libraries:KafkaUtils:run --args="--inputFile '/Users/my-user/Downloads/kafka_export_from_migration_console_1745351831.proto.gz' --kafkaConnection localhost:9092"

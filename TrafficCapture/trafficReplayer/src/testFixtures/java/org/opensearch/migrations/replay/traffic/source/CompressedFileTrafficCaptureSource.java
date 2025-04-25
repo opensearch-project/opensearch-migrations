@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.traffic.source;
 import java.io.EOFException;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -41,7 +42,8 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
         Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
     ) {
         if (numberOfTrafficStreamsToRead.get() <= 0) {
-            return CompletableFuture.failedFuture(new EOFException());
+            return CompletableFuture.completedFuture(Collections.emptyList());
+            //return CompletableFuture.failedFuture(new EOFException());
         }
         return trafficSource.readNextTrafficStreamChunk(readChunkContextSupplier).thenApply(ltswk -> {
             var transformedTrafficStream = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());

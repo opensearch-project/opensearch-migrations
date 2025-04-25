@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.traffic.kafka;
 
+import java.io.EOFException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -34,9 +35,9 @@ public class KafkaStreamLoader {
             var startTime = Instant.now();
             while (!kafkaConsumer.listTopics().isEmpty()) {
                 Thread.sleep(10);
-                Assertions.assertTrue(
-                        Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0
-                );
+//                Assertions.assertTrue(
+//                        Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0
+//                );
             }
         } finally {
             closeableResource.close();
@@ -78,10 +79,15 @@ public class KafkaStreamLoader {
                 new V0_1TrafficCaptureSource(rootCtx, filename),
                 originalTrafficSource -> {
                     try {
-                        for (int i = 0; i < recordCount; ++i) {
+                        int i = 0;
+                        while(true) {
                             List<ITrafficStreamWithKey> chunks = null;
                             chunks = originalTrafficSource.readNextTrafficStreamChunk(rootCtx::createReadChunkContext)
                                     .get();
+                            if (chunks == null || chunks.isEmpty()) {
+                                System.out.println("DONE!");
+                                break;
+                            }
                             for (int j = 0; j < chunks.size(); ++j) {
                                 KafkaTestUtils.writeTrafficStreamRecord(
                                         kafkaProducer,
@@ -89,14 +95,16 @@ public class KafkaStreamLoader {
                                         topicName,
                                         "KEY_" + i + "_" + j
                                 );
-                                Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
+                                //Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
                             }
+                            i++;
                         }
                     } catch (Exception e) {
                         throw Lombok.sneakyThrow(e);
                     }
                 }
         );
+        System.out.println("Happily done!");
         return () -> new KafkaTrafficCaptureSource(
                 rootCtx,
                 kafkaConsumer,

@@ -101,12 +101,12 @@ public class KafkaTestUtils {
     public static void writeTrafficStreamRecord(
         Producer<String, byte[]> kafkaProducer,
         TrafficStream trafficStream,
-        String TEST_TOPIC_NAME,
+        String topicName,
         String recordId
     ) {
         while (true) {
             try {
-                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStream.toByteArray());
+                var record = new ProducerRecord(topicName, recordId, trafficStream.toByteArray());
                 var tsKeyStr = TrafficChannelKeyFormatter.format(
                     trafficStream.getNodeId(),
                     trafficStream.getConnectionId()

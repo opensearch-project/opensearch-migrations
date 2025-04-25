@@ -1,8 +1,8 @@
 package org.opensearch.migrations.utils.kafka;
 
-import com.beust.jcommander.JCommander;
-import org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 
+import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
@@ -17,7 +17,7 @@ public class KafkaUtils {
                 description = "The gzip compressed file containing Capture Proxy produced traffic streams.")
         public String inputFile;
         @ParametersDelegate
-        public CaptureProxy.KafkaParameters kafkaParameters = new CaptureProxy.KafkaParameters();
+        public KafkaConfig.KafkaParameters kafkaParameters = new KafkaConfig.KafkaParameters();
     }
 
     static Parameters parseArgs(String[] args) {
@@ -40,21 +40,13 @@ public class KafkaUtils {
 
     public static void main(String[] args) throws Exception {
         var params = parseArgs(args);
-        var kafkaOps = new KafkaOperations();
-        kafkaOps.loadStreamsToKafkaFromCompressedFile(
+        var kafkaLoader = new KafkaLoader();
+        kafkaLoader.loadRecordsToKafkaFromCompressedFile(
                 params.inputFile,
                 params.kafkaParameters.kafkaPropertiesFile,
                 params.kafkaParameters.kafkaConnection,
                 params.kafkaParameters.kafkaClientId,
                 params.kafkaParameters.mskAuthEnabled
         );
-//        kafkaOps.loadStreamsToKafkaFromCompressedFile(
-//                "/Volumes/workplace/opensearch/lewijacn-migrations/opensearch-migrations/libraries/kafkaUtils" +
-//                        "/src/main/java/org/opensearch/migrations/utils/kafka/" +
-//                        "kafka_export_from_migration_console_1745351831.proto.gz",
-//                null,
-//                "localhost:9092",
-//                "TEST_ID",
-//                false);
     }
 }

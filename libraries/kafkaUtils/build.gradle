@@ -5,11 +5,7 @@ plugins {
 }
 
 dependencies {
-    implementation project(':coreUtilities')
-    implementation project(':TrafficCapture:captureProtobufs')
-    implementation project(':TrafficCapture:trafficReplayer')
-    implementation testFixtures(project(':TrafficCapture:trafficReplayer'))
-    implementation project(':TrafficCapture:trafficCaptureProxyServer')
+    implementation project(':TrafficCapture:captureKafkaOffloader')
     implementation libs.jcommander
     implementation libs.kafka.clients
     implementation libs.slf4j.api

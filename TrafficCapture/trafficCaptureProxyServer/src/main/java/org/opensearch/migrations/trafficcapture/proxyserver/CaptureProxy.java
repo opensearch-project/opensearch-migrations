@@ -4,7 +4,6 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
@@ -17,7 +16,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -36,6 +34,7 @@ import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
@@ -65,16 +64,14 @@ import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.config.SaslConfigs;
+
+import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.buildKafkaProperties;
 
 @Slf4j
 public class CaptureProxy {
 
     private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
-    public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
     public static final String SUPPORTED_TLS_PROTOCOLS_LIST_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     public static class Parameters {
@@ -180,29 +177,6 @@ public class CaptureProxy {
         public KafkaParameters kafkaParameters = new KafkaParameters();
     }
 
-    public static class KafkaParameters {
-        @Parameter(required = false,
-                names = { "--kafkaConfigFile" },
-                arity = 1,
-                description = "Kafka properties file for additional client customization.")
-        public String kafkaPropertiesFile;
-        @Parameter(required = false,
-                names = { "--kafkaClientId" },
-                arity = 1,
-                description = "clientId to use for interfacing with Kafka.")
-        public String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
-        @Parameter(required = false,
-                names = { "--kafkaConnection" },
-                arity = 1,
-                description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
-        public String kafkaConnection;
-        @Parameter(required = false,
-                names = { "--enableMSKAuth" },
-                arity = 0,
-                description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
-        public boolean mskAuthEnabled = false;
-    }
-
     static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
@@ -285,55 +259,6 @@ public class CaptureProxy {
         return UUID.randomUUID().toString();
     }
 
-    public static Properties buildKafkaProperties(KafkaParameters params) throws IOException {
-        return buildKafkaProperties(params.kafkaPropertiesFile, params.kafkaConnection, params.kafkaClientId,
-                params.mskAuthEnabled);
-    }
-
-    public static Properties buildKafkaProperties(String kafkaPropertiesFile, String kafkaConnection, String kafkaClientId,
-                                           boolean mskAuthEnabled) throws IOException {
-        var kafkaProps = new Properties();
-        kafkaProps.put(
-            ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-            "org.apache.kafka.common.serialization.StringSerializer"
-        );
-        kafkaProps.put(
-            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-            "org.apache.kafka.common.serialization.ByteArraySerializer"
-        );
-        // Property details:
-        // https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
-        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
-        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
-        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
-
-        if (kafkaPropertiesFile != null) {
-            try (var fileReader = new FileReader(kafkaPropertiesFile)) {
-                kafkaProps.load(fileReader);
-            } catch (IOException e) {
-                log.error(
-                    "Unable to locate provided Kafka producer properties file path: " + kafkaPropertiesFile
-                );
-                throw e;
-            }
-        }
-
-        kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConnection);
-        kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaClientId);
-        if (mskAuthEnabled) {
-            kafkaProps.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
-            kafkaProps.setProperty(SaslConfigs.SASL_MECHANISM, "AWS_MSK_IAM");
-            kafkaProps.setProperty(
-                SaslConfigs.SASL_JAAS_CONFIG,
-                "software.amazon.msk.auth.iam.IAMLoginModule required;"
-            );
-            kafkaProps.setProperty(
-                SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS,
-                "software.amazon.msk.auth.iam.IAMClientCallbackHandler"
-            );
-        }
-        return kafkaProps;
-    }
 
     protected static IConnectionCaptureFactory<?> getConnectionCaptureFactory(
         Parameters params,
