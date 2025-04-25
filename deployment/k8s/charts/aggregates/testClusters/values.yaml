@@ -9,6 +9,54 @@ proxy:
       value: "http://elasticsearch:9200"
 
 source:
+  http:
+    tls:
+      enabled: true  # Enable HTTPS
+
+  # Configure authentication
+  auth:
+    enabled: true
+
+  # Configure health checks for Elasticsearch
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -k -s -u admin:admin -o /dev/null -w "%{http_code}" https://localhost:9200/_cluster/health)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -k -s -u admin:admin -o /dev/null -w "%{http_code}" https://localhost:9200/_cluster/health?timeout=5s)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
   imageTag: "latest"
   image: "migrations/elasticsearch_searchguard"
   roles: [ master, data, ingest ]
