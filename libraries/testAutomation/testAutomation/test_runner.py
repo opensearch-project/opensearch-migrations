@@ -13,6 +13,8 @@ from typing import List, Optional
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.x"]
+VALID_TARGET_VERSIONS = ["OS_2.x"]
 SOURCE_RELEASE_NAME = "source"
 TARGET_RELEASE_NAME = "target"
 MA_RELEASE_NAME = "ma"
@@ -208,9 +210,40 @@ def _generate_unique_id() -> str:
     return f"{random_part}-{timestamp}"
 
 
+def parse_version_string(version_str: str) -> (string, string, string):
+    """Parse a string in format ES|OS_x.y and return the distinct pieces as (cluster_type, major, minor)"""
+    try:
+        cluster_type_part, version_part = version_str.split('_', 1)
+        major_str, minor_str = version_part.split('.', 1)
+
+        cluster_type = cluster_type_part.lower()
+        major = int(major_str)
+
+        try:
+            minor = int(minor_str)
+        except ValueError:
+            minor = minor_str
+
+        return cluster_type, major, minor
+    except (ValueError, AttributeError):
+        raise ValueError(f"Invalid version string format: '{version_str}'")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process inputs for test automation runner"
+    )
+    parser.add_argument(
+        "--source-version",
+        choices=VALID_SOURCE_VERSIONS,
+        default="ES_5.6",
+        help=f"Source version to use. Must be one of: {', '.join(VALID_SOURCE_VERSIONS)}"
+    )
+    parser.add_argument(
+        "--target-version",
+        choices=VALID_TARGET_VERSIONS,
+        default="OS_2.x",
+        help=f"Target version to use. Must be one of: {', '.join(VALID_TARGET_VERSIONS)}"
     )
     parser.add_argument(
         "--skip-delete",
@@ -247,18 +280,21 @@ def main() -> None:
     elasticsearch_cluster_chart_path = f"{helm_charts_base_path}/components/elasticsearchCluster"
     opensearch_cluster_chart_path = f"{helm_charts_base_path}/components/opensearchCluster"
 
-    # Currently utilizes a single test cluster environment, but should be expanded to allow a matrix of cases based
-    # on provided source and target version
-    ma_chart_values_path = "es-5-values.yaml"
-    es_5_6_values = (f"{helm_charts_base_path}/components/elasticsearchCluster/"
-                     f"environments/es-5-6-single-node-cluster.yaml")
-    os_2_19_values = (f"{helm_charts_base_path}/components/opensearchCluster/"
-                      f"environments/os-2-latest-single-node-cluster.yaml")
-    test_cluster_env = TestClusterEnvironment(source_version="ES_5.6",
-                                              source_helm_values_path=es_5_6_values,
+    source_type, source_major, source_minor = parse_version_string(args.source_version)
+    source_chart = "elasticsearchCluster" if source_type == "es" else "opensearchCluster"
+    source_values = (f"{helm_charts_base_path}/components/{source_chart}/"
+                     f"environments/{source_type}-{source_major}-{source_minor}-single-node-cluster.yaml")
+    target_type, target_major, target_minor = parse_version_string(args.target_version)
+    target_chart = "elasticsearchCluster" if target_type == "es" else "opensearchCluster"
+    target_values = (f"{helm_charts_base_path}/components/{target_chart}/"
+                     f"environments/{target_type}-{target_major}-{target_minor}-single-node-cluster.yaml")
+    ma_chart_values_path = f"{source_type}-{source_major}-to-{target_type}-{target_major}-values.yaml"
+
+    test_cluster_env = TestClusterEnvironment(source_version=args.source_version,
+                                              source_helm_values_path=source_values,
                                               source_chart_path=elasticsearch_cluster_chart_path,
-                                              target_version="OS_2.19",
-                                              target_helm_values_path=os_2_19_values,
+                                              target_version=args.target_version,
+                                              target_helm_values_path=target_values,
                                               target_chart_path=opensearch_cluster_chart_path)
 
     test_runner = TestRunner(k8s_service=k8s_service,
