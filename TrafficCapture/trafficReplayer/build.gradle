@@ -55,6 +55,7 @@ dependencies {
     testFixturesImplementation libs.jackson.databind
     testFixturesImplementation libs.netty.all
     testFixturesImplementation libs.junit.jupiter.api
+    testFixturesImplementation libs.kafka.clients
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))

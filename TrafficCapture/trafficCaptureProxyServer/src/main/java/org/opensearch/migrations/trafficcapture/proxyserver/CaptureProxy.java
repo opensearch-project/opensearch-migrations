@@ -50,6 +50,7 @@ import org.opensearch.security.ssl.util.SSLConfigConstants;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.beust.jcommander.ParametersDelegate;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -87,26 +88,6 @@ public class CaptureProxy {
             arity = 0,
             description = "If enabled, Does NOT capture traffic to ANY sink.")
         public boolean noCapture;
-        @Parameter(required = false,
-            names = { "--kafkaConfigFile" },
-            arity = 1,
-            description = "Kafka properties file for additional client customization.")
-        public String kafkaPropertiesFile;
-        @Parameter(required = false,
-            names = { "--kafkaClientId" },
-            arity = 1,
-            description = "clientId to use for interfacing with Kafka.")
-        public String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
-        @Parameter(required = false,
-            names = { "--kafkaConnection" },
-            arity = 1,
-            description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
-        public String kafkaConnection;
-        @Parameter(required = false,
-            names = { "--enableMSKAuth" },
-            arity = 0,
-            description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
-        public boolean mskAuthEnabled = false;
         @Parameter(required = false,
             names = { "--sslConfigFile" },
             arity = 1,
@@ -195,6 +176,31 @@ public class CaptureProxy {
                 "E.g. '(.* /ephemeral/*|GET /_cat/.*)' to ignore capturing all traffic for '/ephemeral' AND " +
                 "all GET requests to /_cat/.*")
         public String suppressMethodAndPath;
+        @ParametersDelegate
+        public KafkaParameters kafkaParameters = new KafkaParameters();
+    }
+
+    public static class KafkaParameters {
+        @Parameter(required = false,
+                names = { "--kafkaConfigFile" },
+                arity = 1,
+                description = "Kafka properties file for additional client customization.")
+        public String kafkaPropertiesFile;
+        @Parameter(required = false,
+                names = { "--kafkaClientId" },
+                arity = 1,
+                description = "clientId to use for interfacing with Kafka.")
+        public String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
+        @Parameter(required = false,
+                names = { "--kafkaConnection" },
+                arity = 1,
+                description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        public String kafkaConnection;
+        @Parameter(required = false,
+                names = { "--enableMSKAuth" },
+                arity = 0,
+                description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
+        public boolean mskAuthEnabled = false;
     }
 
     static Parameters parseArgs(String[] args) {
@@ -203,7 +209,7 @@ public class CaptureProxy {
         try {
             jCommander.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
-            if (Stream.of(p.traceDirectory, p.kafkaConnection, (p.noCapture ? "" : null))
+            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaConnection, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
                 .sum() != 1) {
                 throw new ParameterException(
@@ -279,7 +285,13 @@ public class CaptureProxy {
         return UUID.randomUUID().toString();
     }
 
-    static Properties buildKafkaProperties(Parameters params) throws IOException {
+    public static Properties buildKafkaProperties(KafkaParameters params) throws IOException {
+        return buildKafkaProperties(params.kafkaPropertiesFile, params.kafkaConnection, params.kafkaClientId,
+                params.mskAuthEnabled);
+    }
+
+    public static Properties buildKafkaProperties(String kafkaPropertiesFile, String kafkaConnection, String kafkaClientId,
+                                           boolean mskAuthEnabled) throws IOException {
         var kafkaProps = new Properties();
         kafkaProps.put(
             ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
@@ -295,20 +307,20 @@ public class CaptureProxy {
         kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
         kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
 
-        if (params.kafkaPropertiesFile != null) {
-            try (var fileReader = new FileReader(params.kafkaPropertiesFile)) {
+        if (kafkaPropertiesFile != null) {
+            try (var fileReader = new FileReader(kafkaPropertiesFile)) {
                 kafkaProps.load(fileReader);
             } catch (IOException e) {
                 log.error(
-                    "Unable to locate provided Kafka producer properties file path: " + params.kafkaPropertiesFile
+                    "Unable to locate provided Kafka producer properties file path: " + kafkaPropertiesFile
                 );
                 throw e;
             }
         }
 
-        kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, params.kafkaConnection);
-        kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, params.kafkaClientId);
-        if (params.mskAuthEnabled) {
+        kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConnection);
+        kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaClientId);
+        if (mskAuthEnabled) {
             kafkaProps.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
             kafkaProps.setProperty(SaslConfigs.SASL_MECHANISM, "AWS_MSK_IAM");
             kafkaProps.setProperty(
@@ -331,11 +343,11 @@ public class CaptureProxy {
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
-        } else if (params.kafkaConnection != null) {
+        } else if (params.kafkaParameters.kafkaConnection != null) {
             return new KafkaCaptureFactory(
                 rootContext,
                 nodeId,
-                new KafkaProducer<>(buildKafkaProperties(params)),
+                new KafkaProducer<>(buildKafkaProperties(params.kafkaParameters)),
                 params.maximumTrafficStreamSize
             );
         } else if (params.noCapture) {

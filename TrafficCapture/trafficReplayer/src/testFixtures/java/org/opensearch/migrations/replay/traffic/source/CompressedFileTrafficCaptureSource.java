@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.traffic.source;
 
 import java.io.EOFException;
 import java.io.FileInputStream;
@@ -13,9 +13,6 @@ import java.util.zip.GZIPInputStream;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 
 public abstract class CompressedFileTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public static final int NUM_TRAFFIC_STREAMS_TO_READ = 1 * 1000;

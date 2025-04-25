@@ -28,7 +28,7 @@ public class CaptureProxySetupTest {
                 "--kafkaConnection",
                 kafkaBrokerString }
         );
-        Properties props = CaptureProxy.buildKafkaProperties(parameters);
+        Properties props = CaptureProxy.buildKafkaProperties(parameters.kafkaParameters);
 
         Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
@@ -55,7 +55,7 @@ public class CaptureProxySetupTest {
                 kafkaBrokerString,
                 "--enableMSKAuth" }
         );
-        Properties props = CaptureProxy.buildKafkaProperties(parameters);
+        Properties props = CaptureProxy.buildKafkaProperties(parameters.kafkaParameters);
 
         Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
@@ -93,7 +93,7 @@ public class CaptureProxySetupTest {
                 "--kafkaConfigFile",
                 "src/test/resources/simple-kafka.properties" }
         );
-        Properties props = CaptureProxy.buildKafkaProperties(parameters);
+        Properties props = CaptureProxy.buildKafkaProperties(parameters.kafkaParameters);
 
         // Default settings which property file does not provide remain intact
         Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
