@@ -3,13 +3,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: argo-workflow-executor
-  namespace: ma
+  namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: workflow-deployer-role
-  namespace: ma
+  namespace: {{ .Release.Namespace }}
 rules:
   # Existing permissions for deployments and replicasets
   - apiGroups: ["apps"]
@@ -41,11 +41,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: workflow-deployer-rolebinding
-  namespace: ma
+  namespace: {{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: argo-workflow-executor
-    namespace: ma
+    namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
   name: workflow-deployer-role

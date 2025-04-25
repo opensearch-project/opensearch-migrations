@@ -25,6 +25,16 @@ dependencies:
     version: "0.45.11"
     repository: "https://argoproj.github.io/argo-helm"
 
+  - name: cert-manager
+    condition: conditionalPackageInstalls.certManager
+    version: 1.17.2
+    repository: https://charts.jetstack.io
+
+  - name: opentelemetry-operator
+    condition: conditionalPackageInstalls.otelCollector
+    version: "0.86.4"
+    repository: "https://open-telemetry.github.io/opentelemetry-helm-charts"
+
   # Coordinate workflows, maybe RFS, maybe more
   - name: etcd
     condition: conditionalPackageInstalls.etcd

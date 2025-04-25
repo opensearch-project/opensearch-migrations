@@ -2,6 +2,8 @@ conditionalPackageInstalls:
   # required migration infrastructure components
   argoWorkflows: true
   etcd: true
+  otelCollector: true
+  certManager: true
   # optional migration components
   kafkaOperator: true
   # migration support packages
@@ -14,6 +16,33 @@ conditionalPackageInstalls:
   grafana: false
   prometheus: false
   jaeger: false
+
+opentelemetry-operator:
+  admissionWebhooks:
+    certManager:
+      enabled: true # default
+  crds:
+    create: true
+  manager:
+    verticalPodAutoscaler:
+      enabled: false # default
+    collectorImage:
+      repository: "public.ecr.aws/aws-observability/aws-otel-collector"
+      tag: "0.43.2"
+
+extraOtelConfiguration:
+  version: "0.124.0"
+  configs:
+    metrics:
+      - prometheus
+      - cloudwatch
+    traces:
+      - jaeger
+      - xray
+
+cert-manager:
+  crds:
+    enabled: true
 
 etcd:
   replicaCount: 1
