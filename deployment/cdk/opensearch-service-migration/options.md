@@ -37,7 +37,7 @@ These tables list all CDK context configuration values a user can specify for th
 
 #### Structure of the cluster objects
 
-If no source cluster is being configured, the source cluster object should be `{"disabled": true} and no other fields are necessary.
+If no source cluster is being configured, the source cluster object should be `{"disabled": true}` and no other fields are necessary.
 
 In all other cases, the required components of each cluster object are:
 
@@ -48,6 +48,12 @@ In all other cases, the required components of each cluster object are:
     2. Sigv4 Signing: `{"type": "sigv4", "region": "us-east-1", "serviceSigningName": "es"}` The serviceSigningName is `es` for Elasticsearch and OpenSearch managed service domains, and `aoss` for Amazon OpenSearch Serverless
     3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
     4. Basic auth with password in secrets manager (recommended): `{"type": "basic", "username": "admin", "passwordFromSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"}`
+
+**Note on Source Cluster Version:**
+If you want to use Migration Console CDK Context for deploying a source cluster, you can specify the source version in one of three ways (consider 5.6 as an example):
+1. In the source cluster configuration: `"version": "ES_5.6"`
+2. In the Migration CDK Context: `"sourceClusterVersion": "ES_5.6"`
+3. By passing RFS Extra Args with the `--source-version` flag: `"reindexFromSnapshotExtraArgs": "--source-version ES_5.6"`
 
 ### Snapshot Definition Options
 
@@ -145,7 +151,6 @@ A number of options are currently available but deprecated. While they function 
 | sourceClusterDisabled | boolean | true                                  | Disable configuring a source cluster in any way. This is incompatible with specifying any type of capture proxy or a source cluster endpoint. It's suitable for backfill migrations using ReindexFromSnapshot from an already-existing snapshot. |
 | sourceClusterEndpoint | string  | `"https://my-source-cluster.com:443"` | The URI of the source cluster from that the migration will reference. **Note**: if this is not provided and elasticsearchService or captureProxyESService is enabled, the migration will reference a uri for that service.                       |
 
-
 ### Other Options
 
 | Name                         | Type    | Example                                                                | Description                                                                                                                                                                                                                                                               |
@@ -160,4 +165,3 @@ A number of options are currently available but deprecated. While they function 
 [^1]: Extra arguments can be added, overridden, or removed as follows:
     - To add/override an argument: Include the argument with the value, e.g., `"--new-arg value"`
     - Include quotes/escaping as appropriate for bash processing  `"--new-arg \"my value\""`
-
