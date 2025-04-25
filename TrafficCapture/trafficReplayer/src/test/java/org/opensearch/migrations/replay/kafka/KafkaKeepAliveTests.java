@@ -10,7 +10,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.traffic.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;

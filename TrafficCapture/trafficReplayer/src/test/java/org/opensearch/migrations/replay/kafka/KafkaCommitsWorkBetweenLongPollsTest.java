@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import org.opensearch.migrations.replay.traffic.kafka.KafkaTestUtils;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;

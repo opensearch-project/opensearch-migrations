@@ -1,9 +1,8 @@
-package org.opensearch.migrations.replay.traffic.source;
+package org.opensearch.migrations.replay;
 
 import java.io.EOFException;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -14,6 +13,9 @@ import java.util.zip.GZIPInputStream;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 
 public abstract class CompressedFileTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public static final int NUM_TRAFFIC_STREAMS_TO_READ = 1 * 1000;
@@ -42,8 +44,7 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
         Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
     ) {
         if (numberOfTrafficStreamsToRead.get() <= 0) {
-            return CompletableFuture.completedFuture(Collections.emptyList());
-            //return CompletableFuture.failedFuture(new EOFException());
+            return CompletableFuture.failedFuture(new EOFException());
         }
         return trafficSource.readNextTrafficStreamChunk(readChunkContextSupplier).thenApply(ltswk -> {
             var transformedTrafficStream = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());

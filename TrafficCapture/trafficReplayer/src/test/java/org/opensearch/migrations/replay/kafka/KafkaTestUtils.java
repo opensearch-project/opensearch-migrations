@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.traffic.kafka;
+package org.opensearch.migrations.replay.kafka;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -7,7 +7,6 @@ import java.util.Properties;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -17,7 +16,6 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -28,12 +26,11 @@ import org.jetbrains.annotations.NotNull;
 public class KafkaTestUtils {
 
     public static final String TEST_GROUP_PRODUCER_ID = "TEST_GROUP_PRODUCER_ID";
-    public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
+    private static final String FAKE_READ_PACKET_DATA = "Fake pa";
     public static final String TEST_NODE_ID = "TestNodeId";
     public static final String TEST_TRAFFIC_STREAM_ID_STRING = "TEST_TRAFFIC_STREAM";
-    private static final String FAKE_READ_PACKET_DATA = "Fake pa";
 
-    public static Producer<String, byte[]> buildKafkaProducer(String bootstrapServers) {
+    static Producer<String, byte[]> buildKafkaProducer(String bootstrapServers) {
         var kafkaProps = new Properties();
         kafkaProps.put(
             ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
@@ -58,25 +55,11 @@ public class KafkaTestUtils {
         }
     }
 
-    @SneakyThrows
-    public static KafkaConsumer<String, byte[]> buildKafkaConsumer(String bootstrapServers, long pollIntervalMs) {
-        var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(
-                bootstrapServers,
-                TEST_GROUP_CONSUMER_ID,
-                false,
-                null
-        );
-        kafkaConsumerProps.setProperty("max.poll.interval.ms", pollIntervalMs + "");
-        var kafkaConsumer = new KafkaConsumer<String, byte[]>(kafkaConsumerProps);
-        log.atInfo().setMessage("Just built KafkaConsumer={}").addArgument(kafkaConsumer).log();
-        return kafkaConsumer;
-    }
-
     static String getConnectionId(int i) {
         return TEST_TRAFFIC_STREAM_ID_STRING + "_" + i;
     }
 
-    public static TrafficStream makeTestTrafficStreamWithFixedTime(Instant t, int i) {
+    static TrafficStream makeTestTrafficStreamWithFixedTime(Instant t, int i) {
         var timestamp = Timestamp.newBuilder().setSeconds(t.getEpochSecond()).setNanos(t.getNano()).build();
         var tsb = TrafficStream.newBuilder().setNumber(i);
         // TODO - add something for setNumberOfThisLastChunk. There's no point in doing that now though
@@ -101,12 +84,12 @@ public class KafkaTestUtils {
     public static void writeTrafficStreamRecord(
         Producer<String, byte[]> kafkaProducer,
         TrafficStream trafficStream,
-        String topicName,
+        String TEST_TOPIC_NAME,
         String recordId
     ) {
         while (true) {
             try {
-                var record = new ProducerRecord(topicName, recordId, trafficStream.toByteArray());
+                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStream.toByteArray());
                 var tsKeyStr = TrafficChannelKeyFormatter.format(
                     trafficStream.getNodeId(),
                     trafficStream.getConnectionId()
@@ -129,7 +112,7 @@ public class KafkaTestUtils {
         }
     }
 
-    public static Future produceKafkaRecord(
+    static Future produceKafkaRecord(
         String testTopicName,
         Producer<String, byte[]> kafkaProducer,
         int i,
@@ -145,5 +128,4 @@ public class KafkaTestUtils {
     private static String makeKey(int i) {
         return "KEY_" + i;
     }
-
 }

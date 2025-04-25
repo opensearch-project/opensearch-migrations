@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.traffic.source;
+package org.opensearch.migrations.replay;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 public class V0_1TrafficCaptureSource extends CompressedFileTrafficCaptureSource {
