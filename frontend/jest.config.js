@@ -8,5 +8,6 @@ module.exports = createJestConfig({
   testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/', '<rootDir>/__tests__/__utils__/'],
   moduleNameMapper: {
     "^@tests/(.*)$": "<rootDir>/__tests__/$1",
+    "^@/(.*)$": "<rootDir>/src/$1"
   },
 });
