@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "lint:fix": "next lint --fix"
+    "lint:fix": "next lint --fix",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@cloudscape-design/board-components": "^3.0.99",
@@ -22,6 +24,9 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -29,7 +34,10 @@
     "eslint-config-next": "15.3.0",
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-prettier": "^5.2.6",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
     "prettier": "^3.5.3",
+    "ts-jest": "^29.3.2",
     "typescript": "^5"
   }
 }
