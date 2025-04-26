@@ -1,16 +1,16 @@
 import { renderHook, act } from "@testing-library/react";
-import { useFileUpload } from "@/hooks/useFileUpload";
-import { validateJsonContent, readFileAsText } from "@/utils/jsonUtils";
+import { useJSONFileUpload } from "@/hooks/useJSONFileUpload";
+import { readFileAsText, isNewlineDelimitedJson } from "@/utils/jsonUtils";
 
 // Mock the readFileAsText function from jsonUtils
 jest.mock("@/utils/jsonUtils", () => ({
   readFileAsText: jest.fn(),
   validateJsonContent: jest.requireActual("@/utils/jsonUtils").validateJsonContent,
   validateNewlineDelimitedJson: jest.requireActual("@/utils/jsonUtils").validateNewlineDelimitedJson,
+  isNewlineDelimitedJson: jest.fn(),
   prettyPrintJson: jest.requireActual("@/utils/jsonUtils").prettyPrintJson,
 }));
 
-// Define types for better readability
 type FileProcessingResult = {
   success: boolean;
   fileName: string;
@@ -38,7 +38,7 @@ describe("useFileUpload", () => {
     }
     
     // Setup hook
-    const { result } = renderHook(() => useFileUpload(validateJsonContent));
+    const { result } = renderHook(() => useJSONFileUpload());
     
     // Add file to state
     const file = new File([fileContent], fileName, { type: fileType });
@@ -56,7 +56,7 @@ describe("useFileUpload", () => {
   };
 
   it("should initialize with empty state", () => {
-    const { result } = renderHook(() => useFileUpload(validateJsonContent));
+    const { result } = renderHook(() => useJSONFileUpload());
     
     expect(result.current.files).toEqual([]);
     expect(result.current.errors).toEqual([]);
@@ -77,21 +77,30 @@ describe("useFileUpload", () => {
     expect(readFileAsText).toHaveBeenCalledWith(file);
   });
 
-  it("should process valid NDJSON file successfully", async () => {
+  it("should process valid NDJSON file as multiple documents", async () => {
     const validNdjson = '{"id": 1}\n{"id": 2}';
+    
+    // Mock isNewlineDelimitedJson to return true for this test
+    (isNewlineDelimitedJson as jest.Mock).mockReturnValue(true);
+    
     const { processResult } = await setupFileProcessingTest(
       validNdjson, 
       "valid.ndjson", 
       "application/x-ndjson"
     );
     
-    expect(processResult).toEqual([
-      {
-        success: true,
-        fileName: "valid.ndjson",
-        content: validNdjson
-      }
-    ]);
+    // Should create two separate documents
+    expect(processResult.length).toBe(2);
+    expect(processResult[0]).toEqual({
+      success: true,
+      fileName: "valid.ndjson [0]",
+      content: '{"id": 1}'
+    });
+    expect(processResult[1]).toEqual({
+      success: true,
+      fileName: "valid.ndjson [1]",
+      content: '{"id": 2}'
+    });
   });
 
   it("should reject invalid JSON file", async () => {
@@ -105,8 +114,30 @@ describe("useFileUpload", () => {
     expect(result.current.errors[0]).toContain("Error in invalid.json");
   });
 
+  it("should process regular JSON file as a single document", async () => {
+    const validJson = '{"key": "value"}';
+    
+    // Mock isNewlineDelimitedJson to return false for this test
+    (isNewlineDelimitedJson as jest.Mock).mockReturnValue(false);
+    
+    const { processResult } = await setupFileProcessingTest(
+      validJson, 
+      "valid.json"
+    );
+    
+    // Should create a single document
+    expect(processResult.length).toBe(1);
+    expect(processResult[0]).toEqual({
+      success: true,
+      fileName: "valid.json",
+      content: validJson
+    });
+  });
+
   it("should reject invalid NDJSON file", async () => {
     const invalidNdjson = '{"id": 1}\n{"id": 2,}';
+    
+    // This will be caught by validateJsonContent before isNewlineDelimitedJson is called
     const { processResult, result } = await setupFileProcessingTest(
       invalidNdjson, 
       "invalid.ndjson", 
@@ -147,7 +178,7 @@ describe("useFileUpload", () => {
       }
     });
     
-    const { result } = renderHook(() => useFileUpload(validateJsonContent));
+    const { result } = renderHook(() => useJSONFileUpload());
     
     // Add multiple files to the state
     const files = [
@@ -184,7 +215,7 @@ describe("useFileUpload", () => {
       }
     });
     
-    const { result } = renderHook(() => useFileUpload(validateJsonContent));
+    const { result } = renderHook(() => useJSONFileUpload());
     
     // Add multiple files to the state
     const files = [
@@ -213,7 +244,7 @@ describe("useFileUpload", () => {
   });
 
   it("should return empty array when no files to process", async () => {
-    const { result } = renderHook(() => useFileUpload(validateJsonContent));
+    const { result } = renderHook(() => useJSONFileUpload());
     
     let processResult: FileProcessingResult[] = [];
     await act(async () => {

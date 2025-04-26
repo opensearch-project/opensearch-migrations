@@ -10,9 +10,8 @@ import Spinner from "@cloudscape-design/components/spinner";
 
 import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
-import { useFileUpload } from "@/hooks/useFileUpload";
+import { useJSONFileUpload } from "@/hooks/useJSONFileUpload";
 import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
-import { validateJsonContent } from "@/utils/jsonUtils";
 
 export default function InputDocumentSection() {
   const { state } = usePlayground();
@@ -25,7 +24,7 @@ export default function InputDocumentSection() {
     isProcessing,
     processFiles,
     clearSuccessfulFiles,
-  } = useFileUpload(validateJsonContent);
+  } = useJSONFileUpload();
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

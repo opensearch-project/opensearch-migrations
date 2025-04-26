@@ -2,6 +2,7 @@ import {
   readFileAsText,
   validateJsonContent,
   validateNewlineDelimitedJson,
+  isNewlineDelimitedJson,
   prettyPrintJson,
 } from "@/utils/jsonUtils";
 
@@ -44,6 +45,21 @@ describe("jsonUtils", () => {
     });
   });
 
+  describe("isNewlineDelimitedJson", () => {
+    // Test cases for valid NDJSON inputs
+    test.each([
+      ["valid NDJSON with two lines", '{"id": 1}\n{"id": 2}', true],
+      ["valid NDJSON with multiple lines", '{"id": 1}\n{"id": 2}\n{"id": 3}', true],
+      ["valid NDJSON with empty lines", '{"id": 1}\n\n{"id": 2}', true],
+      ["single line JSON", '{"id": 1}', false],
+      ["invalid NDJSON", '{"id": 1}\n{"id": 2,}', false],
+      ["empty string", "", false],
+      ["whitespace-only string", "  \n  ", false]
+    ])("should return %s for %s", (_, input, expected) => {
+      expect(isNewlineDelimitedJson(input)).toBe(expected);
+    });
+  });
+
   describe("prettyPrintJson", () => {
     it("should pretty print valid JSON", () => {
       const compactJson = '{"key":"value","nested":{"inner":"value"}}';
@@ -57,25 +73,6 @@ describe("jsonUtils", () => {
       const parsedOriginal = JSON.parse(compactJson);
       const parsedPretty = JSON.parse(prettyJson);
       expect(parsedPretty).toEqual(parsedOriginal);
-    });
-
-    it("should pretty print valid NDJSON", () => {
-      const compactNdjson = '{"id":1,"name":"Item 1"}\n{"id":2,"name":"Item 2"}';
-      const prettyNdjson = prettyPrintJson(compactNdjson);
-      
-      // Check that we have two formatted JSON objects separated by newlines
-      const parts = prettyNdjson.split("\n\n");
-      expect(parts.length).toBe(2);
-      
-      // Check that each part is properly formatted
-      parts.forEach((part, index) => {
-        expect(part).toContain("\n");
-        expect(part).toContain("  ");
-        
-        // Check content preservation
-        const id = index + 1;
-        expect(JSON.parse(part)).toEqual({ id, name: `Item ${id}` });
-      });
     });
 
     test.each([
