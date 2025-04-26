@@ -22,6 +22,13 @@ export const usePlaygroundActions = () => {
     [dispatch],
   );
 
+  const removeInputDocument = useCallback(
+    (id: string) => {
+      dispatch({ type: "REMOVE_INPUT_DOCUMENT", payload: id });
+    },
+    [dispatch],
+  );
+
   const addTransformation = useCallback(
     (name: string, script: string) => {
       const newTransform: Transformation = {
@@ -47,6 +54,7 @@ export const usePlaygroundActions = () => {
 
   return {
     addInputDocument,
+    removeInputDocument,
     addTransformation,
     reorderTransformation,
   };

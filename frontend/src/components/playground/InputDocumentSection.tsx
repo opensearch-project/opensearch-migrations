@@ -15,7 +15,7 @@ import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeVi
 
 export default function InputDocumentSection() {
   const { state } = usePlayground();
-  const { addInputDocument } = usePlaygroundActions();
+  const { addInputDocument, removeInputDocument } = usePlaygroundActions();
   const {
     files,
     setFiles,
@@ -49,7 +49,11 @@ export default function InputDocumentSection() {
           <Box>No input documents.</Box>
         ) : (
           state.inputDocuments.map((doc) => (
-            <DocumentItemWithPopoverCodeView key={doc.id} document={doc} />
+            <DocumentItemWithPopoverCodeView
+              key={doc.id}
+              document={doc}
+              onDelete={removeInputDocument}
+            />
           ))
         )}
 

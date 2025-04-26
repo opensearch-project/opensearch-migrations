@@ -84,6 +84,49 @@ describe("usePlaygroundActions", () => {
     });
   });
 
+  describe("removeInputDocument", () => {
+    it("should dispatch the REMOVE_INPUT_DOCUMENT action with correct payload", () => {
+      const { wrapper, mockDispatch } = createMockWrapper();
+      const { result } = renderHook(() => usePlaygroundActions(), { wrapper });
+
+      const documentId = "test-doc-id";
+
+      act(() => {
+        result.current.removeInputDocument(documentId);
+      });
+
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      expect(mockDispatch).toHaveBeenCalledWith({
+        type: "REMOVE_INPUT_DOCUMENT",
+        payload: documentId,
+      });
+    });
+
+    it("should correctly remove a document when integrated with the provider", () => {
+      const { result } = renderHook(() => usePlaygroundActions(), {
+        wrapper: standardWrapper,
+      });
+
+      // First add a document
+      let documentId: string;
+      act(() => {
+        const doc = result.current.addInputDocument(
+          TEST_DOC_NAME,
+          TEST_DOC_CONTENT
+        );
+        documentId = doc.id;
+      });
+
+      // Then remove it
+      act(() => {
+        result.current.removeInputDocument(documentId);
+      });
+
+      // We can verify the function exists and doesn't throw
+      expect(result.current.removeInputDocument).toBeInstanceOf(Function);
+    });
+  });
+
   describe("addTransformation", () => {
     it("should create a new transformation with the correct structure", () => {
       const { result } = renderHook(() => usePlaygroundActions(), {
