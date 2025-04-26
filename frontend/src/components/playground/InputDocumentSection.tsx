@@ -6,9 +6,12 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
 import FileUpload from "@cloudscape-design/components/file-upload";
 import FormField from "@cloudscape-design/components/form-field";
+import CodeView from "@cloudscape-design/code-view/code-view";
+import javascriptHighlight from "@cloudscape-design/code-view/highlight/javascript";
 
 import { usePlayground } from "../../context/PlaygroundContext";
 import { usePlaygroundActions } from "../../hooks/usePlaygroundActions";
+import { Popover } from "@cloudscape-design/components";
 
 export default function InputDocumentSection() {
   const { state } = usePlayground();
@@ -88,7 +91,22 @@ export default function InputDocumentSection() {
         {state.inputDocuments.length === 0 ? (
           <Box>No input documents.</Box>
         ) : (
-          state.inputDocuments.map((doc) => <Box key={doc.id}>{doc.name}</Box>)
+          state.inputDocuments.map((doc) => (
+            <Popover
+              key={doc.id}
+              size="large"
+              fixedWidth
+              renderWithPortal
+              content={
+                <CodeView
+                  content={doc.content}
+                  highlight={javascriptHighlight}
+                />
+              }
+            >
+              <Box>{doc.name}</Box>
+            </Popover>
+          ))
         )}
         <form onSubmit={handleSubmit}>
           <SpaceBetween size="xs">
