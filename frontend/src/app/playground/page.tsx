@@ -5,9 +5,9 @@ import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import { PlaygroundProvider } from "@/context/PlaygroundProvider";
 import { Container, Grid } from "@cloudscape-design/components";
-import InputDocumentSection from "../../components/playground/InputDocumentSection";
-import OutputDocumentSection from "../../components/playground/OutputDocumentSection";
-import TransformationSection from "../../components/playground/TransformationSection";
+import InputDocumentSection from "@/components/playground/InputDocumentSection";
+import OutputDocumentSection from "@/components/playground/OutputDocumentSection";
+import TransformationSection from "@/components/playground/TransformationSection";
 
 export default function Home() {
   return (

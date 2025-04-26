@@ -4,7 +4,7 @@ import {
   usePlayground,
   InputDocument,
   Transformation,
-} from "../context/PlaygroundContext";
+} from "@/context/PlaygroundContext";
 
 export const usePlaygroundActions = () => {
   const { dispatch } = usePlayground();

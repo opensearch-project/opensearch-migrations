@@ -9,8 +9,8 @@ import FormField from "@cloudscape-design/components/form-field";
 import CodeView from "@cloudscape-design/code-view/code-view";
 import javascriptHighlight from "@cloudscape-design/code-view/highlight/javascript";
 
-import { usePlayground } from "../../context/PlaygroundContext";
-import { usePlaygroundActions } from "../../hooks/usePlaygroundActions";
+import { usePlayground } from "@/context/PlaygroundContext";
+import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { Popover } from "@cloudscape-design/components";
 
 export default function InputDocumentSection() {
@@ -81,7 +81,7 @@ export default function InputDocumentSection() {
           }
         }
       }
-      return "File is not valid JSON data";
+      return `Invalid JSON format in file: ${e instanceof Error ? e.message : "Unknown error"}`;
     }
   };
 
