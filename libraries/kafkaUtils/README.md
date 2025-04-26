@@ -11,7 +11,7 @@ We currently do not include this library in our Docker images, so to load Kafka 
 
 We can follow the quickstart guide [here](../../deployment/k8s/quickstart.md) to setup a testing environment for K8s, but *FIRST* we should add an external listener for our Kafka cluster so we can run this utility locally and communicate with the kafka cluster
 
-1. Modify the kafka cluster configuration found [here](../../deployment/k8s/charts/sharedResources/baseKafkaCluster/templates/configuration.yaml) to include this external listener:
+1. Modify the kafka cluster configuration found [here](../../deployment/k8s/charts/sharedResources/baseKafkaCluster/templates/configuration.yaml) to include this additional external listener:
 ```yaml
       - name: external
         port: 10092
@@ -24,7 +24,7 @@ We can follow the quickstart guide [here](../../deployment/k8s/quickstart.md) to
               advertisedPort: 9092
 ```
 
-2. In a separate shell, set up a port forward so that we can hit the kafka broker at `localhost:9092`
+2. In a separate shell, set up a port forward so that the kafka broker can be reached at `localhost:9092`
 
 ```shell
 kubectl -n ma port-forward svc/captured-traffic-broker-external-0 9092:10092
@@ -37,5 +37,5 @@ kubectl -n ma port-forward svc/captured-traffic-broker-external-0 9092:10092
 ## Running the utility with Gradle
 The following command can be modified to execute with a given kafka export input file and kafka broker endpoint
 ```shell
-./gradlew :libraries:KafkaUtils:run --args="--inputFile '/Users/my-user/Downloads/kafka_export_from_migration_console_1745351831.proto.gz' --kafkaConnection localhost:9092"
+./gradlew :libraries:KafkaUtils:run --args="--inputFile '<INPUT_FILE_PATH>' --kafkaConnection localhost:9092"
 ```

@@ -20,43 +20,52 @@ import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfi
 
 @Slf4j
 public class KafkaLoader {
-    public static final String TOPIC_NAME = "logging-traffic-topic";
+    private static final String DELIMITER = "\\|";
+    private String kafkaPropertiesFile;
+    private String kafkaConnection;
+    private String kafkaClientId;
+    private boolean mskAuthEnabled;
 
 
-    public void loadRecordsToKafkaFromCompressedFile(
-            String filename,
-            String kafkaPropertiesFile,
-            String kafkaConnection,
-            String kafkaClientId,
-            boolean mskAuthEnabled
-    ) throws Exception {
-        var kafkaProperties = buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
-        var kafkaProducer = new KafkaProducer(kafkaProperties);
-        BufferedReader bufferedReader = createBufferedReaderFromFile(filename);
-        readLinesAndSendToKafka(bufferedReader, kafkaProducer, 500);
+    public KafkaLoader(String kafkaPropertiesFile, String kafkaConnection, String kafkaClientId, boolean mskAuthEnabled) {
+        this.kafkaPropertiesFile = kafkaPropertiesFile;
+        this.kafkaConnection = kafkaConnection;
+        this.kafkaClientId = kafkaClientId;
+        this.mskAuthEnabled = mskAuthEnabled;
     }
 
-    public void readLinesAndSendToKafka(BufferedReader reader, Producer<String, byte[]> producer, int batchSize) {
+    public void loadRecordsToKafkaFromCompressedFile(String fileName, String topicName, int batchSize) throws Exception {
+        var kafkaProperties = buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
+        var kafkaProducer = new KafkaProducer(kafkaProperties);
+        BufferedReader bufferedReader = createBufferedReaderFromFile(fileName);
+        readLinesAndSendToKafka(bufferedReader, kafkaProducer, topicName, batchSize);
+    }
+
+    public void readLinesAndSendToKafka(BufferedReader reader, Producer<String, byte[]> producer, String topicName, int batchSize) {
         List<Future<RecordMetadata>> futures = new ArrayList<>();
         int i = 0;
         try {
             String line;
             while ((line = reader.readLine()) != null) {
-                var recordId = "KEY_" + i;
-                var byteArray = Base64.getDecoder().decode(line);
-                futures.add(producer.send(new ProducerRecord<>(TOPIC_NAME, recordId, byteArray)));
+                String[] splitString = line.split(DELIMITER);
+                if (splitString.length != 2) {
+                    throw new RuntimeException("Expected record in format '<key>|<value>' but did not find the correct number of delimiters");
+                }
+                var recordId = splitString[0];
+                var byteArray = Base64.getDecoder().decode(splitString[1]);
+                futures.add(producer.send(new ProducerRecord<>(topicName, recordId, byteArray)));
                 i++;
 
                 // Flush batch
                 if (i % batchSize == 0) {
                     waitForFutures(futures);
-                    log.info("Sent " + i + " messages to kafka topic " + TOPIC_NAME);
+                    log.info("Sent " + i + " messages to kafka topic " + topicName);
                     futures.clear();
                 }
             }
             log.info("End of stream reached");
             waitForFutures(futures);
-            log.info("Sent total of " + i + " messages to kafka topic " + TOPIC_NAME);
+            log.info("Sent total of " + i + " messages to kafka topic " + topicName);
         } catch (Exception e) {
             throw Lombok.sneakyThrow(e);
         }

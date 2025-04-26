@@ -9,6 +9,8 @@ import com.beust.jcommander.ParametersDelegate;
 
 
 public class KafkaUtils {
+    public static final String DEFAULT_TOPIC_NAME = "logging-traffic-topic";
+    public static final int DEFAULT_BATCH_SIZE = 500;
 
     public static class Parameters {
         @Parameter(required = true,
@@ -16,6 +18,16 @@ public class KafkaUtils {
                 arity = 1,
                 description = "The gzip compressed file containing Capture Proxy produced traffic streams.")
         public String inputFile;
+        @Parameter(required = false,
+                names = { "--topicName", "topic-name" },
+                arity = 1,
+                description = "The Kafka topic name to use.")
+        public String topicName = DEFAULT_TOPIC_NAME;
+        @Parameter(required = false,
+                names = { "--batchSize", "batch-size" },
+                arity = 1,
+                description = "The number of records to batch when sending to Kafka.")
+        public int batchSize = DEFAULT_BATCH_SIZE;
         @ParametersDelegate
         public KafkaConfig.KafkaParameters kafkaParameters = new KafkaConfig.KafkaParameters();
     }
@@ -40,13 +52,16 @@ public class KafkaUtils {
 
     public static void main(String[] args) throws Exception {
         var params = parseArgs(args);
-        var kafkaLoader = new KafkaLoader();
-        kafkaLoader.loadRecordsToKafkaFromCompressedFile(
-                params.inputFile,
+        var kafkaLoader = new KafkaLoader(
                 params.kafkaParameters.kafkaPropertiesFile,
                 params.kafkaParameters.kafkaConnection,
                 params.kafkaParameters.kafkaClientId,
                 params.kafkaParameters.mskAuthEnabled
+        );
+        kafkaLoader.loadRecordsToKafkaFromCompressedFile(
+                params.inputFile,
+                params.topicName,
+                params.batchSize
         );
     }
 }
