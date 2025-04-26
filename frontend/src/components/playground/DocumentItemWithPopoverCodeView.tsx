@@ -11,11 +11,12 @@ import { InputDocument } from "@/context/PlaygroundContext";
 interface DocumentItemWithPopoverCodeViewProps {
   document: InputDocument;
   onDelete?: (id: string) => void;
+  onEdit?: (document: InputDocument) => void;
 }
 
 export const DocumentItemWithPopoverCodeView: React.FC<
   DocumentItemWithPopoverCodeViewProps
-> = ({ document, onDelete }) => (
+> = ({ document, onDelete, onEdit }) => (
   <SpaceBetween direction="horizontal" size="xs">
     <Popover
       header={document.name}
@@ -32,6 +33,18 @@ export const DocumentItemWithPopoverCodeView: React.FC<
     >
       <Box>{document.name}</Box>
     </Popover>
+    {onEdit && (
+      <Button
+        variant="inline-icon"
+        iconName="edit"
+        ariaLabel={`Edit ${document.name}`}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onEdit(document);
+        }}
+      />
+    )}
     {onDelete && (
       <Button
         variant="inline-icon"

@@ -113,7 +113,7 @@ export function useJSONFileUpload() {
   const clearSuccessfulFiles = (results: FileProcessingResult[]) => {
     const successfulFileNames = results
       .filter((result) => result.success)
-      .map((result) => result.fileName);
+      .map((result) => result.fileName.split(" [")[0]); // Remove line number if present
 
     setFiles((prevFiles) =>
       prevFiles.filter((file) => !successfulFileNames.includes(file.name)),

@@ -52,7 +52,6 @@ export const PlaygroundProvider: React.FC<{ children: React.ReactNode }> = ({
   // Save state to localStorage whenever it changes (excluding outputDocuments)
   useEffect(() => {
     // Skip the effect if we're in the process of reverting to the last valid state
-    console.log("In the save state effect");
     const stateToSave = {
       inputDocuments: state.inputDocuments,
       transformations: state.transformations,
@@ -96,9 +95,7 @@ export const PlaygroundProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Effect to revert to last valid state when quota is exceeded
   useEffect(() => {
-    console.log("In the quota exceeded effect");
     if (isQuotaExceeded && lastValidState.inputDocuments.length > 0) {
-      console.log("Reverting to last valid state");
       dispatch({
         type: "SET_STATE",
         payload: lastValidState,

@@ -5,7 +5,7 @@ import {
   InputDocument,
   Transformation,
 } from "@/context/PlaygroundContext";
-import { getJsonSizeInBytes } from "@/utils/jsonUtils";
+import { getJsonSizeInBytes, validateJsonContent } from "@/utils/jsonUtils";
 import { MAX_TOTAL_STORAGE_BYTES, formatBytes } from "@/utils/sizeLimits";
 
 export const usePlaygroundActions = () => {
@@ -71,9 +71,36 @@ export const usePlaygroundActions = () => {
     [dispatch],
   );
 
+  const updateInputDocument = useCallback(
+    (id: string, name: string, content: string) => {
+      // Check if quota is already exceeded
+      if (isQuotaExceeded) {
+        throw new Error(
+          `Cannot update document: Local storage quota would be exceeded. Please remove some documents first.`,
+        );
+      }
+
+      // Validate JSON content
+      const validationError = validateJsonContent(content);
+      if (validationError) {
+        throw new Error(`Invalid JSON: ${validationError}`);
+      }
+
+      const updatedDoc: InputDocument = {
+        id,
+        name,
+        content,
+      };
+      dispatch({ type: "UPDATE_INPUT_DOCUMENT", payload: updatedDoc });
+      return updatedDoc;
+    },
+    [dispatch, isQuotaExceeded],
+  );
+
   return {
     addInputDocument,
     removeInputDocument,
+    updateInputDocument,
     addTransformation,
     reorderTransformation,
   };

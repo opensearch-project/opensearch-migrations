@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import Container from "@cloudscape-design/components/container";
 import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
@@ -8,15 +8,38 @@ import FileUpload from "@cloudscape-design/components/file-upload";
 import FormField from "@cloudscape-design/components/form-field";
 import Spinner from "@cloudscape-design/components/spinner";
 
-import { usePlayground } from "@/context/PlaygroundContext";
+import { usePlayground, InputDocument } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { useJSONFileUpload } from "@/hooks/useJSONFileUpload";
 import { MAX_DOCUMENT_SIZE_MB } from "@/utils/sizeLimits";
 import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
+import { EditDocumentModal } from "./EditDocumentModal";
 
 export default function InputDocumentSection() {
   const { state, isQuotaExceeded } = usePlayground();
-  const { addInputDocument, removeInputDocument } = usePlaygroundActions();
+  const { addInputDocument, removeInputDocument, updateInputDocument } =
+    usePlaygroundActions();
+
+  // State for edit modal
+  const [editingDocument, setEditingDocument] = useState<InputDocument | null>(
+    null,
+  );
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+
+  // Handler for edit button click
+  const handleEditDocument = (document: InputDocument) => {
+    setEditingDocument(document);
+    setIsEditModalVisible(true);
+  };
+
+  // Handler for save changes
+  const handleSaveDocument = (id: string, name: string, content: string) => {
+    try {
+      updateInputDocument(id, name, content);
+    } catch (error) {
+      console.error("Failed to update document:", error);
+    }
+  };
   const {
     files,
     setFiles,
@@ -60,6 +83,17 @@ export default function InputDocumentSection() {
     clearSuccessfulFiles(results);
   };
 
+  // Determine error text for file upload form field
+  const getErrorText = () => {
+    if (isQuotaExceeded) {
+      return "Local storage quota exceeded. Please remove some documents before adding more.";
+    }
+    if (errors.length > 0) {
+      return errors;
+    }
+    return undefined;
+  };
+
   return (
     <Container header={<Header variant="h3">Input Documents</Header>}>
       <SpaceBetween size="m">
@@ -71,21 +105,21 @@ export default function InputDocumentSection() {
               key={doc.id}
               document={doc}
               onDelete={removeInputDocument}
+              onEdit={handleEditDocument}
             />
           ))
         )}
 
+        <EditDocumentModal
+          document={editingDocument}
+          visible={isEditModalVisible}
+          onDismiss={() => setIsEditModalVisible(false)}
+          onSave={handleSaveDocument}
+        />
+
         <form onSubmit={handleSubmit}>
           <SpaceBetween size="xs">
-            <FormField
-              errorText={
-                isQuotaExceeded
-                  ? "Local storage quota exceeded. Please remove some documents before adding more."
-                  : errors.length > 0
-                    ? errors
-                    : undefined
-              }
-            >
+            <FormField errorText={getErrorText()}>
               <FileUpload
                 onChange={({ detail }) => {
                   setFiles(detail.value);
