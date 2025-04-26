@@ -12,6 +12,7 @@ import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
+import { validateJsonContent } from "@/utils/jsonUtils";
 
 export default function InputDocumentSection() {
   const { state } = usePlayground();
@@ -24,7 +25,7 @@ export default function InputDocumentSection() {
     isProcessing,
     processFiles,
     clearSuccessfulFiles,
-  } = useFileUpload();
+  } = useFileUpload(validateJsonContent);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
