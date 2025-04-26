@@ -85,6 +85,16 @@ export default function InputDocumentSection() {
     }
   };
 
+  const prettyPrintJson = (json: string): string => {
+    try {
+      const parsed = JSON.parse(json);
+      return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+      console.error("Error pretty printing JSON:", e);
+      return json; // Return original if error occurs
+    }
+  };
+
   return (
     <Container header={<Header variant="h3">Input Documents</Header>}>
       <SpaceBetween size="m">
@@ -99,7 +109,7 @@ export default function InputDocumentSection() {
               renderWithPortal
               content={
                 <CodeView
-                  content={doc.content}
+                  content={prettyPrintJson(doc.content)}
                   highlight={javascriptHighlight}
                 />
               }
@@ -114,6 +124,7 @@ export default function InputDocumentSection() {
               <FileUpload
                 onChange={({ detail }) => {
                   setUploadFileList(detail.value);
+                  setFileErrors([]);
                 }}
                 value={uploadFileList}
                 multiple
