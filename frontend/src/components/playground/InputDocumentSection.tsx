@@ -11,10 +11,11 @@ import Spinner from "@cloudscape-design/components/spinner";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { useJSONFileUpload } from "@/hooks/useJSONFileUpload";
+import { MAX_DOCUMENT_SIZE_MB } from "@/utils/sizeLimits";
 import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
 
 export default function InputDocumentSection() {
-  const { state } = usePlayground();
+  const { state, isQuotaExceeded } = usePlayground();
   const { addInputDocument, removeInputDocument } = usePlaygroundActions();
   const {
     files,
@@ -30,13 +31,30 @@ export default function InputDocumentSection() {
     event.preventDefault();
 
     const results = await processFiles();
+    const newErrors: string[] = [...errors];
 
     // Add successful documents to the playground state
-    results.forEach((result) => {
+    for (const result of results) {
       if (result.success && result.content) {
-        addInputDocument(result.fileName, result.content);
+        try {
+          addInputDocument(result.fileName, result.content);
+        } catch (error) {
+          // Handle storage limit error
+          const errorMsg =
+            error instanceof Error
+              ? error.message
+              : "Unknown error adding document";
+          newErrors.push(errorMsg);
+          result.success = false;
+          result.error = errorMsg;
+        }
       }
-    });
+    }
+
+    // Update errors if any occurred during document addition
+    if (newErrors.length > errors.length) {
+      setErrors(newErrors);
+    }
 
     // Clear successfully processed files from the upload list
     clearSuccessfulFiles(results);
@@ -59,7 +77,15 @@ export default function InputDocumentSection() {
 
         <form onSubmit={handleSubmit}>
           <SpaceBetween size="xs">
-            <FormField errorText={errors.length > 0 ? errors : undefined}>
+            <FormField
+              errorText={
+                isQuotaExceeded
+                  ? "Local storage quota exceeded. Please remove some documents before adding more."
+                  : errors.length > 0
+                    ? errors
+                    : undefined
+              }
+            >
               <FileUpload
                 onChange={({ detail }) => {
                   setFiles(detail.value);
@@ -77,7 +103,7 @@ export default function InputDocumentSection() {
                 showFileLastModified
                 showFileSize
                 tokenLimit={5}
-                constraintText="JSON or newline-delimited JSON files only"
+                constraintText={`JSON or newline-delimited JSON files only. Maximum file size: ${MAX_DOCUMENT_SIZE_MB}MB`}
               />
             </FormField>
 
@@ -85,7 +111,10 @@ export default function InputDocumentSection() {
               <Spinner />
             ) : (
               files.length > 0 && (
-                <Button variant="primary" disabled={isProcessing}>
+                <Button
+                  variant="primary"
+                  disabled={isProcessing || isQuotaExceeded}
+                >
                   Upload
                 </Button>
               )

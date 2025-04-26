@@ -4,6 +4,7 @@ import {
   validateJsonContent,
   isNewlineDelimitedJson,
 } from "@/utils/jsonUtils";
+import { MAX_DOCUMENT_SIZE_BYTES, formatBytes } from "@/utils/sizeLimits";
 
 interface FileProcessingResult {
   success: boolean;
@@ -45,6 +46,18 @@ export function useJSONFileUpload() {
     const errors: string[] = [];
 
     try {
+      // Check file size before processing
+      if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
+        const errorMsg = `File ${file.name} exceeds the maximum size limit of ${formatBytes(MAX_DOCUMENT_SIZE_BYTES)}`;
+        errors.push(errorMsg);
+        results.push({
+          success: false,
+          fileName: file.name,
+          error: errorMsg,
+        });
+        return { results, errors };
+      }
+
       const content = await readFileAsText(file);
       const validationError = validateJsonContent(content);
 

@@ -76,3 +76,12 @@ export const prettyPrintJson = (json: string): string => {
     return json;
   }
 };
+
+/**
+ * Calculates the size of a JSON string in bytes
+ * @param jsonString The JSON string to measure
+ * @returns The size in bytes
+ */
+export const getJsonSizeInBytes = (jsonString: string): number => {
+  return new Blob([jsonString]).size;
+};

@@ -5,12 +5,31 @@ import {
   InputDocument,
   Transformation,
 } from "@/context/PlaygroundContext";
+import { getJsonSizeInBytes } from "@/utils/jsonUtils";
+import { MAX_TOTAL_STORAGE_BYTES, formatBytes } from "@/utils/sizeLimits";
 
 export const usePlaygroundActions = () => {
-  const { dispatch } = usePlayground();
+  const { dispatch, storageSize, isQuotaExceeded } = usePlayground();
 
   const addInputDocument = useCallback(
     (name: string, content: string) => {
+      // Check if quota is already exceeded
+      if (isQuotaExceeded) {
+        throw new Error(
+          `Cannot add document: Local storage quota would be exceeded. Please remove some documents first.`,
+        );
+      }
+
+      // Calculate size of new document
+      const newDocSize = getJsonSizeInBytes(content);
+
+      // Check if adding this document would exceed the storage limit
+      if (storageSize + newDocSize > MAX_TOTAL_STORAGE_BYTES) {
+        throw new Error(
+          `Adding this document would exceed the maximum storage limit of ${formatBytes(MAX_TOTAL_STORAGE_BYTES)}`,
+        );
+      }
+
       const newDoc: InputDocument = {
         id: uuidv4(),
         name,
@@ -19,7 +38,7 @@ export const usePlaygroundActions = () => {
       dispatch({ type: "ADD_INPUT_DOCUMENT", payload: newDoc });
       return newDoc;
     },
-    [dispatch],
+    [dispatch, storageSize, isQuotaExceeded],
   );
 
   const removeInputDocument = useCallback(

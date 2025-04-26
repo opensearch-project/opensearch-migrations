@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { PlaygroundProvider } from "@/context/PlaygroundProvider";
 import { PlaygroundContext, initialState } from "@/context/PlaygroundContext";
+import { MAX_TOTAL_STORAGE_BYTES } from "@/utils/sizeLimits";
 import {
   createInputDocument,
   createTransformation,
@@ -16,6 +17,18 @@ jest.mock("uuid", () => ({
   v4: jest.fn(() => TEST_UUID),
 }));
 
+// Mock the getJsonSizeInBytes function
+jest.mock("@/utils/jsonUtils", () => {
+  const originalModule = jest.requireActual("@/utils/jsonUtils");
+  return {
+    ...originalModule,
+    getJsonSizeInBytes: jest.fn().mockReturnValue(1024),
+  };
+});
+
+// Import the mocked module
+import { getJsonSizeInBytes } from "@/utils/jsonUtils";
+
 describe("usePlaygroundActions", () => {
   // Standard wrapper using the actual PlaygroundProvider
   const standardWrapper = ({ children }: { children: React.ReactNode }) => (
@@ -23,13 +36,15 @@ describe("usePlaygroundActions", () => {
   );
 
   // Create a wrapper with a mock dispatch function for testing dispatched actions
-  const createMockWrapper = () => {
+  const createMockWrapper = (customStorageSize = 0) => {
     const mockDispatch = jest.fn();
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <PlaygroundContext.Provider
         value={{
           state: initialState,
           dispatch: mockDispatch,
+          storageSize: customStorageSize,
+          isQuotaExceeded: false,
         }}
       >
         {children}
@@ -81,6 +96,27 @@ describe("usePlaygroundActions", () => {
         type: "ADD_INPUT_DOCUMENT",
         payload: testDocument,
       });
+    });
+
+    it("should throw an error when adding a document would exceed storage limit", () => {
+      // Set the mock to return a large size
+      (getJsonSizeInBytes as jest.Mock).mockReturnValue(
+        MAX_TOTAL_STORAGE_BYTES
+      );
+
+      // Create a wrapper with storage size close to the limit
+      const { wrapper } = createMockWrapper(1); // Just 1 byte of storage used
+      const { result } = renderHook(() => usePlaygroundActions(), { wrapper });
+
+      // Adding a document should throw an error
+      expect(() => {
+        act(() => {
+          result.current.addInputDocument(TEST_DOC_NAME, TEST_DOC_CONTENT);
+        });
+      }).toThrow(/exceed the maximum storage limit/);
+
+      // Reset the mock
+      (getJsonSizeInBytes as jest.Mock).mockReturnValue(1024);
     });
   });
 

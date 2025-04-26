@@ -1,6 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { useJSONFileUpload } from "@/hooks/useJSONFileUpload";
 import { readFileAsText, isNewlineDelimitedJson } from "@/utils/jsonUtils";
+import { MAX_DOCUMENT_SIZE_BYTES } from "@/utils/sizeLimits";
 
 // Mock the readFileAsText function from jsonUtils
 jest.mock("@/utils/jsonUtils", () => ({
@@ -112,6 +113,32 @@ describe("useFileUpload", () => {
     expect(processResult[0].error).toContain("Invalid JSON format");
     expect(result.current.errors.length).toBe(1);
     expect(result.current.errors[0]).toContain("Error in invalid.json");
+  });
+
+  it("should reject files exceeding the maximum size limit", async () => {
+    const validJson = '{"key": "value"}';
+    
+    // Create a mock file with size property set to exceed the limit
+    const mockFile = new File([validJson], "large.json", { type: "application/json" });
+    Object.defineProperty(mockFile, 'size', { value: MAX_DOCUMENT_SIZE_BYTES + 1 });
+    
+    const { result } = renderHook(() => useJSONFileUpload());
+    
+    // Add file to state
+    act(() => {
+      result.current.setFiles([mockFile]);
+    });
+    
+    // Process file
+    let processResult: FileProcessingResult[] = [];
+    await act(async () => {
+      processResult = await result.current.processFiles();
+    });
+    
+    expect(processResult[0].success).toBe(false);
+    expect(processResult[0].error).toContain("exceeds the maximum size limit");
+    expect(result.current.errors.length).toBe(1);
+    expect(result.current.errors[0]).toContain("exceeds the maximum size limit");
   });
 
   it("should process regular JSON file as a single document", async () => {
