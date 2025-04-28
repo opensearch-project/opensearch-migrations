@@ -21,7 +21,7 @@ final class RemoteSnapshotDataProvider implements Provider {
     }
 
     @Override
-    public List<Index> getIndicesInSnapshot(String snapshotName) {
+    public List<Index> getIndicesInSnapshot() {
         var indexes = new ArrayList<Index>();
         indexData.fields().forEachRemaining(index -> indexes.add(new RemoteIndexSnapshotData(index.getKey())));
 
@@ -29,7 +29,7 @@ final class RemoteSnapshotDataProvider implements Provider {
     }
 
     @Override
-    public String getSnapshotId(String snapshotName) {
+    public String getSnapshotId() {
         throw new UnsupportedOperationException("Unimplemented method 'getSnapshotId'");
     }
 

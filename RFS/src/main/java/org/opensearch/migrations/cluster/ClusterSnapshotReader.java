@@ -5,23 +5,29 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 /** Reads data for a cluster from a snapshot */
-public interface ClusterSnapshotReader extends ClusterReader {
+public abstract class ClusterSnapshotReader implements ClusterReader {
 
-    /** Snapshots are read differently based on their versions */
-    ClusterSnapshotReader initialize(Version version);
+    protected Version version;
+    protected SourceRepo sourceRepo;
+    protected String snapshotName;
 
     /** Where to read the snapshot from */
-    ClusterSnapshotReader initialize(SourceRepo sourceRepo);
+    ClusterSnapshotReader initialize(Version version, SourceRepo sourceRepo, String snapshotName) {
+        this.version = version;
+        this.sourceRepo = sourceRepo;
+        this.snapshotName = snapshotName;
+        return this;
+    }
 
     /** Reads information about index shards */
-    ShardMetadata.Factory getShardMetadata();
+    public abstract ShardMetadata.Factory getShardMetadata();
 
     /** buffer size - bytes */
-    int getBufferSizeInBytes();
+    public abstract int getBufferSizeInBytes();
 
     /** if soft deletes can be in the snapshot */
-    boolean getSoftDeletesPossible();
+    public abstract boolean getSoftDeletesPossible();
 
     /** gets the soft deletes can field data */
-    String getSoftDeletesFieldData();
+    public abstract String getSoftDeletesFieldData();
 }

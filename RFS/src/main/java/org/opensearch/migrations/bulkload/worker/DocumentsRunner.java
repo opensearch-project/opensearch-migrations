@@ -8,6 +8,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.bulkload.LuceneBasedDocumentRepository;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
@@ -31,9 +32,8 @@ public class DocumentsRunner {
     private final ScopedWorkCoordinator workCoordinator;
     private final Duration maxInitialLeaseDuration;
     private final DocumentReindexer reindexer;
-    private final SnapshotShardUnpacker.Factory unpackerFactory;
-    private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
-    private final LuceneIndexReader.Factory readerFactory;
+    private final long maxPermissibleShardSizeInBytes;
+    private final LuceneBasedDocumentRepository documentRepository;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
     private final WorkItemTimeProvider timeProvider;
@@ -135,10 +135,15 @@ public class DocumentsRunner {
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
-        ShardMetadata shardMetadata = shardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
-
-        var unpacker = unpackerFactory.create(shardMetadata);
-        var reader = readerFactory.getReader(unpacker.unpack());
+        {
+            var shardSizeInBytes =
+                documentRepository.getShardSizeInBytes(workItem.getIndexName(), workItem.getShardNumber());
+            log.info("Shard size: " + shardSizeInBytes);
+            if (shardSizeInBytes > maxPermissibleShardSizeInBytes) {
+                throw new DocumentsRunner.ShardTooLargeException(shardSizeInBytes, maxPermissibleShardSizeInBytes);
+            }
+        }
+        var reader = documentRepository.getReader(workItem.getIndexName(), workItem.getShardNumber());
         timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());

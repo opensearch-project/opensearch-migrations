@@ -64,6 +64,9 @@ import org.junit.jupiter.api.function.Executable;
 import reactor.core.publisher.Flux;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
@@ -253,7 +256,7 @@ public class SourceTestBase {
                 return d;
             };
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo);
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo, snapshotName);
 
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
@@ -276,6 +279,10 @@ public class SourceTestBase {
                 return reader;
             });
 
+            var luceneDocumentRepo = spy(
+                new ElasticsearchSnapshotDocumentRepository(snapshotName, sourceResourceProvider, unpackerFactory));
+
+            doReturn(readerFactory).when(luceneDocumentRepo).getReader(anyString(), anyInt());
 
             var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
                     Optional.ofNullable(transformationConfig).orElse(
@@ -300,17 +307,13 @@ public class SourceTestBase {
             )) {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
-                    readerFactory,
+                    luceneDocumentRepo,
                     new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),
                     processManager,
-                    sourceResourceProvider.getIndexMetadata(),
-                    snapshotName,
                     indexAllowlist,
-                    sourceResourceProvider.getShardMetadata(),
-                    unpackerFactory,
                     MAX_SHARD_SIZE_BYTES,
                     context,
                     new AtomicReference<>(),

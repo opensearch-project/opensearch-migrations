@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
@@ -13,19 +14,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.ElasticsearchSnapshotDocumentRepository;
+import org.opensearch.migrations.bulkload.EncryptedShardBucketCollectionDocumentRepository;
+import org.opensearch.migrations.bulkload.LuceneBasedDocumentRepository;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.S3Repo;
-import org.opensearch.migrations.bulkload.common.S3Uri;
-import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
-import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
-import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
@@ -36,7 +31,6 @@ import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -53,6 +47,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -91,7 +86,17 @@ public class RfsMigrateDocuments {
             description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
+            names = {"--snapshotLoader"},
+            description = "Hot-loaded class that should be used to download the lucene directory of a shard")
+        public String snapshotLoaderClassName;
+
+        @Parameter(required = false,
+            names = {"--snapshotLoaderConfig"},
+            description = "Configuration passed to the class specified in --snapshotLoader.")
+        public String snapshotLoaderConfig;
+
+        @Parameter(required = false,
             names = { "--snapshot-name", "--snapshotName" },
             description = "The name of the snapshot to migrate")
         public String snapshotName;
@@ -125,11 +130,14 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = true,
             names = { "--lucene-dir", "--luceneDir" },
-            description = "The absolute path to the directory where we'll put the Lucene docs")
+            description = "The absolute path to the directory where we'll unpack the Lucene docs")
         public String luceneDir;
 
         @ParametersDelegate
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
+
+        @ParametersDelegate
+        public ConnectionContext.CoordinatorArgs coordinatorArgs = new ConnectionContext.CoordinatorArgs();
 
         @Parameter(required = false,
             names = { "--index-allowlist", "--indexAllowlist" },
@@ -176,6 +184,14 @@ public class RfsMigrateDocuments {
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
+
+        @Parameter(required = false,
+            names = { "--initial-subdivision", "--initialSubdivision" },
+            converter = VersionConverter.class,
+            description = ("The first time a shard is processed, it will only be processed for work subdivision.  " +
+                "The shard's work entry will be replaced by this many parts and will exit for subsequent processors " +
+                "to handle the partitioned jobs.  default=0, meaning that there is no subdivision."))
+        public int initialSubdivision = 0;
 
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
@@ -232,10 +248,14 @@ public class RfsMigrateDocuments {
 
     public static void validateArgs(Args args) {
         boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
+        boolean areAllCustomSnapshotArgsProvided = args.snapshotLoaderClassName != null && args.snapshotLoaderConfig != null;
+        boolean areAnyCustomSnapshotArgsProvided = args.snapshotLoaderClassName != null || args.snapshotLoaderConfig != null;
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
-        if (isSnapshotLocalDirProvided && areAnyS3ArgsProvided) {
+        if (((isSnapshotLocalDirProvided      ? 1 : 0) +
+            (areAnyCustomSnapshotArgsProvided ? 1 : 0) +
+            (areAnyS3ArgsProvided             ? 1 : 0)) > 1) {
             throw new ParameterException(
                 "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region, but not both."
             );
@@ -247,12 +267,11 @@ public class RfsMigrateDocuments {
             );
         }
 
-        if (!isSnapshotLocalDirProvided && !areAllS3ArgsProvided) {
+        if (!isSnapshotLocalDirProvided && !areAllS3ArgsProvided && !areAllCustomSnapshotArgsProvided) {
             throw new ParameterException(
                 "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region."
             );
         }
-
     }
 
     public static void main(String[] args) throws Exception {
@@ -277,10 +296,12 @@ public class RfsMigrateDocuments {
 
         var context = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
-        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
-        var connectionContext = arguments.targetArgs.toConnectionContext();
-        OpenSearchClient targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+        var targetConnectionContext = arguments.targetArgs.toConnectionContext();
+        var coordinatorConnectionContext =
+            Optional.ofNullable((ConnectionContext.IParams) arguments.coordinatorArgs).orElse(arguments.targetArgs)
+                .toConnectionContext();
+        OpenSearchClient targetClient = new OpenSearchClientFactory(targetConnectionContext).determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
 
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
@@ -298,7 +319,7 @@ public class RfsMigrateDocuments {
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(
-                 new CoordinateWorkHttpClient(connectionContext),
+                 new CoordinateWorkHttpClient(coordinatorConnectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId,
                 Clock.systemUTC(),
@@ -314,7 +335,8 @@ public class RfsMigrateDocuments {
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
-                Clock.systemUTC());) {
+                Clock.systemUTC());)
+        {
             // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
             // event of a SIGTERM signal.
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -343,38 +365,16 @@ public class RfsMigrateDocuments {
                 arguments.maxConnections,
                 docTransformerSupplier);
 
-            SourceRepo sourceRepo;
-            if (snapshotLocalDirPath == null) {
-                sourceRepo = S3Repo.create(
-                    Paths.get(arguments.s3LocalDir),
-                    new S3Uri(arguments.s3RepoUri),
-                    arguments.s3Region
-                );
-            } else {
-                sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
-            }
-            var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo);
-
-            var unpackerFactory = new SnapshotShardUnpacker.Factory(
-                repoAccessor,
-                luceneDirPath,
-                sourceResourceProvider.getBufferSizeInBytes()
-            );
+            var repository = makeLuceneRepository(arguments);
 
             run(
-                new LuceneIndexReader.Factory(sourceResourceProvider),
+                repository,
                 reindexer,
                 progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
                 processManager,
-                sourceResourceProvider.getIndexMetadata(),
-                arguments.snapshotName,
                 arguments.indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
                 arguments.maxShardSizeBytes,
                 context,
                 cancellationRunnableRef,
@@ -387,6 +387,24 @@ public class RfsMigrateDocuments {
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
+        }
+    }
+
+    private static LuceneBasedDocumentRepository makeLuceneRepository(Args arguments) throws JsonProcessingException {
+        if (arguments.snapshotLoaderClassName != null) {
+            return new EncryptedShardBucketCollectionDocumentRepository(arguments.snapshotLoaderConfig);
+        } else if (arguments.snapshotLocalDir == null) {
+            return new ElasticsearchSnapshotDocumentRepository(arguments.sourceVersion,
+                arguments.snapshotName,
+                Paths.get(arguments.luceneDir),
+                arguments.s3RepoUri,
+                arguments.s3Region,
+                Paths.get(arguments.s3LocalDir));
+        } else {
+            return new ElasticsearchSnapshotDocumentRepository(arguments.sourceVersion,
+                arguments.snapshotName,
+                Path.of(arguments.luceneDir),
+                Path.of(arguments.snapshotLocalDir));
         }
     }
 
@@ -536,7 +554,8 @@ public class RfsMigrateDocuments {
         return successorShardNextAcquisitionLeaseExponent;
     }
 
-    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration,
+                                                        WorkItemCursor progressCursor) {
         if (workItemAndDuration == null) {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
@@ -564,17 +583,13 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(LuceneIndexReader.Factory readerFactory,
+    public static DocumentsRunner.CompletionStatus run(LuceneBasedDocumentRepository luceneBasedDocumentRepository,
                                                        DocumentReindexer reindexer,
                                                        AtomicReference<WorkItemCursor> progressCursor,
                                                        IWorkCoordinator workCoordinator,
                                                        Duration maxInitialLeaseDuration,
                                                        LeaseExpireTrigger leaseExpireTrigger,
-                                                       IndexMetadata.Factory indexMetadataFactory,
-                                                       String snapshotName,
                                                        List<String> indexAllowlist,
-                                                       ShardMetadata.Factory shardMetadataFactory,
-                                                       SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes,
                                                        RootDocumentMigrationContext rootDocumentContext,
                                                        AtomicReference<Runnable> cancellationRunnable,
@@ -582,8 +597,7 @@ public class RfsMigrateDocuments {
         throws IOException, InterruptedException, NoWorkLeftException
     {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory,
-            snapshotName,
+        confirmShardPrepIsComplete(luceneBasedDocumentRepository,
             indexAllowlist,
             scopedWorkCoordinator,
             rootDocumentContext
@@ -593,21 +607,12 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
-            if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
-                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
-            }
-            return shardMetadata;
-        };
 
         var runner = new DocumentsRunner(scopedWorkCoordinator,
             maxInitialLeaseDuration,
             reindexer,
-            unpackerFactory,
-            shardMetadataSupplier,
-            readerFactory,
+            maxShardSizeBytes,
+            luceneBasedDocumentRepository,
             progressCursor::set,
             cancellationRunnable::set,
             timeProvider);
@@ -615,8 +620,7 @@ public class RfsMigrateDocuments {
     }
 
     private static void confirmShardPrepIsComplete(
-        IndexMetadata.Factory indexMetadataFactory,
-        String snapshotName,
+        LuceneBasedDocumentRepository documentRepository,
         List<String> indexAllowlist,
         ScopedWorkCoordinator scopedWorkCoordinator,
         RootDocumentMigrationContext rootContext
@@ -629,8 +633,7 @@ public class RfsMigrateDocuments {
             try {
                 new ShardWorkPreparer().run(
                     scopedWorkCoordinator,
-                    indexMetadataFactory,
-                    snapshotName,
+                    documentRepository,
                     indexAllowlist,
                     rootContext
                 );

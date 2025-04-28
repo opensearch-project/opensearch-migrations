@@ -273,6 +273,73 @@ public class ConnectionContext {
         }
     }
 
+    @Getter
+    public static class CoordinatorArgs implements ConnectionContext.IParams {
+        @Parameter(
+            names = {"--coordinator-host", "--coordinatorHost" },
+            description = "The coordinator host and port (e.g. http://localhost:9200)",
+            required = false)
+        public String host = null;
+
+        @Parameter(
+            names = {"--coordinator-username", "--coordinatorUsername" },
+            description = "The coordinator username; if not provided, will assume no auth on coordinator",
+            required = false)
+        public String username = null;
+
+        @Parameter(
+            names = {"--coordinator-password", "--coordinatorPassword" },
+            description = "The coordinator password; if not provided, will assume no auth on coordinator",
+            required = false)
+        public String password = null;
+
+        @Parameter(
+            names = {"--coordinator-cacert", "--coordinatorCaCert" },
+            description = "Optional. The coordinator CA certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path caCert = null;
+
+        @Parameter(
+            names = {"--coordinator-client-cert", "--coordinatorClientCert" },
+            description = "Optional. The coordinator client TLS certificate",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCert = null;
+
+        @Parameter(
+            names = {"--coordinator-client-cert-key", "--coordinatorClientCertKey" },
+            description = "Optional. The coordinator client TLS certificate key",
+            required = false,
+            converter = PathConverter.class)
+        public Path clientCertKey = null;
+
+        @Parameter(
+            names = {"--coordinator-aws-region", "--coordinatorAwsRegion" },
+            description = "Optional. The coordinator aws region, e.g. 'us-east-1'. Required if sigv4 auth is used",
+            required = false)
+        public String awsRegion = null;
+
+        @Parameter(
+            names = {"--coordinator-aws-service-signing-name", "--coordinatorAwsServiceSigningName" },
+            description = "Optional. The coordinator aws service signing name, e.g 'es' for " +
+                "Amazon OpenSearch Service and 'aoss' for Amazon OpenSearch Serverless. " +
+                "Required if sigv4 auth is used.",
+            required = false)
+        public String awsServiceSigningName = null;
+
+        @Parameter(
+            names = {"--coordinator-insecure", "--coordinatorInsecure" },
+            description = "Allow untrusted SSL certificates for coordinator",
+            required = false)
+        public boolean insecure = false;
+
+        public boolean isCompressionEnabled() {
+            // No compression on coordinator due to no ingestion
+            return false;
+        }
+    }
+
     private static void validateClientCertPairPresence(IParams params) {
         if ((params.getClientCert() != null) ^ (params.getClientCertKey() != null)) {
             throw new IllegalArgumentException(

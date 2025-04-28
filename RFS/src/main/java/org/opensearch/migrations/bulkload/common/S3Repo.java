@@ -179,18 +179,13 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public void prepBlobFiles(ShardMetadata shardMetadata) {
+    public void prepBlobFiles(String index, int shard) {
         try (S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build()) {
 
-            Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
+            Path shardDirPath = getShardDirPath(index, shard);
             ensureS3LocalDirectoryExists(shardDirPath);
 
-            String blobFilesS3Prefix = s3RepoUri.key
-                + INDICES_PREFIX_STR
-                + shardMetadata.getIndexId()
-                + "/"
-                + shardMetadata.getShardId()
-                + "/";
+            String blobFilesS3Prefix = s3RepoUri.key + INDICES_PREFIX_STR + index + "/" + shard + "/";
 
             log.atInfo().setMessage("Downloading blob files from S3: s3://{}/{} to {}")
                 .addArgument(s3RepoUri.bucketName)

@@ -62,10 +62,10 @@ public abstract class IndexMetadata implements Index {
             }
         }
 
-        default IndexMetadata fromRepo(String snapshotName, String indexName) {
+        default IndexMetadata fromRepo(String indexName) {
             SmileFactory smileFactory = getSmileFactory();
             String indexId = getRepoDataProvider().getIndexId(indexName);
-            String indexFileId = getIndexFileId(snapshotName, indexName);
+            String indexFileId = getIndexFileId(indexName);
             JsonNode root = getJsonNode(indexId, indexFileId, smileFactory);
             return fromJsonNode(root, indexId, indexName);
         }
@@ -77,7 +77,7 @@ public abstract class IndexMetadata implements Index {
         SmileFactory getSmileFactory();
 
         // Version-specific implementation
-        String getIndexFileId(String snapshotName, String indexName);
+        String getIndexFileId(String indexName);
 
         // Get the underlying SnapshotRepo Provider
         SnapshotRepo.Provider getRepoDataProvider();

@@ -9,22 +9,13 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
-public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
-
-    private Version version;
-    private SourceRepo sourceRepo;
+public class SnapshotReader_ES_6_8 extends ClusterSnapshotReader {
 
     @Override
     public boolean compatibleWith(Version version) {
         return VersionMatchers.isES_6_X
             .or(VersionMatchers.isES_5_X)
             .test(version);
-    }
-
-    @Override
-    public ClusterSnapshotReader initialize(SourceRepo sourceRepo) {
-        this.sourceRepo = sourceRepo;
-        return this;
     }
 
     @Override
@@ -62,12 +53,6 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
         return version;
     }
 
-    @Override
-    public ClusterSnapshotReader initialize(Version version) {
-        this.version = version;
-        return this;
-    }
-
     public String toString() {
         // These values could be null, don't want to crash during toString
         return String.format("Snapshot: %s %s", version, sourceRepo);
@@ -77,7 +62,7 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
         if (sourceRepo == null) {
             throw new UnsupportedOperationException("initialize(...) must be called");
         }
-        return new SnapshotRepoProvider_ES_6_8(sourceRepo);
+        return new SnapshotRepoProvider_ES_6_8(sourceRepo, snapshotName);
     }
 
 }

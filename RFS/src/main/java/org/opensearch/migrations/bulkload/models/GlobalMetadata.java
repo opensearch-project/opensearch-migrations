@@ -52,13 +52,12 @@ public interface GlobalMetadata {
     interface Factory {
         private JsonNode getJsonNode(
             SnapshotRepo.Provider repoDataProvider,
-            String snapshotName,
             SmileFactory smileFactory
         ) {
-            String snapshotId = repoDataProvider.getSnapshotId(snapshotName);
+            String snapshotId = repoDataProvider.getSnapshotId();
 
             if (snapshotId == null) {
-                throw new CantFindSnapshotInRepo(snapshotName);
+                throw new CantFindSnapshotInRepo();
             }
 
             Path filePath = repoDataProvider.getRepo().getGlobalMetadataFilePath(snapshotId);
@@ -78,14 +77,14 @@ public interface GlobalMetadata {
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
             } catch (Exception e) {
-                throw new CantReadGlobalMetadataFromSnapshot(snapshotName, e);
+                throw new CantReadGlobalMetadataFromSnapshot(e);
             }
         }
 
-        default GlobalMetadata fromRepo(String snapshotName) {
+        default GlobalMetadata fromRepo() {
             SnapshotRepo.Provider repoDataProvider = getRepoDataProvider();
             SmileFactory smileFactory = getSmileFactory();
-            JsonNode root = getJsonNode(repoDataProvider, snapshotName, smileFactory);
+            JsonNode root = getJsonNode(repoDataProvider, smileFactory);
             return fromJsonNode(root);
         }
 
@@ -100,14 +99,14 @@ public interface GlobalMetadata {
     }
 
      class CantFindSnapshotInRepo extends RfsException {
-        public CantFindSnapshotInRepo(String snapshotName) {
-            super("Can't find snapshot in repo: " + snapshotName);
+        public CantFindSnapshotInRepo() {
+            super("Can't find snapshot in repo");
         }
     }
 
     class CantReadGlobalMetadataFromSnapshot extends RfsException {
-        public CantReadGlobalMetadataFromSnapshot(String snapshotName, Throwable cause) {
-            super("Can't read the global metadata from snapshot: " + snapshotName, cause);
+        public CantReadGlobalMetadataFromSnapshot(Throwable cause) {
+            super("Can't read the global metadata from snapshot", cause);
         }
     }
 

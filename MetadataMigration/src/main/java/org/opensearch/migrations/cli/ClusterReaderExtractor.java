@@ -51,6 +51,6 @@ public class ClusterReaderExtractor {
     }
 
     ClusterReader getSnapshotReader(Version sourceVersion, SourceRepo repo) {
-        return ClusterProviderRegistry.getSnapshotReader(sourceVersion, repo);
+        return ClusterProviderRegistry.getSnapshotReader(sourceVersion, repo, arguments.snapshotName);
     }
 }

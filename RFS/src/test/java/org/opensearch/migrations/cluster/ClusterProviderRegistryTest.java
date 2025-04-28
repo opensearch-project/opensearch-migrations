@@ -29,7 +29,7 @@ public class ClusterProviderRegistryTest {
     void testGetSnapshotReader_ES_6_4() {
         var sourceRepo = mock(SourceRepo.class);
 
-        var reader = ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 6.4"), sourceRepo);
+        var reader = ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 6.4"), sourceRepo, "test");
 
         assertThat(reader, instanceOf(SnapshotReader_ES_6_8.class));
     }

@@ -20,32 +20,28 @@ import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
  * See: https://github.com/elastic/elasticsearch/blob/7.10/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L510
  * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L508
  */
-public interface ShardMetadata {
+public interface ShardMetadata extends IndexAndShard {
 
-    public String getSnapshotName();
+    String getSnapshotName();
 
-    public String getIndexName();
+    String getIndexId();
 
-    public String getIndexId();
+    int getIndexVersion();
 
-    public int getShardId();
+    long getStartTime();
 
-    public int getIndexVersion();
+    long getTime();
 
-    public long getStartTime();
+    int getNumberOfFiles();
 
-    public long getTime();
+    long getTotalSizeBytes();
 
-    public int getNumberOfFiles();
-
-    public long getTotalSizeBytes();
-
-    public List<ShardFileInfo> getFiles();
+    List<ShardFileInfo> getFiles();
 
     /**
-    * Defines the behavior required to read a snapshot's shard metadata as JSON and convert it into a Data object
-    */
-    public static interface Factory {
+     * Defines the behavior required to read a snapshot's shard metadata as JSON and convert it into a Data object
+     */
+    interface Factory {
         private JsonNode getJsonNode(String snapshotId, String indexId, int shardId, SmileFactory smileFactory) {
             Path filePath = getRepoDataProvider().getRepo().getShardMetadataFilePath(snapshotId, indexId, shardId);
 
@@ -78,23 +74,23 @@ public interface ShardMetadata {
 
         default ShardMetadata fromRepo(String snapshotName, String indexName, int shardId) {
             SmileFactory smileFactory = getSmileFactory();
-            String snapshotId = getRepoDataProvider().getSnapshotId(snapshotName);
+            String snapshotId = getRepoDataProvider().getSnapshotId();
             String indexId = getRepoDataProvider().getIndexId(indexName);
             JsonNode root = getJsonNode(snapshotId, indexId, shardId, smileFactory);
             return fromJsonNode(root, indexId, indexName, shardId);
         }
 
         // Version-specific implementation
-        public ShardMetadata fromJsonNode(JsonNode root, String indexId, String indexName, int shardId);
+        ShardMetadata fromJsonNode(JsonNode root, String indexId, String indexName, int shardId);
 
         // Version-specific implementation
-        public SmileFactory getSmileFactory();
+        SmileFactory getSmileFactory();
 
         // Get the underlying SnapshotRepo Provider
-        public SnapshotRepo.Provider getRepoDataProvider();
+        SnapshotRepo.Provider getRepoDataProvider();
     }
 
-    public static class CouldNotParseShardMetadata extends RfsException {
+    static class CouldNotParseShardMetadata extends RfsException {
         public CouldNotParseShardMetadata(String message, Throwable cause) {
             super(message, cause);
         }

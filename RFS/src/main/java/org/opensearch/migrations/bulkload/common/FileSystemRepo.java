@@ -94,7 +94,7 @@ public class FileSystemRepo implements SourceRepo {
     }
 
     @Override
-    public void prepBlobFiles(ShardMetadata shardMetadata) {
+    public void prepBlobFiles(String indexName, int shard) {
         // No work necessary for local filesystem
     }
 

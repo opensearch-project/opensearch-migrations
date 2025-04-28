@@ -26,9 +26,9 @@ public class IndexMetadataFactory_ES_7_10 implements IndexMetadata.Factory {
     }
 
     @Override
-    public String getIndexFileId(String snapshotName, String indexName) {
+    public String getIndexFileId(String indexName) {
         SnapshotRepoProvider_ES_7_10 providerES710 = (SnapshotRepoProvider_ES_7_10) repoDataProvider;
-        return providerES710.getIndexMetadataId(snapshotName, indexName);
+        return providerES710.getIndexMetadataId(indexName);
     }
 
     @Override
