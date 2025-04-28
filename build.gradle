@@ -3,12 +3,12 @@ import groovy.json.JsonOutput
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '7.0.2'
+    id "com.diffplug.spotless" version '7.0.3'
     id 'io.freefair.lombok' version '8.13.1' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.6' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
-    id 'com.google.protobuf' version "0.9.4" apply false
+    id 'com.google.protobuf' version "0.9.5" apply false
 
     // Used in top level build.gradle
     id 'jacoco' apply true
@@ -126,12 +126,12 @@ subprojects {
             force "io.netty:netty-codec-http:${libs.versions.netty.get()}"
             force "io.netty:netty-common:${libs.versions.netty.get()}"
             force "io.netty:netty-handler:${libs.versions.netty.get()}"
-            force 'org.apache.httpcomponents:httpclient:4.5.9'
+            force 'org.apache.httpcomponents:httpclient:4.5.14'
             force "org.bouncycastle:bcpkix-jdk18on:${libs.versions.bouncycastle.get()}"
             force "org.bouncycastle:bcprov-jdk18on:${libs.versions.bouncycastle.get()}"
             force 'com.jayway.jsonpath:json-path:2.9.0'
             force 'com.thoughtworks.xstream:xstream:1.4.21'
-            force "commons-io:commons-io:2.18.0"
+            force "commons-io:commons-io:2.19.0"
             force 'commons-net:commons-net:3.11.1'
             force 'dnsjava:dnsjava:3.6.3'
             force 'net.minidev:json-smart:2.5.2'
