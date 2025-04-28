@@ -1,14 +1,14 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.Properties;
+
 import com.beust.jcommander.Parameter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
-
-import java.io.FileReader;
-import java.io.IOException;
-import java.util.Properties;
 
 @Slf4j
 public class KafkaConfig {
