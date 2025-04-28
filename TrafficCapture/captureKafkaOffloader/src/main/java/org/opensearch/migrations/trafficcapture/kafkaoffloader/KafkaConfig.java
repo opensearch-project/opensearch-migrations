@@ -14,6 +14,10 @@ import org.apache.kafka.common.config.SaslConfigs;
 public class KafkaConfig {
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
 
+    private KafkaConfig() {
+        throw new IllegalStateException("Utility class should not be instantiated");
+    }
+
     public static class KafkaParameters {
         @Parameter(required = false,
                 names = { "--kafkaConfigFile" },

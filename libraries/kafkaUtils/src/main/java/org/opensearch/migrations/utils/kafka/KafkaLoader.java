@@ -6,10 +6,10 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.zip.GZIPInputStream;
 
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -26,6 +26,11 @@ public class KafkaLoader {
     private String kafkaClientId;
     private boolean mskAuthEnabled;
 
+    public static class InvalidKafkaExportFormat extends Exception {
+        public InvalidKafkaExportFormat(String message) {
+            super(message);
+        }
+    }
 
     public KafkaLoader(String kafkaPropertiesFile, String kafkaConnection, String kafkaClientId, boolean mskAuthEnabled) {
         this.kafkaPropertiesFile = kafkaPropertiesFile;
@@ -36,42 +41,39 @@ public class KafkaLoader {
 
     public void loadRecordsToKafkaFromCompressedFile(String fileName, String topicName, int batchSize) throws Exception {
         var kafkaProperties = buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
-        var kafkaProducer = new KafkaProducer(kafkaProperties);
-        BufferedReader bufferedReader = createBufferedReaderFromFile(fileName);
-        readLinesAndSendToKafka(bufferedReader, kafkaProducer, topicName, batchSize);
-    }
-
-    public void readLinesAndSendToKafka(BufferedReader reader, Producer<String, byte[]> producer, String topicName, int batchSize) {
-        List<Future<RecordMetadata>> futures = new ArrayList<>();
-        int i = 0;
-        try {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] splitString = line.split(DELIMITER);
-                if (splitString.length != 2) {
-                    throw new RuntimeException("Expected record in format '<key>|<value>' but did not find the correct number of delimiters");
-                }
-                var recordId = splitString[0];
-                var byteArray = Base64.getDecoder().decode(splitString[1]);
-                futures.add(producer.send(new ProducerRecord<>(topicName, recordId, byteArray)));
-                i++;
-
-                // Flush batch
-                if (i % batchSize == 0) {
-                    waitForFutures(futures);
-                    log.info("Sent " + i + " messages to kafka topic " + topicName);
-                    futures.clear();
-                }
-            }
-            log.info("End of stream reached");
-            waitForFutures(futures);
-            log.info("Sent total of " + i + " messages to kafka topic " + topicName);
-        } catch (Exception e) {
-            throw Lombok.sneakyThrow(e);
+        try (var kafkaProducer = new KafkaProducer<String, byte[]>(kafkaProperties)) {
+            BufferedReader bufferedReader = createBufferedReaderFromFile(fileName);
+            readLinesAndSendToKafka(bufferedReader, kafkaProducer, topicName, batchSize);
         }
     }
 
-    private void waitForFutures(List<Future<RecordMetadata>> futures) throws Exception {
+    public void readLinesAndSendToKafka(BufferedReader reader, Producer<String, byte[]> producer, String topicName, int batchSize) throws Exception {
+        List<Future<RecordMetadata>> futures = new ArrayList<>();
+        int i = 0;
+        String line;
+        while ((line = reader.readLine()) != null) {
+            String[] splitString = line.split(DELIMITER);
+            if (splitString.length != 2) {
+                throw new InvalidKafkaExportFormat("Expected record in format '<key>|<value>' but did not find the correct number of delimiters");
+            }
+            var recordId = splitString[0];
+            var byteArray = Base64.getDecoder().decode(splitString[1]);
+            futures.add(producer.send(new ProducerRecord<>(topicName, recordId, byteArray)));
+            i++;
+
+            // Flush batch
+            if (i % batchSize == 0) {
+                waitForFutures(futures);
+                log.info("Sent " + i + " messages to kafka topic " + topicName);
+                futures.clear();
+            }
+        }
+        log.info("End of stream reached");
+        waitForFutures(futures);
+        log.info("Sent total of " + i + " messages to kafka topic " + topicName);
+    }
+
+    private void waitForFutures(List<Future<RecordMetadata>> futures) throws ExecutionException, InterruptedException {
         for (var future : futures) {
             future.get();
         }

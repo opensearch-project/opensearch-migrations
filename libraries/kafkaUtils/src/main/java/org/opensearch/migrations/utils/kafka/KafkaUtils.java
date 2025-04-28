@@ -6,8 +6,9 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import lombok.extern.slf4j.Slf4j;
 
-
+@Slf4j
 public class KafkaUtils {
     public static final String DEFAULT_TOPIC_NAME = "logging-traffic-topic";
     public static final int DEFAULT_BATCH_SIZE = 500;
@@ -42,8 +43,8 @@ public class KafkaUtils {
             }
             return p;
         } catch (ParameterException e) {
-            System.err.println(e.getMessage());
-            System.err.println("Got args: " + String.join("; ", args));
+            log.error(e.getMessage());
+            log.error("Got args: {}", String.join("; ", args));
             jCommander.usage();
             System.exit(2);
             return null;
