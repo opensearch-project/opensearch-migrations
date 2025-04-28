@@ -18,6 +18,7 @@ import {determineStreamingSourceType, StreamingSourceType} from "./streaming-sou
 import {
     ClusterAuth,
     ClusterNoAuth,
+    MAX_STAGE_NAME_LENGTH,
     MigrationSSMParameter,
     parseClusterDefinition,
     parseRemovalPolicy, parseSnapshotDefinition,
@@ -165,8 +166,7 @@ export class StackComposer {
         const warmNodeCount = this.getContextForType('warmNodeCount', 'number', defaultValues, contextJSON)
         const useUnsignedBasicAuth = this.getContextForType('useUnsignedBasicAuth', 'boolean', defaultValues, contextJSON)
         const fineGrainedManagerUserARN = this.getContextForType('fineGrainedManagerUserARN', 'string', defaultValues, contextJSON)
-        const fineGrainedManagerUserName = this.getContextForType('fineGrainedManagerUserName', 'string', defaultValues, contextJSON)
-        const fineGrainedManagerUserSecretManagerKeyARN = this.getContextForType('fineGrainedManagerUserSecretManagerKeyARN', 'string', defaultValues, contextJSON)
+        const fineGrainedManagerUserSecretARN = this.getContextForType('fineGrainedManagerUserSecretARN', 'string', defaultValues, contextJSON)
         const enableDemoAdmin = this.getContextForType('enableDemoAdmin', 'boolean', defaultValues, contextJSON)
         const enforceHTTPS = this.getContextForType('enforceHTTPS', 'boolean', defaultValues, contextJSON)
         const ebsEnabled = this.getContextForType('ebsEnabled', 'boolean', defaultValues, contextJSON)
@@ -259,13 +259,12 @@ export class StackComposer {
             CdkLogger.warn("Please update your CDK context block to use the `targetCluster` object.")
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             let auth: any = {"type": "none"}
-            if (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN) {
-                CdkLogger.warn(`Use of ${fineGrainedManagerUserName} and ${fineGrainedManagerUserSecretManagerKeyARN} with a preexisting target cluster
+            if (fineGrainedManagerUserSecretARN) {
+                CdkLogger.warn(`Use of ${fineGrainedManagerUserSecretARN} with a preexisting target cluster
                     will be deprecated in favor of using a \`targetCluster\` object. Please update your CDK context block.`)
                 auth = {
                     "type": "basic",
-                    "username": fineGrainedManagerUserName,
-                    "passwordFromSecretArn": fineGrainedManagerUserSecretManagerKeyARN
+                    "userSecretArn": fineGrainedManagerUserSecretARN
                 }
             }
             targetClusterDefinition = {"endpoint": targetClusterEndpointField, "auth": auth}
@@ -273,8 +272,8 @@ export class StackComposer {
         const targetCluster = usePreexistingTargetCluster ? parseClusterDefinition(targetClusterDefinition) : undefined
 
         // Ensure that target cluster username and password are not defined in multiple places
-        if (targetCluster && (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN)) {
-            throw new Error("The `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` can only be used when a domain is being " +
+        if (targetCluster && fineGrainedManagerUserSecretARN) {
+            throw new Error("The `fineGrainedManagerUserSecretARN` option can only be used when a domain is being " +
                 "provisioned by this tooling, which is contraindicated by `targetCluster` being provided.")
         }
 
@@ -286,7 +285,6 @@ export class StackComposer {
             )
         }
 
-        const targetClusterAuth = targetCluster?.auth
         const engineVersionValue = engineVersion ? this.getEngineVersion(engineVersion) : this.getEngineVersion('OS_2.15')
 
         if (reindexFromSnapshotWorkerSize !== "default" && reindexFromSnapshotWorkerSize !== "maximum") {
@@ -303,8 +301,8 @@ export class StackComposer {
         if (addOnMigrationDeployId && vpcId) {
             CdkLogger.warn("Add-on deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
-        if (stage.length > 15) {
-            throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
+        if (stage.length > MAX_STAGE_NAME_LENGTH) {
+            throw new Error(`Maximum allowed stage name length is ${MAX_STAGE_NAME_LENGTH} characters but received ${stage}`)
         }
         const clusterDomainName = domainName ?? `os-cluster-${stage}`
         let preexistingOrContainerTargetEndpoint
@@ -368,8 +366,6 @@ export class StackComposer {
                 migrationAPIEnabled,
                 sourceClusterDisabled,
                 sourceClusterEndpoint,
-                targetClusterUsername: targetCluster ? targetClusterAuth?.basicAuth?.username : fineGrainedManagerUserName,
-                targetClusterPasswordSecretArn: targetCluster ? targetClusterAuth?.basicAuth?.password_from_secret_arn : fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env,
             })
             this.stacks.push(networkStack)
@@ -411,8 +407,7 @@ export class StackComposer {
                 openAccessPolicyEnabled: openAccessPolicyEnabled,
                 useUnsignedBasicAuth: useUnsignedBasicAuth,
                 fineGrainedManagerUserARN: fineGrainedManagerUserARN,
-                fineGrainedManagerUserName: fineGrainedManagerUserName,
-                fineGrainedManagerUserSecretManagerKeyARN: fineGrainedManagerUserSecretManagerKeyARN,
+                fineGrainedManagerUserSecretARN: fineGrainedManagerUserSecretARN,
                 enableDemoAdmin: enableDemoAdmin,
                 enforceHTTPS: enforceHTTPS,
                 tlsSecurityPolicy: tlsSecurityPolicy,

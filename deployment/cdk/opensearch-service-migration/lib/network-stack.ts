@@ -53,8 +53,6 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly sourceClusterDisabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
-    readonly targetClusterUsername?: string;
-    readonly targetClusterPasswordSecretArn?: string;
     readonly albAcmCertArn?: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readonly env?: Record<string, any>;
@@ -363,23 +361,12 @@ export class NetworkStack extends Stack {
             });
 
             if (props.targetClusterEndpoint) {
-                const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId;
+                const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
                 createMigrationStringParameter(this, props.targetClusterEndpoint, {
                     stage: props.stage,
                     defaultDeployId: deployId,
                     parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
                 });
-                // This is a somewhat surprsing place for this non-network related set of parameters, but it pairs well with
-                // the OS_CLUSTER_ENDPOINT parameter and is helpful to ensure it happens. This probably isn't a long-term place
-                // for it, but is helpful for the time being.
-                if (props.targetClusterUsername && props.targetClusterPasswordSecretArn) {
-                    createMigrationStringParameter(this,
-                        `${props.targetClusterUsername} ${props.targetClusterPasswordSecretArn}`, {
-                        parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-                        defaultDeployId: deployId,
-                        stage: props.stage,
-                    });
-                }
             }
         }
     }

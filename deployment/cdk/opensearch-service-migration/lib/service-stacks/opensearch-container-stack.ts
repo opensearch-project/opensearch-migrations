@@ -4,18 +4,12 @@ import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
-import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
-import {SecretValue} from "aws-cdk-lib";
-import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "../common-utilities";
+import { MigrationSSMParameter, getMigrationStringParameterValue } from "../common-utilities";
 
 export interface OpenSearchContainerProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly fineGrainedManagerUserARN?: string,
-    readonly fineGrainedManagerUserName?: string,
-    readonly fineGrainedManagerUserSecretManagerKeyARN?: string,
     readonly enableDemoAdmin?: boolean,
-
 }
 
 const opensearch_target_initial_admin_password = "myStrongPassword123!";
@@ -28,20 +22,8 @@ const dnsNameForContainer = "opensearch";
  */
 export class OpenSearchContainerStack extends MigrationServiceCore {
 
-    private createSSMParameters(stage: string, deployId: string, adminUserName: string|undefined, adminUserSecret: ISecret|undefined) {
-        if (adminUserSecret) {
-            createMigrationStringParameter(this, `${adminUserName} ${adminUserSecret.secretArn}`, {
-                parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-                stage,
-                defaultDeployId: deployId
-            });
-        }
-    }
-
     constructor(scope: Construct, id: string, props: OpenSearchContainerProps) {
         super(scope, id, props)
-
-        const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
 
         const securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {
@@ -49,18 +31,6 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
                 parameter: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID,
             })),
         ]
-
-        let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
-            Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
-        let adminUserName: string|undefined = props.fineGrainedManagerUserName
-        if (props.enableDemoAdmin) { // Enable demo mode setting
-            adminUserName = "admin"
-            adminUserSecret = new Secret(this, "demoUserSecret", {
-                secretName: `demo-user-secret-${props.stage}-${deployId}`,
-                // This is unsafe and strictly for ease of use in a demo mode setup
-                secretStringValue: SecretValue.unsafePlainText(opensearch_target_initial_admin_password)
-            })
-        }
 
         const servicePort: PortMapping = {
             name: "opensearch-connect",
@@ -102,8 +72,5 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             ...props
         });
 
-        if (props.enableDemoAdmin) {
-            this.createSSMParameters(props.stage, deployId, adminUserName, adminUserSecret)
-        }
     }
 }

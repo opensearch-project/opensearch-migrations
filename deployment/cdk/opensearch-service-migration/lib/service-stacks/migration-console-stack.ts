@@ -12,7 +12,7 @@ import {
     getMigrationStringParameterValue,
     hashStringSHA256,
     MigrationSSMParameter,
-    createSnapshotOnAOSRole
+    createSnapshotOnAOSRole, createECSTaskRole
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
@@ -147,6 +147,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         let servicePortMappings: PortMapping[]|undefined
         let imageCommand: string[]|undefined
+        const serviceName = "migration-console"
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
@@ -253,10 +254,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        const serviceTaskRole = new Role(this, 'MigrationServiceTaskRole', {
-            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'Role for Migration Console ECS Tasks',
-        });
+        const serviceTaskRole = createECSTaskRole(this, serviceName, this.region, this.account)
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
@@ -325,7 +323,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
 
         this.createService({
-            serviceName: "migration-console",
+            serviceName: serviceName,
             dockerImageName: "migrations/migration_console:latest",
             securityGroups: securityGroups,
             portMappings: servicePortMappings,

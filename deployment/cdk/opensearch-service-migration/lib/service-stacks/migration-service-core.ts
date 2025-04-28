@@ -58,7 +58,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpcDetails.vpc
         })
 
-        this.serviceTaskRole = props.taskRole ? props.taskRole : createDefaultECSTaskRole(this, props.serviceName)
+        this.serviceTaskRole = props.taskRole ?? createDefaultECSTaskRole(this, props.serviceName, this.region, this.account)
         props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
