@@ -381,8 +381,10 @@ public abstract class OpenSearchClient {
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
                                               IRfsContexts.IRequestContext context)
     {
+        final AtomicInteger attemptCounter = new AtomicInteger(0);
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
+            int attempt = attemptCounter.incrementAndGet();
             final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
@@ -405,10 +407,12 @@ public abstract class OpenSearchClient {
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
                     log.atWarn()
-                        .setMessage("After bulk request on index '{}', {} more documents have succeed, {} remain")
+                        .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
+                        .addArgument(attempt)
                         .addArgument(indexName)
                         .addArgument(successfulDocs::size)
                         .addArgument(docsMap::size)
+                        .addArgument(response.body)
                         .log();
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
                 });
