@@ -12,6 +12,9 @@ if [ -n "$ECS_AGENT_URI" ]; then
     s3_bucket_name="migration-artifacts-$account_id-$MIGRATION_STAGE-$AWS_REGION"
 fi
 
+script_dir="$(dirname "$0")"
+abs_script_dir="$(cd "$script_dir" && pwd)"
+output_dir="$abs_script_dir"
 topic="logging-traffic-topic"
 timeout_seconds=60
 enable_s3=false
@@ -24,6 +27,7 @@ usage() {
   echo "  ./kafkaExport.sh [OPTIONS] [-- EXTRA_ARGS]"
   echo ""
   echo "Options:"
+  echo "  --output-dir <string>               Specify the output directory the export GZIP file will be written to, e.g. '/shared-logs-output'. Default is the same directory of the script."
   echo "  --timeout-seconds <seconds>         Timeout for how long the process will try to collect the Kafka records. Default is 60 seconds."
   echo "  --enable-s3                         Option to store the created archive on S3."
   echo "  --s3-bucket-name <bucket_name>      Option to specify a given S3 bucket to store the archive."
@@ -44,6 +48,10 @@ EXTRA_ARGS=()
 while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
+        --output-dir)
+            output_dir="$2"
+            shift 2
+            ;;
         --timeout-seconds)
             timeout_seconds="$2"
             shift 2
@@ -84,14 +92,13 @@ echo ""
 
 epoch_ts=$(date +%s)
 archive_name="kafka_export_from_migration_console_$epoch_ts.proto.gz"
+archive_path="$output_dir/$archive_name"
 s3_bucket_uri="s3://$s3_bucket_name/kafka-exports/$archive_name"
 group="exportFromMigrationConsole_$(hostname -s)_$$_$epoch_ts"
 
-SCRIPT_DIR="$(dirname "$0")"
-ABS_SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
-export CLASSPATH="$CLASSPATH:$(find "$ABS_SCRIPT_DIR" -name 'kafkaCommandLineFormatter-*.jar' | head -n 1)"
+export CLASSPATH="$CLASSPATH:$(find "$abs_script_dir" -name 'kafkaCommandLineFormatter-*.jar' | head -n 1)"
 
-echo "Starting kafka export to $archive_name"
+echo "Starting kafka export to $archive_path"
 # Build the command as an array
 cmd=(
   timeout "$timeout_seconds"
@@ -114,12 +121,12 @@ cmd+=("${EXTRA_ARGS[@]}")
 # Print the full command as one string
 echo "Running command:"
 printf '%q ' "${cmd[@]}"
-echo "| gzip -c -9 > \"$archive_name\""
+echo "| gzip -c -9 > \"$archive_path\""
 echo ""
 
 # Execute the command
-"${cmd[@]}" | gzip -c -9 > "$archive_name"
+"${cmd[@]}" | gzip -c -9 > "$archive_path"
 
 if [ "$enable_s3" = true ]; then
-  aws s3 mv "$archive_name" "$s3_bucket_uri" && echo "Export moved to S3: $s3_bucket_uri"
+  aws s3 mv "$archive_path" "$s3_bucket_uri" && echo "Export moved to S3: $s3_bucket_uri"
 fi

@@ -18,6 +18,11 @@ Export all current Kafka records as well as records that get added during the 2-
 ./kafkaExport.sh --timeout-seconds 120 --enable-s3 -- --from-beginning
 ```
 
+Export all current Kafka records as well as records that get added during the 5-minute limit (if possible) and store the gzip export in the `/shared-logs-output` EFS mounted directory
+```shell
+./kafkaExport.sh --timeout-seconds 300 --output-dir /shared-logs-output -- --from-beginning
+```
+
 Export only the first 200 messages from Kafka and store locally
 ```shell
 ./kafkaExport.sh -- --max-messages 200 --from-beginning
