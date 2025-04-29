@@ -208,8 +208,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             ...props
         });
 
-        new MigrationDashboard(this, 'RFSDashboard', {
-            dashboardName: `MigrationAssistant_ReindexFromSnapshot_Dashboard_${props.stage}`,
+        new MigrationDashboard(this, {
+            dashboardQualifier: `Backfill_Summary`,
             stage: props.stage,
             account: this.account,
             region: this.region,
