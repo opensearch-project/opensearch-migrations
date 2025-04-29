@@ -227,7 +227,7 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "qualifier", "MA_QUALIFIER", "bytesSent", "OTelLib", "documentMigration", { "region": "REGION", "label": "Bytes Sent - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
+                    [ "OpenSearchMigrations", "bytesSent", "qualifier", "MA_QUALIFIER", "OTelLib", "documentMigration", { "region": "REGION", "label": "Bytes Sent - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
                 ],
                 "period": 60,
                 "region": "REGION",
