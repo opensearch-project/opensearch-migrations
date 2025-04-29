@@ -37,6 +37,15 @@
             "label": "Account ID",
             "defaultValue": "ACCOUNT_ID",
             "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_QUALIFIER",
+            "inputType": "input",
+            "id": "MA_QUALIFIER",
+            "label": "Migration Qualifier",
+            "defaultValue": "placehlder-stage",
+            "visible": false
         }
     ],
     "widgets": [
@@ -218,7 +227,7 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "bytesSent", "OTelLib", "documentMigration", { "region": "REGION", "label": "Bytes Sent - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
+                    [ "OpenSearchMigrations", "qualifier", "MA_QUALIFIER", "bytesSent", "OTelLib", "documentMigration", { "region": "REGION", "label": "Bytes Sent - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
                 ],
                 "period": 60,
                 "region": "REGION",

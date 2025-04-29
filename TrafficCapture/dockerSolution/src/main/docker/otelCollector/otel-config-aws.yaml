@@ -11,6 +11,8 @@ processors:
       - key: qualifier
         value: ${env:QUALIFIER:-unknown}
         action: upsert
+      - key: service.name
+        action: delete
       - key: telemetry.sdk.language
         action: delete
       - key: telemetry.sdk.name
