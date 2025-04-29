@@ -13,6 +13,7 @@ dependencies {
     implementation libs.kafka.clients
     implementation libs.slf4j.api
     implementation libs.aws.msk.iam.auth
+    implementation libs.jcommander
 
     testImplementation project(':TrafficCapture:captureProtobufs')
     testImplementation testFixtures(project(path: ':coreUtilities'))
