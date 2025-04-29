@@ -3,6 +3,14 @@ receivers:
     protocols:
       grpc:
 processors:
+  cumulativetodelta:
+  probabilistic_sampler/traces:
+    sampling_percentage: ${TRACE_SAMPLING_PERCENTAGE:-1}
+  resource/stage:
+    attributes:
+      - key: stage
+        action: upsert
+        value: ${STAGE:-}
   batch:
     timeout: 10s
     send_batch_size: 8192
@@ -12,6 +20,8 @@ extensions:
 exporters:
   awsemf:
     namespace: 'OpenSearchMigrations'
+    resource_to_telemetry_conversion:
+      enabled: true
   awsxray:
     index_all_attributes: true
 service:
@@ -19,9 +29,9 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [cumulativetodelta, resource/stage, batch]
       exporters: [awsemf]
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [probabilistic_sampler/traces, batch]
       exporters: [awsxray]
