@@ -78,6 +78,19 @@ export const usePlaygroundActions = () => {
     [dispatch],
   );
 
+  const updateTransformation = useCallback(
+    (id: string, name: string, content: string) => {
+      const updatedTransform: Transformation = {
+        id,
+        name,
+        content,
+      };
+      dispatch({ type: "UPDATE_TRANSFORMATION", payload: updatedTransform });
+      return updatedTransform;
+    },
+    [dispatch],
+  );
+
   const updateInputDocument = useCallback(
     (id: string, name: string, content: string) => {
       // Check if quota is already exceeded
@@ -111,5 +124,6 @@ export const usePlaygroundActions = () => {
     addTransformation,
     reorderTransformation,
     removeTransformation,
+    updateTransformation,
   };
 };

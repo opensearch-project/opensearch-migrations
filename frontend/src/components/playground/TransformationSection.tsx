@@ -1,110 +1,93 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Container from "@cloudscape-design/components/container";
 import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
 import Board, { BoardProps } from "@cloudscape-design/board-components/board";
-import BoardItem from "@cloudscape-design/board-components/board-item";
-import AceEditor from "react-ace";
-
-import "ace-builds/src-noconflict/mode-json";
-import "ace-builds/src-noconflict/theme-github";
-import "ace-builds/src-noconflict/ext-language_tools";
-
 import { Transformation, usePlayground } from "@/context/PlaygroundContext";
+import TransformationItem from "./TransformationItem";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
-
-const boardItemI18nStrings = {
-  dragHandleAriaLabel: "Drag handle",
-  dragHandleAriaDescription:
-    "Use Space or Enter to activate drag, arrow keys to move, Space or Enter to submit, or Escape to discard. Be sure to temporarily disable any screen reader navigation feature that may interfere with the functionality of the arrow keys.",
-  resizeHandleAriaLabel: "Resize handle",
-  resizeHandleAriaDescription:
-    "Use Space or Enter to activate resize, arrow keys to move, Space or Enter to submit, or Escape to discard. Be sure to temporarily disable any screen reader navigation feature that may interfere with the functionality of the arrow keys.",
-};
-const boardI18nStrings: BoardProps.I18nStrings<any> = (() => {
-  function createAnnouncement(
-    operationAnnouncement: string,
-    conflicts: any,
-    disturbed: any
-  ) {
-    const conflictsAnnouncement =
-      conflicts.length > 0
-        ? `Conflicts with ${conflicts.map((c) => c.data.title).join(", ")}.`
-        : "";
-    const disturbedAnnouncement =
-      disturbed.length > 0 ? `Disturbed ${disturbed.length} items.` : "";
-    return [operationAnnouncement, conflictsAnnouncement, disturbedAnnouncement]
-      .filter(Boolean)
-      .join(" ");
-  }
-  return {
-    liveAnnouncementDndStarted: (operationType) =>
-      operationType === "resize" ? "Resizing" : "Dragging",
-    liveAnnouncementDndItemReordered: (operation) => {
-      const columns = `column ${operation.placement.x + 1}`;
-      const rows = `row ${operation.placement.y + 1}`;
-      return createAnnouncement(
-        `Item moved to ${
-          operation.direction === "horizontal" ? columns : rows
-        }.`,
-        operation.conflicts,
-        operation.disturbed
-      );
-    },
-    liveAnnouncementDndItemResized: (operation) => {
-      const columnsConstraint = operation.isMinimalColumnsReached
-        ? " (minimal)"
-        : "";
-      const rowsConstraint = operation.isMinimalRowsReached ? " (minimal)" : "";
-      const sizeAnnouncement =
-        operation.direction === "horizontal"
-          ? `columns ${operation.placement.width}${columnsConstraint}`
-          : `rows ${operation.placement.height}${rowsConstraint}`;
-      return createAnnouncement(
-        `Item resized to ${sizeAnnouncement}.`,
-        operation.conflicts,
-        operation.disturbed
-      );
-    },
-    liveAnnouncementDndItemInserted: (operation) => {
-      const columns = `column ${operation.placement.x + 1}`;
-      const rows = `row ${operation.placement.y + 1}`;
-      return createAnnouncement(
-        `Item inserted to ${columns}, ${rows}.`,
-        operation.conflicts,
-        operation.disturbed
-      );
-    },
-    liveAnnouncementDndCommitted: (operationType) =>
-      `${operationType} committed`,
-    liveAnnouncementDndDiscarded: (operationType) =>
-      `${operationType} discarded`,
-    liveAnnouncementItemRemoved: (op) =>
-      createAnnouncement(
-        `Removed item ${op.item.data.title}.`,
-        [],
-        op.disturbed
-      ),
-    navigationAriaLabel: "Board navigation",
-    navigationAriaDescription: "Click on non-empty item to move focus over",
-    navigationItemAriaLabel: (item) => (item ? item.data.title : "Empty"),
-  };
-})();
+import { boardI18nStrings } from "./boardI18nStrings";
 
 export default function TransformationSection() {
   const { state } = usePlayground();
-  const { addTransformation, removeTransformation } = usePlaygroundActions();
+  const { addTransformation, removeTransformation, reorderTransformation } =
+    usePlaygroundActions();
+
+  // Local state to track rowSpan values for each transformation
+  const [itemDimensions, setItemDimensions] = useState<
+    Record<string, { rowSpan: number }>
+  >(
+    // Initialize with default values from transformations
+    Object.fromEntries(
+      state.transformations.map((transform) => [transform.id, { rowSpan: 1 }]),
+    ),
+  );
+
+  // Sync itemDimensions when transformations change
+  useEffect(() => {
+    // When transformations change (added/removed), update our dimensions map
+    setItemDimensions((prevDimensions) => {
+      const newDimensions = { ...prevDimensions };
+
+      // Add any new transformations
+      state.transformations.forEach((transform) => {
+        if (!newDimensions[transform.id]) {
+          newDimensions[transform.id] = { rowSpan: 1 };
+        }
+      });
+
+      // Remove any deleted transformations
+      Object.keys(newDimensions).forEach((id) => {
+        if (!state.transformations.some((t) => t.id === id)) {
+          delete newDimensions[id];
+        }
+      });
+
+      return newDimensions;
+    });
+  }, [state.transformations]);
 
   const handleAddTransformation = () => {
     addTransformation(`Transformation ${state.transformations.length + 1}`, "");
   };
 
   const handleRemoveTransportation = (id: string) => {
-    console.log(`Delete transformation with id: ${id}`);
     removeTransformation(id);
+  };
+
+  const handleItemsChange = (
+    e: CustomEvent<BoardProps.ItemsChangeDetail<Transformation>>,
+  ) => {
+    const { items, resizedItem, movedItem } = e.detail;
+
+    // Handle resizing - update local state
+    if (resizedItem) {
+      setItemDimensions((prev) => ({
+        ...prev,
+        [resizedItem.id]: {
+          rowSpan: resizedItem.rowSpan || 1,
+        },
+      }));
+    }
+
+    // Handle reordering
+    if (movedItem) {
+      // Find the new index of the moved item
+      const newIndex = items.findIndex((item) => item.id === movedItem.id);
+
+      // Find the old index of the moved item in the current state
+      const oldIndex = state.transformations.findIndex(
+        (transform) => transform.id === movedItem.id,
+      );
+
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        reorderTransformation(oldIndex, newIndex);
+      }
+    }
   };
 
   return (
@@ -113,58 +96,17 @@ export default function TransformationSection() {
         <Board
           items={state.transformations.map((transform) => ({
             id: transform.id,
-            rowSpan: 1,
-            columnSpan: 4,
+            rowSpan: itemDimensions[transform.id]?.rowSpan || 1,
+            columnSpan: 4, // Always full width
             data: transform,
           }))}
           i18nStrings={boardI18nStrings}
-          onItemsChange={(e) => {
-            e.preventDefault();
-            console.log(e);
-          }}
+          onItemsChange={handleItemsChange}
           renderItem={(item: BoardProps.Item<Transformation>) => (
-            <BoardItem
-              key={item.id}
-              header={
-                <Header
-                  actions={
-                    <Button
-                      variant="inline-icon"
-                      iconName="remove"
-                      ariaLabel={`Delete ${item.data.name}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleRemoveTransportation(item.id);
-                      }}
-                    />
-                  }
-                >
-                  {item.data.name}
-                  <AceEditor
-                    mode="json"
-                    theme="github"
-                    onChange={(e) => {
-                      console.log(e);
-                    }}
-                    onValidate={(e) => {
-                      console.log("Validate:");
-                      console.log(e);
-                    }}
-                    name="item.id"
-                    debounceChangePeriod={1000} // TODO: not convinced this is actually working
-                    width="500px"
-                    editorProps={{ $blockScrolling: true }}
-                    setOptions={{
-                      enableBasicAutocompletion: true,
-                    }}
-                  />
-                </Header>
-              }
-              i18nStrings={boardItemI18nStrings}
-            >
-              {item.data.content}
-            </BoardItem>
+            <TransformationItem
+              item={item}
+              onRemove={handleRemoveTransportation}
+            />
           )}
           empty={
             <Box margin={{ vertical: "xs" }} textAlign="center" color="inherit">
