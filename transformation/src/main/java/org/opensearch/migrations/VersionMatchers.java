@@ -46,7 +46,10 @@ public class VersionMatchers {
             }
             var flavorMatches = compatibleFlavor(other.getFlavor()).test(version.getFlavor());
             var majorVersionNumberMatches = version.getMajor() == other.getMajor();
-
+            // Special case: ES 8.x should be handled by ES 7.10 reader
+            if (other.getFlavor() == Flavor.ELASTICSEARCH && other.getMajor() == 8) {
+                return isES_7_X.test(version);
+            }
             return flavorMatches && majorVersionNumberMatches;
         };
     }

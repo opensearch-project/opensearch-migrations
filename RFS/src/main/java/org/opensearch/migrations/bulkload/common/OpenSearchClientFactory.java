@@ -65,7 +65,7 @@ public class OpenSearchClientFactory {
     }
 
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
-        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
+        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).or(VersionMatchers.isES_8_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
         } else if (VersionMatchers.isES_6_X.test(version)) {
             return OpenSearchClient_ES_6_8.class;
