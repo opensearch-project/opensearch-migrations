@@ -71,6 +71,13 @@ export const usePlaygroundActions = () => {
     [dispatch],
   );
 
+  const removeTransformation = useCallback(
+    (id: string) => {
+      dispatch({ type: "REMOVE_TRANSFORMATION", payload: id });
+    },
+    [dispatch],
+  );
+
   const updateInputDocument = useCallback(
     (id: string, name: string, content: string) => {
       // Check if quota is already exceeded
@@ -103,5 +110,6 @@ export const usePlaygroundActions = () => {
     updateInputDocument,
     addTransformation,
     reorderTransformation,
+    removeTransformation,
   };
 };
