@@ -5,8 +5,8 @@ import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
-import { usePlayground } from "../../context/PlaygroundContext";
-import { usePlaygroundActions } from "../../hooks/usePlaygroundActions";
+import { usePlayground } from "@/context/PlaygroundContext";
+import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 
 export default function TransformationSection() {
   const { state } = usePlayground();

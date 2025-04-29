@@ -13,10 +13,12 @@
   },
   "dependencies": {
     "@cloudscape-design/board-components": "^3.0.99",
-    "@cloudscape-design/components": "^3.0.947",
+    "@cloudscape-design/code-view": "^3.0.52",
+    "@cloudscape-design/components": "^3.0.950",
     "@cloudscape-design/global-styles": "^1.0.41",
     "@cloudscape-design/test-utils-core": "^1.0.56",
     "@types/uuid": "^10.0.0",
+    "ace-builds": "^1.40.1",
     "next": "15.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
