@@ -6,10 +6,10 @@ processors:
   cumulativetodelta:
   probabilistic_sampler/traces:
     sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE:-1}
-  resource/stage:
+  resource/metrics:
     attributes:
-      - key: stage
-        value: ${env:STAGE:-unknown}
+      - key: qualifier
+        value: ${env:QUALIFIER:-unknown}
         action: upsert
       - key: telemetry.sdk.language
         action: delete
@@ -38,7 +38,7 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [cumulativetodelta, resource/stage, batch]
+      processors: [cumulativetodelta, resource/metrics, batch]
       exporters: [awsemf]
     traces:
       receivers: [otlp]

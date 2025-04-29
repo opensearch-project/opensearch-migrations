@@ -50,7 +50,7 @@ export class OtelCollectorSidecar {
                 mode: AwsLogDriverMode.BLOCKING,
             }),
             environment: {
-                "STAGE": stage,
+                "QUALIFIER": stage,
                 "TRACE_SAMPLING_PERCENTAGE": "1"
             },
             essential: true,
