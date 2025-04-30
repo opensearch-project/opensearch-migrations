@@ -14,6 +14,8 @@ import "ace-builds/src-noconflict/mode-json";
 import "ace-builds/src-noconflict/mode-javascript";
 import "ace-builds/src-noconflict/theme-github";
 import "ace-builds/src-noconflict/ext-language_tools";
+// This seems like it should be imported from the line above, but there are missing values (like showing highlighted text) without this
+import "ace-builds/css/theme/github.css";
 
 // Import workers
 import jsonWorkerUrl from "ace-builds/src-noconflict/worker-json";
@@ -35,19 +37,14 @@ export default function AceEditorComponent({
   const { state } = usePlayground();
   const { updateTransformation } = usePlaygroundActions();
   const [content, setContent] = useState("");
-  const [validationErrors, setValidationErrors] = useState<IAnnotation[]>([]);
-  const isUpdatingRef = useRef(false);
+  // Use a ref instead of state for validation errors to prevent re-renders
+  const validationErrorsRef = useRef<IAnnotation[]>([]);
 
   // Find the transformation by ID
   const transformation = state.transformations.find((t) => t.id === itemId);
 
   // Initialize content from the transformation
   useEffect(() => {
-    // Skip if we're in the middle of updating
-    if (isUpdatingRef.current) {
-      return;
-    }
-
     if (transformation) {
       setContent(transformation.content || "");
     }
@@ -56,6 +53,8 @@ export default function AceEditorComponent({
   // Handle content change and save (debounce is handled internally by AceEditor)
   const handleChange = (newContent: string) => {
     setContent(newContent);
+    console.log("Current content:", newContent);
+    console.log("Validation errors:", validationErrorsRef.current);
 
     // Skip update if transformation doesn't exist
     if (!transformation) {
@@ -67,19 +66,8 @@ export default function AceEditorComponent({
       return;
     }
 
-    // Only save if there are no validation errors
-    if (validationErrors.length === 0) {
-      // Set flag to prevent re-initialization from the useEffect
-      isUpdatingRef.current = true;
-
-      // Update the transformation
-      updateTransformation(itemId, transformation.name, newContent);
-
-      // Reset flag after a short delay to allow state to settle
-      setTimeout(() => {
-        isUpdatingRef.current = false;
-      }, 100);
-    }
+    console.log("Updating transformation:", transformation.name);
+    updateTransformation(itemId, transformation.name, newContent);
   };
 
   return (
@@ -90,15 +78,22 @@ export default function AceEditorComponent({
         value={content}
         onChange={handleChange}
         onValidate={(errors) => {
-          setValidationErrors(errors as IAnnotation[]);
+          // The UI gets "twitchy" if we set state (and therefore re-render) on every validation
+          // So we're using a ref to store the errors instead
+          validationErrorsRef.current = errors as IAnnotation[];
         }}
         name={itemId}
-        debounceChangePeriod={100}
-        width="100%"
-        editorProps={{ $blockScrolling: true }}
+        debounceChangePeriod={500}
+        width="500px"
+        editorProps={{ $blockScrolling: false }}
         setOptions={{
           enableBasicAutocompletion: true,
         }}
+        showGutter={true}
+        showPrintMargin={true}
+        highlightActiveLine={true}
+        minLines={10}
+        tabSize={2}
       />
     </Box>
   );
