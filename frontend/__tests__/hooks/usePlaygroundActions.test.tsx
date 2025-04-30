@@ -109,11 +109,13 @@ describe("usePlaygroundActions", () => {
       const { result } = renderHook(() => usePlaygroundActions(), { wrapper });
 
       // Adding a document should throw an error
-      expect(() => {
-        act(() => {
-          result.current.addInputDocument(TEST_DOC_NAME, TEST_DOC_CONTENT);
-        });
-      }).toThrow(/exceed the maximum storage limit/);
+      const addDocumentAction = () => {
+        result.current.addInputDocument(TEST_DOC_NAME, TEST_DOC_CONTENT);
+      };
+
+      expect(() => act(addDocumentAction)).toThrow(
+        /exceed the maximum storage limit/
+      );
 
       // Reset the mock
       (getJsonSizeInBytes as jest.Mock).mockReturnValue(1024);

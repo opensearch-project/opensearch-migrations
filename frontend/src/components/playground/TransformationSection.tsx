@@ -27,27 +27,43 @@ export default function TransformationSection() {
     ),
   );
 
+  // Helper functions to reduce nesting depth
+  const addNewTransformations = (
+    transformations: Transformation[],
+    dimensions: Record<string, { rowSpan: number }>,
+  ) => {
+    const newDimensions = { ...dimensions };
+    transformations.forEach((transform) => {
+      if (!newDimensions[transform.id]) {
+        newDimensions[transform.id] = { rowSpan: 1 };
+      }
+    });
+    return newDimensions;
+  };
+
+  const removeDeletedTransformations = (
+    transformations: Transformation[],
+    dimensions: Record<string, { rowSpan: number }>,
+  ) => {
+    const newDimensions = { ...dimensions };
+    Object.keys(newDimensions).forEach((id) => {
+      if (!transformations.some((t) => t.id === id)) {
+        delete newDimensions[id];
+      }
+    });
+    return newDimensions;
+  };
+
   // Sync itemDimensions when transformations change
   useEffect(() => {
     // When transformations change (added/removed), update our dimensions map
     setItemDimensions((prevDimensions) => {
-      const newDimensions = { ...prevDimensions };
-
-      // Add any new transformations
-      state.transformations.forEach((transform) => {
-        if (!newDimensions[transform.id]) {
-          newDimensions[transform.id] = { rowSpan: 1 };
-        }
-      });
-
-      // Remove any deleted transformations
-      Object.keys(newDimensions).forEach((id) => {
-        if (!state.transformations.some((t) => t.id === id)) {
-          delete newDimensions[id];
-        }
-      });
-
-      return newDimensions;
+      // Process additions and deletions using helper functions
+      const withAdditions = addNewTransformations(
+        state.transformations,
+        prevDimensions,
+      );
+      return removeDeletedTransformations(state.transformations, withAdditions);
     });
   }, [state.transformations]);
 
@@ -69,7 +85,7 @@ export default function TransformationSection() {
       setItemDimensions((prev) => ({
         ...prev,
         [resizedItem.id]: {
-          rowSpan: resizedItem.rowSpan || 1,
+          rowSpan: resizedItem.rowSpan ?? 1,
         },
       }));
     }
@@ -96,7 +112,7 @@ export default function TransformationSection() {
         <Board
           items={state.transformations.map((transform) => ({
             id: transform.id,
-            rowSpan: itemDimensions[transform.id]?.rowSpan || 1,
+            rowSpan: itemDimensions[transform.id]?.rowSpan ?? 1,
             columnSpan: 4, // Always full width
             data: transform,
           }))}
