@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, CSSProperties } from "react";
 import AceEditor, { IAnnotation } from "react-ace";
 import Box from "@cloudscape-design/components/box";
 import { usePlayground } from "@/context/PlaygroundContext";
@@ -45,9 +45,28 @@ export default function AceEditorComponent({
   // Use a ref instead of state for validation errors to prevent re-renders
   const validationErrorsRef = useRef<IAnnotation[]>([]);
   const editorRef = useRef<AceEditor>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 500, height: 300 }); // Default fallback values
 
   // Find the transformation by ID
   const transformation = state.transformations.find((t) => t.id === itemId);
+
+  // Set up ResizeObserver to monitor container size
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      // Subtract some padding for better appearance
+      setDimensions({
+        width: Math.max(width - 20, 100), // Ensure minimum width
+        height: Math.max(height - 20, 100), // Ensure minimum height
+      });
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   // Initialize content from the transformation
   useEffect(() => {
@@ -110,7 +129,7 @@ export default function AceEditorComponent({
         saveContent();
       }
     },
-    [saveContent],
+    [saveContent]
   );
 
   // Add keyboard event listener
@@ -155,37 +174,43 @@ export default function AceEditorComponent({
   }, [formatCode, formatRef]);
 
   return (
-    <AceEditor
-      ref={editorRef}
-      mode={mode}
-      theme="github"
-      value={content}
-      onChange={handleChange}
-      onValidate={(errors) => {
-        // The UI gets "twitchy" if we set state (and therefore re-render) on every validation
-        // So we're using a ref to store the errors instead
-        validationErrorsRef.current = errors as IAnnotation[];
-      }}
-      name={itemId}
-      debounceChangePeriod={500}
-      width="500px"
-      editorProps={{ $blockScrolling: false }}
-      setOptions={{
-        enableBasicAutocompletion: true,
-      }}
-      showGutter={true}
-      showPrintMargin={false}
-      highlightActiveLine={true}
-      minLines={10}
-      tabSize={2}
-      commands={beautify.commands.map((command) => ({
-        name: command.name,
-        bindKey:
-          typeof command.bindKey === "string"
-            ? { win: command.bindKey, mac: command.bindKey }
-            : command.bindKey,
-        exec: command.exec,
-      }))}
-    />
+    <div
+      ref={containerRef}
+      style={{ width: "100%", height: "100%", minHeight: "200px" }}
+    >
+      <AceEditor
+        ref={editorRef}
+        mode={mode}
+        theme="github"
+        value={content}
+        onChange={handleChange}
+        onValidate={(errors) => {
+          // The UI gets "twitchy" if we set state (and therefore re-render) on every validation
+          // So we're using a ref to store the errors instead
+          validationErrorsRef.current = errors as IAnnotation[];
+        }}
+        name={itemId}
+        debounceChangePeriod={500}
+        width={`${dimensions.width}px`}
+        height={`${dimensions.height}px`}
+        editorProps={{ $blockScrolling: false }}
+        setOptions={{
+          enableBasicAutocompletion: true,
+        }}
+        showGutter={true}
+        showPrintMargin={false}
+        highlightActiveLine={true}
+        minLines={10}
+        tabSize={2}
+        commands={beautify.commands.map((command) => ({
+          name: command.name,
+          bindKey:
+            typeof command.bindKey === "string"
+              ? { win: command.bindKey, mac: command.bindKey }
+              : command.bindKey,
+          exec: command.exec,
+        }))}
+      />
+    </div>
   );
 }
