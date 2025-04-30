@@ -101,7 +101,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
         let targetUser = "";
         let targetPassword = "";
-        let targetUserSecretArn = "";
+        let targetSecretArn = "";
         if (props.clusterAuthDetails.basicAuth) {
             // Only set user or password if not overridden in extraArgs
             if (extraArgsDict["--target-username"] === undefined) {
@@ -109,9 +109,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             }
             if (extraArgsDict["--target-password"] === undefined) {
                 targetPassword = props.clusterAuthDetails.basicAuth.password ?? ""
-            }
-            if (extraArgsDict["--target-user-secret-arn"] === undefined) {
-                targetUserSecretArn = props.clusterAuthDetails.basicAuth.user_secret_arn ?? ""
+                targetSecretArn = props.clusterAuthDetails.basicAuth.user_secret_arn ?? ""
             }
         }
         command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
@@ -204,7 +202,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,
                 "RFS_TARGET_PASSWORD": targetPassword,
-                "RFS_TARGET_USER_SECRET_ARN": targetUserSecretArn,
+                "RFS_TARGET_SECRET_ARN": targetSecretArn,
                 "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/reindex-from-snapshot-${props.defaultDeployId}`,
             },
             ...props
