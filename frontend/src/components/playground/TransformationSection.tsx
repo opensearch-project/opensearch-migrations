@@ -23,7 +23,7 @@ export default function TransformationSection() {
   >(
     // Initialize with default values from transformations
     Object.fromEntries(
-      state.transformations.map((transform) => [transform.id, { rowSpan: 1 }]),
+      state.transformations.map((transform) => [transform.id, { rowSpan: 3 }]),
     ),
   );
 

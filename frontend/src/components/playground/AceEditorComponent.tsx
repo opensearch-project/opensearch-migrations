@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, CSSProperties } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import AceEditor, { IAnnotation } from "react-ace";
-import Box from "@cloudscape-design/components/box";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 
@@ -32,6 +31,17 @@ interface AceEditorComponentProps {
   formatRef?: React.RefObject<(() => void) | null>;
   onSaveStatusChange?: (isSaved: boolean) => void;
 }
+
+const defaultContent: string = `
+function main(context) {
+  return (document) => {
+    // Your transformation logic here
+    return document;
+  };
+}
+// Entrypoint function
+(() => main)();
+`;
 
 export default function AceEditorComponent({
   itemId,
@@ -71,7 +81,7 @@ export default function AceEditorComponent({
   // Initialize content from the transformation
   useEffect(() => {
     if (transformation) {
-      setContent(transformation.content || "");
+      setContent(transformation.content || defaultContent);
       if (onSaveStatusChange) {
         onSaveStatusChange(true);
       }
@@ -110,15 +120,7 @@ export default function AceEditorComponent({
       console.error("Error formatting code:", error);
     }
     saveContent();
-  }, [
-    content,
-    mode,
-    itemId,
-    transformation,
-    updateTransformation,
-    onSaveStatusChange,
-    saveContent,
-  ]);
+  }, [content, saveContent]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -129,7 +131,7 @@ export default function AceEditorComponent({
         saveContent();
       }
     },
-    [saveContent]
+    [saveContent],
   );
 
   // Add keyboard event listener
