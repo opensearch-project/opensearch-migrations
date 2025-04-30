@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import BoardItem from "@cloudscape-design/board-components/board-item";
 import Header from "@cloudscape-design/components/header";
-import Button from "@cloudscape-design/components/button";
+import StatusIndicator from "@cloudscape-design/components/status-indicator";
+import Button, { ButtonProps } from "@cloudscape-design/components/button";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Input from "@cloudscape-design/components/input";
 import { BoardProps } from "@cloudscape-design/board-components/board";
@@ -20,10 +21,38 @@ interface TransformationItemProps {
 export default function TransformationItem({
   item,
   onRemove,
-}: TransformationItemProps) {
+}: Readonly<TransformationItemProps>) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(item.data.name);
+  const [isSaved, setIsSaved] = useState(true);
   const { updateTransformation } = usePlaygroundActions();
+  const formatCodeRef = useRef<(() => void) | null>(null);
+
+  const handleSaveStatusChange = useCallback((saved: boolean) => {
+    setIsSaved(saved);
+  }, []);
+
+  const handleEditNameChange = (
+    event: CustomEvent<ButtonProps.ClickDetail>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (isEditing) {
+      if (editName.trim()) {
+        updateTransformation(item.id, editName, item.data.content);
+      } else {
+        setEditName(item.data.name); // Reset to original if empty
+      }
+
+      // Exit edit mode
+      setIsEditing(false);
+    } else {
+      // Enter edit mode
+      setEditName(item.data.name);
+      setIsEditing(true);
+    }
+  };
 
   return (
     <BoardItem
@@ -40,28 +69,17 @@ export default function TransformationItem({
                     ? `Save ${item.data.name}`
                     : `Edit ${item.data.name}`
                 }
+                onClick={handleEditNameChange}
+              />
+              <Button
+                variant="inline-icon"
+                iconName="script"
+                ariaLabel={`Format code in ${item.data.name}`}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-
-                  if (isEditing) {
-                    // When in edit mode, save the changes
-                    if (editName.trim()) {
-                      updateTransformation(
-                        item.id,
-                        editName,
-                        item.data.content,
-                      );
-                    } else {
-                      setEditName(item.data.name); // Reset to original if empty
-                    }
-
-                    // Exit edit mode
-                    setIsEditing(false);
-                  } else {
-                    // Enter edit mode
-                    setEditName(item.data.name);
-                    setIsEditing(true);
+                  if (formatCodeRef.current) {
+                    formatCodeRef.current();
                   }
                 }}
               />
@@ -78,35 +96,51 @@ export default function TransformationItem({
             </SpaceBetween>
           }
         >
-          {isEditing ? (
-            <Input
-              value={editName}
-              onChange={({ detail }) => setEditName(detail.value)}
-              onKeyDown={({ detail }) => {
-                if (detail.key === "Enter") {
-                  // Save the transformation
-                  if (editName.trim()) {
-                    updateTransformation(item.id, editName, item.data.content);
-                  } else {
-                    setEditName(item.data.name); // Reset to original if empty
+          <div style={{ display: "flex", alignItems: "center" }}>
+            {isEditing ? (
+              <Input
+                value={editName}
+                onChange={({ detail }) => setEditName(detail.value)}
+                onKeyDown={({ detail }) => {
+                  if (detail.key === "Enter") {
+                    if (editName.trim()) {
+                      updateTransformation(
+                        item.id,
+                        editName,
+                        item.data.content,
+                      );
+                    } else {
+                      setEditName(item.data.name); // Reset to original if empty
+                    }
+                    setIsEditing(false);
+                  } else if (detail.key === "Escape") {
+                    setEditName(item.data.name); // Reset to original
+                    setIsEditing(false);
                   }
-                  setIsEditing(false);
-                } else if (detail.key === "Escape") {
-                  setEditName(item.data.name); // Reset to original
-                  setIsEditing(false);
-                }
-              }}
-              // Remove onBlur handler completely to prevent any blur-related issues
-              autoFocus
-            />
-          ) : (
-            item.data.name
-          )}
+                }}
+                autoFocus
+              />
+            ) : (
+              <>
+                {item.data.name}
+                <div style={{ marginLeft: "10px" }}>
+                  <StatusIndicator type={isSaved ? "success" : "pending"}>
+                    {isSaved ? "Saved" : "Unsaved"}
+                  </StatusIndicator>
+                </div>
+              </>
+            )}
+          </div>
         </Header>
       }
       i18nStrings={boardItemI18nStrings}
     >
-      <AceEditorComponent itemId={item.id} mode="javascript" />
+      <AceEditorComponent
+        itemId={item.id}
+        mode="javascript"
+        formatRef={formatCodeRef}
+        onSaveStatusChange={handleSaveStatusChange}
+      />
     </BoardItem>
   );
 }
