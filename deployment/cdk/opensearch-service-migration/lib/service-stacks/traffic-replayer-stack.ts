@@ -100,15 +100,13 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                     secretName: `replayer-user-secret-${props.stage}-${deployId}`,
                     secretStringValue: SecretValue.unsafePlainText(props.clusterAuthDetails.basicAuth.password)
                 })
-            } else if (props.clusterAuthDetails.basicAuth.password_from_secret_arn) {
+            } else if (props.clusterAuthDetails.basicAuth.user_secret_arn) {
                 secret = Secret.fromSecretCompleteArn(this, "ReplayerClusterPasswordSecretImport",
-                props.clusterAuthDetails.basicAuth.password_from_secret_arn)
+                props.clusterAuthDetails.basicAuth.user_secret_arn)
             } else {
                 throw new Error("Replayer secret or password must be provided if using basic auth.")
             }
-
-            const bashSafeUserAndSecret = `"${props.clusterAuthDetails.basicAuth.username}" "${secret.secretArn}"`
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--auth-header-user-and-secret", bashSafeUserAndSecret)
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--auth-header-secret", `"${secret.secretArn}"`)
         }
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {

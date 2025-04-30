@@ -49,7 +49,7 @@ public class TrafficReplayer {
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
-    public static final String AWS_AUTH_HEADER_USER_AND_SECRET_ARG = "--auth-header-user-and-secret";
+    public static final String AWS_AUTH_HEADER_SECRET_ARG = "--auth-header-secret";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
@@ -117,15 +117,12 @@ public class TrafficReplayer {
         String authHeaderValue;
         @Parameter(
             required = false,
-            names = { AWS_AUTH_HEADER_USER_AND_SECRET_ARG, "--authHeaderUserAndSecret" },
-            splitter = NoSplitter.class,
-            arity = 2,
-            description = "<USERNAME> <SECRET_ARN> pair to specify "
-                + "\"authorization\" header value for each request.  "
-                + "The USERNAME specifies the plaintext user and the SECRET_ARN specifies the ARN or "
-                + "Secret name from AWS Secrets Manager to retrieve the password from for the password section"
+            names = { AWS_AUTH_HEADER_SECRET_ARG, "--authHeaderSecret" },
+            arity = 1,
+            description = "The AWS Secrets Manager secret ARN which should contain two key/value pairs, one for 'username' "
+                + "and one for 'password' that will be used for the 'authorization' header value for each request. "
                 + "(cannot be used with other auth arguments)")
-        List<String> awsAuthHeaderUserAndSecret;
+        String awsAuthHeaderSecret;
         @Parameter(
             required = false,
             names = { SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG, "--sigv4AuthHeaderServiceRegion" },
@@ -494,7 +491,7 @@ public class TrafficReplayer {
             ", ",
             REMOVE_AUTH_HEADER_VALUE_ARG,
             AUTH_HEADER_VALUE_ARG,
-            AWS_AUTH_HEADER_USER_AND_SECRET_ARG,
+            AWS_AUTH_HEADER_SECRET_ARG,
             SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG
         );
     }
@@ -503,25 +500,19 @@ public class TrafficReplayer {
         if (params.removeAuthHeader
             && params.authHeaderValue != null
             && params.useSigV4ServiceAndRegion != null
-            && params.awsAuthHeaderUserAndSecret != null) {
+            && params.awsAuthHeaderSecret != null) {
             throw new IllegalArgumentException(
                 "Cannot specify more than one auth option: " + formatAuthArgFlagsAsString()
             );
         }
 
         var authHeaderValue = params.authHeaderValue;
-        if (params.awsAuthHeaderUserAndSecret != null) {
-            if (params.awsAuthHeaderUserAndSecret.size() != 2) {
-                throw new ParameterException(
-                    AWS_AUTH_HEADER_USER_AND_SECRET_ARG + " must specify two arguments, <USERNAME> <SECRET_ARN>"
-                );
-            }
-            var secretArnStr = params.awsAuthHeaderUserAndSecret.get(1);
-            var regionOp = Arn.fromString(secretArnStr).region();
+        if (params.awsAuthHeaderSecret != null) {
+            var regionOp = Arn.fromString(params.awsAuthHeaderSecret).region();
             if (regionOp.isEmpty()) {
                 throw new ParameterException(
-                    AWS_AUTH_HEADER_USER_AND_SECRET_ARG
-                        + " must specify two arguments, <USERNAME> <SECRET_ARN>, and SECRET_ARN must specify a region"
+                        AWS_AUTH_HEADER_SECRET_ARG
+                        + " the secret ARN provided must specify a region"
                 );
             }
             try (

@@ -101,15 +101,17 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
         let targetUser = "";
         let targetPassword = "";
-        let targetPasswordArn = "";
+        let targetUserSecretArn = "";
         if (props.clusterAuthDetails.basicAuth) {
             // Only set user or password if not overridden in extraArgs
             if (extraArgsDict["--target-username"] === undefined) {
-                targetUser = props.clusterAuthDetails.basicAuth.username
+                targetUser = props.clusterAuthDetails.basicAuth.username ?? ""
             }
             if (extraArgsDict["--target-password"] === undefined) {
                 targetPassword = props.clusterAuthDetails.basicAuth.password ?? ""
-                targetPasswordArn = props.clusterAuthDetails.basicAuth.password_from_secret_arn ?? ""
+            }
+            if (extraArgsDict["--target-user-secret-arn"] === undefined) {
+                targetUserSecretArn = props.clusterAuthDetails.basicAuth.user_secret_arn ?? ""
             }
         }
         command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
@@ -119,8 +121,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
         const servicePolicies = [sharedLogFileSystem.asPolicyStatement(), s3AccessPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
-        const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.password_from_secret_arn ?
-            getSecretAccessPolicy(props.clusterAuthDetails.basicAuth.password_from_secret_arn) : null;
+        const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.user_secret_arn ?
+            getSecretAccessPolicy(props.clusterAuthDetails.basicAuth.user_secret_arn) : null;
         if (getSecretsPolicy) {
             servicePolicies.push(getSecretsPolicy);
         }
@@ -202,7 +204,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,
                 "RFS_TARGET_PASSWORD": targetPassword,
-                "RFS_TARGET_PASSWORD_ARN": targetPasswordArn,
+                "RFS_TARGET_USER_SECRET_ARN": targetUserSecretArn,
                 "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/reindex-from-snapshot-${props.defaultDeployId}`,
             },
             ...props

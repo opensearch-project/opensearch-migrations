@@ -233,11 +233,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getTargetSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn ?
-            getSecretAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn) : null;
+        const getTargetSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.user_secret_arn ?
+            getSecretAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.user_secret_arn) : null;
 
-        const getSourceSecretsPolicy = props.sourceCluster?.auth.basicAuth?.password_from_secret_arn ?
-            getSecretAccessPolicy(props.sourceCluster?.auth.basicAuth?.password_from_secret_arn) : null;
+        const getSourceSecretsPolicy = props.sourceCluster?.auth.basicAuth?.user_secret_arn ?
+            getSecretAccessPolicy(props.sourceCluster?.auth.basicAuth?.user_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
         const servicesYaml = props.servicesYaml

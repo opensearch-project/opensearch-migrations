@@ -47,7 +47,7 @@ In all other cases, the required components of each cluster object are:
     1. No auth: `{"type": "none"}`
     2. Sigv4 Signing: `{"type": "sigv4", "region": "us-east-1", "serviceSigningName": "es"}` The serviceSigningName is `es` for Elasticsearch and OpenSearch managed service domains, and `aoss` for Amazon OpenSearch Serverless
     3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
-    4. Basic auth with secrets manager (recommended): `{"type": "basic", "userSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:opensearch-secret-123abc"}`
+    4. Basic auth with secrets manager (recommended): `{"type": "basic", "userSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:opensearch-secret-123abc"}`. This secret should include two key/value pairs, one for `username` and one for `password`
 
 ### Snapshot Definition Options
 
