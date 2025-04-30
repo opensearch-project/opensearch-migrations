@@ -5,7 +5,7 @@
             "property": "region",
             "inputType": "input",
             "id": "REGION",
-            "label": "Region",
+            "label": "region",
             "defaultValue": "us-east-1",
             "visible": false
         },
@@ -39,12 +39,12 @@
             "visible": false
         },
         {
-            "type": "pattern",
-            "pattern": "MA_QUALIFIER",
+            "type": "property",
+            "property": "qualifier",
             "inputType": "input",
-            "id": "MA_QUALIFIER",
+            "id": "qualifier",
             "label": "Migration Qualifier",
-            "defaultValue": "placehlder-stage",
+            "defaultValue": "placeholder-stage",
             "visible": false
         }
     ],

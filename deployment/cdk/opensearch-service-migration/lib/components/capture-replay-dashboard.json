@@ -4,7 +4,7 @@
             "type": "property",
             "property": "region",
             "inputType": "input",
-            "id": "REGION",
+            "id": "region",
             "label": "Region",
             "defaultValue": "placeholder-region",
             "visible": false
@@ -20,9 +20,18 @@
         },
         {
             "type": "pattern",
-            "pattern": "MA_QUALIFIER",
+            "pattern": "ACCOUNT_ID",
             "inputType": "input",
-            "id": "MA_QUALIFIER",
+            "id": "ACCOUNT_ID",
+            "label": "Account ID",
+            "defaultValue": "ACCOUNT_ID",
+            "visible": false
+        },
+        {
+            "type": "property",
+            "property": "qualifier",
+            "inputType": "input",
+            "id": "qualifier",
             "label": "Migration Qualifier",
             "defaultValue": "placeholder-stage",
             "visible": false
