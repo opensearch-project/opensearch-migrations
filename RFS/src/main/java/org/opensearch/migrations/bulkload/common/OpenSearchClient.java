@@ -52,6 +52,7 @@ public abstract class OpenSearchClient {
     /** Retries for up 10 minutes */
     private static final Retry BULK_RETRY_STRATEGY = Retry.backoff(BULK_MAX_RETRY_ATTEMPTS, BULK_BACKOFF)
         .maxBackoff(BULK_MAX_BACKOFF);
+    public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
 
     static {
@@ -378,9 +379,20 @@ public abstract class OpenSearchClient {
         return BULK_RETRY_STRATEGY;
     }
 
+    private static String truncateMessageIfNeeded(String input, int maxCharacters) {
+        if (input == null || input.length() <= maxCharacters) {
+            return input;
+        }
+        int partLength = maxCharacters / 2;
+        String head = input.substring(0, partLength);
+        String tail = input.substring(input.length() - partLength);
+        return head + "... [truncated] ..." + tail;
+    }
+
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
                                               IRfsContexts.IRequestContext context)
     {
+        final AtomicInteger attemptCounter = new AtomicInteger(0);
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
@@ -405,10 +417,12 @@ public abstract class OpenSearchClient {
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
                     log.atWarn()
-                        .setMessage("After bulk request on index '{}', {} more documents have succeed, {} remain")
+                        .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
+                        .addArgument(attemptCounter.incrementAndGet())
                         .addArgument(indexName)
                         .addArgument(successfulDocs::size)
                         .addArgument(docsMap::size)
+                        .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
                         .log();
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
                 });
