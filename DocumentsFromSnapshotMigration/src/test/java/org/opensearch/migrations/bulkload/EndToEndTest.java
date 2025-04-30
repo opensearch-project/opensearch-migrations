@@ -90,6 +90,7 @@ public class EndToEndTest extends SourceTestBase {
             );
             sourceClusterOperations.createIndex(indexName, body);
             sourceClusterOperations.disableBloom(indexName);
+            // sourceClusterOperations.disableTSDBCodec(indexName);
             targetClusterOperations.createIndex(indexName, body);
 
             // === ACTION: Create two large documents (40MB each) ===

@@ -100,13 +100,13 @@ public class ClusterOperations {
     }
 
     public void createIndex(final String index) {
-        var body = "{" + //
-        "  \"settings\": {" + //
-        "    \"index\": {" + //
-        "      \"number_of_shards\": 5," + //
-        "      \"number_of_replicas\": 0" + //
-        "    }" + //
-        "  }" + //
+        String body = "{\n" +
+        "  \"settings\": {\n" +
+        "    \"number_of_shards\": 5,\n" +
+        "    \"number_of_replicas\": 0,\n" +
+        "    \"codec\": \"Lucene90\",\n" +
+        "    \"mode\": \"standard\"\n" +
+        "  }\n" +
         "}";
         createIndex(index, body);
     }
@@ -117,7 +117,7 @@ public class ClusterOperations {
         assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
-    // Add this method to your ClusterOperations class
+    // ES 8x specific
     @SneakyThrows
     public void disableBloom(final String index) {
         final String body = "{" +
@@ -130,7 +130,24 @@ public class ClusterOperations {
         
         var response = put("/" + index + "/_settings", body);
         assertThat(response.getKey(), equalTo(200));
-    }    
+    }
+
+    @SneakyThrows
+    public void disableTSDBCodec(final String index) {
+        final String body = "{" +
+            "  \"index\": {" +
+            "    \"mode\": \"standard\"," +
+            "    \"time_series\": {" +
+            "      \"es87tsdb_codec\": {" +
+            "        \"enabled\": false" +
+            "      }" +
+            "    }" +
+            "  }" +
+            "}";
+        
+        var response = put("/" + index + "/_settings", body);
+        assertThat(response.getKey(), equalTo(200));
+    }
 
     @SneakyThrows
     public Map.Entry<Integer, String> post(final String path, final String body) {

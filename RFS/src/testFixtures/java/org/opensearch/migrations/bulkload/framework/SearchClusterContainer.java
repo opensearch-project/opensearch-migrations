@@ -29,6 +29,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
     );
+    public static final ContainerVersion ES_V8_10 = new ElasticsearchVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch:8.10.2",
+        Version.fromString("ES 8.10.2")
+    );
     public static final ContainerVersion ES_V8_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:8.17.5",
         Version.fromString("ES 8.17.5")
@@ -86,6 +90,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 .put("xpack.security.transport.ssl.enabled", "false")
                 .put("cluster.name", "docker-test-cluster")
                 .put("node.name", "test-node")
+                .put("xpack.ml.enabled", "false")
+                .put("xpack.watcher.enabled", "false")
                 .build()),
         OPENSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
