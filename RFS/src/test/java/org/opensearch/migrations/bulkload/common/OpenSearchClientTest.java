@@ -15,14 +15,13 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.SneakyThrows;
-import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.message.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -297,9 +296,7 @@ class OpenSearchClientTest {
 
     @Test
     void testBulkRequest_warningLogContainsDetails_onError() {
-        LoggingListAppender appender = LoggingListAppender.createAndRegister(OpenSearchClient.class.getName());
-
-        try {
+        try (var logs = new CloseableLogSetup(OpenSearchClient.class.getName())) {
             var docId1 = "tt1979320";
             var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
 
@@ -320,26 +317,19 @@ class OpenSearchClientTest {
             assertThrows(Exception.class, responseMono::block);
 
             // Verify the logs
-            List<String> bulkErrorWarnLogs = appender.getEvents().stream()
-                    .map(LogEvent::getMessage)
-                    .map(Message::getFormattedMessage)
+            List<String> bulkErrorWarnLogs = logs.getLogEvents().stream()
                     .filter(log -> log.contains("After bulk request attempt")).toList();
             for (String bulkErrorWarnLog : bulkErrorWarnLogs) {
                 // Add buffer for additional log line characters
                 assertThat(bulkErrorWarnLog.length(), lessThan(OpenSearchClient.BULK_TRUNCATED_RESPONSE_MAX_LENGTH + 300));
                 assertThat(bulkErrorWarnLog, containsString("version conflict, document already exists"));
             }
-
-        } finally {
-            appender.removeFromLogger(OpenSearchClient.class.getName());
         }
     }
 
     @Test
     void testBulkRequest_truncatesLargeLog_onError() {
-        LoggingListAppender appender = LoggingListAppender.createAndRegister(OpenSearchClient.class.getName());
-
-        try {
+        try (var logs = new CloseableLogSetup(OpenSearchClient.class.getName())) {
             var docId1 = "tt1979320";
             // Create dummy large response message
             StringBuilder sb = new StringBuilder();
@@ -370,9 +360,7 @@ class OpenSearchClientTest {
             assertThrows(Exception.class, responseMono::block);
 
             // Verify the logs
-            List<String> bulkErrorWarnLogs = appender.getEvents().stream()
-                    .map(LogEvent::getMessage)
-                    .map(Message::getFormattedMessage)
+            List<String> bulkErrorWarnLogs = logs.getLogEvents().stream()
                     .filter(log -> log.contains("After bulk request attempt")).toList();
             for (String bulkErrorWarnLog : bulkErrorWarnLogs) {
                 // Add buffer for additional log line characters
@@ -380,8 +368,6 @@ class OpenSearchClientTest {
                 assertThat(bulkErrorWarnLog, containsString("aaaaa... [truncated] ...aaaaa"));
             }
 
-        } finally {
-            appender.removeFromLogger(OpenSearchClient.class.getName());
         }
     }
 
