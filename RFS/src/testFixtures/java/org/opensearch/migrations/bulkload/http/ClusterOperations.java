@@ -100,13 +100,13 @@ public class ClusterOperations {
     }
 
     public void createIndex(final String index) {
-        String body = "{\n" +
-        "  \"settings\": {\n" +
-        "    \"number_of_shards\": 5,\n" +
-        "    \"number_of_replicas\": 0,\n" +
-        "    \"codec\": \"Lucene90\",\n" +
-        "    \"mode\": \"standard\"\n" +
-        "  }\n" +
+        var body = "{" + //
+        "  \"settings\": {" + //
+        "    \"index\": {" + //
+        "      \"number_of_shards\": 5," + //
+        "      \"number_of_replicas\": 0" + //
+        "    }" + //
+        "  }" + //
         "}";
         createIndex(index, body);
     }

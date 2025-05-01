@@ -81,6 +81,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 .build()),
         ELASTICSEARCH_OSS(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
+                .put("bootstrap.system_call_filter", "false")
                 .build()),
         ELASTICSEARCH_8(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
@@ -97,12 +98,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("plugins.security.disabled", "true")
                 .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .put("bootstrap.system_call_filter", "false")
                 .build()),
         OPENSEARCH_2_19(
         new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("plugins.security.disabled", "true")
                 .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
                 .put("search.insights.top_queries.exporter.type", "debug")
+                .put("bootstrap.system_call_filter", "false")
                 .build()
         );
 
@@ -254,7 +257,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
+            super(imageName, version,
+                    version.toString().startsWith("ES 8.") ? INITIALIZATION_FLAVOR.ELASTICSEARCH_8 : INITIALIZATION_FLAVOR.ELASTICSEARCH,
+                    "elasticsearch");
         }
     }
 

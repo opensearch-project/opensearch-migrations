@@ -1,5 +1,9 @@
 package org.opensearch.migrations;
 
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Iterator;
+
 import shadow.lucene9.org.apache.lucene.codecs.FieldsConsumer;
 import shadow.lucene9.org.apache.lucene.codecs.FieldsProducer;
 import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
@@ -11,10 +15,6 @@ import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 import shadow.lucene9.org.apache.lucene.index.Terms;
 import shadow.lucene9.org.apache.lucene.store.Directory;
 import shadow.lucene9.org.apache.lucene.util.IOUtils;
-
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Iterator;
 
 public class ES812Postings extends PostingsFormat {
 
