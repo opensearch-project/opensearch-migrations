@@ -22,16 +22,26 @@ export interface OutputDocument {
   transformationsApplied: string[]; // ids of all transformations that changed the document
 }
 
+export interface TransformationError {
+  documentId: string;
+  transformationId: string;
+  message: string;
+}
+
 export interface PlaygroundState {
   inputDocuments: InputDocument[];
   transformations: Transformation[];
   outputDocuments: OutputDocument[];
+  isProcessingTransformations: boolean;
+  transformationErrors: TransformationError[];
 }
 
 export const initialState: PlaygroundState = {
   inputDocuments: [],
   transformations: [],
   outputDocuments: [],
+  isProcessingTransformations: false,
+  transformationErrors: [],
 };
 
 export type ActionType =
@@ -49,7 +59,16 @@ export type ActionType =
   | { type: "UPDATE_OUTPUT_DOCUMENT"; payload: OutputDocument }
   | { type: "REMOVE_OUTPUT_DOCUMENT"; payload: string }
   | { type: "CLEAR_OUTPUT_DOCUMENTS"; payload: undefined }
-  | { type: "SET_STATE"; payload: Partial<PlaygroundState> };
+  | { type: "SET_STATE"; payload: Partial<PlaygroundState> }
+  | { type: "START_TRANSFORMATIONS"; payload: undefined }
+  | {
+      type: "COMPLETE_TRANSFORMATIONS";
+      payload: {
+        outputDocuments: OutputDocument[];
+        errors: TransformationError[];
+      };
+    }
+  | { type: "CLEAR_TRANSFORMATION_ERRORS"; payload: undefined };
 
 export const playgroundReducer = (
   state: PlaygroundState,
@@ -83,6 +102,13 @@ export const playgroundReducer = (
         outputDocuments: [],
       };
     case "UPDATE_TRANSFORMATION":
+      console.log(
+        `[DEBUG] PlaygroundContext reducer UPDATE_TRANSFORMATION for ${action.payload.id}:`,
+        action.payload.content.length > 20
+          ? action.payload.content.substring(0, 20) + "..."
+          : action.payload.content,
+      );
+
       return {
         ...state,
         transformations: state.transformations.map((transform) =>
@@ -132,6 +158,24 @@ export const playgroundReducer = (
       return {
         ...state,
         outputDocuments: [],
+      };
+    case "START_TRANSFORMATIONS":
+      return {
+        ...state,
+        isProcessingTransformations: true,
+        transformationErrors: [],
+      };
+    case "COMPLETE_TRANSFORMATIONS":
+      return {
+        ...state,
+        isProcessingTransformations: false,
+        outputDocuments: action.payload.outputDocuments,
+        transformationErrors: action.payload.errors,
+      };
+    case "CLEAR_TRANSFORMATION_ERRORS":
+      return {
+        ...state,
+        transformationErrors: [],
       };
     case "SET_STATE":
       return {

@@ -5,6 +5,7 @@ import AceEditor, { IAnnotation } from "react-ace";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { SaveState, SaveStatus } from "@/types/SaveStatus";
+import { useTransformationExecutor } from "@/hooks/useTransformationExecutor";
 
 // Import ace-builds core
 import ace from "ace-builds";
@@ -32,6 +33,7 @@ interface AceEditorComponentProps {
   mode: "json" | "javascript";
   formatRef: React.RefObject<(() => void) | null>;
   onSaveStatusChange: (status: SaveState) => void;
+  onValidationChange: (hasErrors: boolean) => void;
 }
 
 export default function AceEditorComponent({
@@ -39,18 +41,21 @@ export default function AceEditorComponent({
   mode,
   formatRef,
   onSaveStatusChange,
+  onValidationChange,
 }: Readonly<AceEditorComponentProps>) {
   const { state } = usePlayground();
   const { updateTransformation } = usePlaygroundActions();
+  const { runTransformations } = useTransformationExecutor();
   const [content, setContent] = useState("");
-
-  // Use a ref instead of state for validation errors to prevent re-renders
+  // Use refs for validation errors to prevent re-renders
   const validationErrorsRef = useRef<IAnnotation[]>([]);
-
-  // Refs and dimension state used for resizing the AceEditor instance
+  const hasValidationErrorsRef = useRef<boolean>(false);
   const editorRef = useRef<AceEditor>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 500, height: 300 });
+
+  // Track if content has been initialized
+  const contentInitializedRef = useRef<boolean>(false);
 
   // Find the transformation by ID
   const transformation = state.transformations.find((t) => t.id === itemId);
@@ -72,9 +77,10 @@ export default function AceEditorComponent({
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Initialize content from the transformation
+  // Initialize content from the transformation only once
   useEffect(() => {
-    if (transformation) {
+    // Only initialize content if it hasn't been initialized yet or if the transformation ID changes
+    if (transformation && !contentInitializedRef.current) {
       setContent(transformation.content || defaultContent);
       onSaveStatusChange({
         status: SaveStatus.SAVED,
@@ -82,7 +88,7 @@ export default function AceEditorComponent({
         errors: [],
       });
     }
-  }, [transformation, onSaveStatusChange]);
+  }, [itemId, transformation, onSaveStatusChange]);
 
   // Save the current content to local storage
   const saveContent = useCallback(() => {
@@ -125,21 +131,22 @@ export default function AceEditorComponent({
         beautify.beautify(editorRef.current.editor.session);
       }
     } catch (error) {
-      console.error("Error formatting code:", error);
+      console.error(`[DEBUG] Error formatting code for ${itemId}:`, error);
     }
     saveContent();
-  }, [content, saveContent]);
+  }, [content, saveContent, itemId]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       // Check for Ctrl+S or Cmd+S
       if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+        console.log(`[DEBUG] Ctrl+S pressed for ${itemId}`);
         event.preventDefault();
         saveContent();
       }
     },
-    [saveContent],
+    [saveContent, itemId]
   );
 
   // Add keyboard event listener
@@ -156,13 +163,14 @@ export default function AceEditorComponent({
     };
   }, [handleKeyDown]);
 
-  // Handle content change and save (debounce is handled internally by AceEditor)
+  // Handle content change without auto-saving
   const handleChange = (newContent: string) => {
     if (newContent === content) return; // Skip if content is unchanged
     setContent(newContent);
 
     // Skip update if transformation doesn't exist
     if (!transformation) {
+      console.log(`[DEBUG] No transformation found for ${itemId}`);
       return;
     }
 

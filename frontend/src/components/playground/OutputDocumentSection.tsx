@@ -2,17 +2,51 @@ import Container from "@cloudscape-design/components/container";
 import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
+import Alert from "@cloudscape-design/components/alert";
+import Spinner from "@cloudscape-design/components/spinner";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
 
-// Inner component that uses the usePlayground hook
 export default function OutputDocumentSection() {
   const { state } = usePlayground();
+  const { isProcessingTransformations, transformationErrors } = state;
 
   return (
     <Container header={<Header variant="h3">Output Documents</Header>}>
       <SpaceBetween size="m">
-        {state.outputDocuments.length === 0 ? (
+        {transformationErrors.length > 0 && (
+          <Alert type="error" header="Transformation errors">
+            <ul>
+              {transformationErrors.map((error) => {
+                const inputDoc = state.inputDocuments.find(
+                  (doc) => doc.id === error.documentId,
+                );
+                const transformation = state.transformations.find(
+                  (t) => t.id === error.transformationId,
+                );
+
+                return (
+                  <li key={inputDoc?.id ?? error.documentId}>
+                    Error in document `{inputDoc?.name ?? "Unknown"}`
+                    {transformation
+                      ? ` at transformation "${transformation.name}"`
+                      : ""}
+                    :{error.message}
+                  </li>
+                );
+              })}
+            </ul>
+          </Alert>
+        )}
+
+        {isProcessingTransformations ? (
+          <Box textAlign="center">
+            <Spinner size="large" />
+            <Box variant="p" color="text-status-info">
+              Processing transformations...
+            </Box>
+          </Box>
+        ) : state.outputDocuments.length === 0 ? (
           <Box>No output documents.</Box>
         ) : (
           state.outputDocuments.map((doc) => (
