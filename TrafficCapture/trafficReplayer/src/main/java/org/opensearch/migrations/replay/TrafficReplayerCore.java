@@ -359,7 +359,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     throw ex.getCause();
                 }
             }
-            if (log.isInfoEnabled()) {
+            if (log.isDebugEnabled()) {
                 Optional.of(
                     trafficStreams.stream()
                         .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
