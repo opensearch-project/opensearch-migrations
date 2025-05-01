@@ -62,9 +62,7 @@ public class EndToEndTest extends SourceTestBase {
 
         try {
             // === ACTION: Set up the source/target clusters ===
-            System.out.println("Starting clusters...");
             Startables.deepStart(sourceCluster, targetCluster).join();
-            System.out.println("Clusters started successfully");
 
             var indexName = "blog_2023";
             var numberOfShards = 3;
@@ -74,7 +72,6 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
-            System.out.println("Creating indices with source version: " + sourceVersion);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
@@ -97,12 +94,9 @@ public class EndToEndTest extends SourceTestBase {
             // === ACTION: Create two large documents (40MB each) ===
             String largeDoc = generateLargeDocJson(40);
             sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
-            System.out.println("Created first large document");
             sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);
-            System.out.println("Created second large document");
 
             // === ACTION: Create some searchable documents ===
-            System.out.println("Creating searchable documents");
             sourceClusterOperations.createDocument(indexName, "222", "{\"author\":\"Tobias Funke\"}");
             sourceClusterOperations.createDocument(indexName, "223", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
             sourceClusterOperations.createDocument(indexName, "224", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
@@ -118,7 +112,6 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
 
             // === ACTION: Take a snapshot ===
-            System.out.println("Taking snapshot");
             var snapshotName = "my_snap";
             var snapshotRepoName = "my_snap_repo";
             var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
@@ -135,9 +128,7 @@ public class EndToEndTest extends SourceTestBase {
                 List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
-            System.out.println("Running snapshot creation");
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
-            System.out.println("Snapshot creation completed");
             sourceCluster.copySnapshotData(localDirectory.toString());
             var sourceRepo = new FileSystemRepo(localDirectory.toPath());
 
