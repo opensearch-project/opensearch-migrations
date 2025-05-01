@@ -11,11 +11,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.ElasticsearchSnapshotDocumentRepository;
-import org.opensearch.migrations.bulkload.EncryptedShardBucketCollectionDocumentRepository;
+import org.opensearch.migrations.bulkload.ManuallyManagedLuceneShardRepository;
 import org.opensearch.migrations.bulkload.LuceneBasedDocumentRepository;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -87,14 +86,14 @@ public class RfsMigrateDocuments {
         private boolean help;
 
         @Parameter(required = false,
-            names = {"--snapshotLoader"},
-            description = "Hot-loaded class that should be used to download the lucene directory of a shard")
-        public String snapshotLoaderClassName;
+            names = {"--manualSnapshotLoader"},
+            description = "External program invoked to position an index shard for the LuceneDirectoryReader to read.")
+        public String manualSnapshotProgramToRun;
 
         @Parameter(required = false,
-            names = {"--snapshotLoaderConfig"},
-            description = "Configuration passed to the class specified in --snapshotLoader.")
-        public String snapshotLoaderConfig;
+            names = {"--manualSnapshotLoaderConfig"},
+            description = "Configuration passed to the the program specified in --manualSnapshotLoader.")
+        public String manualSnapshotLoaderConfig;
 
         @Parameter(required = false,
             names = { "--snapshot-name", "--snapshotName" },
@@ -187,7 +186,6 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--initial-subdivision", "--initialSubdivision" },
-            converter = VersionConverter.class,
             description = ("The first time a shard is processed, it will only be processed for work subdivision.  " +
                 "The shard's work entry will be replaced by this many parts and will exit for subsequent processors " +
                 "to handle the partitioned jobs.  default=0, meaning that there is no subdivision."))
@@ -248,8 +246,8 @@ public class RfsMigrateDocuments {
 
     public static void validateArgs(Args args) {
         boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
-        boolean areAllCustomSnapshotArgsProvided = args.snapshotLoaderClassName != null && args.snapshotLoaderConfig != null;
-        boolean areAnyCustomSnapshotArgsProvided = args.snapshotLoaderClassName != null || args.snapshotLoaderConfig != null;
+        boolean areAllCustomSnapshotArgsProvided = args.manualSnapshotProgramToRun != null && args.manualSnapshotLoaderConfig != null;
+        boolean areAnyCustomSnapshotArgsProvided = args.manualSnapshotProgramToRun != null || args.manualSnapshotLoaderConfig != null;
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
@@ -390,9 +388,10 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private static LuceneBasedDocumentRepository makeLuceneRepository(Args arguments) throws JsonProcessingException {
-        if (arguments.snapshotLoaderClassName != null) {
-            return new EncryptedShardBucketCollectionDocumentRepository(arguments.snapshotLoaderConfig);
+    private static LuceneBasedDocumentRepository makeLuceneRepository(Args arguments) {
+        if (arguments.manualSnapshotProgramToRun != null) {
+            return new ManuallyManagedLuceneShardRepository(arguments.manualSnapshotProgramToRun,
+                arguments.manualSnapshotLoaderConfig);
         } else if (arguments.snapshotLocalDir == null) {
             return new ElasticsearchSnapshotDocumentRepository(arguments.sourceVersion,
                 arguments.snapshotName,

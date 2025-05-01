@@ -54,6 +54,7 @@ import org.opensearch.migrations.transform.TransformationLoader;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
@@ -350,7 +351,7 @@ public class SourceTestBase {
         WITH_DELAYS
     }
 
-    @NotNull
+    @NonNull
     public static ProcessBuilder setupProcess(
         Path tempDirSnapshot,
         Path tempDirLucene,
