@@ -23,7 +23,7 @@ exporters:
     dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing most granular metric
     metric_declarations:
       - dimensions: [ [ "qualifier" ] ]
-        metric_name_selectors: [ "*" ]
+        metric_name_selectors: [ ".*" ]
   awsxray:
     index_all_attributes: true
 service:
