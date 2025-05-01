@@ -9,16 +9,8 @@ processors:
   resource/metrics:
     attributes:
       - key: qualifier
-        value: ${env:QUALIFIER:-unknown}
+        value: ${env:QUALIFIER}
         action: upsert
-      - key: service.name
-        action: delete
-      - key: telemetry.sdk.language
-        action: delete
-      - key: telemetry.sdk.name
-        action: delete
-      - key: telemetry.sdk.version
-        action: delete
   batch:
     timeout: 10s
     send_batch_size: 8192
@@ -28,11 +20,10 @@ extensions:
 exporters:
   awsemf:
     namespace: 'OpenSearchMigrations'
-    resource_to_telemetry_conversion:
-      enabled: true
-    detailed_metrics: true
-    retain_initial_value_of_delta_metric: true
-    dimension_rollup_option: NoDimensionRollup
+    dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing most granular metric
+    metric_declarations:
+      - dimensions: [ [ "qualifier" ] ]
+        metric_name_selectors: [ "*" ]
   awsxray:
     index_all_attributes: true
 service:
