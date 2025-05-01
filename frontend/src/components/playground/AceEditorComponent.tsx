@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import AceEditor, { IAnnotation } from "react-ace";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
+import { SaveState, SaveStatus } from "@/types/SaveStatus";
 
 // Import ace-builds core
 import ace from "ace-builds";
@@ -29,11 +30,10 @@ interface AceEditorComponentProps {
   itemId: string;
   mode?: "json" | "javascript";
   formatRef?: React.RefObject<(() => void) | null>;
-  onSaveStatusChange?: (isSaved: boolean) => void;
+  onSaveStatusChange?: (status: SaveState) => void;
 }
 
-const defaultContent: string = `
-function main(context) {
+const defaultContent: string = `function main(context) {
   return (document) => {
     // Your transformation logic here
     return document;
@@ -52,8 +52,11 @@ export default function AceEditorComponent({
   const { state } = usePlayground();
   const { updateTransformation } = usePlaygroundActions();
   const [content, setContent] = useState("");
+
   // Use a ref instead of state for validation errors to prevent re-renders
   const validationErrorsRef = useRef<IAnnotation[]>([]);
+
+  // Refs and dimension state used for resizing the AceEditor instance
   const editorRef = useRef<AceEditor>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 500, height: 300 }); // Default fallback values
@@ -83,22 +86,42 @@ export default function AceEditorComponent({
     if (transformation) {
       setContent(transformation.content || defaultContent);
       if (onSaveStatusChange) {
-        onSaveStatusChange(true);
+        onSaveStatusChange({
+          status: SaveStatus.SAVED,
+          savedAt: new Date(Date.now()),
+          errors: [],
+        });
       }
     }
   }, [transformation, onSaveStatusChange]);
 
   // Save the current content to local storage
   const saveContent = useCallback(() => {
-    if (!transformation || content === transformation.content) return;
+    // Immediately set content to the exact content from the editor ref (our state may be stale)
+    const editorContent = editorRef.current?.editor.getValue();
+    const activeContent = editorContent ?? content;
+    // Skip update if transformation doesn't exist or if content is unchanged.
+    if (!transformation || activeContent === transformation.content) return;
+
+    // Check for validation errors
     if (validationErrorsRef.current.length > 0) {
-      console.log("Validation errors:", validationErrorsRef.current);
+      if (onSaveStatusChange) {
+        onSaveStatusChange({
+          status: SaveStatus.BLOCKED,
+          savedAt: null,
+          errors: validationErrorsRef.current,
+        });
+      }
       return;
     }
 
-    updateTransformation(itemId, transformation.name, content);
+    updateTransformation(itemId, transformation.name, activeContent);
     if (onSaveStatusChange) {
-      onSaveStatusChange(true);
+      onSaveStatusChange({
+        status: SaveStatus.SAVED,
+        savedAt: new Date(Date.now()),
+        errors: [],
+      });
     }
   }, [
     content,
@@ -106,13 +129,13 @@ export default function AceEditorComponent({
     transformation,
     updateTransformation,
     onSaveStatusChange,
+    editorRef,
   ]);
 
   // Format the code based on the mode
   const formatCode = useCallback(() => {
     if (!content) return;
     try {
-      console.log("Formatting code...");
       if (editorRef.current) {
         beautify.beautify(editorRef.current.editor.session);
       }
@@ -131,7 +154,7 @@ export default function AceEditorComponent({
         saveContent();
       }
     },
-    [saveContent],
+    [saveContent]
   );
 
   // Add keyboard event listener
@@ -150,6 +173,7 @@ export default function AceEditorComponent({
 
   // Handle content change and save (debounce is handled internally by AceEditor)
   const handleChange = (newContent: string) => {
+    if (newContent === content) return; // Skip if content is unchanged
     setContent(newContent);
 
     // Skip update if transformation doesn't exist
@@ -157,14 +181,28 @@ export default function AceEditorComponent({
       return;
     }
 
-    // Mark as unsaved if content is different from saved content
-    const savedStatus = transformation.content === newContent;
-    if (onSaveStatusChange) {
-      onSaveStatusChange(savedStatus);
+    // Check for validation errors
+    if (validationErrorsRef.current.length > 0) {
+      if (onSaveStatusChange) {
+        onSaveStatusChange({
+          status: SaveStatus.BLOCKED,
+          savedAt: null,
+          errors: validationErrorsRef.current,
+        });
+      }
+    } else {
+      // Mark as unsaved if content is different from saved content
+      const isSaved = transformation.content === newContent;
+      if (onSaveStatusChange && !isSaved) {
+        onSaveStatusChange({
+          status: SaveStatus.UNSAVED,
+          savedAt: null,
+          errors: [],
+        });
+      }
     }
 
     // Auto-save after debounce period (handled by AceEditor)
-    console.log("Updating transformation:", transformation.name);
     saveContent();
   };
 

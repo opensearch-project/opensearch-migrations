@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { SaveState, SaveStatus } from "@/types/SaveStatus";
 import BoardItem from "@cloudscape-design/board-components/board-item";
 import Header from "@cloudscape-design/components/header";
-import StatusIndicator from "@cloudscape-design/components/status-indicator";
 import Button, { ButtonProps } from "@cloudscape-design/components/button";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Input from "@cloudscape-design/components/input";
@@ -12,6 +12,7 @@ import { Transformation } from "@/context/PlaygroundContext";
 import { boardItemI18nStrings } from "./boardItemI18nStrings";
 import AceEditorComponent from "./AceEditorComponent";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
+import SaveStatusIndicator from "@/components/playground/SaveStatusIndicator";
 
 interface TransformationItemProps {
   item: BoardProps.Item<Transformation>;
@@ -24,12 +25,17 @@ export default function TransformationItem({
 }: Readonly<TransformationItemProps>) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(item.data.name);
-  const [isSaved, setIsSaved] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<SaveState>({
+    status: SaveStatus.UNSAVED,
+    savedAt: null,
+    errors: [],
+  });
   const { updateTransformation } = usePlaygroundActions();
   const formatCodeRef = useRef<(() => void) | null>(null);
 
-  const handleSaveStatusChange = useCallback((saved: boolean) => {
-    setIsSaved(saved);
+  const handleSaveStatusChange = useCallback((status: SaveState) => {
+    console.log("Save status changed:", status);
+    setSaveStatus(status);
   }, []);
 
   const handleEditNameChange = (
@@ -124,9 +130,7 @@ export default function TransformationItem({
               <>
                 {item.data.name}
                 <div style={{ marginLeft: "10px" }}>
-                  <StatusIndicator type={isSaved ? "success" : "pending"}>
-                    {isSaved ? "Saved" : "Unsaved"}
-                  </StatusIndicator>
+                  <SaveStatusIndicator state={saveStatus} />
                 </div>
               </>
             )}
