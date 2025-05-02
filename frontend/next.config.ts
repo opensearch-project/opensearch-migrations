@@ -10,11 +10,15 @@ const nextConfig: NextConfig = {
     "@cloudscape-design/component-toolkit"
   ],
   webpack(config) {
-    // h/t https://github.com/securingsincity/react-ace/issues/725#issuecomment-1407356137
+    // Configure webpack to handle Ace Editor worker files
     config.module.rules.push({
-      test: /ace-builds.*\/worker-.*$/,
+      test: /ace-builds.*\/worker-.*\.js$/,
       type: "asset/resource",
+      generator: {
+        filename: "static/workers/[name][ext]",
+      },
     });
+    
     return config;
   },
 };
