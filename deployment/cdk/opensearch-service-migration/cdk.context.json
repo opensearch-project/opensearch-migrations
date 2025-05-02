@@ -26,6 +26,9 @@
         "serviceSigningName": "es | aoss"
       }
     },
+    "MskEbsStorage":{
+      "maxCapacity": 16384
+    },
     "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
     "reindexFromSnapshotMaxShardSizeGiB": 80,

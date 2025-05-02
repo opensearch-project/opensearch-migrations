@@ -71,6 +71,26 @@ export const usePlaygroundActions = () => {
     [dispatch],
   );
 
+  const removeTransformation = useCallback(
+    (id: string) => {
+      dispatch({ type: "REMOVE_TRANSFORMATION", payload: id });
+    },
+    [dispatch],
+  );
+
+  const updateTransformation = useCallback(
+    (id: string, name: string, content: string) => {
+      const updatedTransform: Transformation = {
+        id,
+        name,
+        content,
+      };
+      dispatch({ type: "UPDATE_TRANSFORMATION", payload: updatedTransform });
+      return updatedTransform;
+    },
+    [dispatch],
+  );
+
   const updateInputDocument = useCallback(
     (id: string, name: string, content: string) => {
       // Check if quota is already exceeded
@@ -103,5 +123,7 @@ export const usePlaygroundActions = () => {
     updateInputDocument,
     addTransformation,
     reorderTransformation,
+    removeTransformation,
+    updateTransformation,
   };
 };
