@@ -101,7 +101,14 @@ def call(Map config = [:]) {
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,
             "nodeToNodeEncryptionEnabled": ${nodeToNodeEncryption},
-            "encryptionAtRestEnabled": true
+            "encryptionAtRestEnabled": true,
+            "targetCluster": {
+                "auth": {
+                    "type": "sigv4",
+                    "region": "${params.DEPLOY_REGION}",
+                    "serviceSigningName": "es"
+                },
+            }
             }
         }
     """
