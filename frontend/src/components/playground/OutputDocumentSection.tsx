@@ -6,10 +6,32 @@ import Alert from "@cloudscape-design/components/alert";
 import Spinner from "@cloudscape-design/components/spinner";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
+import { ReactNode } from "react";
 
 export default function OutputDocumentSection() {
   const { state } = usePlayground();
   const { isProcessingTransformations, transformationErrors } = state;
+
+  const renderOutputContent = (): ReactNode => {
+    if (isProcessingTransformations) {
+      return (
+        <Box textAlign="center">
+          <Spinner size="large" />
+          <Box variant="p" color="text-status-info">
+            Processing transformations...
+          </Box>
+        </Box>
+      );
+    }
+
+    if (state.outputDocuments.length === 0) {
+      return <Box>No output documents.</Box>;
+    }
+
+    return state.outputDocuments.map((doc) => (
+      <DocumentItemWithPopoverCodeView key={doc.id} document={doc} />
+    ));
+  };
 
   return (
     <Container header={<Header variant="h3">Output Documents</Header>}>
@@ -39,20 +61,7 @@ export default function OutputDocumentSection() {
           </Alert>
         )}
 
-        {isProcessingTransformations ? (
-          <Box textAlign="center">
-            <Spinner size="large" />
-            <Box variant="p" color="text-status-info">
-              Processing transformations...
-            </Box>
-          </Box>
-        ) : state.outputDocuments.length === 0 ? (
-          <Box>No output documents.</Box>
-        ) : (
-          state.outputDocuments.map((doc) => (
-            <DocumentItemWithPopoverCodeView key={doc.id} document={doc} />
-          ))
-        )}
+        {renderOutputContent()}
       </SpaceBetween>
     </Container>
   );

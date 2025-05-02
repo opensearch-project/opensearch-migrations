@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { SaveState, SaveStatus } from "@/types/SaveStatus";
 import BoardItem from "@cloudscape-design/board-components/board-item";
 import Header from "@cloudscape-design/components/header";
@@ -13,7 +13,6 @@ import { transformationBoardItemStrings } from "./TransformationBoardItemStrings
 import AceEditorComponent from "./AceEditorComponent";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import SaveStatusIndicator from "@/components/playground/SaveStatusIndicator";
-import { useTransformationExecutor } from "@/hooks/useTransformationExecutor";
 
 interface TransformationItemProps {
   item: BoardProps.Item<Transformation>;
@@ -24,7 +23,6 @@ interface TransformationItemProps {
 export default function TransformationItem({
   item,
   onRemove,
-  onValidationChange,
 }: Readonly<TransformationItemProps>) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(item.data.name);
@@ -33,29 +31,15 @@ export default function TransformationItem({
     savedAt: null,
     errors: [],
   });
-  const [hasValidationErrors, setHasValidationErrors] = useState(false);
   const { updateTransformation } = usePlaygroundActions();
-  const { updateValidationError } = useTransformationExecutor();
   const formatCodeRef = useRef<(() => void) | null>(null);
 
   const handleSaveStatusChange = useCallback((status: SaveState) => {
     setSaveStatus(status);
   }, []);
 
-  const handleValidationChange = useCallback(
-    (hasErrors: boolean) => {
-      setHasValidationErrors(hasErrors);
-      // Update validation error in the transformation executor
-      updateValidationError(item.id, hasErrors);
-      if (onValidationChange) {
-        onValidationChange(hasErrors);
-      }
-    },
-    [onValidationChange, updateValidationError, item.id]
-  );
-
   const handleEditNameChange = (
-    event: CustomEvent<ButtonProps.ClickDetail>
+    event: CustomEvent<ButtonProps.ClickDetail>,
   ) => {
     event.preventDefault();
     event.stopPropagation();
@@ -84,6 +68,7 @@ export default function TransformationItem({
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Button
+                key="edit-button"
                 variant="inline-icon"
                 iconName={isEditing ? "check" : "edit"}
                 ariaLabel={
@@ -94,6 +79,7 @@ export default function TransformationItem({
                 onClick={handleEditNameChange}
               />
               <Button
+                key="format-button"
                 variant="inline-icon"
                 iconName="script"
                 ariaLabel={`Format code in ${item.data.name}`}
@@ -106,6 +92,7 @@ export default function TransformationItem({
                 }}
               />
               <Button
+                key="remove-button"
                 variant="inline-icon"
                 iconName="remove"
                 ariaLabel={`Delete ${item.data.name}`}
@@ -129,7 +116,7 @@ export default function TransformationItem({
                       updateTransformation(
                         item.id,
                         editName,
-                        item.data.content
+                        item.data.content,
                       );
                     } else {
                       setEditName(item.data.name); // Reset to original if empty
@@ -141,11 +128,15 @@ export default function TransformationItem({
                   }
                 }}
                 autoFocus
+                key="input"
               />
             ) : (
-              <SpaceBetween direction="horizontal" size="s">
-                {item.data.name}
-                <SaveStatusIndicator state={saveStatus} />
+              <SpaceBetween direction="horizontal" size="s" key="name">
+                <span key="name-text">{item.data.name}</span>
+                <SaveStatusIndicator
+                  state={saveStatus}
+                  key="save-status-indicator"
+                />
               </SpaceBetween>
             )}
           </SpaceBetween>
@@ -158,7 +149,6 @@ export default function TransformationItem({
         mode="javascript"
         formatRef={formatCodeRef}
         onSaveStatusChange={handleSaveStatusChange}
-        onValidationChange={handleValidationChange}
       />
     </BoardItem>
   );

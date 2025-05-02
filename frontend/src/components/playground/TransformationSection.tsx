@@ -17,8 +17,7 @@ export default function TransformationSection() {
   const { state } = usePlayground();
   const { addTransformation, removeTransformation, reorderTransformation } =
     usePlaygroundActions();
-  const { runTransformations, isProcessing, hasValidationErrors } =
-    useTransformationExecutor();
+  const { runTransformations, isProcessing } = useTransformationExecutor();
 
   // Local state to track rowSpan values and validation errors for each transformation
   const [itemDimensions, setItemDimensions] = useState<
@@ -26,19 +25,14 @@ export default function TransformationSection() {
   >(
     // Initialize with default values from transformations
     Object.fromEntries(
-      state.transformations.map((transform) => [transform.id, { rowSpan: 3 }])
-    )
+      state.transformations.map((transform) => [transform.id, { rowSpan: 3 }]),
+    ),
   );
-
-  // Track validation errors for each transformation
-  const [validationErrors, setValidationErrors] = useState<
-    Record<string, boolean>
-  >({});
 
   // Helper functions to reduce nesting depth
   const addNewTransformations = (
     transformations: Transformation[],
-    dimensions: Record<string, { rowSpan: number }>
+    dimensions: Record<string, { rowSpan: number }>,
   ) => {
     const newDimensions = { ...dimensions };
     transformations.forEach((transform) => {
@@ -51,7 +45,7 @@ export default function TransformationSection() {
 
   const removeDeletedTransformations = (
     transformations: Transformation[],
-    dimensions: Record<string, { rowSpan: number }>
+    dimensions: Record<string, { rowSpan: number }>,
   ) => {
     const newDimensions = { ...dimensions };
     Object.keys(newDimensions).forEach((id) => {
@@ -69,7 +63,7 @@ export default function TransformationSection() {
       // Process additions and deletions using helper functions
       const withAdditions = addNewTransformations(
         state.transformations,
-        prevDimensions
+        prevDimensions,
       );
       return removeDeletedTransformations(state.transformations, withAdditions);
     });
@@ -79,26 +73,12 @@ export default function TransformationSection() {
     addTransformation(`Transformation ${state.transformations.length + 1}`, "");
   };
 
-  const handleRemoveTransportation = (id: string) => {
+  const handleRemoveTransformation = (id: string) => {
     removeTransformation(id);
-    // Remove validation errors for this transformation
-    setValidationErrors((prev) => {
-      const newErrors = { ...prev };
-      delete newErrors[id];
-      return newErrors;
-    });
-  };
-
-  // Handler for validation errors from TransformationItem
-  const handleValidationChange = (id: string, hasErrors: boolean) => {
-    setValidationErrors((prev) => ({
-      ...prev,
-      [id]: hasErrors,
-    }));
   };
 
   const handleItemsChange = (
-    e: CustomEvent<BoardProps.ItemsChangeDetail<Transformation>>
+    e: CustomEvent<BoardProps.ItemsChangeDetail<Transformation>>,
   ) => {
     const { items, resizedItem, movedItem } = e.detail;
 
@@ -119,7 +99,7 @@ export default function TransformationSection() {
 
       // Find the old index of the moved item in the current state
       const oldIndex = state.transformations.findIndex(
-        (transform) => transform.id === movedItem.id
+        (transform) => transform.id === movedItem.id,
       );
 
       if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
@@ -143,10 +123,7 @@ export default function TransformationSection() {
           renderItem={(item: BoardProps.Item<Transformation>) => (
             <TransformationItem
               item={item}
-              onRemove={handleRemoveTransportation}
-              onValidationChange={(hasErrors) =>
-                handleValidationChange(item.id, hasErrors)
-              }
+              onRemove={handleRemoveTransformation}
             />
           )}
           empty={
@@ -170,14 +147,9 @@ export default function TransformationSection() {
               loading={isProcessing}
               disabled={
                 state.transformations.length === 0 ||
-                state.inputDocuments.length === 0 ||
-                hasValidationErrors
+                state.inputDocuments.length === 0
               }
-              ariaLabel={
-                hasValidationErrors
-                  ? "Cannot run transformations while there are syntax errors"
-                  : "Run transformations"
-              }
+              ariaLabel="Run transformations"
             >
               Run transformations
             </Button>

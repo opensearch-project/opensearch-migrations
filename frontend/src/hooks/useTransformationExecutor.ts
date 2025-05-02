@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import {
   usePlayground,
@@ -12,23 +12,6 @@ import { executeTransformationChain } from "@/utils/transformationExecutor";
  */
 export function useTransformationExecutor() {
   const { state, dispatch } = usePlayground();
-  // Track validation errors for transformations
-  const [validationErrors, setValidationErrors] = useState<
-    Record<string, boolean>
-  >({});
-
-  // Method to update validation errors
-  const updateValidationError = useCallback((id: string, hasError: boolean) => {
-    setValidationErrors((prev) => ({
-      ...prev,
-      [id]: hasError,
-    }));
-  }, []);
-
-  // Check if any transformation has validation errors
-  const hasValidationErrors = useCallback(() => {
-    return Object.values(validationErrors).some((hasError) => hasError);
-  }, [validationErrors]);
 
   /**
    * Run all transformations on all input documents
@@ -72,8 +55,8 @@ export function useTransformationExecutor() {
           // Record error
           errors.push({
             documentId: inputDoc.id,
-            transformationId: result.transformationId || "",
-            message: result.error || "Unknown error",
+            transformationId: result.transformationId ?? "",
+            message: result.error ?? "Unknown error",
           });
         }
       } catch (error) {
@@ -94,24 +77,14 @@ export function useTransformationExecutor() {
     });
   }, [state.inputDocuments, state.transformations, dispatch]);
 
-  // Disable automatic transformation execution to prevent UI "snapping"
-  // The user can run transformations manually using the "Run transformations" button
-  // or by saving a transformation with Ctrl+S
-
-  // Uncomment this to re-enable automatic execution
-  /*
+  // Enable automatic transformation execution when transformations are saved
   useEffect(() => {
-    if (!hasValidationErrors()) {
-      runTransformations();
-    }
-  }, [state.inputDocuments, state.transformations, runTransformations, hasValidationErrors]);
-  */
+    runTransformations();
+  }, [state.inputDocuments, state.transformations, runTransformations]);
 
   return {
     runTransformations,
     isProcessing: state.isProcessingTransformations,
     errors: state.transformationErrors,
-    updateValidationError,
-    hasValidationErrors: hasValidationErrors(),
   };
 }

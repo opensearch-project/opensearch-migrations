@@ -5,7 +5,6 @@ import AceEditor, { IAnnotation } from "react-ace";
 import { usePlayground } from "@/context/PlaygroundContext";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { SaveState, SaveStatus } from "@/types/SaveStatus";
-import { useTransformationExecutor } from "@/hooks/useTransformationExecutor";
 
 // Import ace-builds core
 import ace from "ace-builds";
@@ -33,7 +32,6 @@ interface AceEditorComponentProps {
   mode: "json" | "javascript";
   formatRef: React.RefObject<(() => void) | null>;
   onSaveStatusChange: (status: SaveState) => void;
-  onValidationChange: (hasErrors: boolean) => void;
 }
 
 export default function AceEditorComponent({
@@ -41,15 +39,12 @@ export default function AceEditorComponent({
   mode,
   formatRef,
   onSaveStatusChange,
-  onValidationChange,
 }: Readonly<AceEditorComponentProps>) {
   const { state } = usePlayground();
   const { updateTransformation } = usePlaygroundActions();
-  const { runTransformations } = useTransformationExecutor();
   const [content, setContent] = useState("");
   // Use refs for validation errors to prevent re-renders
   const validationErrorsRef = useRef<IAnnotation[]>([]);
-  const hasValidationErrorsRef = useRef<boolean>(false);
   const editorRef = useRef<AceEditor>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 500, height: 300 });
@@ -131,7 +126,7 @@ export default function AceEditorComponent({
         beautify.beautify(editorRef.current.editor.session);
       }
     } catch (error) {
-      console.error(`[DEBUG] Error formatting code for ${itemId}:`, error);
+      console.error(`Error formatting code for ${itemId}:`, error);
     }
     saveContent();
   }, [content, saveContent, itemId]);
@@ -141,12 +136,11 @@ export default function AceEditorComponent({
     (event: KeyboardEvent) => {
       // Check for Ctrl+S or Cmd+S
       if ((event.ctrlKey || event.metaKey) && event.key === "s") {
-        console.log(`[DEBUG] Ctrl+S pressed for ${itemId}`);
         event.preventDefault();
         saveContent();
       }
     },
-    [saveContent, itemId]
+    [saveContent],
   );
 
   // Add keyboard event listener
@@ -170,7 +164,6 @@ export default function AceEditorComponent({
 
     // Skip update if transformation doesn't exist
     if (!transformation) {
-      console.log(`[DEBUG] No transformation found for ${itemId}`);
       return;
     }
 
