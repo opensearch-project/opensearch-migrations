@@ -148,8 +148,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         this.replayerYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
         this.replayerYaml.ecs.service_name = `migration-${props.stage}-traffic-replayer-${deployId}`;
 
-        new MigrationDashboard(this, 'CnRDashboard', {
-            dashboardName: `MigrationAssistant_CaptureAndReplay_Dashboard_${props.stage}`,
+        new MigrationDashboard(this, {
+            dashboardQualifier: `LiveCaptureReplay_Summary`,
             stage: props.stage,
             account: this.account,
             region: this.region,
