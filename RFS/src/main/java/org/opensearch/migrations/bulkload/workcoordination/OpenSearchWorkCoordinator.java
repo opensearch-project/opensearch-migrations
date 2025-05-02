@@ -235,7 +235,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         null
                     );
                     if (indexCheckResponse.getStatusCode() == 200) {
-                        log.info("Not creating " + indexName + " because it already exists");
+                        log.atInfo().setMessage("Not creating {} because it already exists")
+                            .addArgument(indexName)
+                            .log();
                         return indexCheckResponse;
                     }
                     log.atInfo().setMessage("Creating {} because HEAD returned {}")
