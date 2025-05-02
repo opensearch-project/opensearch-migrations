@@ -10,7 +10,6 @@ import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchWorkCoordina
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration;
 
 import lombok.AllArgsConstructor;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
