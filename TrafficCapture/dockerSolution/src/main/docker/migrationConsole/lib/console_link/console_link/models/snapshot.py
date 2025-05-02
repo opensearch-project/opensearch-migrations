@@ -2,7 +2,7 @@ import datetime
 import logging
 from abc import ABC, abstractmethod
 from requests.exceptions import HTTPError
-from typing import Dict
+from typing import Dict, Optional
 
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
