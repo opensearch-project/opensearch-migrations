@@ -34,7 +34,6 @@ export default function TransformationItem({
   const formatCodeRef = useRef<(() => void) | null>(null);
 
   const handleSaveStatusChange = useCallback((status: SaveState) => {
-    console.log("Save status changed:", status);
     setSaveStatus(status);
   }, []);
 

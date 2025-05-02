@@ -154,7 +154,7 @@ export default function AceEditorComponent({
         saveContent();
       }
     },
-    [saveContent]
+    [saveContent],
   );
 
   // Add keyboard event listener
