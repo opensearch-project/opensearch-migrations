@@ -235,17 +235,17 @@ class ECSRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
 
-def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[str]:
+def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Optional[str]:
     values = get_detailed_status_dict(target_cluster, session_name)
     return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
 
 
-def get_detailed_status_dict(target_cluster: Cluster, session_name: str) -> Optional[Dict]:
+def get_detailed_status_dict(target_cluster: Cluster, session_name: str = "") -> Optional[Dict]:
     # Check whether the working state index exists. If not, we can't run queries.
-    index_to_check = "/.migrations_working_state" + ("_" + session_name if session_name else "")
+    index_to_check = ".migrations_working_state" + ("_" + session_name if session_name else "")
     print("index to check = " + index_to_check)
     try:
-        target_cluster.call_api(index_to_check)
+        target_cluster.call_api("/" + index_to_check)
     except requests.exceptions.RequestException:
         logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
         return None
@@ -293,7 +293,7 @@ def get_detailed_status_dict(target_cluster: Cluster, session_name: str) -> Opti
     return values
 
 
-def all_shards_finished_processing(target_cluster: Cluster, session_name: str) -> bool:
+def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
     d = get_detailed_status_dict(target_cluster, session_name)
     return d['total'] == d['completed'] and d['incomplete'] == 0 and d['in progress'] == 0 and d['unclaimed'] == 0
 
