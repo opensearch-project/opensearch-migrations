@@ -2,7 +2,7 @@ conditionalPackageInstalls:
   # required migration infrastructure components
   argoWorkflows: true
   etcd: true
-  otelCollector: true
+  otelCollector: false
   certManager: true
   # optional migration components
   kafkaOperator: true
