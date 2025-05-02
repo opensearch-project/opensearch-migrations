@@ -51,7 +51,7 @@ export class MigrationAssistanceStack extends Stack {
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
         const storageContext = this.node.tryGetContext('MskEbsStorage') || {};
-        const maxCapacity = storageContext.maxCapacity || 1750;
+        const maxCapacity = storageContext.maxCapacity || 16384; // Maximum capacity for each MSK broker node
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: `migration-msk-config-${props.stage}`,
@@ -74,6 +74,9 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpcDetails.vpc,
             vpcSubnets: props.vpcDetails.subnetSelection,
             securityGroups: [streamingSecurityGroup],
+            ebsStorageInfo: {
+                volumeSize: 1750 // Starting capacity for each MSK broker node
+            },
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
                 // Current limitation of alpha construct, would like to get latest revision dynamically

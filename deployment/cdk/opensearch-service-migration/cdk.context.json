@@ -27,7 +27,7 @@
       }
     },
     "MskEbsStorage":{
-      "maxCapacity": 1750 
+      "maxCapacity": 16384
     },
     "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
