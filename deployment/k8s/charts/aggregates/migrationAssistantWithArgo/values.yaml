@@ -1,0 +1,259 @@
+conditionalPackageInstalls:
+  # required migration infrastructure components
+  argoWorkflows: true
+  etcd: true
+  otelCollector: true
+  certManager: true
+  # optional migration components
+  kafkaOperator: true
+  # migration support packages
+  migrationConsole: false
+  logsVolume: false
+  # Test packages
+  localstack: true
+  # Nice to haves that aren't fully supported yet
+  gatekeeper: false
+  grafana: false
+  prometheus: false
+  jaeger: false
+
+opentelemetry-operator:
+  admissionWebhooks:
+    certManager:
+      enabled: true # default
+  crds:
+    create: true
+  manager:
+    verticalPodAutoscaler:
+      enabled: false # default
+    collectorImage:
+      repository: "public.ecr.aws/aws-observability/aws-otel-collector"
+      tag: "0.43.2"
+
+extraOtelConfiguration:
+  version: "0.124.0"
+  configs:
+    metrics:
+      - prometheus
+      - cloudwatch
+    traces:
+      - jaeger
+      - xray
+
+cert-manager:
+  crds:
+    enabled: true
+
+etcd:
+  replicaCount: 1
+  auth:
+    rbac:
+      rootPassword: password
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  persistence:
+    enabled: false
+#    storageClass: "standard"
+#    size: 10Gi
+  service:
+    type: ClusterIP
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  extraEnvVars:
+    - name: ETCD_AUTO_COMPACTION_RETENTION
+      value: "1"
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "8589934592" # 8GB
+    - name: ETCD_HEARTBEAT_INTERVAL
+      value: "100"
+    - name: ETCD_ELECTION_TIMEOUT
+      value: "1000"
+  startFromSnapshot:
+    enabled: false
+  serviceAccount:
+    create: true
+
+  podSecurityContext:
+    fsGroup: 1001
+    runAsUser: 1001
+
+
+#migration-console:
+#  snapshotVolumeEnabled: true
+#  snapshotVolumePvc: "snapshot-volume-pvc"
+#  sharedLogsVolumeEnabled: true
+#  sharedLogsPvc: "shared-logs-pvc"
+
+
+strimzi-kafka-operator:
+  replicas: 1
+  storageType: ephemeral
+  storageSize: 100Gi
+  storageDeleteClaim: true
+  dedicatedController:
+    replicas: 1
+    storageSize: 10Gi
+
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    timeoutSeconds: 3
+    failureThreshold: 1
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    timeoutSeconds: 3
+    failureThreshold: 1
+
+  kafka:
+    template:
+      pod:
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 1
+
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 2
+      timeoutSeconds: 3
+      failureThreshold: 1
+    livenessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 2
+      timeoutSeconds: 3
+      failureThreshold: 1
+
+localstack:
+  image:
+    repository: "localstack/localstack"
+    tag: "4.3.0"
+
+
+s3Configuration:
+  region: us-east-2
+  useLocalStack: true
+  endpoint: ma-localstack
+
+snapshotBucketConfiguration:
+  create: true
+  bucketName: snapshot
+
+argo-workflows:
+  fullnameOverride: "argo"
+  images:
+    pullPolicy: IfNotPresent
+  controller:
+    containerSecurityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+    clusterWorkflowTemplates:
+      enabled: false
+    metricsConfig:
+      enabled: true
+    resourceRateLimit: { "limit": 10.0, "burst": 25 }
+    workflowWorkers: 16
+  mainContainer:
+    env:
+      - name: RESOURCE_STATE_CHECK_INTERVAL
+        value: "1s"
+  executor:
+    env:
+      - name: RESOURCE_STATE_CHECK_INTERVAL
+        value: "1s"
+  server:
+    extraArgs:
+      - --auth-mode=server
+  serviceAccount:
+    create: true
+  singleNamespace: true
+  # Extra workflow configuration
+  workflow:
+    serviceAccount:
+      create: false
+      name: argo-workflow-executor
+
+
+workflowService:
+  defaultEnvVars:
+    ENV_VAR1: "default-value-1"
+    ENV_VAR2: "default-value-2"
+  defaultReplicas: 1
+  monitorImage: "bitnami/kubectl:latest"
+  allowedRepos:
+    - "bitnami/"
+#    - "k8s.gcr.io/"
+#    - "docker.io/library/"
+
+
+gatekeeper:
+  auditInterval: 60
+  constraintViolationsLimit: 20
+  enableExternalData: true
+  audit:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  controllerManager:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+
+jaeger:
+  allInOne:
+    enabled: true
+  provisionDataStore:
+    cassandra: false
+  storage:
+    type: memory
+  agent:
+    enabled: false
+  collector:
+    enabled: false
+  query:
+    enabled: false
+
+
+grafana:
+  ## Grafana data sources configuration
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus-server.prometheus.svc.cluster.local:9090
+          isDefault: true
+          editable: true
+        - name: Jaeger
+          type: jaeger
+          access: proxy
+          url: http://jaeger-query.jaeger.svc.cluster.local:16686
+          isDefault: false
+          editable: true
+
+  ## Set up the sidecar to import data sources (usually enabled by default)
+  sidecar:
+    datasources:
+      enabled: true
+    dashboards:
+      enabled: true
+      label: grafana_dashboard

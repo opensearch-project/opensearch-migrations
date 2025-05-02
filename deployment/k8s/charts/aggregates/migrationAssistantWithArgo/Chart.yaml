@@ -1,0 +1,69 @@
+apiVersion: v2
+name: migration-assistant
+version: 0.1.0
+type: application
+appVersion: "1.16.0"
+
+dependencies:
+  - name: logs-volume
+    version: "0.1.0"
+    repository: "file://../../sharedResources/logsVolume"
+    condition: conditionalPackageInstalls.logsVolume
+
+  - name: migration-console
+    condition: conditionalPackageInstalls.migrationConsole
+    version: "0.1.0"
+    repository: "file://../../components/migrationConsole"
+
+  - name: strimzi-kafka-operator
+    condition: conditionalPackageInstalls.kafkaOperator
+    version: 0.45.0
+    repository: "https://strimzi.io/charts/"
+
+  - name: argo-workflows
+    condition: conditionalPackageInstalls.argoWorkflows
+    version: "0.45.11"
+    repository: "https://argoproj.github.io/argo-helm"
+
+  - name: cert-manager
+    condition: conditionalPackageInstalls.certManager
+    version: 1.17.2
+    repository: https://charts.jetstack.io
+
+  - name: opentelemetry-operator
+    condition: conditionalPackageInstalls.otelCollector
+    version: "0.86.4"
+    repository: "https://open-telemetry.github.io/opentelemetry-helm-charts"
+
+  # Coordinate workflows, maybe RFS, maybe more
+  - name: etcd
+    condition: conditionalPackageInstalls.etcd
+    version: "11.2.1"
+    repository: "https://charts.bitnami.com/bitnami"
+
+  # Will likely be required for auto-scaling.
+  # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.
+  - name: prometheus
+    condition: conditionalPackageInstalls.prometheus
+    version: "25.27.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+
+  # OPA Gatekeeper dependency to lock down what images we can spin up - not implemented yet
+#  - name: gatekeeper
+#    condition: conditionalPackageInstalls.gatekeeper
+#    version: "3.13.0"
+#    repository: "https://open-policy-agent.github.io/gatekeeper/charts"
+
+  - name: localstack
+    condition: conditionalPackageInstalls.localstack
+    version: "0.6.23"  # Or whichever version you want to use
+    repository: "https://localstack.github.io/helm-charts"
+
+  - name: grafana
+    condition: conditionalPackageInstalls.grafana
+    version: "8.5.0"
+    repository: "https://grafana.github.io/helm-charts"
+  - name: jaeger
+    condition: conditionalPackageInstalls.jaeger
+    version: "3.2.0"
+    repository: "https://jaegertracing.github.io/helm-charts"
