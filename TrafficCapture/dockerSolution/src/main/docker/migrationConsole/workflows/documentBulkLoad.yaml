@@ -337,13 +337,13 @@ spec:
                       fi
 
                       mkdir /config
-                      export LOG4J2_PROPERTIES_FILE=/config/log4j2.overrides.json
-                      cat << '___EOF___' > $LOG4J2_PROPERTIES_FILE 
+                      export LOG4J_CONFIGURATION_FILE=/config/log4j2.overrides.json
+                      cat << '___EOF___' > $LOG4J_CONFIGURATION_FILE 
                       {{inputs.parameters.logging-configuration-contents}}
                       ___EOF___
 
                       echo properties file contents...
-                      cat $LOG4J2_PROPERTIES_FILE
+                      cat $LOG4J_CONFIGURATION_FILE
 
                       export RFS_COMMAND="/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $ARGS"
                       exec /rfs-app/entrypoint.sh
