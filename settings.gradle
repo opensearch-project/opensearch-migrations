@@ -41,6 +41,7 @@ rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
 include 'coreUtilities'
 include 'libraries:kafkaCommandLineFormatter'
+include 'libraries:kafkaUtils'
 include 'transformation'
 include 'transformation:standardJavascriptTransforms'
 include 'testHelperFixtures'
@@ -59,6 +60,7 @@ include 'TrafficCapture:nettyWireLogging'
 include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficCaptureProxyServerTest'
 include 'TrafficCapture:trafficReplayer'
+include 'frontend'
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())
 

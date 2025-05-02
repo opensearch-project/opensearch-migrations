@@ -18,6 +18,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
 
     public S3SnapshotCreator(
         String snapshotName,
+        String snapshotRepoName,
         OpenSearchClient client,
         String s3Uri,
         String s3Region,
@@ -29,6 +30,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
 
     public S3SnapshotCreator(
         String snapshotName,
+        String snapshotRepoName,
         OpenSearchClient client,
         String s3Uri,
         String s3Region,
@@ -38,7 +40,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         String s3Endpoint,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        super(snapshotName, indexAllowlist, client, context);
+        super(snapshotName, snapshotRepoName, indexAllowlist, client, context);
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
         this.maxSnapshotRateMBPerNode = maxSnapshotRateMBPerNode;

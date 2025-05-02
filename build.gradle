@@ -80,7 +80,8 @@ def commonExclusions = ['**/build/**',
                         '**/node_modules/**',
                         '**/opensearch-cluster-cdk/**',
                         '**/cdk.out/**',
-                        '**/transformation/standardJavascriptTransforms/node_modules/**']
+                        '**/transformation/standardJavascriptTransforms/node_modules/**',
+                        '**/frontend/**']
 spotless {
     format 'misc', {
         target fileTree('.') {

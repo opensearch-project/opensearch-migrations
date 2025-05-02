@@ -57,9 +57,9 @@ If you want to use Migration Console CDK Context for deploying a source cluster,
 
 ### Snapshot Definition Options
 
-| Name     | Type   | Example                                                                                                                          | Description                                                                                        |
-|----------|--------|----------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
-| snapshot | object | {"snapshotName": "test-snapshot", "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo", "s3Region": "us-east-2"} | A json object for defining the details of an existing S3 snapshot. See below for detailed options. |
+| Name     | Type   | Example                                                                                                                                                                    | Description                                                                                        |
+|----------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| snapshot | object | {"snapshotName": "test-snapshot", "snapshotRepoName": "test-snapshot-repo", "s3Uri": "s3://snapshot-bucket-123456789012-us-east-2/snapshot-repo", "s3Region": "us-east-2"} | A json object for defining the details of an existing S3 snapshot. See below for detailed options. |
 
 #### Structure of the snapshot object
 
@@ -68,6 +68,7 @@ A snapshot should only be configured when the user has an existing snapshot they
 In such case, the required fields in the snapshot object are:
 
 - `snapshotName` -- the name of the existing snapshot that was created
+- `snapshotRepoName` -- the name of the existing snapshot repository that contains the given `snapshotName`
 - `s3Uri` -- the `s3://` URI path to where the snapshot repo exists in the given S3 bucket
 - `s3Region` -- the region where the S3 bucket is located
 
@@ -97,6 +98,8 @@ In such case, the required fields in the snapshot object are:
 | -------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | mskBrokersPerAZCount             | number       | 1                                                                                                       | The number of broker nodes per MSK Availability Zone                                                                                                                                               |
 | mskARN (Not currently available) | string       | `"arn:aws:kafka:us-east-2:12345678912:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"` | Supply an existing MSK cluster ARN to use. **NOTE** As MSK is using an L1 construct this is not currently available for use                                                                        |
+
+| MskEbsStorage                    | object       | `{ "maxCapacity": 16384 }`                                                                               | Configuration object for enabling MSK EBS storage autoscaling. `maxCapacity` sets the upper storage limit in GiB.                                                                                  | '
 
 ## Options being deprecated
 

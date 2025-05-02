@@ -83,7 +83,7 @@ helm install tc -n ma charts/aggregates/testClusters
 Alternatively, specific test cluster configurations for elasticsearch and opensearch can be deployed instead of the default source and target configuration. Existing alternative configurations can be found in the `charts/components/elasticsearchCluster/environments` and `charts/components/opensearchCluster/environments` directories and deployed with helm commands similar to below
 ```shell
 helm install tc-source -n ma charts/components/elasticsearchCluster -f charts/components/elasticsearchCluster/environments/es-5-6-single-node-cluster.yaml
-helm install tc-target -n ma charts/components/opensearchCluster -f charts/components/opensearchCluster/environments/os-2-latest-single-node-cluster.yaml
+helm install tc-target -n ma charts/components/opensearchCluster -f charts/components/opensearchCluster/environments/os-2-x-single-node-cluster.yaml
 ```
 
 ### Configuration

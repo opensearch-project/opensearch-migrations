@@ -1,13 +1,16 @@
 import datetime
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from requests.exceptions import HTTPError
+from typing import Dict
 
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,7 @@ SNAPSHOT_SCHEMA = {
         'type': 'dict',
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
+            'snapshot_repo_name': {'type': 'string', 'required': False},
             'otel_endpoint': {'type': 'string', 'required': False},
             's3': {
                 'type': 'dict',
@@ -49,6 +53,9 @@ class Snapshot(ABC):
         v = Validator(SNAPSHOT_SCHEMA)
         if not v.validate({'snapshot': config}):
             raise ValueError("Invalid config file for snapshot", v.errors)
+        self.snapshot_name = config['snapshot_name']
+        self.snapshot_repo_name = config.get("snapshot_repo_name", DEFAULT_SNAPSHOT_REPO_NAME)
+        self.otel_endpoint = config.get("otel_endpoint", None)
 
     @abstractmethod
     def create(self, *args, **kwargs) -> CommandResult:
@@ -66,6 +73,11 @@ class Snapshot(ABC):
         pass
 
     @abstractmethod
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        """Delete all snapshots in the snapshot repository."""
+        pass
+
+    @abstractmethod
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         """Delete a snapshot repository."""
         pass
@@ -73,7 +85,8 @@ class Snapshot(ABC):
     def _collect_universal_command_args(self) -> Dict:
         command_args = {
             "--snapshot-name": self.snapshot_name,
-            "--source-host": self.cluster.endpoint
+            "--snapshot-repo-name": self.snapshot_repo_name,
+            "--source-host": self.source_cluster.endpoint
         }
 
         if self.cluster.auth_type == AuthMethod.BASIC_AUTH:
@@ -350,9 +363,68 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'mig
     path = f"/_snapshot/{repository}/{snapshot_name}"
     response = cluster.call_api(path, HttpMethod.DELETE, timeout=timeout)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
+    logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str = 'migration_assistant_repo', timeout: int = 1200):
-    path = f"/_snapshot/{repository}"
-    response = cluster.call_api(path, HttpMethod.DELETE, timeout=timeout)
-    logging.debug(f"Raw delete snapshot repository status response: {response.text}")
+def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
+    logger.info(f"Clearing snapshots from repository '{repository}'")
+    """
+    Clears all snapshots from the specified repository.
+
+    :param cluster: Cluster object to interact with the Elasticsearch cluster.
+    :param repository: Name of the snapshot repository to clear snapshots from.
+    :raises Exception: For general errors during snapshot clearing, except when the repository is missing.
+    """
+    try:
+        # List all snapshots in the repository
+        snapshots_path = f"/_snapshot/{repository}/_all"
+        response = cluster.call_api(snapshots_path, raise_error=True)
+        logger.debug(f"Raw response: {response.json()}")
+        snapshots = response.json().get("snapshots", [])
+        logger.info(f"Found {len(snapshots)} snapshots in repository '{repository}'.")
+
+        if not snapshots:
+            logger.info(f"No snapshots found in repository '{repository}'.")
+            return
+
+        # Delete each snapshot
+        for snapshot in snapshots:
+            snapshot_name = snapshot["snapshot"]
+            delete_snapshot(cluster, snapshot_name, repository)
+
+    except Exception as e:
+        # Handle 404 errors specifically for missing repository
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            error_details = e.response.json().get('error', {})
+            if error_details.get('type') == 'repository_missing_exception':
+                logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
+                return
+        # Re-raise other errors
+        logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
+        raise e
+
+
+def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
+    logger.info(f"Deleting repository '{repository}'")
+    """
+    Delete repository. Should be empty before execution.
+
+    :param cluster: Cluster object to interact with the Elasticsearch cluster.
+    :param repository: Name of the snapshot repository to delete.
+    :raises Exception: For general errors during repository deleting, except when the repository is missing.
+    """
+    try:
+        delete_path = f"/_snapshot/{repository}"
+        response = cluster.call_api(delete_path, method=HttpMethod.DELETE, raise_error=True)
+        logging.debug(f"Raw delete snapshot repository status response: {response.text}")
+        logger.info(f"Deleted repository: {repository}.")
+    except Exception as e:
+        # Handle 404 errors specifically for missing repository
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            error_details = e.response.json().get('error', {})
+            if error_details.get('type') == 'repository_missing_exception':
+                logger.info(f"Repository '{repository}' is missing. Skipping delete.")
+                return
+        # Re-raise other errors
+        logger.error(f"Error deleting repository '{repository}': {e}")
+        raise e

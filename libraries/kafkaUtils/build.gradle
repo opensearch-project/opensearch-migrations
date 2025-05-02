@@ -1,0 +1,25 @@
+
+plugins {
+    id 'org.opensearch.migrations.java-application-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':TrafficCapture:captureKafkaOffloader')
+    implementation libs.jcommander
+    implementation libs.kafka.clients
+    implementation libs.slf4j.api
+}
+
+tasks.withType(Tar){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.withType(Zip){
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+application {
+    // Define the main class for the application.
+    mainClass = 'org.opensearch.migrations.utils.kafka.KafkaUtils'
+}

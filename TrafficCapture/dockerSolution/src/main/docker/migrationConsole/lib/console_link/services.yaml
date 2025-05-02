@@ -21,6 +21,7 @@ replay:
   docker:
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
+  snapshot_repo_name: "migration_assistant_repo"
   fs:
     repo_path: "/snapshot/test-console"
   otel_endpoint: "http://otel-collector:4317"

@@ -1,5 +1,5 @@
 import logging
-from ..cluster_version import ElasticsearchV6_X, ElasticsearchV7_X, OpensearchV1_X, OpensearchV2_X
+from ..cluster_version import ElasticsearchV6_X, ElasticsearchV7_X, ElasticsearchV8_X, OpensearchV1_X, OpensearchV2_X
 from .ma_test_base import MATestBase, MigrationType
 from console_link.environment import Environment
 
@@ -10,10 +10,7 @@ logger = logging.getLogger(__name__)
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
-            (ElasticsearchV6_X, OpensearchV1_X),
-            (ElasticsearchV6_X, OpensearchV2_X),
-            (ElasticsearchV7_X, OpensearchV1_X),
-            (ElasticsearchV7_X, OpensearchV2_X),
+            (ElasticsearchV8_X, OpensearchV2_X),
         ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document."
