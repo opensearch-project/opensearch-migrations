@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useReducer } from "react";
 import { SaveStatus, SaveState } from "@/types/SaveStatus";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
 
@@ -21,17 +21,19 @@ interface SaveStatusIndicatorProps {
 export default function SaveStatusIndicator({
   state,
 }: Readonly<SaveStatusIndicatorProps>) {
-  // Add a state to force re-renders of the "X seconds ago" text
-  const [, setTick] = useState(0);
+  // Use useReducer to force re-renders of the "X seconds ago" text without causing sonarqube
+  // to complain about unused variables
+  const forceUpdate = useReducer((tick) => tick + 1, 0)[1];
 
   useEffect(() => {
     const intervalId = setInterval(() => {
-      setTick((tick) => tick + 1);
+      forceUpdate();
     }, 1000 * 30); // 30 seconds
 
     // Clean up on unmount
     return () => clearInterval(intervalId);
-  }, []);
+  }, [forceUpdate]);
+
   const getStatusType = (state: SaveState) => {
     switch (state?.status ?? null) {
       case SaveStatus.SAVED:
@@ -51,15 +53,14 @@ export default function SaveStatusIndicator({
           "Saved" +
           (state.savedAt ? ` ${formatDistanceToNow(state.savedAt)} ago` : "")
         );
-      case SaveStatus.BLOCKED:
-        return (
-          "Blocked" +
-          (state.errors.length
-            ? ` (${state.errors.length} error${
-                state.errors.length > 1 ? "s" : ""
-              })`
-            : "")
-        );
+      case SaveStatus.BLOCKED: {
+        const errorCount = state.errors.length;
+        const errorSuffix = errorCount > 1 ? "s" : "";
+        const errorText = errorCount
+          ? ` (${errorCount} error${errorSuffix})`
+          : "";
+        return "Blocked" + errorText;
+      }
       case SaveStatus.UNSAVED:
       default:
         return "Unsaved";
