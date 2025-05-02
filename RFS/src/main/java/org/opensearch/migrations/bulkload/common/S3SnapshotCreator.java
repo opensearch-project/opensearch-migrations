@@ -25,7 +25,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        this(snapshotName, client, s3Uri, s3Region, indexAllowlist, null, null, null, context);
+        this(snapshotName, snapshotRepoName, client, s3Uri, s3Region, indexAllowlist, null, null, null, context);
     }
 
     public S3SnapshotCreator(
