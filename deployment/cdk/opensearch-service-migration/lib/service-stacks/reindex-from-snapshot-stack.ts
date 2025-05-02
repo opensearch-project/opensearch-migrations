@@ -1,6 +1,7 @@
 import {StackPropsExt} from "../stack-composer";
+import {VpcDetails} from "../network-stack";
 import {Size} from "aws-cdk-lib/core";
-import {IVpc, SecurityGroup, EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
+import {SecurityGroup, EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
 import {
     CpuArchitecture,
     ServiceManagedVolume,
@@ -25,7 +26,7 @@ import * as rfsDashboard from '../components/reindex-from-snapshot-dashboard.jso
 import { MigrationDashboard } from '../constructs/migration-dashboard';
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
     readonly otelCollectorEnabled: boolean,

@@ -1,10 +1,9 @@
 import {Construct} from "constructs";
+import {VpcDetails} from "./network-stack";
 import {
   EbsDeviceVolumeType,
   ISecurityGroup,
-  IVpc,
   SecurityGroup,
-  SubnetFilter,
   SubnetSelection
 } from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
@@ -54,10 +53,8 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly appLogEnabled?: boolean,
   readonly appLogGroup?: string,
   readonly nodeToNodeEncryptionEnabled?: boolean,
-  readonly vpc?: IVpc,
-  readonly vpcSubnetIds?: string[],
+  readonly vpcDetails?: VpcDetails,
   readonly vpcSecurityGroupIds?: string[],
-  readonly vpcAZCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy,
   readonly domainAccessSecurityGroupParameter?: string
 
@@ -161,17 +158,14 @@ export class OpenSearchDomainStack extends Stack {
         secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
       })
     }
-    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.vpcAZCount && props.vpcAZCount > 1 ?
-        {enabled: true, availabilityZoneCount: props.vpcAZCount} : undefined
+    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.vpcDetails?.azCount && props.vpcDetails.azCount > 1 ?
+        {enabled: true, availabilityZoneCount: props.vpcDetails.azCount} : undefined;
 
     // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
     // to the Domain as it has existing behavior to select private subnets from a given VPC
     let domainSubnets: SubnetSelection[]|undefined;
-    if (props.vpc && props.vpcSubnetIds) {
-      const selectSubnets = props.vpc.selectSubnets({
-        subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
-      })
-      domainSubnets = [selectSubnets]
+    if (props.vpcDetails) {
+      domainSubnets = [props.vpcDetails.subnetSelection]
     }
 
     // Retrieve existing SGs to apply to VPC Domain endpoints
@@ -227,7 +221,7 @@ export class OpenSearchDomainStack extends Stack {
         appLogEnabled: props.appLogEnabled,
         appLogGroup: appLG
       },
-      vpc: props.vpc,
+      vpc: props.vpcDetails?.vpc,
       vpcSubnets: domainSubnets,
       securityGroups: securityGroups,
       zoneAwareness: zoneAwarenessConfig,

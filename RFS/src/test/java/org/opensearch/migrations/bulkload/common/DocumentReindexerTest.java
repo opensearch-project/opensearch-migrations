@@ -51,7 +51,7 @@ class DocumentReindexerTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, () -> null);
+        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, null);
         when(mockContext.createBulkRequest()).thenReturn(mock(IRfsContexts.IRequestContext.class));
     }
 
@@ -236,7 +236,7 @@ class DocumentReindexerTest {
     void reindex_shouldRespectMaxConcurrentRequests() {
         int numDocs = 100;
         int maxConcurrentRequests = 5;
-        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, () -> null);
+        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, null);
 
         Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(i));
 

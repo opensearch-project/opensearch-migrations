@@ -1,0 +1,58 @@
+import com.github.gradle.node.npm.task.NpmTask
+
+plugins {
+    id 'base'
+    id 'com.github.node-gradle.node' version '7.1.0'
+}
+
+node {
+    version = '22.14.0'
+    download = true
+
+    // Use this project's directories for node artifacts
+    workDir = file("${project.buildDir}/nodejs")
+    npmWorkDir = file("${project.buildDir}/npm")
+}
+
+def jsSrcDir = "${projectDir}/src"
+def jsDistDir = "${buildDir}/dist"
+
+task installDependencies(type: NpmTask) {
+    description = "Install Node.js dependencies"
+    args = ['install']
+}
+
+task test(type: NpmTask) {
+    description = "Run JavaScript tests with coverage"
+    args = ['run', 'test']
+    dependsOn installDependencies
+}
+
+task lint(type: NpmTask) {
+    description = "Run ESLint on JavaScript files"
+    args = ['run', 'lint']
+    dependsOn installDependencies
+}
+
+task packageJs(type: Copy) {
+    description = "Package JavaScript files for distribution"
+    from jsSrcDir
+    into jsDistDir
+}
+
+task createNpmPackage(type: NpmTask) {
+    description = "Create local npm package (.tgz file)"
+    args = ['pack']
+    dependsOn test
+}
+
+assemble.dependsOn packageJs
+check.dependsOn test
+
+configurations {
+    jsResources
+}
+
+artifacts {
+    jsResources file: file("${buildDir}/dist"), builtBy: packageJs
+}
