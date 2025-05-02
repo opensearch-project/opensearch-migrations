@@ -101,7 +101,7 @@ export default function TransformationItem({
             </SpaceBetween>
           }
         >
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <SpaceBetween direction="horizontal" size="xs">
             {isEditing ? (
               <Input
                 value={editName}
@@ -126,14 +126,12 @@ export default function TransformationItem({
                 autoFocus
               />
             ) : (
-              <>
+              <SpaceBetween direction="horizontal" size="s">
                 {item.data.name}
-                <div style={{ marginLeft: "10px" }}>
-                  <SaveStatusIndicator state={saveStatus} />
-                </div>
-              </>
+                <SaveStatusIndicator state={saveStatus} />
+              </SpaceBetween>
             )}
-          </div>
+          </SpaceBetween>
         </Header>
       }
       i18nStrings={transformationBoardItemStrings}
