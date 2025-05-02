@@ -10,7 +10,7 @@ import Board, { BoardProps } from "@cloudscape-design/board-components/board";
 import { Transformation, usePlayground } from "@/context/PlaygroundContext";
 import TransformationItem from "./TransformationItem";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
-import { boardI18nStrings } from "./boardI18nStrings";
+import { transformationBoardLayoutStrings } from "./TransformationBoardLayoutStrings";
 
 export default function TransformationSection() {
   const { state } = usePlayground();
@@ -116,7 +116,7 @@ export default function TransformationSection() {
             columnSpan: 4, // Always full width
             data: transform,
           }))}
-          i18nStrings={boardI18nStrings}
+          i18nStrings={transformationBoardLayoutStrings}
           onItemsChange={handleItemsChange}
           renderItem={(item: BoardProps.Item<Transformation>) => (
             <TransformationItem

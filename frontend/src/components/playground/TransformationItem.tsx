@@ -9,7 +9,7 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import Input from "@cloudscape-design/components/input";
 import { BoardProps } from "@cloudscape-design/board-components/board";
 import { Transformation } from "@/context/PlaygroundContext";
-import { boardItemI18nStrings } from "./boardItemI18nStrings";
+import { transformationBoardItemStrings } from "./TransformationBoardItemStrings";
 import AceEditorComponent from "./AceEditorComponent";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import SaveStatusIndicator from "@/components/playground/SaveStatusIndicator";
@@ -45,7 +45,7 @@ export default function TransformationItem({
 
     if (isEditing) {
       if (editName.trim()) {
-        updateTransformation(item.id, editName, item.data.content);
+        updateTransformation(item.id, editName.trim(), item.data.content);
       } else {
         setEditName(item.data.name); // Reset to original if empty
       }
@@ -136,7 +136,7 @@ export default function TransformationItem({
           </div>
         </Header>
       }
-      i18nStrings={boardItemI18nStrings}
+      i18nStrings={transformationBoardItemStrings}
     >
       <AceEditorComponent
         itemId={item.id}

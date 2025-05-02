@@ -21,6 +21,7 @@ import "ace-builds/css/theme/github.css";
 // Import workers
 import jsonWorkerUrl from "ace-builds/src-noconflict/worker-json";
 import javascriptWorkerUrl from "ace-builds/src-noconflict/worker-javascript";
+import { defaultContent } from "./DefaultTransformationContent";
 
 // Configure Ace to use the imported workers
 ace.config.setModuleUrl("ace/mode/json_worker", jsonWorkerUrl);
@@ -28,24 +29,14 @@ ace.config.setModuleUrl("ace/mode/javascript_worker", javascriptWorkerUrl);
 
 interface AceEditorComponentProps {
   itemId: string;
-  mode?: "json" | "javascript";
-  formatRef?: React.RefObject<(() => void) | null>;
-  onSaveStatusChange?: (status: SaveState) => void;
+  mode: "json" | "javascript";
+  formatRef: React.RefObject<(() => void) | null>;
+  onSaveStatusChange: (status: SaveState) => void;
 }
-
-const defaultContent: string = `function main(context) {
-  return (document) => {
-    // Your transformation logic here
-    return document;
-  };
-}
-// Entrypoint function
-(() => main)();
-`;
 
 export default function AceEditorComponent({
   itemId,
-  mode = "json",
+  mode,
   formatRef,
   onSaveStatusChange,
 }: Readonly<AceEditorComponentProps>) {
@@ -59,7 +50,7 @@ export default function AceEditorComponent({
   // Refs and dimension state used for resizing the AceEditor instance
   const editorRef = useRef<AceEditor>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 500, height: 300 }); // Default fallback values
+  const [dimensions, setDimensions] = useState({ width: 500, height: 300 });
 
   // Find the transformation by ID
   const transformation = state.transformations.find((t) => t.id === itemId);
@@ -85,13 +76,11 @@ export default function AceEditorComponent({
   useEffect(() => {
     if (transformation) {
       setContent(transformation.content || defaultContent);
-      if (onSaveStatusChange) {
-        onSaveStatusChange({
-          status: SaveStatus.SAVED,
-          savedAt: new Date(Date.now()),
-          errors: [],
-        });
-      }
+      onSaveStatusChange({
+        status: SaveStatus.SAVED,
+        savedAt: new Date(Date.now()),
+        errors: [],
+      });
     }
   }, [transformation, onSaveStatusChange]);
 
@@ -105,24 +94,20 @@ export default function AceEditorComponent({
 
     // Check for validation errors
     if (validationErrorsRef.current.length > 0) {
-      if (onSaveStatusChange) {
-        onSaveStatusChange({
-          status: SaveStatus.BLOCKED,
-          savedAt: null,
-          errors: validationErrorsRef.current,
-        });
-      }
+      onSaveStatusChange({
+        status: SaveStatus.BLOCKED,
+        savedAt: null,
+        errors: validationErrorsRef.current,
+      });
       return;
     }
 
     updateTransformation(itemId, transformation.name, activeContent);
-    if (onSaveStatusChange) {
-      onSaveStatusChange({
-        status: SaveStatus.SAVED,
-        savedAt: new Date(Date.now()),
-        errors: [],
-      });
-    }
+    onSaveStatusChange({
+      status: SaveStatus.SAVED,
+      savedAt: new Date(Date.now()),
+      errors: [],
+    });
   }, [
     content,
     itemId,
@@ -183,17 +168,15 @@ export default function AceEditorComponent({
 
     // Check for validation errors
     if (validationErrorsRef.current.length > 0) {
-      if (onSaveStatusChange) {
-        onSaveStatusChange({
-          status: SaveStatus.BLOCKED,
-          savedAt: null,
-          errors: validationErrorsRef.current,
-        });
-      }
+      onSaveStatusChange({
+        status: SaveStatus.BLOCKED,
+        savedAt: null,
+        errors: validationErrorsRef.current,
+      });
     } else {
       // Mark as unsaved if content is different from saved content
       const isSaved = transformation.content === newContent;
-      if (onSaveStatusChange && !isSaved) {
+      if (!isSaved) {
         onSaveStatusChange({
           status: SaveStatus.UNSAVED,
           savedAt: null,
@@ -208,9 +191,7 @@ export default function AceEditorComponent({
 
   // Expose formatCode function to parent component via ref
   useEffect(() => {
-    if (formatRef) {
-      formatRef.current = formatCode;
-    }
+    formatRef.current = formatCode;
   }, [formatCode, formatRef]);
 
   return (
