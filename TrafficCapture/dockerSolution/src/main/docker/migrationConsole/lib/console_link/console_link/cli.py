@@ -15,7 +15,7 @@ import console_link.middleware.tuples as tuples_
 
 from console_link.models.cluster import HttpMethod
 from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexDoesntExist
-from console_link.models.utils import ExitCode
+from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 from click.shell_completion import get_completion_class
@@ -201,6 +201,13 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
 # ##################### SNAPSHOT ###################
 
 
+def _external_snapshots_check(snapshot):
+    if snapshot.snapshot_repo_name != DEFAULT_SNAPSHOT_REPO_NAME:
+        logger.warning(f"External snapshot detected, normally snapshot commands are not necessary for external "
+                       f"snapshots. The snapshot repository: '{snapshot.snapshot_repo_name}' must belong to "
+                       f"the source cluster as snapshot commands will perform requests to the source cluster")
+
+
 @cli.group(name="snapshot",
            help="Commands to create and check status of snapshots of the source cluster.")
 @click.pass_obj
@@ -208,6 +215,9 @@ def snapshot_group(ctx):
     """All actions related to snapshot creation"""
     if ctx.env.snapshot is None:
         raise click.UsageError("Snapshot is not set")
+    if ctx.env.source_cluster is None:
+        raise click.UsageError("Snapshot commands require a source cluster to be defined")
+    _external_snapshots_check(ctx.env.snapshot)
 
 
 @snapshot_group.command(name="create", context_settings=dict(ignore_unknown_options=True))

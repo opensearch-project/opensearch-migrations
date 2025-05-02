@@ -2,24 +2,23 @@ package org.opensearch.migrations.cli;
 
 import java.util.List;
 
+import org.opensearch.migrations.cli.Items.ItemsBuilder;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.opensearch.migrations.matchers.ContainsStringCount.containsStringCount;
 import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
+import static org.opensearch.migrations.metadata.CreationResult.CreationFailureType.TARGET_CLUSTER_FAILURE;
 
 public class ItemsTest {
     @Test
     void testAsString_empty() {
-        var items = Items.builder()
-            .indexTemplates(List.of())
-            .componentTemplates(List.of())
-            .indexes(List.of())
-            .aliases(List.of())
+        var items = createEmptyItemsBuilder()
             .build();
 
         var result = items.asCliOutput();
@@ -71,14 +70,11 @@ public class ItemsTest {
 
     @Test
     void testAsString_indexTemplates_failures() {
-        var items = Items.builder()
+        var items = createEmptyItemsBuilder()
             .indexTemplates(List.of(
                 CreationResult.builder().name("it1").failureType(CreationFailureType.ALREADY_EXISTS).build(),
                 CreationResult.builder().name("it2").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).exception(new RuntimeException("403 Forbidden")).build()
             ))
-            .componentTemplates(List.of())
-            .indexes(List.of())
-            .aliases(List.of())
             .build();
 
         var result = items.asCliOutput();
@@ -96,9 +92,7 @@ public class ItemsTest {
 
     @Test
     void testAsString_itemOrdering() {
-        var items = Items.builder()
-            .indexTemplates(List.of())
-            .componentTemplates(List.of())
+        var items = createEmptyItemsBuilder()
             .indexes(List.of(
                 CreationResult.builder().name("i1").build(),
                 CreationResult.builder().name("i2").build(),
@@ -106,7 +100,6 @@ public class ItemsTest {
                 CreationResult.builder().name("i3").build(),
                 CreationResult.builder().name("i4").build()
             ))
-            .aliases(List.of())
             .build();
 
         var result = items.asCliOutput();
@@ -119,5 +112,37 @@ public class ItemsTest {
         assertThat(result, containsString("Aliases:"));
         assertThat(result, containsStringCount(Items.NONE_FOUND_MARKER, 3));
         assertThat(result, hasLineCount(12));
+    }
+
+    @Test
+    void testFailureTypes() {
+        var items = createEmptyItemsBuilder()
+            .indexes(List.of(
+                CreationResult.builder().name("i1").build(),
+                CreationResult.builder().name("i2").failureType(null).build(),
+                CreationResult.builder().name("i3").exception(new RuntimeException("exception-without-failure-type")).build(),
+                CreationResult.builder().name("i4").failureType(TARGET_CLUSTER_FAILURE).build(),
+                CreationResult.builder().name("i5").failureType(TARGET_CLUSTER_FAILURE).exception(new RuntimeException("re1")).build(),
+                CreationResult.builder().name("i6").failureType(TARGET_CLUSTER_FAILURE).exception(new RuntimeException()).build()
+            ))
+            .build();
+
+        var result = items.asCliOutput();
+        assertThat(result, containsString("i1"));
+        assertThat(result, containsString("i2"));
+        assertThat(result, containsString("i3"));
+        assertThat("Results with no errors do not print exception info", result, not(containsString("exception-without-failure-type")));
+        assertThat(result, containsString("i4 failed on target cluster"));
+        assertThat(result, containsString("i5 failed on target cluster: re1"));        
+        assertThat("Expect an exception's toString() if there was no message in the exception", result, containsString("i6 failed on target cluster: java.lang.RuntimeException"));
+        assertThat(result, hasLineCount(15));
+    }
+
+    private ItemsBuilder createEmptyItemsBuilder() {
+        return Items.builder()
+            .indexTemplates(List.of())
+            .componentTemplates(List.of())
+            .indexes(List.of())
+            .aliases(List.of());
     }
 }

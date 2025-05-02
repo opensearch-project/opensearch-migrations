@@ -26,6 +26,7 @@ class ClusterVersion:
 ElasticsearchV5_X = ClusterVersion("ES_5.x")
 ElasticsearchV6_X = ClusterVersion("ES_6.x")
 ElasticsearchV7_X = ClusterVersion("ES_7.x")
+ElasticsearchV8_X = ClusterVersion("ES_8.x")
 OpensearchV1_X = ClusterVersion("OS_1.x")
 OpensearchV2_X = ClusterVersion("OS_2.x")
 

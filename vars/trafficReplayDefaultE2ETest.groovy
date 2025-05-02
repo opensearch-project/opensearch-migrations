@@ -67,7 +67,6 @@ def call(Map config = [:]) {
         "encryptionAtRestEnabled": true,
         "vpcEnabled": true,
         "vpcAZCount": 2,
-        "domainAZCount": 2,
         "mskAZCount": 2,
         "migrationAssistanceEnabled": true,
         "replayerOutputEFSRemovalPolicy": "DESTROY",

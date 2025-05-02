@@ -1,5 +1,5 @@
 import logging
-from ..cluster_version import ElasticsearchV5_X, OpensearchV2_X
+from ..cluster_version import ElasticsearchV5_X, ElasticsearchV8_X, OpensearchV2_X
 from .ma_test_base import MATestBase, MigrationType
 from console_link.environment import Environment
 from console_link.models.command_result import CommandResult
@@ -35,6 +35,7 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
     def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV2_X),
+            (ElasticsearchV8_X, OpensearchV2_X),
         ]
         run_isolated = True
         description = "Run OpenSearch Benchmark tests and then runs metadata and backfill."

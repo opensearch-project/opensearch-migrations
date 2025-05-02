@@ -234,9 +234,11 @@ class ECSRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
+
 def get_detailed_status(target_cluster: Cluster, session_name: str) -> Optional[str]:
     values = get_detailed_status_dict(target_cluster, session_name)
     return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
+
 
 def get_detailed_status_dict(target_cluster: Cluster, session_name: str) -> Optional[Dict]:
     # Check whether the working state index exists. If not, we can't run queries.
@@ -290,9 +292,11 @@ def get_detailed_status_dict(target_cluster: Cluster, session_name: str) -> Opti
                        f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
     return values
 
+
 def all_shards_finished_processing(target_cluster: Cluster, session_name: str) -> bool:
     d = get_detailed_status_dict(target_cluster, session_name)
     return d['total'] == d['completed'] and d['incomplete'] == 0 and d['in progress'] == 0 and d['unclaimed'] == 0
+
 
 def perform_archive(target_cluster: Cluster,
                     deployment_status: DeploymentStatus,

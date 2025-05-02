@@ -85,7 +85,10 @@ public class Items {
         }
     }
 
-    private String failureMessage(CreationResult result){
+    private String failureMessage(CreationResult result) {
+        if (result.getFailureType() == null) {
+            return "";
+        }
         var sb = new StringBuilder()
             .append(result.getFailureType().isFatal() ? "ERROR" : "WARN")
             .append(" - ")
@@ -93,8 +96,12 @@ public class Items {
             .append(" ")
             .append(result.getFailureType().getMessage());
 
-        if (result.getFailureType().isFatal()) {
-            sb.append(": " + result.getException().getMessage());
+        if (result.getFailureType().isFatal() && result.getException() != null) {
+            // There might not be an message in the exception, if so fallback to the toString of the exception.  
+            var exceptionDetail = result.getException().getMessage() != null
+                ? result.getException().getMessage()
+                : result.getException().toString();
+            sb.append(": " + exceptionDetail);
         }
 
         return sb.toString();

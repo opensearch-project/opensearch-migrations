@@ -21,6 +21,7 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
     test_case = test_cases[0]
     source_cluster = test_case.source_cluster
     target_cluster = test_case.target_cluster
+    snapshot = test_case.snapshot
     source_con_result: ConnectionResult = connection_check(source_cluster)
     assert source_con_result.connection_established is True
     target_con_result: ConnectionResult = connection_check(target_cluster)
@@ -35,7 +36,7 @@ def setup_and_teardown(request, test_cases: List[MATestBase]):
         logger.info("No transformation files detected to cleanup")
 
     # Clear cluster data
-    clear_cluster(source_cluster)
+    clear_cluster(source_cluster, snapshot)
     clear_indices(target_cluster)
     test_case.target_operations.clear_index_templates(cluster=target_cluster)
 
