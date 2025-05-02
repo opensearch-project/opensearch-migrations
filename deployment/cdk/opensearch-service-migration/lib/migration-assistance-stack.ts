@@ -7,6 +7,12 @@ import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 import {
+    ScalableTarget, 
+    TargetTrackingScalingPolicy, 
+    PredefinedMetric, 
+    ServiceNamespace
+} from 'aws-cdk-lib/aws-applicationautoscaling'; 
+import {
     createMigrationStringParameter,
     MigrationSSMParameter,
     parseRemovalPolicy
@@ -38,8 +44,14 @@ export interface MigrationStackProps extends StackPropsExt {
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
     artifactBucketName: string;
+    clusterArn: string;
+    clusterName: string;
+    bootstrapBrokers: string;
+
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
+        const storageContext = this.node.tryGetContext('MskEbsStorage') || {};
+        const maxCapacity = storageContext.maxCapacity || 16384; // Maximum capacity for each MSK broker node
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: `migration-msk-config-${props.stage}`,
@@ -62,6 +74,9 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpcDetails.vpc,
             vpcSubnets: props.vpcDetails.subnetSelection,
             securityGroups: [streamingSecurityGroup],
+            ebsStorageInfo: {
+                volumeSize: 1750 // Starting capacity for each MSK broker node
+            },
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
                 // Current limitation of alpha construct, would like to get latest revision dynamically
@@ -82,6 +97,22 @@ export class MigrationAssistanceStack extends Stack {
             },
             removalPolicy: RemovalPolicy.DESTROY
         });
+
+            const scalableTarget = new ScalableTarget(this, 'MSKScalableTarget', {
+                serviceNamespace: ServiceNamespace.KAFKA,
+                scalableDimension: 'kafka:broker-storage:VolumeSize',
+                resourceId: mskCluster.clusterArn,
+                minCapacity: 1,
+                maxCapacity: maxCapacity,
+            });
+
+            new TargetTrackingScalingPolicy(this, 'MSKScalingPolicy', {
+                scalingTarget: scalableTarget,
+                predefinedMetric: PredefinedMetric.KAFKA_BROKER_STORAGE_UTILIZATION,
+                targetValue: 70,
+                disableScaleIn: true,
+            });
+
 
         createMigrationStringParameter(this, mskCluster.clusterArn, {
             ...props,
