@@ -17,6 +17,7 @@ public class VersionMatchers {
     public static final Predicate<Version> isES_8_X = version -> {
         return version != null && version.getFlavor() == Flavor.ELASTICSEARCH && version.getMajor() == 8;
     };
+    public static final Predicate<Version> isSnapshotReaderCompatibleWithES7 = isES_7_X;
     public static final Predicate<Version> isES_7_10 = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.10.2"));
     public static final Predicate<Version> equalOrGreaterThanES_7_10 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.10"));
 
