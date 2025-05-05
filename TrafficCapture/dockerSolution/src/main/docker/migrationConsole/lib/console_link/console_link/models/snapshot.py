@@ -86,7 +86,7 @@ class Snapshot(ABC):
         command_args = {
             "--snapshot-name": self.snapshot_name,
             "--snapshot-repo-name": self.snapshot_repo_name,
-            "--source-host": self.source_cluster.endpoint
+            "--source-host": self.cluster.endpoint
         }
 
         if self.cluster.auth_type == AuthMethod.BASIC_AUTH:
@@ -184,7 +184,14 @@ class S3Snapshot(Snapshot):
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         timeout = kwargs.get('timeout', 1200)
-        return delete_snapshot_repo(self.cluster, timeout=timeout)
+        return delete_snapshot_repo(self.cluster, self.snapshot_repo_name, timeout=timeout)
+    
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        try:
+            delete_all_snapshots(self.cluster, self.snapshot_repo_name)
+            return CommandResult(success=True, value="All snapshots deleted successfully.")
+        except Exception as e:
+            return CommandResult(success=False, value=f"Failed to delete all snapshots: {str(e)}")
 
 
 class FileSystemSnapshot(Snapshot):
@@ -404,7 +411,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
         raise e
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
+def delete_snapshot_repo(cluster: Cluster, repository: str, timeout: int = 1200) -> None:
     logger.info(f"Deleting repository '{repository}'")
     """
     Delete repository. Should be empty before execution.
