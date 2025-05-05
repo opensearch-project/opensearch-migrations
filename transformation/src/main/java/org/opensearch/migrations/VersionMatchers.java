@@ -14,7 +14,9 @@ public class VersionMatchers {
         int major = version.getMajor();
         return major == 7 || major == 8;
     };
-    public static final Predicate<Version> isES_8_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 8.17"));
+    public static final Predicate<Version> isES_8_X = version -> {
+        return version != null && version.getFlavor() == Flavor.ELASTICSEARCH && version.getMajor() == 8;
+    };
     public static final Predicate<Version> isES_7_10 = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.10.2"));
     public static final Predicate<Version> equalOrGreaterThanES_7_10 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.10"));
 
@@ -50,10 +52,6 @@ public class VersionMatchers {
             }
             var flavorMatches = compatibleFlavor(other.getFlavor()).test(version.getFlavor());
             var majorVersionNumberMatches = version.getMajor() == other.getMajor();
-            // Special case: ES 8.x should be handled by ES 7.10 reader
-            if (other.getFlavor() == Flavor.ELASTICSEARCH && other.getMajor() == 8) {
-                return isES_7_X.test(version);
-            }
             return flavorMatches && majorVersionNumberMatches;
         };
     }
