@@ -125,7 +125,7 @@ public class RemoteReaderClient extends OpenSearchClient {
         try {
             var tree = (ObjectNode) objectMapper.readTree(resp.body);
 
-            if (tree.size() == 1 && tree.fields().next().getValue().isArray()) {
+            if (tree.size() == 1 && tree.properties().iterator().next().getValue().isArray()) {
                 return Mono.just(handleSingleItemArrayValueTree(tree));
             }
     
