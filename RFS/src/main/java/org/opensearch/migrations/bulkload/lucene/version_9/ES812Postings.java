@@ -1,4 +1,4 @@
-package org.opensearch.migrations;
+package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
 import java.util.Arrays;

@@ -24,8 +24,6 @@ public class DirectoryReader9 implements LuceneDirectoryReader {
 
     @SneakyThrows
     public List<LeafReaderContext9> leaves() {
-        wrapped.storedFields().document(0);
-
 
         return wrapped.leaves()
             .stream()
