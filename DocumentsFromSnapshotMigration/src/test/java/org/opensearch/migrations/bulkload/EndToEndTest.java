@@ -86,9 +86,6 @@ public class EndToEndTest extends SourceTestBase {
                 numberOfShards
             );
             sourceClusterOperations.createIndex(indexName, body);
-            if (VersionMatchers.isES_8_X.test(sourceVersion)) {
-                sourceClusterOperations.disableBloom(indexName);
-            }
             targetClusterOperations.createIndex(indexName, body);
 
             // === ACTION: Create two large documents (40MB each) ===

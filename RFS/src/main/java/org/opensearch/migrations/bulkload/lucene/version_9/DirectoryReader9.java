@@ -8,7 +8,6 @@ import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.SneakyThrows;
 import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
 
 @AllArgsConstructor
@@ -22,7 +21,6 @@ public class DirectoryReader9 implements LuceneDirectoryReader {
         return wrapped.maxDoc();
     }
 
-    @SneakyThrows
     public List<LeafReaderContext9> leaves() {
         return wrapped.leaves()
             .stream()
