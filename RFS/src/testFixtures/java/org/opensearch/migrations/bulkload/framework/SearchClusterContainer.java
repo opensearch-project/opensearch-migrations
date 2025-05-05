@@ -29,10 +29,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
     );
-    public static final ContainerVersion ES_V8_10 = new Elasticsearch8Version(
-        "docker.elastic.co/elasticsearch/elasticsearch:8.10.2",
-        Version.fromString("ES 8.10.2")
-    );
     public static final ContainerVersion ES_V8_17 = new Elasticsearch8Version(
         "docker.elastic.co/elasticsearch/elasticsearch:8.17.5",
         Version.fromString("ES 8.17.5")
@@ -78,6 +74,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         ELASTICSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("xpack.security.enabled", "false")
+                .put("bootstrap.system_call_filter", "false")
                 .build()),
         ELASTICSEARCH_OSS(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
