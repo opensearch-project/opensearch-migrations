@@ -23,7 +23,7 @@ final class RemoteSnapshotDataProvider implements Provider {
     @Override
     public List<Index> getIndicesInSnapshot(String snapshotName) {
         var indexes = new ArrayList<Index>();
-        indexData.fields().forEachRemaining(index -> indexes.add(new RemoteIndexSnapshotData(index.getKey())));
+        indexData.properties().forEach(index -> indexes.add(new RemoteIndexSnapshotData(index.getKey())));
 
         return indexes;
     }

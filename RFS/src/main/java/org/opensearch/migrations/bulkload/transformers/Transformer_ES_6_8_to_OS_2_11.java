@@ -41,7 +41,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         var templatesRoot = globalData.getTemplates();
         if (templatesRoot != null) {
             var templates = mapper.createObjectNode();
-            templatesRoot.fields().forEachRemaining(template -> {
+            templatesRoot.properties().forEach(template -> {
                 var templateCopy = (ObjectNode) template.getValue().deepCopy();
                 var indexTemplate = new Index() {
                     @Override
