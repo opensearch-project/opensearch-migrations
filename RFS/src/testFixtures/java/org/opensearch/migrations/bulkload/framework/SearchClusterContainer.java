@@ -29,11 +29,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
     );
-    public static final ContainerVersion ES_V8_10 = new ElasticsearchVersion(
+    public static final ContainerVersion ES_V8_10 = new Elasticsearch8Version(
         "docker.elastic.co/elasticsearch/elasticsearch:8.10.2",
         Version.fromString("ES 8.10.2")
     );
-    public static final ContainerVersion ES_V8_17 = new ElasticsearchVersion(
+    public static final ContainerVersion ES_V8_17 = new Elasticsearch8Version(
         "docker.elastic.co/elasticsearch/elasticsearch:8.17.5",
         Version.fromString("ES 8.17.5")
     );
@@ -257,9 +257,13 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
-            super(imageName, version,
-                    version.toString().startsWith("ES 8.") ? INITIALIZATION_FLAVOR.ELASTICSEARCH_8 : INITIALIZATION_FLAVOR.ELASTICSEARCH,
-                    "elasticsearch");
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
+        }
+    }
+
+    public static class Elasticsearch8Version extends ContainerVersion {
+        public Elasticsearch8Version(String imageName, Version version) {
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
         }
     }
 
