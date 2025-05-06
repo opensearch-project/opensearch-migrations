@@ -188,6 +188,7 @@ class S3Snapshot(Snapshot):
     
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
         try:
+            timeout = kwargs.get('timeout', 1200)
             delete_all_snapshots(self.cluster, self.snapshot_repo_name)
             return CommandResult(success=True, value="All snapshots deleted successfully.")
         except Exception as e:
@@ -239,6 +240,14 @@ class FileSystemSnapshot(Snapshot):
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         timeout = kwargs.get('timeout', 1200)
         return delete_snapshot_repo(self.cluster, timeout=timeout)
+    
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        try:
+            timeout = kwargs.get('timeout', 1200)
+            delete_all_snapshots(self.cluster, self.snapshot_repo_name)
+            return CommandResult(success=True, value="All snapshots deleted successfully.")
+        except Exception as e:
+            return CommandResult(success=False, value=f"Failed to delete all snapshots: {str(e)}")
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str,
@@ -373,7 +382,7 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'mig
     logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
 
 
-def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
+def delete_all_snapshots(cluster: Cluster, repository: str, timeout: int = 1200) -> None:
     logger.info(f"Clearing snapshots from repository '{repository}'")
     """
     Clears all snapshots from the specified repository.
@@ -385,7 +394,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
     try:
         # List all snapshots in the repository
         snapshots_path = f"/_snapshot/{repository}/_all"
-        response = cluster.call_api(snapshots_path, raise_error=True)
+        response = cluster.call_api(snapshots_path, raise_error=True, timeout=timeout)
         logger.debug(f"Raw response: {response.json()}")
         snapshots = response.json().get("snapshots", [])
         logger.info(f"Found {len(snapshots)} snapshots in repository '{repository}'.")
