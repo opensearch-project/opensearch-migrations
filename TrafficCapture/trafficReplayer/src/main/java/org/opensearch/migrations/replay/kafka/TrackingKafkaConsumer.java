@@ -348,7 +348,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                         + "Swallowing and awaiting next metadata refresh to try again.")
                 .addArgument(topic)
                 .log();
-            return new ConsumerRecords<>(Collections.emptyMap());
+            return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
         }
     }
 
