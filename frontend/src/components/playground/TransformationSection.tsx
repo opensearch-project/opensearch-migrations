@@ -12,6 +12,7 @@ import TransformationItem from "./TransformationItem";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { transformationBoardLayoutStrings } from "./TransformationBoardLayoutStrings";
 import { useTransformationExecutor } from "@/hooks/useTransformationExecutor";
+import { defaultContent } from "@/components/playground/DefaultTransformationContent";
 
 export default function TransformationSection() {
   const { state } = usePlayground();
@@ -70,7 +71,10 @@ export default function TransformationSection() {
   }, [state.transformations]);
 
   const handleAddTransformation = () => {
-    addTransformation(`Transformation ${state.transformations.length + 1}`, "");
+    addTransformation(
+      `Transformation ${state.transformations.length + 1}`,
+      defaultContent,
+    );
   };
 
   const handleRemoveTransformation = (id: string) => {
