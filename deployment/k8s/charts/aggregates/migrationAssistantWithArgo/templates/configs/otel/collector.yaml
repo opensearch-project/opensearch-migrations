@@ -1,4 +1,4 @@
-{{- if .Values.conditionalPackageInstalls.otelCollector }}
+{{- if hasKey .Values.conditionalPackageInstalls "otel-collector" }}
 apiVersion: opentelemetry.io/v1beta1
 kind: OpenTelemetryCollector
 metadata:

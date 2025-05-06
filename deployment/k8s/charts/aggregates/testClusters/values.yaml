@@ -95,7 +95,7 @@ source:
       ######## End Search Guard Demo Configuration ########
       discovery.type: single-node
       
-      s3.client.default.endpoint: "http://ma-localstack:4566"
+      s3.client.default.endpoint: "http://localstack:4566"
       s3.client.default.path_style_access: true
 
   minimumMasterNodes: 1

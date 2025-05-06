@@ -1,11 +1,11 @@
 conditionalPackageInstalls:
   # Migration infrastructure components
-  etcd: true                    # used by our Argo workflows for workflow coordination
+  etcd: true                     # used by our Argo workflows for workflow coordination
   cert-manager: true             # needed by the otel operator
-  kube-prometheus-stack: true     # will be needed for auto-scaling
+  kube-prometheus-stack: true    # will be needed for auto-scaling
   opentelemetry-operator: true   # needed for auto-scaling and general observability
   argo-workflows: true           # orchestrates the steps of a migration
-  strimzi-kafka-operator: true    # Required by capture and replay
+  strimzi-kafka-operator: true   # Required by capture and replay
 
   # Support packages - installed as direct dependencies to this chart as opposed to via the installer job
   migration-console: true
@@ -20,11 +20,11 @@ conditionalPackageInstalls:
 
 
 snapshotBucketConfiguration:
-  create: false
+  create: true
   bucketName: snapshot
   region: us-east-2
   useLocalStack: true
-  endpoint: ma-localstack
+  endpoint: localstack
 
 
 extraOtelConfiguration:
@@ -174,7 +174,40 @@ charts:
   - name: argo-workflows
     version: "0.45.11"
     repository: "https://argoproj.github.io/argo-helm"
-    values: {}
+    values:
+      fullnameOverride: "argo"
+      images:
+        pullPolicy: IfNotPresent
+      controller:
+        containerSecurityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+        clusterWorkflowTemplates:
+          enabled: false
+        metricsConfig:
+          enabled: true
+        resourceRateLimit: { "limit": 10.0, "burst": 25 }
+        workflowWorkers: 16
+      mainContainer:
+        env:
+          - name: RESOURCE_STATE_CHECK_INTERVAL
+            value: "1s"
+      executor:
+        env:
+          - name: RESOURCE_STATE_CHECK_INTERVAL
+            value: "1s"
+      server:
+        extraArgs:
+          - --auth-mode=server
+      serviceAccount:
+        create: true
+      singleNamespace: true
+      # Extra workflow configuration
+      workflow:
+        serviceAccount:
+          create: false
+          name: argo-workflow-executor
+
 
   # Will likely be required for auto-scaling.
   # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.

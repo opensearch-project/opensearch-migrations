@@ -16,7 +16,7 @@ spec:
       - name: targets
         value: "T1,T2,T3"
       - name: etcd-endpoints
-        value: "http://ma-etcd.ma.svc.cluster.local:2379"
+        value: "http://etcd.ma.svc.cluster.local:2379"
       - name: etcd-user
         value: "root"
       - name: etcd-password

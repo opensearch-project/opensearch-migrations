@@ -33,14 +33,11 @@ spec:
               #!/bin/sh
               set -e -x
 
-              # Create directory to store NOTES output
               mkdir -p /tmp/helm-notes
-              # Create directory for tracking chart status
               mkdir -p /tmp/helm-status
 
               echo "Starting Helm installation sequence..."
 
-              # Add all repositories first
       {{- range .Values.charts }}
         {{- if (index $.Values.conditionalPackageInstalls .name) }}
               echo "Adding chart repository..."
@@ -48,12 +45,14 @@ spec:
         {{- end }}
       {{- end }}
 
-              helm repo update
+      {{- if (not (empty .Values.charts)) }}
+              time helm repo update
+      {{- end }}
 
-              # Function to check if a dependency is ready
+              # Helper function.  Charts that define "dependsOn" will check a dependency with this.
               check_dependency() {
                 local dependency=$1
-                local max_attempts=60
+                local max_attempts=300
                 local attempt=0
 
                 while [ $attempt -lt $max_attempts ]; do
@@ -64,7 +63,7 @@ spec:
 
                   echo "Waiting for dependency $dependency to complete (attempt $attempt of $max_attempts)..."
                   attempt=$((attempt + 1))
-                  sleep 5
+                  sleep 1
                 done
 
                 echo "Error: Dependency $dependency not ready after maximum attempts"
@@ -79,16 +78,15 @@ spec:
               echo "Preparing chart: {{ .name }}"
 
           {{- if .values }}
-              cat > /tmp/values-{{ .name }}.yaml << EOF
-          {{- .values | toYaml | nindent 16 }}
-              EOF
-
               VALUE_PARAM="--values /tmp/values-{{ .name }}.yaml"
+              cat > /tmp/values-{{ .name }}.yaml << EOF
+            {{- .values | toYaml | nindent 16 }}
+              EOF
           {{- else }}
               VALUE_PARAM=""
           {{- end }}
 
-              # Setup unique output file
+              # Gather the chart installation's output for later aggregation
               NOTES_FILE="/tmp/helm-notes/{{ .name }}.txt"
               echo "==== NOTES for {{ .name }} ====" > $NOTES_FILE
 
@@ -103,18 +101,18 @@ spec:
                 helm upgrade --install \
                   {{ .name }} \
                   chart-repo-{{ .name }}/{{ .name }} \
-              {{- if .version }}
+          {{- if .version }}
                   --version {{ .version }} \
-              {{- end }}
-              {{- if .namespace }}
+          {{- end }}
+          {{- if .namespace }}
                   --namespace {{ .namespace }} \
-              {{- end }}
+          {{- end }}
                   --timeout {{ default "300" .timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
                   $VALUE_PARAM \
-              {{- if .waitForInstallation }}
+          {{- if .waitForInstallation }}
                   --wait
-              {{- end }}
+          {{- end }}
 
                 # Mark this chart as done
                 touch /tmp/helm-status/{{ .name }}.done
@@ -124,12 +122,11 @@ spec:
         {{- end }}
       {{- end }}
 
-              # Wait for all background processes to complete
-              wait
+              # Wait for all helm upgrades/installs to complete
+              time wait
 
               # Combine all notes and create a ConfigMap to store them
               echo "All charts installed successfully!"
-              echo "Aggregating installation notes..."
 
               cat > /tmp/all-notes.yaml << EOF
               apiVersion: v1

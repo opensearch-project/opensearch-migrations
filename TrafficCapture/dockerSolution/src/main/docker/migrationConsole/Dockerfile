@@ -67,8 +67,6 @@ COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 
-COPY workflows /root/workflows
-
 COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
@@ -105,6 +103,9 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console --config-file=/root/lib/console_link/services.yaml completion bash > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
+
+COPY workflows /root/workflows
+
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
 

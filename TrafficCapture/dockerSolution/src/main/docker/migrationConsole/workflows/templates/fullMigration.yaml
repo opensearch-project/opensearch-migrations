@@ -12,7 +12,7 @@ spec:
   arguments:
     parameters:
       - name: etcd-endpoints
-        value: "http://ma-etcd.ma.svc.cluster.local:2379"
+        value: "http://etcd.ma.svc.cluster.local:2379"
       - name: etcd-user
         value: "root"
       - name: etcd-password
