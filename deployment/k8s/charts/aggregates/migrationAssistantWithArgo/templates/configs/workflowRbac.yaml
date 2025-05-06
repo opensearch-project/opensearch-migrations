@@ -1,3 +1,4 @@
+{{ if .Values.conditionalPackageInstalls.argoWorkflows }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -50,3 +51,4 @@ roleRef:
   kind: Role
   name: workflow-deployer-role
   apiGroup: rbac.authorization.k8s.io
+{{ end }}
