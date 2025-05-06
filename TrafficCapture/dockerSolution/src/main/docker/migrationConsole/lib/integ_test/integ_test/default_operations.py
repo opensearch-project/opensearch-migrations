@@ -1,6 +1,5 @@
 import datetime
 import logging
-import os
 import random
 import string
 import json
@@ -178,7 +177,7 @@ class DefaultOperationsLibrary:
 
     def create_transformation_json_file(self, transform_config_data, file_path_to_create: str):
         file_path = Path(file_path_to_create)
-        file_path.parent.mkdir(parents=True, exist_ok=True)  
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with file_path.open("w") as file:
             json.dump(transform_config_data, file, indent=4)
 

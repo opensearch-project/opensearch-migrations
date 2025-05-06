@@ -52,7 +52,8 @@ def pytest_addoption(parser):
                      help="Timeout for backfill completion in hours")
     parser.addoption("--transformation_directory", action="store", default="/shared-logs-output/test-transformations",
                      help="Directory for transformation files")
-    parser.addoption("--large_snapshot_s3_uri", action="store", default="s3://test-large-snapshot-bucket/es56-snapshot/",
+    parser.addoption("--large_snapshot_s3_uri", action="store",
+                     default="s3://test-large-snapshot-bucket/es56-snapshot/",
                      help="S3 URI for large snapshot")
     parser.addoption("--deploy_region", action="store", default="us-east-1",
                      help="AWS region for deployment")

@@ -45,7 +45,7 @@ def fs_snapshot(mock_cluster):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_status(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
-    source_cluster = snapshot.source_cluster
+    source_cluster = snapshot.cluster
     mock_response = mock.Mock()
     mock_response.json.return_value = {
         "snapshots": [
@@ -64,14 +64,15 @@ def test_snapshot_status(request, snapshot_fixture):
     assert result.value == "SUCCESS"
     source_cluster.call_api.assert_called_once_with(
         f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
-        HttpMethod.GET
+        HttpMethod.GET,
+        timeout=300
     )
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_status_full(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
-    source_cluster = snapshot.source_cluster
+    source_cluster = snapshot.cluster
     mock_response = mock.Mock()
     mock_response.json.return_value = {
         "snapshots": [
@@ -363,9 +364,9 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
-                                  "--source-host", snapshot.source_cluster.endpoint,
-                                  "--source-username", snapshot.source_cluster.auth_details.get("username"),
-                                  "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-host", snapshot.cluster.endpoint,
+                                  "--source-username", snapshot.cluster.auth_details.get("username"),
+                                  "--source-password", snapshot.cluster.get_basic_auth_password(),
                                   "--source-insecure",
                                   "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
@@ -391,9 +392,9 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
-                                  "--source-host", snapshot.source_cluster.endpoint,
-                                  "--source-username", snapshot.source_cluster.auth_details.get("username"),
-                                  "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-host", snapshot.cluster.endpoint,
+                                  "--source-username", snapshot.cluster.auth_details.get("username"),
+                                  "--source-password", snapshot.cluster.get_basic_auth_password(),
                                   "--source-insecure",
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -422,7 +423,7 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
-                                  "--source-host", snapshot.source_cluster.endpoint,
+                                  "--source-host", snapshot.cluster.endpoint,
                                   "--source-aws-service-signing-name", service_name,
                                   "--source-aws-region", signing_region,
                                   "--source-insecure",
@@ -433,7 +434,7 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_delete(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
-    source_cluster = snapshot.source_cluster
+    source_cluster = snapshot.cluster
     snapshot.delete()
     source_cluster.call_api.assert_called_once()
     source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
@@ -443,7 +444,7 @@ def test_snapshot_delete(request, snapshot_fixture):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_delete_all_snapshots(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
-    source_cluster = snapshot.source_cluster
+    source_cluster = snapshot.cluster
     source_cluster.call_api.return_value.json = lambda: {"snapshots": [{"snapshot": "test_snapshot"}]}
     source_cluster.call_api.return_value.text = str({"snapshots": [{"snapshot": "test_snapshot"}]})
     snapshot.delete_all_snapshots()
@@ -457,7 +458,7 @@ def test_snapshot_delete_all_snapshots(request, snapshot_fixture):
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
 def test_snapshot_delete_repo(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
-    source_cluster = snapshot.source_cluster
+    source_cluster = snapshot.cluster
     snapshot.delete_snapshot_repo()
     source_cluster.call_api.assert_called_once()
     source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}",

@@ -2,14 +2,13 @@ import logging
 import pytest
 import unittest
 import json
-from requests.exceptions import HTTPError
-from console_link.middleware.clusters import connection_check, clear_cluster, ConnectionResult
+from console_link.middleware.clusters import clear_cluster
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.cli import Context
-from console_link.models.snapshot import S3Snapshot  # Import S3Snapshot
+from console_link.models.snapshot import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from .default_operations import DefaultOperationsLibrary
@@ -18,6 +17,7 @@ from datetime import datetime
 import time
 import shutil
 import os
+
 
 # Test configuration from pytest options
 @pytest.fixture(scope="class")
@@ -39,11 +39,13 @@ def test_config(request):
         'CLUSTER_VERSION': request.config.getoption("--cluster_version")
     }
 
+
 # Constants
 PILOT_INDEX = "pilot_index"  # Name of the index used for testing
 
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
+
 
 def preload_data_cluster_es56(target_cluster: Cluster, test_config):
     config = test_config
@@ -54,14 +56,14 @@ def preload_data_cluster_es56(target_cluster: Cluster, test_config):
             "number_of_replicas": "0"
         },
         "mappings": {
-            "doc": {  
+            "doc": {
                 "properties": {
                     "timestamp": {"type": "date"},
                     "value": {"type": "keyword"},
                     "doc_number": {"type": "integer"},
                     "description": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
                     "metadata": {
-                        "properties": {  
+                        "properties": {
                             "tags": {"type": "keyword"},
                             "category": {"type": "keyword"},
                             "subcategories": {"type": "keyword"},
@@ -127,14 +129,14 @@ def preload_data_cluster_es710(target_cluster: Cluster, test_config):
             "number_of_shards": str(config['NUM_SHARDS']),
             "number_of_replicas": "0"
         },
-        "mappings": {  
+        "mappings": {
             "properties": {
                 "timestamp": {"type": "date"},
                 "value": {"type": "keyword"},
                 "doc_number": {"type": "integer"},
                 "description": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
                 "metadata": {
-                    "properties": {  
+                    "properties": {
                         "tags": {"type": "keyword"},
                         "category": {"type": "keyword"},
                         "subcategories": {"type": "keyword"},
@@ -160,7 +162,7 @@ def preload_data_cluster_es710(target_cluster: Cluster, test_config):
         for i in range(config['DOCS_PER_BATCH']):
             doc_id = f"doc_{j}_{i}"
             bulk_data.extend([
-                {"index": {"_index": PILOT_INDEX, "_id": doc_id}},  
+                {"index": {"_index": PILOT_INDEX, "_id": doc_id}},
                 {
                     "timestamp": datetime.now().isoformat(),
                     "value": f"test_value_{i}",
@@ -321,9 +323,9 @@ def setup_test_environment(target_cluster: Cluster, test_config):
     # Transformer structure
     config = test_config
     transform_config = {
-    "JsonJSTransformerProvider": {
-        "initializationScript": "const MULTIPLICATION_FACTOR = " + str(config['MULTIPLICATION_FACTOR'])+ "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
-        "bindingsObject": "{}"
+        "JsonJSTransformerProvider": {
+            "initializationScript": "const MULTIPLICATION_FACTOR = " + str(config['MULTIPLICATION_FACTOR']) + "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
+            "bindingsObject": "{}"
         }
     }
     ops.create_transformation_json_file([transform_config], os.path.join(config['TRANSFORMATION_DIRECTORY'], "transformation.json"))
@@ -502,7 +504,7 @@ class BackfillTest(unittest.TestCase):
         timeout_seconds = timeout_hours * 3600 if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS'] * 3600
         stuck_count = 0
         
-        while True:  
+        while True:
             if time.time() - start_time > timeout_seconds:
                 raise TimeoutError(f"Backfill monitoring timed out after {timeout_hours if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS']} hours. Last count: {previous_count:,}")
 
@@ -631,9 +633,9 @@ class BackfillTest(unittest.TestCase):
         index_name = PILOT_INDEX
         backfill = pytest.console_env.backfill
 
-        logger.info("\n" + "="*50)
+        logger.info("\n" + "=" * 50)
         logger.info("Starting Document Multiplication Test")
-        logger.info("="*50)
+        logger.info("=" * 50)
 
         # Initial index stats
         initial_doc_count, initial_index_size = self.get_cluster_stats(source, index_name)
@@ -706,13 +708,11 @@ class BackfillTest(unittest.TestCase):
         # Delete the existing snapshot and snapshot repo from the cluster
         max_retries = 5
         retry_interval = 10
-        snapshotdeletion_success = False
 
         for attempt in range(max_retries):
             try:
                 snapshot.delete()
                 snapshot.delete_snapshot_repo()
-                snapshotdeletion_success = True
                 logger.info("Successfully deleted existing snapshot and repository")
                 break
             except Exception as e:
@@ -740,7 +740,7 @@ class BackfillTest(unittest.TestCase):
         endpoint = f"s3.{snapshot_region}.amazonaws.com"
         
         # Print all parameters for better logging and debugging
-        logger.info(f"Snapshot Parameters:")
+        logger.info("Snapshot Parameters:")
         logger.info(f"  - Snapshot Name: {snapshot_name}")
         logger.info(f"  - Repository Name: {snapshot_repo}")
         logger.info(f"  - S3 Bucket: {updated_s3_uri.split('/')[2]}")
@@ -753,7 +753,7 @@ class BackfillTest(unittest.TestCase):
         final_snapshot_config = {
             'snapshot_name': snapshot_name,
             's3': {
-                'repo_uri': updated_s3_uri,  
+                'repo_uri': updated_s3_uri,
                 'role': large_snapshot_role,
                 'aws_region': snapshot_region,
                 'endpoint': endpoint
@@ -769,7 +769,7 @@ class BackfillTest(unittest.TestCase):
         
         # Add detailed success information for easier snapshot retrieval
         logger.info("\n=== Final Snapshot Details ===")
-        logger.info(f"Snapshot successfully stored at:")
+        logger.info("Snapshot successfully stored at:")
         logger.info(f"  - S3 Bucket: {updated_s3_uri.split('/')[2]}")
         logger.info(f"  - S3 Path: {updated_s3_uri}")
         logger.info(f"  - Snapshot Name: {snapshot_name}")

@@ -189,7 +189,7 @@ class S3Snapshot(Snapshot):
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
         try:
             timeout = kwargs.get('timeout', 1200)
-            delete_all_snapshots(self.cluster, self.snapshot_repo_name)
+            delete_all_snapshots(self.cluster, self.snapshot_repo_name, timeout)
             return CommandResult(success=True, value="All snapshots deleted successfully.")
         except Exception as e:
             return CommandResult(success=False, value=f"Failed to delete all snapshots: {str(e)}")
@@ -239,12 +239,12 @@ class FileSystemSnapshot(Snapshot):
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         timeout = kwargs.get('timeout', 1200)
-        return delete_snapshot_repo(self.cluster, timeout=timeout)
+        return delete_snapshot_repo(self.cluster, self.snapshot_repo_name, timeout=timeout)
     
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
         try:
             timeout = kwargs.get('timeout', 1200)
-            delete_all_snapshots(self.cluster, self.snapshot_repo_name)
+            delete_all_snapshots(self.cluster, self.snapshot_repo_name, timeout)
             return CommandResult(success=True, value="All snapshots deleted successfully.")
         except Exception as e:
             return CommandResult(success=False, value=f"Failed to delete all snapshots: {str(e)}")
@@ -342,7 +342,8 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
 def get_snapshot_status_full(cluster: Cluster, snapshot: str,
                              repository: str = 'migration_assistant_repo', timeout: int = 300) -> CommandResult:
     try:
-        repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot, timeout=timeout)
+        if repository == '*':
+            repository = get_repository_for_snapshot(cluster, snapshot, timeout=timeout)
 
         path = f"/_snapshot/{repository}/{snapshot}"
         response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
