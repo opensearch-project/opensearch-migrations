@@ -11,6 +11,16 @@ processors:
       - key: qualifier
         value: ${env:QUALIFIER}
         action: upsert
+  resource/remove_default_attributes:
+    attributes:
+      - key: telemetry.sdk.name
+        action: delete
+      - key: telemetry.sdk.version
+        action: delete
+      - key: telemetry.sdk.language
+        action: delete
+      - key: service.name
+        action: delete
   batch:
     timeout: 10s
     send_batch_size: 8192
@@ -20,10 +30,9 @@ extensions:
 exporters:
   awsemf:
     namespace: 'OpenSearchMigrations'
-    dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing most granular metric
-    metric_declarations:
-      - dimensions: [ [ "qualifier" ] ]
-        metric_name_selectors: [ ".*" ]
+    dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
+    resource_to_telemetry_conversion:
+      enabled: true
   awsxray:
     index_all_attributes: true
 service:
@@ -31,7 +40,7 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [cumulativetodelta, resource/metrics, batch]
+      processors: [resource/remove_default_attributes, resource/metrics, cumulativetodelta, batch]
       exporters: [awsemf]
     traces:
       receivers: [otlp]
