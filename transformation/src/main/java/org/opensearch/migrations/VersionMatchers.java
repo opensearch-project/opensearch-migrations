@@ -74,6 +74,5 @@ public class VersionMatchers {
             var isLowerMajorVersion = other.getMajor() < version.getMajor();
             return flavorMatches && isLowerMajorVersion;
         };
-    };
     }
 }
