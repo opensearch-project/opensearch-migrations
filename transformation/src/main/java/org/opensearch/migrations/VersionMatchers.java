@@ -19,6 +19,8 @@ public class VersionMatchers {
     public static final Predicate<Version> isOS_2_19_OrGreater = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.19.0"))
                                                                     .or(VersionMatchers.isOS_3_X);
 
+    public static final Predicate<Version> anyOS = VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isOS_3_X);
+
 
     private static Predicate<Flavor> compatibleFlavor(final Flavor flavor) {
         return other -> {
