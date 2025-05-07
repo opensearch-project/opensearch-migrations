@@ -13,10 +13,10 @@ public class SnapshotRepo {
         public List<SnapshotRepo.Snapshot> getSnapshots();
 
         // Returns a list of all indices in the specified snapshot
-        public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName);
+        public List<SnapshotRepo.Index> getIndicesInSnapshot();
 
         // Get the ID of a snapshot from its name
-        public String getSnapshotId(String snapshotName);
+        public String getSnapshotId();
 
         // Get the ID of an index from its name
         public String getIndexId(String indexName);

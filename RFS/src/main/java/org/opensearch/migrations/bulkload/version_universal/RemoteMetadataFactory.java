@@ -15,7 +15,7 @@ public class RemoteMetadataFactory implements GlobalMetadata.Factory {
     private final RemoteReaderClient client;
 
     @Override
-    public GlobalMetadata fromRepo(String snapshotName) {
+    public GlobalMetadata fromRepo() {
         log.info("Ignoring snapshot parameter, getting data from cluster directly");
 
         return new RemoteMetadata(client.getClusterData());

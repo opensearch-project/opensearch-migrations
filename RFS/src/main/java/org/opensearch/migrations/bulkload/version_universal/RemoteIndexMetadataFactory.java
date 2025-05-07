@@ -25,7 +25,7 @@ public class RemoteIndexMetadataFactory implements IndexMetadata.Factory {
     }
 
     @Override
-    public IndexMetadata fromRepo(String snapshotName, String indexName) {
+    public IndexMetadata fromRepo(String indexName) {
         log.info("Using remote cluster directly");
         return new RemoteIndexMetadata(indexName, (ObjectNode)getIndexData().get(indexName));
     }
@@ -46,7 +46,7 @@ public class RemoteIndexMetadataFactory implements IndexMetadata.Factory {
     }
 
     @Override
-    public String getIndexFileId(String snapshotName, String indexName) {
+    public String getIndexFileId(String indexName) {
         throw new UnsupportedOperationException("Unimplemented method 'getIndexFileId'");
     }
 }

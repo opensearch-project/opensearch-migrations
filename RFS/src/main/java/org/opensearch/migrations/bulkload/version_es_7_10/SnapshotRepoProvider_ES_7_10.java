@@ -10,9 +10,11 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_7_10 repoData = null;
+    private final String snapshotName;
 
-    public SnapshotRepoProvider_ES_7_10(SourceRepo repo) {
+    public SnapshotRepoProvider_ES_7_10(SourceRepo repo, String snapshotName) {
         this.repo = repo;
+        this.snapshotName = snapshotName;
     }
 
     protected SnapshotRepoData_ES_7_10 getRepoData() {
@@ -30,7 +32,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
     }
 
     @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+    public List<SnapshotRepo.Index> getIndicesInSnapshot() {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
         SnapshotRepoData_ES_7_10.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
             .filter(snapshot -> snapshotName.equals(snapshot.getName()))
@@ -53,7 +55,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         return new ArrayList<>(getRepoData().getSnapshots());
     }
 
-    public String getSnapshotId(String snapshotName) {
+    public String getSnapshotId() {
         for (SnapshotRepoData_ES_7_10.Snapshot snapshot : getRepoData().getSnapshots()) {
             if (snapshot.getName().equals(snapshotName)) {
                 return snapshot.getId();
@@ -72,7 +74,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         return repo;
     }
 
-    public String getIndexMetadataId(String snapshotName, String indexName) {
+    public String getIndexMetadataId(String indexName) {
         String indexId = getIndexId(indexName);
         if (indexId == null) {
             return null;

@@ -39,17 +39,16 @@ public class ClusterProviderRegistry {
      * @param repo The source repo that contains of the snapshot
      * @return The snapshot resource provider
      */
-    public ClusterSnapshotReader getSnapshotReader(Version version, SourceRepo repo) {
+    public ClusterSnapshotReader getSnapshotReader(Version version, SourceRepo repo, String snapshotName) {
         var snapshotProvider = getProviders()
             .stream()
             .filter(p -> p.compatibleWith(version))
             .filter(ClusterSnapshotReader.class::isInstance)
             .map(ClusterSnapshotReader.class::cast)
-            .map(p -> p.initialize(version))
             .findFirst()
             .orElseThrow(() -> new UnsupportedVersionException("No snapshot provider found for version: " + version));
 
-        snapshotProvider.initialize(repo);
+        snapshotProvider.initialize(version, repo, snapshotName);
         log.info("Found snapshot resource reader for version: " + version);
         return snapshotProvider;
     }
