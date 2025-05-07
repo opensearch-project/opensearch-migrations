@@ -14,6 +14,7 @@ kubernetes = ">=30.1.0"
 pytest = "*"
 coverage = "*"
 testcontainers = {extras = ["opensearch"], version = "*"}
+autopep8 = "*"
 
 [requires]
 python_version = "3.11"
