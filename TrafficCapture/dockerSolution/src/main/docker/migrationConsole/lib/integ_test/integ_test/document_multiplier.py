@@ -3,7 +3,7 @@ import pytest
 import unittest
 import json
 from console_link.middleware.clusters import clear_cluster
-from console_link.models.cluster import Cluster, HttpMethod
+from console_link.models.cluster import Cluster, HttpMethod, AuthMethod
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
@@ -11,6 +11,7 @@ from console_link.cli import Context
 from console_link.models.snapshot import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
+from console_link.models.utils import SigV4AuthPlugin
 from .default_operations import DefaultOperationsLibrary
 from .common_utils import execute_api_call
 from datetime import datetime
@@ -20,7 +21,7 @@ import os
 
 
 # Test configuration from pytest options
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="session")
 def test_config(request):
     """Fixture to provide test configuration at class level"""
     return {
@@ -286,6 +287,12 @@ def setup_test_environment(target_cluster: Cluster, test_config):
         config_path = "/config/migration_services.yaml"
         env = Context(config_path).env
         target_cluster = env.target_cluster
+        test_config = request.getfixturevalue('test_config')
+        env.target_cluster.auth_type = AuthMethod.SIGV4
+        env.target_cluster.auth_details = {
+            "region" : test_config['DEPLOY_REGION'],
+            "service" : "es"
+        }
         if target_cluster is None:
             raise Exception("Target cluster is not available")
 
@@ -365,7 +372,7 @@ def setup_backfill(test_config, request):
     """Test setup with backfill lifecycle management"""
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
-    
+    test_config = request.getfixturevalue('test_config')
     # Log config file path
     logger.info(f"Using config file: {config_path}")
     
@@ -384,6 +391,14 @@ def setup_backfill(test_config, request):
     
     # Log target cluster details
     if env.target_cluster:
+        logger.info("Setting Target cluster auth type from default NO_AUTH to be SIGV4_AUTH for Multiplication test")
+        
+        pytest.console_env.target_cluster.auth_type = AuthMethod.SIGV4
+        pytest.console_env.target_cluster.auth_details = {
+            "region" : test_config['DEPLOY_REGION'],
+            "service" : "es"
+        }
+
         logger.info(f"Target cluster endpoint: {env.target_cluster.endpoint}")
         logger.info(f"Target cluster auth type: {env.target_cluster.auth_type}")
         if hasattr(env.target_cluster, 'auth_details'):
@@ -478,6 +493,12 @@ def setup_environment(request):
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
+    test_config = request.getfixturevalue('test_config')
+    pytest.console_env.target_cluster.auth_type = AuthMethod.SIGV4
+    pytest.console_env.target_cluster.auth_details = {
+        "region" : test_config['DEPLOY_REGION'],
+        "service" : "es"
+    }
     
     logger.info("Starting tests...")
     yield

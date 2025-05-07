@@ -18,7 +18,6 @@ import {
   ClusterAuth,
   ClusterBasicAuth,
   ClusterNoAuth,
-  ClusterSigV4Auth,
   MigrationSSMParameter,
   createMigrationStringParameter,
   getMigrationStringParameterValue
@@ -124,7 +123,7 @@ export class OpenSearchDomainStack extends Stack {
     if (adminUserName) {
       clusterAuth.basicAuth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
     } else {
-      clusterAuth.sigv4 = new ClusterSigV4Auth({region: Stack.of(this).region, serviceSigningName: "es"});
+      clusterAuth.noAuth = new ClusterNoAuth();
     }
      this.targetClusterYaml = new ClusterYaml({endpoint: `https://${domain.domainEndpoint}:443`, auth: clusterAuth, version: version.toString()})
 
