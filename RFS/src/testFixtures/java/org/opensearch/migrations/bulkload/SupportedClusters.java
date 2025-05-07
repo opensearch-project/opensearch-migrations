@@ -27,7 +27,7 @@ public class SupportedClusters {
         return List.of(
             SearchClusterContainer.OS_V1_3_16,
             SearchClusterContainer.OS_V2_19_1,
-            SearchClusterContainer.OS_V3_0_0_ALPHA
+            SearchClusterContainer.OS_V3_0_0
         );
     }
 

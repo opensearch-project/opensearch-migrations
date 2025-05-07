@@ -21,6 +21,8 @@ public class VersionMatchers {
 
     public static final Predicate<Version> anyOS = VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isOS_3_X);
 
+    public static final Predicate<Version> isBelowES_6_X = belowMajorVersion(Version.fromString("ES 6.0"));
+
 
     private static Predicate<Flavor> compatibleFlavor(final Flavor flavor) {
         return other -> {
@@ -57,4 +59,24 @@ public class VersionMatchers {
             .and(other2 -> version.getMinor() <= other2.getMinor())
             .test(other);
     }
+
+    /**
+     * Returns a predicate that checks if a given version is of the same flavor as the provided threshold version
+     * and has a major version number that is lower than the threshold's major version.
+     * This method ensures that only versions with a matching flavor are compared, thereby excluding incompatible OS or ES versions.
+     *
+     * @param version The threshold version used for comparison.
+     * @return A predicate that returns {@code true} if the tested version's major version is less than the threshold and the flavors match.
+     */
+    private static Predicate<Version> belowMajorVersion(final Version version) {
+        return other -> {
+            if (other == null) {
+                return false;
+            }
+            var flavorMatches = compatibleFlavor(other.getFlavor()).test(version.getFlavor());
+            var isLowerMajorVersion = other.getMajor() < version.getMajor();
+            return flavorMatches && isLowerMajorVersion;
+        };
+    }
+
 }
