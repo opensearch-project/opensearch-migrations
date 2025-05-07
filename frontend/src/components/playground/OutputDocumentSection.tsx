@@ -2,7 +2,8 @@ import Container from "@cloudscape-design/components/container";
 import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
-import { usePlayground } from "../../context/PlaygroundContext";
+import { usePlayground } from "@/context/PlaygroundContext";
+import { DocumentItemWithPopoverCodeView } from "./DocumentItemWithPopoverCodeView";
 
 // Inner component that uses the usePlayground hook
 export default function OutputDocumentSection() {
@@ -14,7 +15,9 @@ export default function OutputDocumentSection() {
         {state.outputDocuments.length === 0 ? (
           <Box>No output documents.</Box>
         ) : (
-          state.outputDocuments.map((doc) => <Box key={doc.id}>{doc.name}</Box>)
+          state.outputDocuments.map((doc) => (
+            <DocumentItemWithPopoverCodeView key={doc.id} document={doc} />
+          ))
         )}
       </SpaceBetween>
     </Container>

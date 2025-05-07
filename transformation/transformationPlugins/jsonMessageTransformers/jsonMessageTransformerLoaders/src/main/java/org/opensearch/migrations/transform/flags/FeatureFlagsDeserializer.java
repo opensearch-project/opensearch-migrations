@@ -1,7 +1,6 @@
 package org.opensearch.migrations.transform.flags;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.Map;
 
 import com.fasterxml.jackson.core.JsonParser;
@@ -26,9 +25,7 @@ public class FeatureFlagsDeserializer extends StdDeserializer<FeatureFlags> {
         FeatureFlags featureFlags = new FeatureFlags();
         JsonNode node = p.getCodec().readTree(p);
 
-        Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-        while (fields.hasNext()) {
-            Map.Entry<String, JsonNode> entry = fields.next();
+        for (var entry : node.properties()) {
             final var key = entry.getKey();
             final var value = entry.getValue();
             if (value.isObject()) {

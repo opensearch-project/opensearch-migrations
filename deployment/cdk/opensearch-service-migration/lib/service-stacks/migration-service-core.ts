@@ -58,18 +58,18 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpcDetails.vpc
         })
 
-        this.serviceTaskRole = props.taskRole ? props.taskRole : createDefaultECSTaskRole(this, props.serviceName)
+        this.serviceTaskRole = props.taskRole ?? createDefaultECSTaskRole(this, props.serviceName)
         props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
-            ephemeralStorageGiB: Math.max(props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75, 21), // valid values 21 - 200
+            ephemeralStorageGiB: Math.max(props.ephemeralStorageGiB ?? 75, 21), // valid values 21 - 200
             runtimePlatform: {
                 operatingSystemFamily: OperatingSystemFamily.LINUX,
                 cpuArchitecture: props.cpuArchitecture
             },
             family: `migration-${props.stage}-${props.serviceName}`,
-            memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
-            cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
+            memoryLimitMiB: props.taskMemoryLimitMiB ?? 1024,
+            cpu: props.taskCpuUnits ?? 256,
             taskRole: this.serviceTaskRole
         });
         if (props.volumes) {
