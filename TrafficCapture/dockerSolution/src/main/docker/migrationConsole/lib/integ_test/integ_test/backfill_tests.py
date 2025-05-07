@@ -7,14 +7,16 @@ from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
 from console_link.models.metadata import Metadata
+from console_link.models.snapshot import Snapshot
 from console_link.cli import Context
-from common_operations import (get_document, create_document, create_index, check_doc_counts_match,
-                               EXPECTED_BENCHMARK_DOCS)
+from .common_utils import EXPECTED_BENCHMARK_DOCS
+from .default_operations import DefaultOperationsLibrary
 
 logger = logging.getLogger(__name__)
+ops = DefaultOperationsLibrary()
 
 
-def preload_data(source_cluster: Cluster, target_cluster: Cluster):
+def preload_data(source_cluster: Cluster, target_cluster: Cluster, snapshot: Snapshot):
     # Confirm source and target connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
     assert source_con_result.connection_established is True
@@ -22,16 +24,16 @@ def preload_data(source_cluster: Cluster, target_cluster: Cluster):
     assert target_con_result.connection_established is True
 
     # Clear all data from clusters
-    clear_cluster(source_cluster)
+    clear_cluster(source_cluster, snapshot)
     clear_cluster(target_cluster)
 
     # Preload data that test cases will verify is migrated
     # test_backfill_0001
     index_name = f"test_backfill_0001_{pytest.unique_id}"
     doc_id = "backfill_0001_doc"
-    create_index(cluster=source_cluster, index_name=index_name)
-    create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
-                    expected_status_code=HTTPStatus.CREATED)
+    ops.create_index(cluster=source_cluster, index_name=index_name)
+    ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                        expected_status_code=HTTPStatus.CREATED)
 
     # test_backfill_0002
     run_test_benchmarks(source_cluster)
@@ -44,7 +46,8 @@ def setup_backfill(request):
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
     preload_data(source_cluster=pytest.console_env.source_cluster,
-                 target_cluster=pytest.console_env.target_cluster)
+                 target_cluster=pytest.console_env.target_cluster,
+                 snapshot=pytest.console_env.snapshot)
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
     metadata: Metadata = pytest.console_env.metadata
@@ -85,23 +88,23 @@ class BackfillTests(unittest.TestCase):
         target_cluster: Cluster = pytest.console_env.target_cluster
 
         # Assert preloaded document exists
-        get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
+        ops.get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
 
         # TODO Determine when backfill is completed
 
-        get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id, max_attempts=30, delay=30.0,
-                     test_case=self)
+        ops.get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id, max_attempts=30, delay=30.0,
+                         test_case=self)
 
     def test_backfill_0002_sample_benchmarks(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster
 
         # Confirm documents on source
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
-                               test_case=self)
+        ops.check_doc_counts_match(cluster=source_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
+                                   test_case=self)
 
         # TODO Determine when backfill is completed
 
         # Confirm documents on target after backfill
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
-                               max_attempts=30, delay=30.0, test_case=self)
+        ops.check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
+                                   max_attempts=30, delay=30.0, test_case=self)

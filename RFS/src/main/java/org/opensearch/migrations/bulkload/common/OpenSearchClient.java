@@ -7,10 +7,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -19,6 +21,7 @@ import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +52,7 @@ public abstract class OpenSearchClient {
     /** Retries for up 10 minutes */
     private static final Retry BULK_RETRY_STRATEGY = Retry.backoff(BULK_MAX_RETRY_ATTEMPTS, BULK_BACKOFF)
         .maxBackoff(BULK_MAX_BACKOFF);
+    public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
 
     static {
@@ -71,6 +75,65 @@ public abstract class OpenSearchClient {
 
     public Version getClusterVersion() {
         return version;
+    }
+
+    private JsonNode getSettingFromPersistentOrDefaults(String path, ObjectNode settings) {
+        return settings.get("persistent").has(path) ?
+            settings.get("persistent").get(path) : settings.get("defaults").get(path);
+    }
+
+    public AwarenessAttributeSettings getAwarenessAttributeSettings() {
+        String settingsPath = "_cluster/settings?flat_settings&include_defaults";
+        var getResponse = client.getAsync(settingsPath, null)
+            .flatMap(resp -> {
+                if (resp.statusCode == HttpURLConnection.HTTP_OK)
+                {
+                    return Mono.just(resp);
+                } else {
+                    String errorMessage = "Could not retrieve cluster settings: " + settingsPath + ". " + getString(resp);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
+            .doOnError(e -> log.error(e.getMessage()))
+            .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+            .block();
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or " +
+            "an exception should have been thrown.");
+        ObjectNode settings;
+
+        String balanceIsEnabledSetting = "cluster.routing.allocation.awareness.balance";
+
+        try {
+            settings = objectMapper.readValue(getResponse.body, ObjectNode.class);
+        } catch (Exception e) {
+            throw new OperationFailed("Could not parse settings values", getResponse);
+        }
+        boolean balanceIsEnabled = Optional.ofNullable(getSettingFromPersistentOrDefaults(balanceIsEnabledSetting, settings))
+            .map(JsonNode::asBoolean)
+            .orElse(false);
+
+        if (!balanceIsEnabled) {
+            return new org.opensearch.migrations.AwarenessAttributeSettings(false, 0);
+        }
+        AtomicInteger attributeValues = new AtomicInteger(1);
+
+        String balanceAttributeSetting = "cluster.routing.allocation.awareness.attributes";
+        String balanceAttributeValues = "cluster.routing.allocation.awareness.force.";
+
+        Optional.ofNullable(getSettingFromPersistentOrDefaults(balanceAttributeSetting, settings))
+            .ifPresent(attributes -> {
+                attributes.forEach(attributeName -> {
+                    Optional.ofNullable(getSettingFromPersistentOrDefaults(
+                            balanceAttributeValues + attributeName.asText() + ".values", settings))
+                        .map(JsonNode::asText)
+                        .map(text -> text.split(","))
+                        .ifPresent(values -> attributeValues.getAndAccumulate(
+                            values.length,
+                            Math::max
+                        ));
+                });
+            });
+        return new AwarenessAttributeSettings(true, attributeValues.get());
     }
 
     /*
@@ -316,9 +379,20 @@ public abstract class OpenSearchClient {
         return BULK_RETRY_STRATEGY;
     }
 
+    private static String truncateMessageIfNeeded(String input, int maxCharacters) {
+        if (input == null || input.length() <= maxCharacters) {
+            return input;
+        }
+        int partLength = maxCharacters / 2;
+        String head = input.substring(0, partLength);
+        String tail = input.substring(input.length() - partLength);
+        return head + "... [truncated] ..." + tail;
+    }
+
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
                                               IRfsContexts.IRequestContext context)
     {
+        final AtomicInteger attemptCounter = new AtomicInteger(0);
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
@@ -343,10 +417,12 @@ public abstract class OpenSearchClient {
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
                     log.atWarn()
-                        .setMessage("After bulk request on index '{}', {} more documents have succeed, {} remain")
+                        .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
+                        .addArgument(attemptCounter.incrementAndGet())
                         .addArgument(indexName)
                         .addArgument(successfulDocs::size)
                         .addArgument(docsMap::size)
+                        .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
                         .log();
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
                 });

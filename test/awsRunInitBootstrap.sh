@@ -92,7 +92,39 @@ get_instance_id() {
   echo "$instance_id"
 }
 
+check_ssm_ready() {
+    local instance_id="$1"
+    local timeout="${2:-60}"   # default 60 seconds
+    local interval="${3:-5}"   # default 5 seconds
+    local elapsed=0
+    local ssm_status
+
+    echo "Checking for SSM registration of instance ${instance_id}..."
+
+    while [ $elapsed -lt $timeout ]; do
+        ssm_status=$(aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=${instance_id}" \
+            --query "InstanceInformationList[0].PingStatus" --output text)
+
+        if [ -z "$ssm_status" ] || [ "$ssm_status" = "None" ]; then
+            echo "Instance ${instance_id} is not currently registered with SSM."
+        elif [ "$ssm_status" != "Online" ]; then
+            echo "Instance ${instance_id} SSM PingStatus is not Online. Current status: ${ssm_status}"
+        else
+            echo "Instance ${instance_id} is ready (running and SSM PingStatus is Online)."
+            return 0
+        fi
+
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+
+    echo "Instance ${instance_id} was not ready for SSM after ${timeout} seconds."
+    exit 1
+}
+
 instance_id=$(get_instance_id)
+check_ssm_ready "$instance_id"
 init_command="cd /opensearch-migrations && ./initBootstrap.sh"
 verify_command="cdk --version && docker --version && java --version && python3 --version"
 if [ "$WORKFLOW" = "ALL" ]; then

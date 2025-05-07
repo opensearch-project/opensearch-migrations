@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/deployment/migration-assistant-solution"
+    schedule:
+      interval: "weekly"
+    groups:
+      migration-assistant-npm:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/deployment/cdk/opensearch-service-migration"
+    schedule:
+      interval: "weekly"
+    groups:
+      opensearch-cdk-npm:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gradle-all:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "org.opensearch:*"
+      - dependency-name: "org.opensearch.plugin:*"
+      - dependency-name: "org.apache.lucene:*"
+      - dependency-name: "io.opentelemetry.semconv:*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions-all:
+        patterns:
+          - "*"

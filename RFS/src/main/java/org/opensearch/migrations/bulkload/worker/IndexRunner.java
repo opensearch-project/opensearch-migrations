@@ -3,8 +3,10 @@ package org.opensearch.migrations.bulkload.worker;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.IndexTransformationException;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
@@ -25,38 +27,39 @@ public class IndexRunner {
     private final IndexCreator indexCreator;
     private final Transformer transformer;
     private final List<String> indexAllowlist;
+    private final AwarenessAttributeSettings awarenessAttributeSettings;
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
         var results = IndexMetadataResults.builder();
         var skipCreation = FilterScheme.filterByAllowList(indexAllowlist).negate();
 
-        repoDataProvider.getIndicesInSnapshot(snapshotName)
-            .stream()
-            .forEach(index -> {
-                List<CreationResult> creationResults;
-                if (skipCreation.test(index.getName())) {
-                    log.atInfo()
+        for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
+            List<CreationResult> creationResults;
+            if (skipCreation.test(index.getName())) {
+                log.atInfo()
                         .setMessage("Index {} was not part of the allowlist and will not be migrated.")
                         .addArgument(index.getName())
                         .log();
-                    creationResults = List.of(CreationResult.builder()
+                creationResults = List.of(CreationResult.builder()
                         .name(index.getName())
                         .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
                         .build());
-                } else {
-                    creationResults = createIndex(index.getName(), mode, context);
-                }
+            } else {
+                creationResults = createIndex(index.getName(), mode, context);
+            }
 
-                creationResults.forEach(results::index);
+            creationResults.forEach(results::index);
 
-                var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
-                indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
-                    var aliasResult = CreationResult.builder().name(alias);
+            var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+            indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
+                var aliasResult = CreationResult.builder().name(alias);
+                if (!creationResults.isEmpty()) {
                     aliasResult.failureType(creationResults.get(0).getFailureType());
-                    results.alias(aliasResult.build());
-                });
+                }
+                results.alias(aliasResult.build());
             });
+        }
         return results.build();
     }
 
@@ -67,15 +70,7 @@ public class IndexRunner {
         try {
             List<IndexMetadata> transformedMetadataList = transformer.transformIndexMetadata(indexMetadata);
             for (IndexMetadata transformedMetadata : transformedMetadataList) {
-                try {
-                    creationResults.add(indexCreator.create(transformedMetadata, mode, context));
-                } catch (Exception e) {
-                    creationResults.add(CreationResult.builder()
-                        .name(indexName)
-                        .exception(new IndexTransformationException(indexName, e))
-                        .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
-                        .build());
-                }
+                creationResults.add(createInner(indexName, mode, context, transformedMetadata));
             }
         } catch (Exception e) {
             creationResults.add(CreationResult.builder()
@@ -85,5 +80,20 @@ public class IndexRunner {
                 .build());
         }
         return creationResults;
+    }
+
+    private CreationResult createInner(String indexName,
+                                       MigrationMode mode,
+                                       ICreateIndexContext context,
+                                       IndexMetadata transformedMetadata) {
+        try {
+            return indexCreator.create(transformedMetadata, mode, awarenessAttributeSettings, context);
+        } catch (Exception e) {
+            return CreationResult.builder()
+                .name(indexName)
+                .exception(new IndexTransformationException(indexName, e))
+                .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
+                .build();
+        }
     } 
 }

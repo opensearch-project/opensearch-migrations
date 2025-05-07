@@ -19,6 +19,7 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
     public boolean compatibleWith(Version version) {
         return VersionMatchers.isES_6_X
             .or(VersionMatchers.isES_7_X)
+            .or(VersionMatchers.isES_5_X)
             .or(VersionMatchers.isOS_1_X)
             .or(VersionMatchers.isOS_2_X)
             .or(VersionMatchers.isOS_3_X)
@@ -58,7 +59,7 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
 
     private RemoteReaderClient getClient() {
         if (client == null) {
-            if (VersionMatchers.isES_6_X.test(getVersion())) {
+            if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(getVersion())) {
                 client = new RemoteReaderClient_ES_6_8(getConnection());
             } else {
                 client = new RemoteReaderClient(getConnection());

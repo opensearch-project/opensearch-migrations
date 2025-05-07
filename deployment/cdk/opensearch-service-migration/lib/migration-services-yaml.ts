@@ -89,6 +89,7 @@ export class S3SnapshotYaml {
 export class SnapshotYaml {
     snapshot_name = '';
     otel_endpoint = '';
+    snapshot_repo_name = '';
     s3?: S3SnapshotYaml;
     fs?: FileSystemSnapshotYaml;
 
@@ -96,6 +97,7 @@ export class SnapshotYaml {
         return {
             snapshot_name: this.snapshot_name,
             otel_endpoint: this.otel_endpoint,
+            snapshot_repo_name: this.snapshot_repo_name,
             // This conditinally includes the s3 and fs parameters if they're defined,
             // but does not add the keys otherwise
             ...(this.s3 && { s3: this.s3 }),
@@ -108,7 +110,7 @@ export class SnapshotYaml {
 // but for the time being, we are assuming that the snapshot is the one specified in SnapshotYaml.
 export class MetadataMigrationYaml {
     from_snapshot = null;
-    min_replicas = 1;
+    cluster_awareness_attributes = 1;
     otel_endpoint = '';
     source_cluster_version?: string;
 }

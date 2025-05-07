@@ -4,7 +4,7 @@ import {ContainerImage, CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
-import { ClusterYaml } from "./migration-services-yaml";
+import {ClusterYaml, SnapshotYaml} from "./migration-services-yaml";
 import { CdkLogger } from "./cdk-logger";
 import { mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -47,7 +47,7 @@ export function parseArgsToDict(argString: string | undefined): Record<string, s
         if (trimmedPart.length === 0) return; // Skip empty parts
 
         // Use a regular expression to find the first whitespace character
-        const firstWhitespaceMatch = trimmedPart.match(/\s/);
+        const firstWhitespaceMatch = /\s/.exec(trimmedPart);
         const firstWhitespaceIndex = firstWhitespaceMatch?.index;
 
         const key = firstWhitespaceIndex === undefined ? trimmedPart : trimmedPart.slice(0, firstWhitespaceIndex).trim();
@@ -211,9 +211,16 @@ export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string,
         resources: [`${artifactS3Arn}/*`],
     }));
 
-    // The Migration Console Role needs to be able to pass the snapshot role
+    // The Migration Console Role needs to be able to pass the snapshot role as well as any other role
     const requestingRole = Role.fromRoleArn(scope, 'RequestingRole', migrationConsoleTaskRoleArn);
     snapshotRole.grantPassRole(requestingRole);
+    
+    // Grant broader permission to pass any role in the account, enabling support for user-provided snapshot roles at runtime
+    requestingRole.addToPrincipalPolicy(new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['iam:PassRole'],
+        resources: [`arn:aws:iam::${Stack.of(scope).account}:role/*`]
+    }));
 
     return snapshotRole
 }
@@ -464,6 +471,22 @@ export function parseClusterDefinition(json: any): ClusterYaml {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }
     return new ClusterYaml({endpoint, version, auth})
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parseSnapshotDefinition(json: any): SnapshotYaml {
+    const snapshotName = json.snapshotName
+    const snapshotRepoName = json.snapshotRepoName
+    const s3Region = json.s3Region
+    const s3Uri = json.s3Uri
+    if (!snapshotName || !snapshotRepoName || !s3Region || !s3Uri) {
+        throw new Error('Missing at least one of the required snapshot fields: snapshotName, snapshotRepoName, s3Region, s3Uri');
+    }
+    const snapshotYaml = new SnapshotYaml()
+    snapshotYaml.snapshot_name = snapshotName
+    snapshotYaml.snapshot_repo_name = snapshotRepoName
+    snapshotYaml.s3 = {repo_uri: s3Uri, aws_region: s3Region}
+    return snapshotYaml
 }
 
 export function isStackInGovCloud(stack: Stack): boolean {

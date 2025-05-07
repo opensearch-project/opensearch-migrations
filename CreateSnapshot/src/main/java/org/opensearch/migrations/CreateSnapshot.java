@@ -41,6 +41,12 @@ public class CreateSnapshot {
         public String snapshotName;
 
         @Parameter(
+                names = { "--snapshot-repo-name" },
+                required = true,
+                description = "The name of the snapshot repository")
+        public String snapshotRepoName;
+
+        @Parameter(
                 names = {"--file-system-repo-path" },
                 required = false,
                 description = "The full path to the snapshot repo on the file system.")
@@ -141,6 +147,7 @@ public class CreateSnapshot {
         if (arguments.fileSystemRepoPath != null) {
             snapshotCreator = new FileSystemSnapshotCreator(
                     arguments.snapshotName,
+                    arguments.snapshotRepoName,
                     client,
                     arguments.fileSystemRepoPath,
                     arguments.indexAllowlist,
@@ -149,6 +156,7 @@ public class CreateSnapshot {
         } else {
             snapshotCreator = new S3SnapshotCreator(
                 arguments.snapshotName,
+                arguments.snapshotRepoName,
                 client,
                 arguments.s3RepoUri,
                 arguments.s3Region,

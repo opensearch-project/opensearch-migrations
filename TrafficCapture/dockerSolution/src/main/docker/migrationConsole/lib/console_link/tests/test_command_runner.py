@@ -95,3 +95,43 @@ def test_command_runner_handles_no_output(capsys, mocker):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
+
+
+def test_command_runner_prints_nothing_on_error_when_disabled(capsys, mocker):
+    mock_stdout = "Found 5 directories"
+    mock_stderr = "Unknown file path"
+    runner = CommandRunner("ls", {})
+    mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(returncode=1, cmd=["ls"],
+                                                                             output=mock_stdout, stderr=mock_stderr))
+    with pytest.raises(CommandRunnerError):
+        runner.run(print_on_error=False)
+    # Capture stdout/stderr output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_command_runner_prints_output_on_error_when_enabled(capsys, mocker):
+    mock_stdout = "Found 5 directories"
+    mock_stderr = "Unknown file path"
+    runner = CommandRunner("ls", {})
+    mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(returncode=1, cmd=["ls"],
+                                                                             output=mock_stdout, stderr=mock_stderr))
+    with pytest.raises(CommandRunnerError):
+        runner.run(print_on_error=True)
+    # Capture stdout/stderr output
+    captured = capsys.readouterr()
+    assert captured.out == mock_stdout
+    assert captured.err == mock_stderr
+
+
+def test_command_runner_handles_no_output_on_error(capsys, mocker):
+    runner = CommandRunner("ls", {})
+    mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(returncode=1, cmd=["ls"],
+                                                                             output=None, stderr=None))
+    with pytest.raises(CommandRunnerError):
+        runner.run(print_on_error=True)
+    # Capture stdout/stderr output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""

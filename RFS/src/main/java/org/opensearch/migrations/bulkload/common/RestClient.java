@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.common.http.CompositeTransformer;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.GzipPayloadRequestTransformer;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.http.TlsCredentialsProvider;
 import org.opensearch.migrations.bulkload.netty.ReadMeteringHandler;
 import org.opensearch.migrations.bulkload.netty.WriteMeteringHandler;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -75,22 +76,14 @@ public class RestClient {
 
     protected RestClient(ConnectionContext connectionContext, HttpClient httpClient) {
         this.connectionContext = connectionContext;
+        TlsCredentialsProvider tlsCredentialsProvider = connectionContext.getTlsCredentialsProvider();
 
         SslProvider sslProvider;
-        if (connectionContext.isInsecure()) {
-            try {
-                SslContext sslContext = SslContextBuilder.forClient()
-                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                    .build();
-                sslProvider = SslProvider.builder().sslContext(sslContext).handlerConfigurator(sslHandler -> {
-                    SSLEngine engine = sslHandler.engine();
-                    SSLParameters sslParameters = engine.getSSLParameters();
-                    sslParameters.setEndpointIdentificationAlgorithm(null);
-                    engine.setSSLParameters(sslParameters);
-                }).build();
-            } catch (SSLException e) {
-                throw new IllegalStateException("Unable to construct SslProvider", e);
-            }
+
+        if (tlsCredentialsProvider != null) {
+            sslProvider = getSslProvider(tlsCredentialsProvider);
+        } else if (connectionContext.isInsecure()) {
+            sslProvider = getInsecureSslProvider();
         } else {
             sslProvider = SslProvider.defaultClientProvider();
         }
@@ -272,5 +265,56 @@ public class RestClient {
                     removeIfPresent(p, READ_METERING_HANDLER_NAME);
                 };
             };
+    }
+
+    private SslProvider getSslProvider(TlsCredentialsProvider tlsCredentialsProvider) {
+        try {
+            SslContextBuilder builder = SslContextBuilder.forClient();
+
+            if (tlsCredentialsProvider.hasCACredentials()) {
+                builder.trustManager(tlsCredentialsProvider.getCaCertInputStream());
+            }
+
+            if (tlsCredentialsProvider.hasClientCredentials()) {
+                builder.keyManager(
+                    tlsCredentialsProvider.getClientCertInputStream(),
+                    tlsCredentialsProvider.getClientCertKeyInputStream()
+                );
+            }
+
+            SslContext sslContext = builder.build();
+
+            return SslProvider.builder()
+                .sslContext(sslContext)
+                .handlerConfigurator(sslHandler -> {
+                    SSLEngine engine = sslHandler.engine();
+                    SSLParameters sslParameters = engine.getSSLParameters();
+                    engine.setSSLParameters(sslParameters);
+                })
+                .build();
+
+        } catch (SSLException e) {
+            throw new IllegalStateException("Unable to construct custom SslProvider", e);
+        }
+    }
+
+    private SslProvider getInsecureSslProvider() {
+        try {
+            SslContext sslContext = SslContextBuilder.forClient()
+                .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                .build();
+
+            return SslProvider.builder()
+                .sslContext(sslContext)
+                .handlerConfigurator(sslHandler -> {
+                    SSLEngine engine = sslHandler.engine();
+                    SSLParameters sslParameters = engine.getSSLParameters();
+                    sslParameters.setEndpointIdentificationAlgorithm(null);
+                    engine.setSSLParameters(sslParameters);
+                })
+                .build();
+        } catch (SSLException e) {
+            throw new IllegalStateException("Unable to construct SslProvider", e);
+        }
     }
 }

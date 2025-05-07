@@ -1,10 +1,9 @@
 import {Construct} from "constructs";
+import {VpcDetails} from "./network-stack";
 import {
   EbsDeviceVolumeType,
   ISecurityGroup,
-  IVpc,
   SecurityGroup,
-  SubnetFilter,
   SubnetSelection
 } from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
@@ -53,10 +52,8 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly appLogEnabled?: boolean,
   readonly appLogGroup?: string,
   readonly nodeToNodeEncryptionEnabled?: boolean,
-  readonly vpc?: IVpc,
-  readonly vpcSubnetIds?: string[],
+  readonly vpcDetails?: VpcDetails,
   readonly vpcSecurityGroupIds?: string[],
-  readonly domainAZCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy,
   readonly domainAccessSecurityGroupParameter?: string
 
@@ -135,7 +132,7 @@ export class OpenSearchDomainStack extends Stack {
   constructor(scope: Construct, id: string, props: OpensearchDomainStackProps) {
     super(scope, id, props);
 
-    const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
+    const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId
     // Retrieve existing account resources if defined
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
@@ -160,17 +157,14 @@ export class OpenSearchDomainStack extends Stack {
         secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
       })
     }
-    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.domainAZCount && props.domainAZCount > 1 ?
-        {enabled: true, availabilityZoneCount: props.domainAZCount} : undefined
+    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.vpcDetails?.azCount && props.vpcDetails.azCount > 1 ?
+        {enabled: true, availabilityZoneCount: props.vpcDetails.azCount} : undefined;
 
     // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
     // to the Domain as it has existing behavior to select private subnets from a given VPC
     let domainSubnets: SubnetSelection[]|undefined;
-    if (props.vpc && props.vpcSubnetIds) {
-      const selectSubnets = props.vpc.selectSubnets({
-        subnetFilters: [SubnetFilter.byIds(props.vpcSubnetIds)]
-      })
-      domainSubnets = [selectSubnets]
+    if (props.vpcDetails) {
+      domainSubnets = [props.vpcDetails.subnetSelection]
     }
 
     // Retrieve existing SGs to apply to VPC Domain endpoints
@@ -226,7 +220,7 @@ export class OpenSearchDomainStack extends Stack {
         appLogEnabled: props.appLogEnabled,
         appLogGroup: appLG
       },
-      vpc: props.vpc,
+      vpc: props.vpcDetails?.vpc,
       vpcSubnets: domainSubnets,
       securityGroups: securityGroups,
       zoneAwareness: zoneAwarenessConfig,

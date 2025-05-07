@@ -1,18 +1,21 @@
 package org.opensearch.migrations.bulkload.framework;
 
 import java.io.File;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
 
 import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
+import org.testcontainers.containers.ExecConfig;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
@@ -40,25 +43,36 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         Version.fromString("ES 5.6.16")
     );
 
+    public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
+        "elasticsearch:2.4.6",
+        Version.fromString("ES 2.4.6"),
+        // This version of doesn't support path.repo based via env variables, passing this value via config 
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
 
     public static final ContainerVersion OS_V1_3_16 = new OpenSearchVersion(
         "opensearchproject/opensearch:1.3.16",
         Version.fromString("OS 1.3.16")
     );
-    public static final ContainerVersion OS_V2_14_0 = new OpenSearchVersion(
-        "opensearchproject/opensearch:2.14.0",
-        Version.fromString("OS 2.14.0")
+    public static final ContainerVersion OS_V2_19_1 = new OpenSearchVersion(
+        "opensearchproject/opensearch:2.19.1",
+        Version.fromString("OS 2.19.1")
     );
-    public static final ContainerVersion OS_V3_0_0_ALPHA = new OpenSearchVersion(
-        "opensearchstaging/opensearch:3.0.0-alpha1",
+    public static final ContainerVersion OS_V3_0_0 = new OpenSearchVersion(
+        "opensearchproject/opensearch:3.0.0",
         Version.fromString("OS 3.0.0")
     );
     
+    public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     private enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
             "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "ES_JAVA_OPTS", "-Xms512m -Xmx512m")),
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
+            "index.store.type", "mmapfs",
+            "bootstrap.system_call_filter", "false"
+        )),
         ELASTICSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("xpack.security.enabled", "false")
@@ -70,6 +84,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("plugins.security.disabled", "true")
                 .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .build()),
+        OPENSEARCH_2_19_PLUS(
+            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
+                .put("plugins.security.disabled", "true")
+                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .put("search.insights.top_queries.exporter.type", "debug")
                 .build()
         );
 
@@ -87,17 +107,39 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @SuppressWarnings("resource")
     public SearchClusterContainer(final ContainerVersion version) {
         super(DockerImageName.parse(version.imageName));
-        this.withExposedPorts(9200, 9300)
-            .withEnv(version.getInitializationType().getEnvVariables())
-            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(5)));
+        var builder = this.withExposedPorts(9200, 9300);
+
+        if (version instanceof OverrideFile) {
+            var overrideFile = (OverrideFile) version;
+            builder = builder.withCopyToContainer(Transferable.of(overrideFile.getContents()), overrideFile.getFilePath());
+        }
+
+        builder.withEnv(version.getInitializationType().getEnvVariables())
+            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         this.containerVersion = version;
     }
 
+    public SearchClusterContainer(final ContainerVersion version, Map<String, String> supplementaryEnvVariables) {
+        super(DockerImageName.parse(version.imageName));
+        var builder = this.withExposedPorts(9200, 9300);
+
+        var combinedEnvVariables = new ImmutableMap.Builder<String, String>().putAll(
+                                        version.getInitializationType().getEnvVariables()).putAll(
+                                        supplementaryEnvVariables
+                                    ).build();
+        builder.withEnv(combinedEnvVariables)
+                .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
+        this.containerVersion = version;
+    }
+
+
     public void copySnapshotData(final String directory) {
         try {
             // Execute command to list all files in the directory
-            final var result = this.execInContainer("sh", "-c", "find " + CLUSTER_SNAPSHOT_DIR + " -type f");
+            // `find` is not available on some versions of the containers, in which case it falls back to a ls/grep loop.
+            final var result = this.execInContainer("sh", "-c", "find " + CLUSTER_SNAPSHOT_DIR + " -type f" + " || " +
+                    "for dir in $(ls -1 -R " + CLUSTER_SNAPSHOT_DIR + " | grep ':' | sed 's/://g'); do for file in $(ls -1 $dir); do if [ -f \"$dir/$file\" ]; then echo \"$dir/$file\"; fi; done; done");
             log.debug("Process Exit Code: " + result.getExitCode());
             log.debug("Standard Output: " + result.getStdout());
             log.debug("Standard Error : " + result.getStderr());
@@ -121,10 +163,29 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public void putSnapshotData(final String directory) {
         try {
             this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
-            this.execInContainer("chown", "-R", "elasticsearch:elasticsearch", CLUSTER_SNAPSHOT_DIR);
+            var user = this.containerVersion.user;
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR})
+                .user("root")
+                .build());
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR})
+                .user("root")
+                .build());
         } catch (final Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void executeAndLog(ExecConfig command) throws UnsupportedOperationException, IOException, InterruptedException {
+            var result = this.execInContainer(command);
+            log.atInfo()
+                .setMessage("Command result: {} as <{}>\nStdOut:\n{}\nStdErr:\n{}")
+                .addArgument(command.getCommand())
+                .addArgument(command.getUser())
+                .addArgument(result.getStdout())
+                .addArgument(result.getStderr())
+                .log();
     }
 
 
@@ -148,36 +209,59 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     @EqualsAndHashCode
     @Getter
-    @ToString(onlyExplicitlyIncluded = true, includeFieldNames = false)
     public static class ContainerVersion {
         final String imageName;
-        @ToString.Include
         final Version version;
         final INITIALIZATION_FLAVOR initializationType;
+        final String user;
 
-        public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType) {
+        public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType, String user) {
             this.imageName = imageName;
             this.version = version;
             this.initializationType = initializationType;
+            this.user = user;
         }
 
+        @Override
+        public String toString() {
+            return "Container(" + version.toString() + ")";
+        }
+    }
+
+    interface OverrideFile {
+        String getContents();
+        String getFilePath();
     }
 
     public static class ElasticsearchOssVersion extends ContainerVersion {
         public ElasticsearchOssVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS);
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS, "elasticsearch");
         }
     }
 
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH);
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
         }
     }
 
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.OPENSEARCH);
+            super(imageName, version, VersionMatchers.isOS_2_19_OrGreater.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19_PLUS : INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
+        }
+    }
+
+    /**
+     * Older versions of elasticsearch require modifications to the configuration on disk 
+     */
+    @Getter
+    public static class OlderElasticsearchVersion extends ElasticsearchVersion implements OverrideFile {
+        private final String contents;
+        private final String filePath;
+        public OlderElasticsearchVersion(String imageName, Version version, String filePath, String contents) {
+            super(imageName, version);
+            this.contents = contents;
+            this.filePath = filePath;
         }
     }
 }

@@ -14,12 +14,13 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
 
     public FileSystemSnapshotCreator(
         String snapshotName,
+        String snapshotRepoName,
         OpenSearchClient client,
         String snapshotRepoDirectoryPath,
         List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        super(snapshotName, indexAllowlist, client, context);
+        super(snapshotName, snapshotRepoName, indexAllowlist, client, context);
         this.snapshotRepoDirectoryPath = snapshotRepoDirectoryPath;
     }
 

@@ -1,3 +1,5 @@
+sharedLogsVolumeEnabled: false
+sharedLogsPvc: ""
 snapshotVolumeEnabled: false
 snapshotVolumePvc: ""
 parameters:

@@ -6,7 +6,7 @@ on:
 
 env:
   java-version: '17'
-  gradle-version: '8.0.2'
+  gradle-version: '8.12.1'
 
 jobs:
   sonar:
@@ -15,11 +15,7 @@ jobs:
 
     services:
       sonarqube:
-        # sonarqube disabled the `password` option in 25.2.0. This is the last release of the
-        # `community` tag that supports this option, which we're using as a short-term solution
-        # while we support the `token` parameter.credentials:
-        # https://opensearch.atlassian.net/browse/MIGRATIONS-2389
-        image: sonarqube@sha256:47e573f85879254dafd7be9845f750155f33de8a6f33542015c31ce050917059
+        image: sonarqube
         ports:
           - 9000:9000
         options: >-
@@ -31,24 +27,40 @@ jobs:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: actions/setup-java@v4
       with:
         distribution: 'corretto'
         java-version: |
             17
     - name: Cache SonarQube Scanner
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.sonar/cache
         key: sonar-cache
         restore-keys: sonar-cache
     - uses: gradle/actions/setup-gradle@v4
       with:
-        gradle-version: 8.0.2
+        gradle-version: 8.12.1
         gradle-home-cache-cleanup: true
+
+    - name: Generate SonarQube Token
+      run: |
+        echo "Generating a SonarQube token..."
+        RESPONSE=$(curl -s -X POST -u "admin:admin" "http://localhost:9000/api/user_tokens/generate" \
+          -d "name=github-action-token" -d "type=GLOBAL_ANALYSIS_TOKEN")
+
+        SONAR_TOKEN=$(echo "$RESPONSE" | jq -r '.token')
+
+        if [ "$SONAR_TOKEN" == "null" ]; then
+          echo "❌ Failed to generate SonarQube token!"
+          exit 1
+        fi
+
+        echo "::add-mask::$SONAR_TOKEN"
+        echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run Gradle Build
-      run: ./gradlew copyDependencies
+      run: gradle copyDependencies
     - name: Run SonarQube Scanner
       run: |
         curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
@@ -58,20 +70,19 @@ jobs:
           -Dsonar.projectKey=local_project \
           -Dsonar.sources=. \
           -Dsonar.host.url=http://localhost:9000 \
-          -Dsonar.login=admin \
-          -Dsonar.password=admin
+          -Dsonar.login=$SONAR_TOKEN
     - name: Wait for issues to be processed
       run: sleep 60
     - name: Collect issues from the server
       run: |
-        curl -s -u admin:admin "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
+        curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
 
         echo "::group::SonarQube Issues"
         jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
         echo "::endgroup::"
 
-        # Annotate issue on the PR
-        jq -c '.issues[]' issues.json | while read -r issue; do
+        # Annotate issue on the PR with newest first
+        jq -c '.issues | sort_by(.creationDate) | reverse | .[]' issues.json | while read -r issue; do
           FILE=$(echo "$issue" | jq -r '.component | split(":")[1]')
           LINE=$(echo "$issue" | jq -r '.line')
           MESSAGE=$(echo "$issue" | jq -r '.message')
@@ -81,7 +92,7 @@ jobs:
         done
 
         ISSUE_COUNT=$(jq '.issues | length' issues.json)
-        BASELINE_ISSUE_COUNT=89 # Baseline issue count
+        BASELINE_ISSUE_COUNT=27 # Baseline issue count
         if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
           echo "❌ Build failed: Found $ISSUE_COUNT issues, which is more than the baseline of $BASELINE_ISSUE_COUNT."
           exit 1

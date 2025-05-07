@@ -10,7 +10,7 @@ import java.nio.file.Paths
 
 plugins {
     id("com.gradle.develocity") version("3.18.1")
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.9.0'
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.10.0'
 }
 
 void addSubProjects(String path, File dir) {
@@ -39,10 +39,11 @@ void addSubProjects(String path, File dir) {
 
 rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
-include 'commonDependencyVersionConstraints'
 include 'coreUtilities'
 include 'libraries:kafkaCommandLineFormatter'
+include 'libraries:kafkaUtils'
 include 'transformation'
+include 'transformation:standardJavascriptTransforms'
 include 'testHelperFixtures'
 include 'jenkinsTests'
 include 'RFS'
@@ -59,6 +60,7 @@ include 'TrafficCapture:nettyWireLogging'
 include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficCaptureProxyServerTest'
 include 'TrafficCapture:trafficReplayer'
+include 'frontend'
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())
 

@@ -51,9 +51,8 @@ describe('OpenSearch Domain Stack Tests', () => {
       nodeToNodeEncryptionEnabled: true,
       vpcEnabled: true,
       vpcId: "vpc-123456789abcdefgh",
-      vpcSubnetIds: ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"],
       vpcSecurityGroupIds: ["sg-123456789abcdefgh", "sg-223456789abcdefgh"],
-      domainAZCount: 3,
+      vpcAZCount: 3,
       domainRemovalPolicy: "DESTROY",
       sourceCluster: {
         "endpoint": "https://test-cluster",
@@ -108,9 +107,8 @@ describe('OpenSearch Domain Stack Tests', () => {
       nodeToNodeEncryptionEnabled: "true",
       vpcEnabled: "true",
       vpcId: "vpc-123456789abcdefgh",
-      vpcSubnetIds: "[\"subnet-123456789abcdefgh\", \"subnet-223456789abcdefgh\"]",
       vpcSecurityGroupIds: "[\"sg-123456789abcdefgh\", \"sg-223456789abcdefgh\"]",
-      domainAZCount: "3",
+      vpcAZCount: "3",
       domainRemovalPolicy: "DESTROY",
       sourceCluster: {
         "endpoint": "https://test-cluster",
@@ -254,7 +252,7 @@ describe('OpenSearch Domain Stack Tests', () => {
       vpcId: "",
       vpcSubnetIds: "",
       vpcSecurityGroupIds: "",
-      domainAZCount: "",
+      vpcAZCount: "",
       openAccessPolicyEnabled: "",
       domainRemovalPolicy: ""
     }

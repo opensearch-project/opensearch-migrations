@@ -21,12 +21,13 @@ replay:
   docker:
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
+  snapshot_repo_name: "migration_assistant_repo"
   fs:
     repo_path: "/snapshot/test-console"
   otel_endpoint: "http://otel-collector:4317"
 metadata_migration:
   from_snapshot:
-  min_replicas: 0
+  cluster_awareness_attributes: 0
   otel_endpoint: "http://otel-collector:4317"
 kafka:
   broker_endpoints: "kafka:9092"

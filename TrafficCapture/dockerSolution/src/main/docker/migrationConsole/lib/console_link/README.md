@@ -75,12 +75,13 @@ replay:
     service-name: "migrations-dev-replayer-service"
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
+  snapshot_repo_name: "my-snapshot-repo"
   s3:
       repo_uri: "s3://my-snapshot-bucket"
       aws_region: "us-east-2"
 metadata_migration:
   from_snapshot:
-  min_replicas: 0
+  cluster_awarness_attributes: 1
 kafka:
   broker_endpoints: "kafka:9092"
   standard:
@@ -200,6 +201,7 @@ backfill:
 The snapshot configuration specifies a local filesystem or an s3 snapshot that will be created by the `snapshot create` command, and (if not overridden) used as the source for the `metadata migrate` command. In a docker migration, it may also be used as the source for backfill via reindex-from-snapshot. If metadata migration and reindex-from-snapshot are not being used, this block is optional.
 
 - `snapshot_name`: required, name of the snapshot
+- `snapshot_repo_name`: optional, name of the snapshot repository
 
 Exactly one of the following blocks must be present:
 
@@ -215,7 +217,7 @@ Exactly one of the following blocks must be present:
 
 The metadata migration moves indices, components, and templates from a snapshot to the target cluster. In the future, there may be a `from_live_cluster` option, but currently all metadata migration must originate from a snapshot. A snapshot can be created via `console snapshot create` or can be pre-existing. The snapshot details are independently defineable, so if a special case is necessary, a snapshot could theoretically be created and used for document, but metadata migration could operate from a separate, pre-existing snapshot. This block is optional if metadata migration isn't being used as part of the migration.
 
-- `min_replicas`: optional, an integer value for the number of replicas to create. The default value is 0.
+- `cluster_awareness_attributes`: optional, an integer value for the number of awareness attributes that the cluster has (usually this means zones). This is only necessary if routing balancing across attributes is enforced.
 - `index_allowlist`: optional, a list of index names. If this key is provided, only the named indices will be migrated. If the field is not provided, all non-system indices will be migrated.
 - `index_template_allowlist`: optional, a list of index template names. If this key is provided, only the named templates will be migrated. If the field is not provided, all templates will be migrated.
 - `component_template_allowlist`: optional, a list of component template names. If this key is provided, only the named component templates will be migrated. If the field is not provided, all component templates will be migrated.
@@ -312,6 +314,18 @@ Unit tests can be run from this current `console_link/` by first installing depe
 ```shell
 pipenv install --dev
 pipenv run test
+```
+
+There are a handful of tests which involve creating an Elasticsearch/OpenSearch container and testing against it, which comes with a higher startup time. They're marked as "slow" tests. To skip those tests, run:
+
+```shell
+pipenv run test -m "not slow"
+```
+
+To run only those tests,
+
+```shell
+pipenv run test -m "slow"
 ```
 
 ### Coverage

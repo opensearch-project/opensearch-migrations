@@ -30,8 +30,6 @@ public abstract class IndexMetadata implements Index {
 
     public abstract JsonNode getMappings();
 
-    public abstract String getName();
-
     public abstract int getNumberOfShards();
 
     public abstract JsonNode getSettings();

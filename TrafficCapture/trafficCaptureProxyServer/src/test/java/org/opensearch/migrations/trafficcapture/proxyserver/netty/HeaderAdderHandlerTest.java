@@ -37,6 +37,46 @@ class HeaderAdderHandlerTest {
         runTestsWithSize(() -> IntStream.generate(()->1));
     }
 
+    @Test
+    public void multipleRequestsCheck_headerAdder_withComplexBody_andResponse() {
+        var extraHeader = "host: my.host";
+        var newHeader = Unpooled.wrappedBuffer(extraHeader.getBytes(StandardCharsets.UTF_8));
+
+        var body = "line1\r\nHost: fake.value\r\nPOST /oops HTTP/1.1\r\n\r\nEND";
+        var contentLength = body.getBytes(StandardCharsets.UTF_8).length;
+        var contentLengthHeader = "Content-Length: " + contentLength;
+
+        EmbeddedChannel channel = new EmbeddedChannel(new HeaderAdderHandler(newHeader));
+
+        var request = String.join("\r\n",
+                "POST /submit HTTP/1.1",
+                contentLengthHeader,
+                "",
+                body
+        );
+
+        var expected = String.join("\r\n",
+                "POST /submit HTTP/1.1",
+                extraHeader,
+                contentLengthHeader,
+                "",
+                body
+        );
+
+        try {
+            for (int i = 0; i < 5; i++) {
+                channel.writeInbound(Unpooled.wrappedBuffer(request.getBytes(StandardCharsets.UTF_8)));
+                ByteBuf result = channel.readInbound();
+                Assertions.assertEquals(expected, result.toString(StandardCharsets.UTF_8));
+                result.release();
+
+                channel.writeOutbound(Unpooled.copiedBuffer("HTTP/1.1 200 OK\r\n\r\n", StandardCharsets.UTF_8));
+            }
+        } finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "8,27,9999",

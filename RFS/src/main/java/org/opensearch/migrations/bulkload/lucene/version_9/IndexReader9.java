@@ -25,7 +25,7 @@ public class IndexReader9 implements LuceneIndexReader {
             var commits = DirectoryReader.listCommits(directory);
             var latestCommit = commits.get(commits.size() - 1);
 
-            var reader = DirectoryReader.open(latestCommit);
+            var reader = DirectoryReader.open(latestCommit, 0, null);
             if (softDeletesPossible) {
                 reader = new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
             }

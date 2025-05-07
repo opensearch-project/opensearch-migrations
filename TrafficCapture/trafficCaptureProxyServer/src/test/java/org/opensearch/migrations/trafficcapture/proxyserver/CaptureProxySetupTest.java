@@ -12,6 +12,9 @@ import org.apache.kafka.common.config.SaslConfigs;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.DEFAULT_KAFKA_CLIENT_ID;
+import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.buildKafkaProperties;
+
 public class CaptureProxySetupTest {
 
     public static final String kafkaBrokerString = "invalid:9092";
@@ -28,9 +31,9 @@ public class CaptureProxySetupTest {
                 "--kafkaConnection",
                 kafkaBrokerString }
         );
-        Properties props = CaptureProxy.buildKafkaProperties(parameters);
+        Properties props = buildKafkaProperties(parameters.kafkaParameters);
 
-        Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
+        Assertions.assertEquals(DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals(
             "org.apache.kafka.common.serialization.StringSerializer",
@@ -55,9 +58,9 @@ public class CaptureProxySetupTest {
                 kafkaBrokerString,
                 "--enableMSKAuth" }
         );
-        Properties props = CaptureProxy.buildKafkaProperties(parameters);
+        Properties props = buildKafkaProperties(parameters.kafkaParameters);
 
-        Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
+        Assertions.assertEquals(DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals(
             "org.apache.kafka.common.serialization.StringSerializer",
@@ -93,10 +96,10 @@ public class CaptureProxySetupTest {
                 "--kafkaConfigFile",
                 "src/test/resources/simple-kafka.properties" }
         );
-        Properties props = CaptureProxy.buildKafkaProperties(parameters);
+        Properties props = buildKafkaProperties(parameters.kafkaParameters);
 
         // Default settings which property file does not provide remain intact
-        Assertions.assertEquals(CaptureProxy.DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
+        Assertions.assertEquals(DEFAULT_KAFKA_CLIENT_ID, props.get(ProducerConfig.CLIENT_ID_CONFIG));
         Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals(
             "org.apache.kafka.common.serialization.ByteArraySerializer",

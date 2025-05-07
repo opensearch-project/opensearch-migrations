@@ -10,17 +10,11 @@
  */
 
 
-buildscript {
-    dependencies {
-        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
-    }
-}
-
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id 'org.owasp.dependencycheck' version '8.2.1'
     id 'io.freefair.lombok'
 }
 
 dependencies {
+    implementation libs.slf4j.api
 }

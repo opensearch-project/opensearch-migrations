@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -11,12 +12,15 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -26,7 +30,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.hasItems;
 
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster.
@@ -35,25 +39,24 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 @Slf4j
 class EndToEndTest extends BaseMigrationTest {
 
-    private static Stream<Arguments> scenarios() {
-        return getSupportedClusters().stream()
-            .flatMap(sourceCluster -> {
-                // Determine applicable template types based on source version
-                List<TemplateType> templateTypes = Stream.concat(
-                                Stream.of(TemplateType.Legacy),
-                                (sourceCluster.getVersion().getMajor() >= 7
-                                        ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
-                                        : Stream.empty()))
-                        .collect(Collectors.toList());
+    @TempDir
+    protected File localDirectory;
 
-                return SupportedClusters.targets().stream()
-                        .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
-                                .map(transferMedium -> Arguments.of(
-                                        sourceCluster,
-                                        targetCluster,
-                                        transferMedium,
-                                        templateTypes)))
-                        .collect(Collectors.toList()).stream();
+    private static Stream<Arguments> scenarios() {
+        return SupportedClusters.supportedPairs(false).stream()
+            .flatMap(pair -> {
+                List<TemplateType> templateTypes = Stream.concat(
+                            (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
+                                    ? Stream.empty()
+                                    : Stream.of(TemplateType.Legacy)),
+                            (VersionMatchers.equalOrGreaterThanES_7_10.test(pair.source().getVersion())
+                                    ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
+                                    : Stream.empty()))
+                    .toList();
+
+                return Arrays.stream(TransferMedium.values())
+                    .map(medium -> Arguments.of(pair.source(), pair.target(), medium, templateTypes))
+                        .toList().stream();
             });
     }
 
@@ -125,27 +128,38 @@ class EndToEndTest extends BaseMigrationTest {
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);
 
-        var arguments = new MigrateOrEvaluateArgs();
+        MigrateOrEvaluateArgs arguments;
 
         switch (medium) {
             case SnapshotImage:
-                var snapshotName = createSnapshot("my_snap_" + command.name().toLowerCase());
-                arguments = prepareSnapshotMigrationArgs(snapshotName);
+                var snapshotName = "my_snap_" + command.name().toLowerCase();
+                var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+                createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
+                sourceCluster.copySnapshotData(localDirectory.toString());
+                arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
                 break;
 
             case Http:
+                arguments = new MigrateOrEvaluateArgs();
                 arguments.sourceArgs.host = sourceCluster.getUrl();
                 arguments.targetArgs.host = targetCluster.getUrl();
                 break;
-        }
 
-        // Set up data filters
-        var dataFilterArgs = new DataFilterArgs();
-        dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
-            Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
-        dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
-        dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
-        arguments.dataFilterArgs = dataFilterArgs;
+            default:
+                throw new RuntimeException("Invalid Option");
+        }
+        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
+
+        // Set up data filters for ES 7.17 as we do not currently have transformations in place to support breaking
+        // changes from default templates and settings here: https://opensearch.atlassian.net/browse/MIGRATIONS-2447
+        if (sourceCluster.getContainerVersion().getVersion().equals(Version.fromString("ES 7.17.22"))) {
+            var dataFilterArgs = new DataFilterArgs();
+            dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
+                    Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
+            dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
+            dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
+            arguments.dataFilterArgs = dataFilterArgs;
+        }
 
         targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 
@@ -160,7 +174,6 @@ class EndToEndTest extends BaseMigrationTest {
     private static class TestData {
         final String compoTemplateName = "simple_component_template";
         final String indexTemplateName = "simple_index_template";
-        final String aliasInTemplate = "alias1";
         final String movieIndexName = "movies_2023";
         final String aliasName = "movies-alias";
         final String indexThatAlreadyExists = "already-exists";
@@ -178,17 +191,17 @@ class EndToEndTest extends BaseMigrationTest {
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
-            containsInAnyOrder(testData.templateNames.toArray(new String[0])));
+            hasItems(testData.templateNames.toArray(new String[0])));
         assertThat(getNames(getSuccessfulResults(migratedItems.getComponentTemplates())),
-            containsInAnyOrder(testData.componentTemplateNames.toArray(new String[0])));
+            hasItems(testData.componentTemplateNames.toArray(new String[0])));
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())),
-            containsInAnyOrder(Stream.concat(testData.blogIndexNames.stream(),
-                Stream.of(testData.movieIndexName)).toArray()));
+            hasItems(Stream.concat(testData.blogIndexNames.stream(),
+                Stream.of(testData.movieIndexName)).toArray(String[]::new)));
         assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
                 CreationResult.CreationFailureType.ALREADY_EXISTS)),
-            containsInAnyOrder(testData.indexThatAlreadyExists));
+            hasItems(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
-            containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
+            hasItems(testData.aliasNames.toArray(new String[0])));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {

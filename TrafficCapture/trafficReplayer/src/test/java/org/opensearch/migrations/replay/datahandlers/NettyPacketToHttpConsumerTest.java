@@ -210,7 +210,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatWithBigResponseReadTimeoutResponseWouldHang(boolean useTls) throws Exception {
-        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofSeconds(5));
+        testPeerResets(useTls, false, REGULAR_RESPONSE_TIMEOUT, Duration.ofSeconds(5));
     }
 
     private void testPeerResets(
@@ -439,7 +439,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 Instant.now(),
                 Instant.now(),
                 () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(30);
+            var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
             Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
@@ -449,8 +449,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @ParameterizedTest
     @Tag("longTest")
     @CsvSource({ "false", "true" })
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
-        var responseTimeout = Duration.ofMillis(100);
+        var responseTimeout = Duration.ofSeconds(1);
         var timeBetweenRequests = responseTimeout.plus(Duration.ofMillis(10));
         log.atInfo().setMessage("Running testTimeBetweenRequestsLongerThanResponseTimeout with responseTimeout {}" +
                 " and timeBetweenRequests {}")
@@ -499,7 +500,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     Instant.now(),
                     Instant.now(),
                     () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-                var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
+                var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
                 var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
                 log.atInfo().setMessage("RequestFinishFuture finished for request {}").addArgument(i).log();
                 Assertions.assertNull(aggregatedResponse.getError());

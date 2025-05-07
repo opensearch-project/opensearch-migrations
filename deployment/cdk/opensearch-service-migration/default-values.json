@@ -1,6 +1,5 @@
 {
   "vpcEnabled": true,
-  "mskAZCount": 2,
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,

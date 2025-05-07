@@ -8,16 +8,18 @@ from http import HTTPStatus
 from console_link.middleware.clusters import connection_check, clear_cluster, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
-from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.models.kafka import Kafka
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.middleware.kafka import delete_topic
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
-from common_operations import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer,
-                               get_index_name_transformation, convert_transformations_to_str)
+from .common_utils import wait_for_service_status
+from .default_operations import DefaultOperationsLibrary
+
 logger = logging.getLogger(__name__)
+ops = DefaultOperationsLibrary()
 
 
 @pytest.fixture(scope="class")
@@ -48,6 +50,8 @@ def initialize(request):
     replayer: Replayer = pytest.console_env.replay
     assert replayer is not None
     kafka: Kafka = pytest.console_env.kafka
+    snapshot: Snapshot = pytest.console_env.snapshot
+    assert snapshot is not None
 
     # Confirm source and target connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
@@ -56,7 +60,7 @@ def initialize(request):
     assert target_con_result.connection_established is True
 
     # Clear Cluster
-    clear_cluster(source_cluster)
+    clear_cluster(source_cluster, snapshot)
     clear_cluster(target_cluster)
 
     # Delete existing Kafka topic to clear records
@@ -84,6 +88,9 @@ class E2ETests(unittest.TestCase):
 
     def test_e2e_0001_default(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
+        # Populate with https://opensearch.atlassian.net/browse/MIGRATIONS-2382
+        source_major_version = 6
+        source_minor_version = 8
         target_cluster: Cluster = pytest.console_env.target_cluster
 
         backfill: Backfill = pytest.console_env.backfill
@@ -102,9 +109,9 @@ class E2ETests(unittest.TestCase):
                 }
             }
         }
-        create_index(cluster=source_cluster, index_name=index_name, data=json.dumps(index_body), test_case=self)
-        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_1",
-                        expected_status_code=HTTPStatus.CREATED, test_case=self)
+        ops.create_index(cluster=source_cluster, index_name=index_name, data=json.dumps(index_body), test_case=self)
+        ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_1",
+                            expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         backfill.create()
         snapshot: Snapshot = pytest.console_env.snapshot
@@ -112,9 +119,11 @@ class E2ETests(unittest.TestCase):
         assert snapshot_result.success
 
         # Perform metadata migration with a transform to index name
-        index_name_transform = get_index_name_transformation(existing_index_name=index_name,
-                                                             target_index_name=transformed_index_name)
-        transform_arg = convert_transformations_to_str(transform_list=[index_name_transform])
+        index_name_transform = ops.get_index_name_transformation(existing_index_name=index_name,
+                                                                 target_index_name=transformed_index_name,
+                                                                 source_major_version=source_major_version,
+                                                                 source_minor_version=source_minor_version)
+        transform_arg = ops.convert_transformations_to_str(transform_list=[index_name_transform])
         metadata_result: CommandResult = metadata.migrate(extra_args=["--transformer-config", transform_arg])
         assert metadata_result.success
 
@@ -124,33 +133,33 @@ class E2ETests(unittest.TestCase):
         backfill_scale_result: CommandResult = backfill.scale(units=2)
         assert backfill_scale_result.success
         # This document was created after snapshot and should not be included in Backfill but expected in Replay
-        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
-                        expected_status_code=HTTPStatus.CREATED, test_case=self)
+        ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
+                            expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         ignore_list = [".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
         expected_source_docs = {}
         expected_target_docs = {}
         # Source should have both documents
         expected_source_docs[index_name] = {"count": 2}
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
-                               index_prefix_ignore_list=ignore_list, test_case=self)
+        ops.check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
+                                   index_prefix_ignore_list=ignore_list, test_case=self)
         # Target should have one document from snapshot
         expected_target_docs[transformed_index_name] = {"count": 1}
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
-                               index_prefix_ignore_list=ignore_list, max_attempts=20, delay=30.0, test_case=self)
+        ops.check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
+                                   index_prefix_ignore_list=ignore_list, max_attempts=20, delay=30.0, test_case=self)
 
         backfill.stop()
 
-        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_3",
-                        expected_status_code=HTTPStatus.CREATED, test_case=self)
+        ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_3",
+                            expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         replayer.start()
-        wait_for_running_replayer(replayer=replayer)
+        wait_for_service_status(status_func=lambda: replayer.get_status(), desired_status=ReplayStatus.RUNNING)
 
         expected_source_docs[index_name] = {"count": 3}
         # TODO Replayer transformation needed to only have docs in the transformed index
         expected_target_docs[index_name] = {"count": 3}
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
-                               index_prefix_ignore_list=ignore_list, test_case=self)
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
-                               index_prefix_ignore_list=ignore_list, max_attempts=30, delay=10.0, test_case=self)
+        ops.check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
+                                   index_prefix_ignore_list=ignore_list, test_case=self)
+        ops.check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
+                                   index_prefix_ignore_list=ignore_list, max_attempts=30, delay=10.0, test_case=self)

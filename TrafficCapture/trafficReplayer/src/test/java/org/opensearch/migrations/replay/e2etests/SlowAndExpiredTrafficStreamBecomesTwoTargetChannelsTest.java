@@ -45,6 +45,7 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
     private static final long SPACING_SECONDS = 3600;
     private static final long TIME_SPEEDUP_FACTOR = SPACING_SECONDS / 2;
     private static final String TCP_CONNECTION_COUNT_METRIC_NAME = "tcpConnectionCount";
+    private static final Duration TEST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
 
     private static TrafficStream makeTrafficStream(
         Instant t,
@@ -114,7 +115,7 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         var trafficSource = new BlockingTrafficSource(arraySource, Duration.ofSeconds(SPACING_SECONDS));
 
         try (
-            var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofMillis(200), responseTracker);
+            var httpServer = SimpleNettyHttpServer.makeServer(false, Duration.ofSeconds(2), responseTracker);
             var replayer = new RootReplayerConstructorExtensions(
                 rc,
                 httpServer.localhostEndpoint(),
@@ -129,11 +130,11 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
             )
         ) {
             new Thread(
-                () -> responseTracker.onCountDownFinished(Duration.ofSeconds(10), () -> replayer.shutdown(null).join())
+                () -> responseTracker.onCountDownFinished(TEST_RESPONSE_TIMEOUT, () -> replayer.shutdown(null).join())
             );
             replayer.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofMillis(1),
-                Duration.ofSeconds(30),
+                TEST_RESPONSE_TIMEOUT,
                 trafficSource,
                 new TimeShifter(TIME_SPEEDUP_FACTOR),
                 t -> {}

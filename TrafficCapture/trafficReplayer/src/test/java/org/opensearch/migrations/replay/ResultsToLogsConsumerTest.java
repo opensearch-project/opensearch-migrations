@@ -309,6 +309,10 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     private void testOutputterForRequest(String requestResourceName, String expected, IJsonTransformer transformer) throws IOException {
+        testOutputterForRequestWithTransformerSupplier(requestResourceName, expected, transformer != null ? () -> transformer : null);
+    }
+
+    private void testOutputterForRequestWithTransformerSupplier(String requestResourceName, String expected, java.util.function.Supplier<IJsonTransformer> transformerSupplier) throws IOException {
         var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(
             NODE_ID,
             "c",
@@ -338,7 +342,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 targetResponses,
                 null
             );
-            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, transformer);
+            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, transformerSupplier);
             var consumer = new TupleParserChainConsumer(streamConsumer);
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());

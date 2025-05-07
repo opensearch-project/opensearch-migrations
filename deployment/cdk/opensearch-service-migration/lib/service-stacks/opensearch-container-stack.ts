@@ -1,5 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {VpcDetails} from "../network-stack";
+import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -8,7 +9,7 @@ import {SecretValue} from "aws-cdk-lib";
 import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "../common-utilities";
 
 export interface OpenSearchContainerProps extends StackPropsExt {
-    readonly vpc: IVpc,
+    readonly vpcDetails: VpcDetails,
     readonly fargateCpuArch: CpuArchitecture,
     readonly fineGrainedManagerUserARN?: string,
     readonly fineGrainedManagerUserName?: string,
@@ -40,7 +41,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: OpenSearchContainerProps) {
         super(scope, id, props)
 
-        const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
+        const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId
 
         const securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {

@@ -67,6 +67,11 @@ update_directories () {
 
 START_TIME=$(date +%s)
 
+# Allow executing this script from any dir
+script_abs_path=$(readlink -f "$0")
+script_dir_abs_path=$(dirname "$script_abs_path")
+cd "$script_dir_abs_path" || exit
+
 # Create hash file if it doesn't exist, create or clear temp file
 touch "$HASH_FILE"
 echo -n > "$TEMP_FILE"
@@ -88,7 +93,9 @@ if [ ${#UPDATED_CHARTS[@]} -gt 0 ]; then
 fi
 
 helm_update_with_hash "charts/aggregates/migrationAssistant" "migrationAssistant" "false" "$must_update"
-helm_update_with_hash "charts/aggregates/mockCustomerClusters" "mockCustomerClusters" "false" "false"
+helm_update_with_hash "charts/aggregates/testClusters" "testClusters" "false" "false"
+helm_update_with_hash "charts/components/elasticsearchCluster" "elasticsearchCluster" "false" "false"
+helm_update_with_hash "charts/components/opensearchCluster" "opensearchCluster" "false" "false"
 
 # Update stored hashes
 mv "$TEMP_FILE" "$HASH_FILE"

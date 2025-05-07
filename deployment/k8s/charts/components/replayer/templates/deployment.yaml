@@ -1,4 +1,5 @@
 {{ $envMountName := "env-vars" }}
+{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,6 +43,15 @@ spec:
           volumeMounts:
             - name: {{ $envMountName }}
               mountPath: /shared
+            {{- if $sharedLogsVolumeEnabled }}
+            - name: shared-logs
+              mountPath: /shared-logs-output
+            {{- end }}
       volumes:
         - name: {{ $envMountName }}
           emptyDir: {}
+        {{- if $sharedLogsVolumeEnabled  }}
+        - name: shared-logs
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedLogsPvc }}
+        {{- end }}

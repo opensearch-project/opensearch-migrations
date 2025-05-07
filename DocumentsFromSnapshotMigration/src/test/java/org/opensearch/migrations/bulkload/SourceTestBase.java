@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -59,6 +60,7 @@ import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.function.Executable;
 import reactor.core.publisher.Flux;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -68,12 +70,14 @@ import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNA
 
 @Slf4j
 public class SourceTestBase {
-    public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
+    public static final long MAX_SHARD_SIZE_BYTES = 1024 * 1024 * 1024L; // 1 GB
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.PIPE);
         var process = processBuilder.start();
 
         log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
@@ -180,12 +184,13 @@ public class SourceTestBase {
         FileSystemRepo sourceRepo,
         String snapshotName,
         List<String> indexAllowlist,
-        String targetAddress,
+        SearchClusterContainer target,
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
         Version sourceVersion,
-        Version targetVersion
+        Version targetVersion,
+        String transformationConfig
     ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
@@ -193,11 +198,12 @@ public class SourceTestBase {
                     sourceRepo,
                     snapshotName,
                     indexAllowlist,
-                    targetAddress,
+                    target.getUrl(),
                     clockJitter,
                     testContext,
                     sourceVersion,
-                    targetVersion
+                    targetVersion,
+                    transformationConfig
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -230,7 +236,8 @@ public class SourceTestBase {
         Random clockJitter,
         DocumentMigrationTestContext context,
         Version sourceVersion,
-        Version targetVersion
+        Version targetVersion,
+        String transformationConfig
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -269,7 +276,11 @@ public class SourceTestBase {
                 return reader;
             });
 
-            var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+
+            var docTransformer = new TransformationLoader().getTransformerFactoryLoader(
+                    Optional.ofNullable(transformationConfig).orElse(
+                            RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG
+                    ));
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
@@ -290,7 +301,7 @@ public class SourceTestBase {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> defaultDocTransformer),
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, () -> docTransformer),
                     progressCursor,
                     workCoordinator,
                     Duration.ofMinutes(10),
@@ -395,5 +406,18 @@ public class SourceTestBase {
 
         var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
         snapshotCreator.run();
+    }
+
+    protected ExpectedMigrationWorkTerminationException waitForRfsCompletion(Executable executable) {
+        var expectedTerminationException = Assertions.assertTimeout(
+            Duration.ofSeconds(30),
+            () -> {
+                return Assertions.assertThrows(
+                    ExpectedMigrationWorkTerminationException.class,
+                    executable
+                );
+            }
+        );
+        return expectedTerminationException;
     }
 }

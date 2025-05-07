@@ -8,19 +8,19 @@ import time
 from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
-from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.middleware.kafka import delete_topic
 from console_link.models.kafka import Kafka
 from console_link.middleware.clusters import connection_check, clear_cluster, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 
-from common_operations import (get_index, create_index, delete_index, get_document, create_document, delete_document,
-                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call,
-                               wait_for_running_replayer, EXPECTED_BENCHMARK_DOCS)
-from metric_operations import assert_metrics_present
+from .common_utils import execute_api_call, wait_for_service_status, EXPECTED_BENCHMARK_DOCS
+from .default_operations import DefaultOperationsLibrary
+from .metric_operations import assert_metrics_present
 
 logger = logging.getLogger(__name__)
+ops = DefaultOperationsLibrary()
 
 
 @pytest.fixture(scope="class")
@@ -51,7 +51,7 @@ def setup_replayer(request):
     logger.info("Starting replayer...")
     # TODO provide support for actually starting/stopping Replayer in Docker
     replayer.start()
-    wait_for_running_replayer(replayer=replayer)
+    wait_for_service_status(status_func=lambda: replayer.get_status(), desired_status=ReplayStatus.RUNNING)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -85,14 +85,14 @@ class ReplayerTests(unittest.TestCase):
         target_cluster: Cluster = pytest.console_env.target_cluster
         index_name = f"test_replayer_0001_{pytest.unique_id}"
 
-        create_index(cluster=source_cluster, index_name=index_name, test_case=self)
-        get_index(cluster=source_cluster, index_name=index_name, test_case=self)
-        get_index(cluster=target_cluster, index_name=index_name, test_case=self)
-        delete_index(cluster=source_cluster, index_name=index_name, test_case=self)
-        get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
-                  test_case=self)
-        get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
-                  test_case=self)
+        ops.create_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        ops.get_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        ops.get_index(cluster=target_cluster, index_name=index_name, test_case=self)
+        ops.delete_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        ops.get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                      test_case=self)
+        ops.get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                      test_case=self)
 
     @unittest.skip("Flaky test - https://opensearch.atlassian.net/browse/MIGRATIONS-1925")
     def test_replayer_0002_single_document(self):
@@ -106,23 +106,23 @@ class ReplayerTests(unittest.TestCase):
         index_name = f"test_replayer_0002_{pytest.unique_id}"
         doc_id = "replayer_0002_doc"
 
-        create_index(cluster=source_cluster, index_name=index_name, test_case=self)
-        get_index(cluster=source_cluster, index_name=index_name, test_case=self)
-        get_index(cluster=target_cluster, index_name=index_name, test_case=self)
-        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
-                        expected_status_code=HTTPStatus.CREATED, test_case=self)
-        check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
-                        index_name=index_name, doc_id=doc_id, test_case=self)
-        delete_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
-        get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
-                     expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
-        get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id,
-                     expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
-        delete_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
-                  test_case=self)
-        get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
-                  test_case=self)
+        ops.create_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        ops.get_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        ops.get_index(cluster=target_cluster, index_name=index_name, test_case=self)
+        ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                            expected_status_code=HTTPStatus.CREATED, test_case=self)
+        ops.check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
+                            index_name=index_name, doc_id=doc_id, test_case=self)
+        ops.delete_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
+        ops.get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                         expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
+        ops.get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id,
+                         expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
+        ops.delete_index(cluster=source_cluster, index_name=index_name)
+        ops.get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                      test_case=self)
+        ops.get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                      test_case=self)
 
     def test_replayer_0003_negativeAuth_invalidCreds(self):
         # This test sends negative credentials to the clusters to validate that unauthorized access is prevented.
@@ -178,11 +178,11 @@ class ReplayerTests(unittest.TestCase):
 
         run_test_benchmarks(cluster=source_cluster)
         # Confirm documents on source
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
-                               test_case=self)
+        ops.check_doc_counts_match(cluster=source_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
+                                   test_case=self)
         # Confirm documents on target after replay
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
-                               test_case=self)
+        ops.check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
+                                   test_case=self)
 
     def test_replayer_0007_timeBetweenRequestsOnSameConnection(self):
         # This test will verify that the replayer functions correctly when
@@ -201,17 +201,17 @@ class ReplayerTests(unittest.TestCase):
 
         for doc_id_int in range(number_of_docs):
             doc_id = str(doc_id_int)
-            create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
-                            expected_status_code=HTTPStatus.CREATED, session=proxy_single_connection_session,
-                            test_case=self)
+            ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                                expected_status_code=HTTPStatus.CREATED, session=proxy_single_connection_session,
+                                test_case=self)
             if doc_id_int + 1 < number_of_docs:
                 time.sleep(seconds_between_requests)
 
         try:
             for doc_id_int in range(number_of_docs):
                 doc_id = str(doc_id_int)
-                check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
-                                index_name=index_name, doc_id=doc_id, test_case=self)
+                ops.check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
+                                    index_name=index_name, doc_id=doc_id, test_case=self)
         finally:
             proxy_single_connection_session.close()
 
@@ -224,13 +224,13 @@ class ReplayerTests(unittest.TestCase):
 
         # Create large document, 99MiB
         # Default max 100MiB in ES/OS settings (http.max_content_length)
-        large_doc = generate_large_doc(size_mib=99)
+        large_doc = ops.generate_large_doc(size_mib=99)
 
         # Measure the time taken by the create_document call
         # Send large request to proxy and verify response
         start_time = time.time()
-        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, data=large_doc,
-                        expected_status_code=HTTPStatus.CREATED, test_case=self)
+        ops.create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, data=large_doc,
+                            expected_status_code=HTTPStatus.CREATED, test_case=self)
         end_time = time.time()
         duration = end_time - start_time
 
@@ -244,5 +244,5 @@ class ReplayerTests(unittest.TestCase):
         time.sleep(wait_time_seconds)
 
         # Verify document created on source and target
-        check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster, index_name=index_name,
-                        doc_id=doc_id, test_case=self)
+        ops.check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster, index_name=index_name,
+                            doc_id=doc_id, test_case=self)

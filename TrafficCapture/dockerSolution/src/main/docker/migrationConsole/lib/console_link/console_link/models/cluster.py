@@ -18,7 +18,7 @@ requests.packages.urllib3.disable_warnings()  # ignore: type
 logger = logging.getLogger(__name__)
 
 AuthMethod = Enum("AuthMethod", ["NO_AUTH", "BASIC_AUTH", "SIGV4"])
-HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
+HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE", "HEAD"])
 
 
 NO_AUTH_SCHEMA = {
@@ -89,6 +89,7 @@ class Cluster:
             raise ValueError("Invalid config file for cluster", v.errors)
 
         self.endpoint = config["endpoint"]
+        self.version = config.get("version", None)
         self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
             "https") else config.get("allow_insecure", True)
         if 'no_auth' in config:
@@ -176,8 +177,7 @@ class Cluster:
         return r
 
     def execute_benchmark_workload(self, workload: str,
-                                   workload_params='target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,'
-                                                   'search_clients:1'):
+                                   workload_params='bulk_size:10,bulk_indexing_clients:1'):
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
@@ -189,13 +189,9 @@ class Cluster:
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
-        # Note -- we should censor the password when logging this command
-        # Fix commit used for OSB on latest verified working commit
-        workload_revision = "fc64258a9b2ed2451423d7758ca1c5880626c520"
-        logger.info(f"Running opensearch-benchmark with '{workload}' workload and revision '{workload_revision}'")
-        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
+        logger.info(f"Running opensearch-benchmark with '{workload}' workload")
+        command = (f"opensearch-benchmark execute-test "
                    f"--exclude-tasks=check-cluster-health "
-                   f"--workload-revision={workload_revision} "
                    f"--target-host={self.endpoint} "
                    f"--workload={workload} "
                    f"--pipeline=benchmark-only "

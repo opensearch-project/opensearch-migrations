@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -194,9 +195,13 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     public Optional<Instant> getNextRequiredTouch() {
         var lastTouchTime = lastTouchTimeRef.get();
-        var r = kafkaRecordsLeftToCommitEventually.get() == 0
-            ? Optional.<Instant>empty()
-            : Optional.of(kafkaRecordsReadyToCommit.get() ? Instant.now() : lastTouchTime.plus(keepAliveInterval));
+        Optional<Instant> r;
+        if (kafkaRecordsLeftToCommitEventually.get() == 0) {
+            r = Optional.empty();
+        }
+        else {
+            r = Optional.of(kafkaRecordsReadyToCommit.get() ? Instant.now() : lastTouchTime.plus(keepAliveInterval));
+        }
         log.atTrace().setMessage("returning next required touch at {} from a lastTouchTime of {}")
             .addArgument(() -> r.map(Instant::toString).orElse("N/A"))
             .addArgument(lastTouchTime)
@@ -333,7 +338,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atTrace().setMessage("All previously COMMITTED positions: {{}}")
                 .addArgument(() -> kafkaConsumer.assignment()
                         .stream()
-                        .map(tp -> tp + ": " + kafkaConsumer.committed(tp))
+                        .map(tp -> tp + ": " + kafkaConsumer.committed(Set.of(tp)))
                         .collect(Collectors.joining(",")))
                 .log();
             return records;
@@ -343,7 +348,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                         + "Swallowing and awaiting next metadata refresh to try again.")
                 .addArgument(topic)
                 .log();
-            return new ConsumerRecords<>(Collections.emptyMap());
+            return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
         }
     }
 

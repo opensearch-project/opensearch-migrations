@@ -117,10 +117,10 @@ kubectl -n ma get pods
 
 ## Deploy test clusters with Helm chart
 
-Next to simulate an actual migration environment we should create both a source cluster and target cluster that we will migrate data between . The below chart will create an Elasticsearch 7.10 source cluster and an OpenSearch 2.16 target cluster, but could be supplied different values to customize the source and target versions or settings by modifying the /charts/aggregates/mockCustomerClusters/values.yaml . We don’t need to wait for the Migration Assistant pods to finish initializing before deploying our test clusters with the below command.
+Next to simulate an actual migration environment we should create both a source cluster and target cluster that we will migrate data between . The below chart will create an Elasticsearch 7.10 source cluster and an OpenSearch 2.16 target cluster, but could be supplied different values to customize the source and target versions or settings by modifying the /charts/aggregates/testClusters/values.yaml . We don’t need to wait for the Migration Assistant pods to finish initializing before deploying our test clusters with the below command.
 
 ```shell
-helm install mcc -n ma charts/aggregates/mockCustomerClusters
+helm install tc -n ma charts/aggregates/testClusters
 ```
 
 
@@ -129,7 +129,7 @@ helm install mcc -n ma charts/aggregates/mockCustomerClusters
 Open a shell to the Migration Console pod
 
 ```shell
-kubectl -n ma exec --stdin --tty ma-migration-console-<pod_id> -- /bin/bash
+kubectl -n ma exec --stdin --tty $(kubectl -n ma get pods -l app=ma-migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash
 ```
 
 The `<id>` here can easily be replaced with autocomplete or retrieved from the pod name when executing:
@@ -218,10 +218,11 @@ After exiting the Migration Console
 migration-console (~) -> exit
 ```
 
-To remove both our Migration Assistant and Test Clusters Helm deployments:
+To remove both our Migration Assistant and Test Clusters Helm deployments, as well as any created volumes:
 
 ```shell
-helm uninstall -n ma ma mcc
+helm uninstall -n ma ma tc
+kubectl -n ma delete pvc --all
 ```
 
 To remove the Minikube container:

@@ -38,7 +38,7 @@ import org.testcontainers.containers.Network;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Slf4j
-@Tag("longTest")
+@Tag("isolatedTest")
 public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
@@ -107,7 +107,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private void testProcess(int expectedExitCode, Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
+        var targetImageName = SearchClusterContainer.OS_LATEST.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
         var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
