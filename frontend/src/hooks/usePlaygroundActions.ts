@@ -80,11 +80,6 @@ export const usePlaygroundActions = () => {
 
   const updateTransformation = useCallback(
     (id: string, name: string, content: string) => {
-      console.log(
-        `[DEBUG] usePlaygroundActions.updateTransformation for ${id}:`,
-        content.length > 20 ? content.substring(0, 20) + "..." : content,
-      );
-
       const updatedTransform: Transformation = {
         id,
         name,

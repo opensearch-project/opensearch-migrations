@@ -1,7 +1,3 @@
-/**
- * Utility for executing transformations on documents
- */
-
 export interface TransformationResult {
   success: boolean;
   document: string | object;
@@ -9,20 +5,13 @@ export interface TransformationResult {
   transformationId?: string;
 }
 
-/**
- * Executes a single transformation on a document
- */
+// Executes a single transformation on a document
 export async function executeTransformation(
   transformation: string,
   document: string | object,
-  transformationName?: string,
 ): Promise<TransformationResult> {
   try {
-    // Execute the transformation in a controlled environment
-    const transformFn = evaluateTransformation(
-      transformation,
-      transformationName,
-    );
+    const transformFn = evaluateTransformation(transformation);
 
     if (typeof transformFn !== "function") {
       return {
@@ -43,71 +32,21 @@ export async function executeTransformation(
   }
 }
 
-/**
- * Type definition for a document transformer function
- */
+// A DocumentTransformer is a function that takes a document (object or string)
+// and returns a transformed document (object or string).
+// We need all transformations to conform to this type.
 export type DocumentTransformer = (
   document: object | string,
 ) => object | string;
 
-/**
- * Evaluates a transformation code string and returns the entrypoint function
- */
-function evaluateTransformation(
-  code: string,
-  transformationName?: string,
-): DocumentTransformer | null {
+// Evaluates a transformation code string and returns the entrypoint function
+function evaluateTransformation(code: string): DocumentTransformer | null {
   try {
-    // Create a custom console that prefixes logs with the transformation name
-    // but only if the first argument is not already prefixed
-    const customConsoleCode = transformationName
-      ? `
-        const originalConsole = console;
-        const prefix = "[${transformationName}] ";
-        console = {
-          log: (...args) => {
-            if (typeof args[0] === 'string' && args[0].startsWith(prefix)) {
-              originalConsole.log(...args);
-            } else {
-              originalConsole.log(prefix, ...args);
-            }
-          },
-          warn: (...args) => {
-            if (typeof args[0] === 'string' && args[0].startsWith(prefix)) {
-              originalConsole.warn(...args);
-            } else {
-              originalConsole.warn(prefix, ...args);
-            }
-          },
-          error: (...args) => {
-            if (typeof args[0] === 'string' && args[0].startsWith(prefix)) {
-              originalConsole.warn(...args);
-            } else {
-              originalConsole.warn(prefix + "Error:", ...args);
-            }
-          },
-          info: (...args) => {
-            if (typeof args[0] === 'string' && args[0].startsWith(prefix)) {
-              originalConsole.info(...args);
-            } else {
-              originalConsole.info(prefix, ...args);
-            }
-          },
-          debug: (...args) => {
-            if (typeof args[0] === 'string' && args[0].startsWith(prefix)) {
-              originalConsole.debug(...args);
-            } else {
-              originalConsole.debug(prefix, ...args);
-            }
-          },
-        };
-      `
-      : "";
-
     // Use Function constructor to evaluate the code safely
-    // This will be replaced with isolated-vm or web workers later for better isolation
+    // This can be replaced with isolated-vm or web workers later for better isolation
+    // The way of extracting the entrypoint function is a bit specific to our default transformation format,
+    // this could be broadened.
     const result = new Function(`
-      ${customConsoleCode}
       ${code}
       return (document) => {
         try {
@@ -126,18 +65,14 @@ function evaluateTransformation(
         }
       };
     `)();
-
     return result;
   } catch (error) {
-    // Use console.warn instead of console.error
     console.warn("Error evaluating transformation:", error);
     return null;
   }
 }
 
-/**
- * Executes a chain of transformations on a document
- */
+// Executes a chain of transformations on a document
 export async function executeTransformationChain(
   transformations: Array<{ id: string; name: string; content: string }>,
   document: object | string,
@@ -152,7 +87,6 @@ export async function executeTransformationChain(
     result = await executeTransformation(
       transformation.content,
       currentDocument,
-      transformation.name,
     );
 
     if (!result.success) {

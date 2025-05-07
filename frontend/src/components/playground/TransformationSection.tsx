@@ -20,7 +20,7 @@ export default function TransformationSection() {
     usePlaygroundActions();
   const { runTransformations, isProcessing } = useTransformationExecutor();
 
-  // Local state to track rowSpan values and validation errors for each transformation
+  // Local state to track rowSpan values for each transformation
   const [itemDimensions, setItemDimensions] = useState<
     Record<string, { rowSpan: number }>
   >(

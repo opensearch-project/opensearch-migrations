@@ -7,21 +7,14 @@ import {
 } from "@/context/PlaygroundContext";
 import { executeTransformationChain } from "@/utils/transformationExecutor";
 
-/**
- * Hook for executing transformations on input documents
- */
 export function useTransformationExecutor() {
   const { state, dispatch } = usePlayground();
 
-  /**
-   * Run all transformations on all input documents
-   */
   const runTransformations = useCallback(async () => {
     if (
       state.inputDocuments.length === 0 ||
       state.transformations.length === 0
     ) {
-      // Nothing to do
       return;
     }
 
@@ -33,10 +26,8 @@ export function useTransformationExecutor() {
     // Process each input document through the transformation chain
     for (const inputDoc of state.inputDocuments) {
       try {
-        // Parse the input document
         const inputContent = JSON.parse(inputDoc.content);
 
-        // Execute all transformations in sequence
         const result = await executeTransformationChain(
           state.transformations,
           inputContent,
@@ -47,8 +38,10 @@ export function useTransformationExecutor() {
           outputDocuments.push({
             id: uuidv4(),
             name: inputDoc.name,
-            content: JSON.stringify(result.document, null, 2),
+            content: JSON.stringify(result.document),
             sourceInputId: inputDoc.id,
+            // For now, this just lists all the transformations
+            // Later, we can track which transformations had an effect
             transformationsApplied: state.transformations.map((t) => t.id),
           });
         } else {
@@ -60,7 +53,6 @@ export function useTransformationExecutor() {
           });
         }
       } catch (error) {
-        // Use console.warn instead of console.error
         console.warn(`Error processing document ${inputDoc.id}:`, error);
         errors.push({
           documentId: inputDoc.id,
@@ -69,8 +61,6 @@ export function useTransformationExecutor() {
         });
       }
     }
-
-    // Update state with results
     dispatch({
       type: "COMPLETE_TRANSFORMATIONS",
       payload: { outputDocuments, errors },

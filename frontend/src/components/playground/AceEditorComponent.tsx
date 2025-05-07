@@ -76,7 +76,7 @@ export default function AceEditorComponent({
   useEffect(() => {
     // Only initialize content if it hasn't been initialized yet or if the transformation ID changes
     if (transformation && !contentInitializedRef.current) {
-      setContent(transformation.content || defaultContent);
+      setContent(transformation.content ?? defaultContent);
       onSaveStatusChange({
         status: SaveStatus.SAVED,
         savedAt: new Date(Date.now()),
@@ -157,7 +157,6 @@ export default function AceEditorComponent({
     };
   }, [handleKeyDown]);
 
-  // Handle content change without auto-saving
   const handleChange = (newContent: string) => {
     if (newContent === content) return; // Skip if content is unchanged
     setContent(newContent);
@@ -186,7 +185,6 @@ export default function AceEditorComponent({
       }
     }
 
-    // Auto-save after debounce period (handled by AceEditor)
     saveContent();
   };
 

@@ -17,7 +17,6 @@ import SaveStatusIndicator from "@/components/playground/SaveStatusIndicator";
 interface TransformationItemProps {
   item: BoardProps.Item<Transformation>;
   onRemove: (id: string) => void;
-  onValidationChange?: (hasErrors: boolean) => void;
 }
 
 export default function TransformationItem({

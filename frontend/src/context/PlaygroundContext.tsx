@@ -102,13 +102,6 @@ export const playgroundReducer = (
         outputDocuments: [],
       };
     case "UPDATE_TRANSFORMATION":
-      console.log(
-        `[DEBUG] PlaygroundContext reducer UPDATE_TRANSFORMATION for ${action.payload.id}:`,
-        action.payload.content.length > 20
-          ? action.payload.content.substring(0, 20) + "..."
-          : action.payload.content,
-      );
-
       return {
         ...state,
         transformations: state.transformations.map((transform) =>
