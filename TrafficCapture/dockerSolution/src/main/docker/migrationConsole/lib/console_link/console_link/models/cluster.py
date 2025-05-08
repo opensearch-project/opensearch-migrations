@@ -264,28 +264,28 @@ class Cluster:
             )
 
     def update_auth_to_sigv4(self, region: str, service: str = "es") -> None:
-    """
-    Updates the cluster's authentication to use SIGV4.
-    """
-    logger.info(f"Updating target cluster auth to SIGV4 for region: {region}, service: {service}")
-    self.auth_type = AuthMethod.SIGV4
-    self.auth_details = {
-        "region": region,
-        "service": service
-    }
+        """
+        Updates the cluster's authentication to use SIGV4.
+        """
+        logger.info(f"Updating target cluster auth to SIGV4 for region: {region}, service: {service}")
+        self.auth_type = AuthMethod.SIGV4
+        self.auth_details = {
+            "region": region,
+            "service": service
+        }
 
-    # Initialize client options if not present
-    self.client_options = self.client_options or ClientOptions()
-    self.client_options.user_agent_extra = f"SIGV4-{region}"
+        # Initialize client options if not present
+        self.client_options = self.client_options or ClientOptions()
+        self.client_options.user_agent_extra = f"SIGV4-{region}"
 
-    # Reinitialize the session and client
-    session = boto3.Session(region_name=region)
-    self.client = session.client(service, region_name=region)
-    
-    # Verification Check
-    auth = self._generate_auth_object()
-    if isinstance(auth, SigV4AuthPlugin):
-        logger.info(f"SIGV4 authentication verified successfully: {auth}")
-    else:
-        logger.error(f"SIGV4 authentication verification failed: {auth}")
-    logger.info(f"Target cluster authentication successfully updated to SIGV4 for region {region}")
+        # Reinitialize the session and client
+        session = boto3.Session(region_name=region)
+        self.client = session.client(service, region_name=region)
+        
+        # Verification Check
+        auth = self._generate_auth_object()
+        if isinstance(auth, SigV4AuthPlugin):
+            logger.info(f"SIGV4 authentication verified successfully: {auth}")
+        else:
+            logger.error(f"SIGV4 authentication verification failed: {auth}")
+        logger.info(f"Target cluster authentication successfully updated to SIGV4 for region {region}")

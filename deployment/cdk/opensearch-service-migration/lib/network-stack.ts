@@ -363,13 +363,13 @@ export class NetworkStack extends Stack {
             });
 
             if (props.targetClusterEndpoint) {
-                const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId;
+                const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
                 createMigrationStringParameter(this, props.targetClusterEndpoint, {
                     stage: props.stage,
                     defaultDeployId: deployId,
                     parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
                 });
-                // This is a somewhat surprsing place for this non-network related set of parameters, but it pairs well with
+                // This is a somewhat surprising place for this non-network related set of parameters, but it pairs well with
                 // the OS_CLUSTER_ENDPOINT parameter and is helpful to ensure it happens. This probably isn't a long-term place
                 // for it, but is helpful for the time being.
                 if (props.targetClusterUsername && props.targetClusterPasswordSecretArn) {

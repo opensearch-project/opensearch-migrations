@@ -245,7 +245,7 @@ export class StackComposer {
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         let targetClusterDefinition = this.getContextForType('targetCluster', 'object', defaultValues, contextJSON)
-        const usePreexistingTargetCluster = !!(targetClusterEndpointField || targetClusterDefinition)
+        const usePreexistingTargetCluster = !!(targetClusterEndpointField ?? targetClusterDefinition)
         if (!targetClusterDefinition && usePreexistingTargetCluster) {
             CdkLogger.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
             CdkLogger.warn("Please update your CDK context block to use the `targetCluster` object.")
