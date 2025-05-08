@@ -1,31 +1,62 @@
-{{ $mountName := "all-configs" }}
-{{ $envVarMountName := "env-vars" }}
+---
+# kubernetes/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: migration-console-access-role
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: migration-console-access-role
+rules:
+  - apiGroups: [ "" ]
+    resources: ["secrets"]
+    verbs: ["list"]
+  - apiGroups: [ "" ]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log"]
+    verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: [ "apps" ]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: migration-console-access-role
+subjects:
+  - kind: ServiceAccount
+    name: migration-console-access-role
+roleRef:
+  kind: Role
+  name: migration-console-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
 {{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
-{{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
 {{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: {{ include "generic.fullname" . }}
+  name: migration-console
 spec:
+  serviceName: "migration-console"
   replicas: 1
   selector:
     matchLabels:
-      app: {{ include "generic.fullname" . }}
+      app: migration-console
   template:
     metadata:
       labels:
-        app: {{ include "generic.fullname" . }}
+        app: migration-console
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
-      initContainers:
-        {{- include "generic.setupEnvLoadInitContainer" (merge (dict
-           "MountName" $envVarMountName
-           "include" .Template.Include) .) | nindent 8 }}
-        {{- include "generic.setupServicesYamlContainer" (merge (dict
-           "MountName" "merged-config"
-           "include" .Template.Include) .) | nindent 8 }}
       containers:
         - name: console
           image: migrations/migration_console:latest
@@ -34,7 +65,6 @@ spec:
             - "/bin/sh"
             - "-c"
             - |
-              source /shared/vars.sh
               {{- if .Values.developerModeEnabled }}
               source /.venv/bin/activate && pipenv install -e ~/lib/console_link
               {{- end }}
@@ -47,23 +77,11 @@ spec:
             - name: shared-logs
               mountPath: /shared-logs-output
             {{- end }}
-            - name: merged-config
-              mountPath: /config
-            - name: {{ $envVarMountName }}
-              mountPath: /shared
             {{- if $developerModeEnabled }}
             - name: local-console-libs
               mountPath: /root/lib
             {{- end }}
-            {{- if $snapshotVolumeEnabled }}
-            - name: snapshot-volume
-              mountPath: /snapshot
-            {{- end }}
       volumes:
-        - name: {{ $envVarMountName }}
-          emptyDir: { }
-        - name: merged-config
-          emptyDir: { }
         {{- if $developerModeEnabled  }}
         - name: local-console-libs
           hostPath:
@@ -74,9 +92,4 @@ spec:
         - name: shared-logs
           persistentVolumeClaim:
             claimName: {{ .Values.sharedLogsPvc }}
-        {{- end }}
-        {{- if $snapshotVolumeEnabled }}
-        - name: snapshot-volume
-          persistentVolumeClaim:
-            claimName: {{ .Values.snapshotVolumePvc }}
         {{- end }}

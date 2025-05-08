@@ -92,7 +92,7 @@ data:
         metric_expiration: 5m
         enable_open_metrics: true
       otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
-        endpoint: jaeger:4317
+        endpoint: jaeger-collector:4317
         tls:
           insecure: true
     service:
@@ -101,11 +101,11 @@ data:
         metrics:
           receivers: [ otlp ]
           processors: [ batch ]
-          exporters: [ debug, prometheus ]
+          exporters: [ prometheus ]
         traces:
           receivers: [ otlp ]
           processors: [ batch ]
-          exporters: [ debug, otlp/jaeger ]
+          exporters: [ otlp/jaeger ]
         logs:
           receivers: [ otlp ]
           processors:

@@ -9,8 +9,3 @@ dependencies:
     version: "0.1.0"
     repository: "file://../../sharedResources/logsVolume"
     condition: conditionalPackageInstalls.logs-volume
-
-  - name: migration-console
-    condition: conditionalPackageInstalls.migration-console
-    version: "0.1.0"
-    repository: "file://../../components/migrationConsole"
