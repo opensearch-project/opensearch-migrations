@@ -102,7 +102,7 @@ spec:
           - name: destination-connection-pool-timeout
             value: ""
           - name: otel-collector-endpoint
-            value: ""
+            value: "http://otel-collector:4317"
           - name: header-overrides
             value: ""
           - name: suppress-capture-header-pairs

@@ -1,11 +1,18 @@
 conditionalPackageInstalls:
   # Migration infrastructure components
-  etcd: true                     # used by our Argo workflows for workflow coordination
+  etcd: false                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
   cert-manager: true             # needed by the otel operator
   kube-prometheus-stack: true    # will be needed for auto-scaling
-  opentelemetry-operator: true   # needed for auto-scaling and general observability
   argo-workflows: true           # orchestrates the steps of a migration
   strimzi-kafka-operator: true   # Required by capture and replay
+
+  # Simpler alternative to the opentelemetry-operator.
+  # ONLY set up the otel-collector and require manual instrumentation
+  # Mutually exclusive with otel-collector
+  otel-collector-daemonset: true
+  # EXPERIMENTAL!  Needed for auto-instrumenting and general observability.
+  # Mutually exclusive with otel-collector-daemonset
+  opentelemetry-operator: false
 
   # Support packages - installed as direct dependencies to this chart as opposed to via the installer job
   migration-console: true
@@ -15,7 +22,7 @@ conditionalPackageInstalls:
   localstack: true
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
-  grafana: true
+  grafana: false
   jaeger: true
 
 
@@ -282,6 +289,14 @@ charts:
           node: true
           prometheus: true
           prometheusOperator: true
+      grafana:
+        additionalDataSources:
+          - name: Jaeger
+            type: jaeger
+            url: http://jaeger-query:16686
+            access: proxy
+            isDefault: false
+            editable: true
 
 # OPA Gatekeeper dependency to lock down what images we can spin up - not implemented yet
 #  - name: gatekeeper
@@ -333,10 +348,10 @@ charts:
     version: "3.2.0"
     repository: "https://jaegertracing.github.io/helm-charts"
     values:
-      allInOne:
-        enabled: true
       provisionDataStore:
         cassandra: false
+      allInOne:
+        enabled: true
       storage:
         type: memory
       agent:

@@ -70,7 +70,7 @@ spec:
             - name: kafka-traffic-enable-msk-auth
               value: ""
             - name: otel-collector-endpoint
-              value: ""
+              value: "http://otel-collector:4317"
 
       resource:
         action: create

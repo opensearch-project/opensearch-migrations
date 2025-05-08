@@ -1,9 +1,13 @@
-{{- if hasKey .Values.conditionalPackageInstalls "opentelemetry-operator" }}
+{{- if get .Values.conditionalPackageInstalls "opentelemetry-operator" }}
 apiVersion: opentelemetry.io/v1beta1
 kind: OpenTelemetryCollector
 metadata:
   name: otel-collector
   namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade,pre-delete
+    "helm.sh/hook-weight": "-20"  # Run early during pre-delete
+    "helm.sh/hook-delete-policy": hook-succeeded
 spec:
   mode: daemonset
   serviceAccount: otel-collector

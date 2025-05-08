@@ -33,9 +33,15 @@ spec:
               #!/bin/sh
               set -e -x
 
+      {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
+                  (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}
+              echo "'otel-collector-daemonset' and 'opentelemetry-operator' are mutually exclusive. " \
+                   "At least one must be false."
+              exit 1
+      {{- end }}
+
               mkdir -p /tmp/helm-notes
               mkdir -p /tmp/helm-status
-
               echo "Starting Helm installation sequence..."
 
       {{- range .Values.charts }}

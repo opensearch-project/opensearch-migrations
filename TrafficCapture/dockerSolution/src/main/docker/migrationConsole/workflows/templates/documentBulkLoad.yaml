@@ -197,6 +197,8 @@ spec:
           - name: target-password
           - name: doc-transformer-base64
           - name: index-allowlist
+          - name: otel-collector-endpoint
+            value: "http://otel-collector:4317"
       resource:
         action: create
         setOwnerReference: true

@@ -1,31 +1,51 @@
-minikube start
+minikube start \
+  --extra-config=kubelet.authentication-token-webhook=true \
+  --extra-config=kubelet.authorization-mode=Webhook \
+  --extra-config=scheduler.bind-address=0.0.0.0 \
+  --extra-config=controller-manager.bind-address=0.0.0.0
+minikube addons enable metrics-server
 eval $(minikube docker-env)
+minikube dashboard &
 kubectl config set-context --current --namespace=ma
 
 helm dependency build charts/aggregates/testClusters
-./linkSubChartsToDependencies.sh charts/aggregates/testClusters
-helm install tc -n tc charts/aggregates/testClusters --create-namespace
+helm install--create-namespace -n ma ma charts/aggregates/testClusters
+
+helm dependency build charts/aggregates/migrationAssistantWithArgo
+helm install --create-namespace -n ma ma charts/aggregates/migrationAssistan
+
+# Notice that this doesn't include the capture proxy yet
+kubectl port-forward services/elasticsearch-master 19200:9200 &
+kubectl port-forward services/opensearch-cluster-master 29200:9200 &
+
+kubectl port-forward svc/argo-server 2746:2746 &
+kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 &
+kubectl port-forward svc/jaeger-query 16686:16686 &
+kubectl port-forward svc/kube-prometheus-stack-grafana  9000:80 &
+
+# Grafana password...
+#  kubectl --namespace ma get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 
 
-helm dependency build charts/aggregates/migrationAssistant
-./linkSubChartsToDependencies.sh charts/aggregates/migrationAssistant
-helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
+# Function to find the migration console pod
+function find_migration_console() {
+  local pods=$(kubectl -n ma get pods | grep "migration-console" | grep "Running")
+  local count=$(echo "$pods" | wc -l)
 
-# Test with
-# kc exec -n ma  -it migration-console-7c846764b8-zvf6w --  curl https://opensearch-cluster-master.tc:9200/   -u admin:myStrongPassword123!  --insecure
+  if [ "$count" -ne 1 ]; then
+    echo "Error: Found $count running migration-console pods. Need exactly 1." >&2
+    return 1
+  fi
 
-kubectl port-forward service/capture-proxy 9200:9200 &
-kubectl port-forward service/elasticsearch 19200:9200 &
-kubectl port-forward service/opensearch 29200:9200 &
+  echo "$pods" | awk '{print $1}'
+}
 
-# kubectl get secret observability-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
-kc port-forward service/observability-grafana 3000:80
-
-# this hasn't been tested recently and will be folded into packages
-
-# just the operator, not any clusters
-helm install strimzi-cluster-operator --set replicas=1 --version 0.43.0 oci://quay.io/strimzi-helm/strimzi-kafka-operator
-helm install capture-traffic-kafka-cluster ./capturedTrafficKafkaCluster --set environment=test
-helm install replayer ./replayer
-
-helm install target opensearch/opensearch --version 2.21.0 --values ChartValues/localtesting/opensearchTarget.yaml
+# Function to run the migration console
+function runmc() {
+  local pod=$(find_migration_console)
+  if [ $? -eq 0 ]; then
+    kubectl -n ma exec --stdin --tty "$pod" -- /bin/bash
+  else
+    return 1
+  fi
+}

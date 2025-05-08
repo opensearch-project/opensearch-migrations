@@ -22,8 +22,6 @@ spec:
         value: test
       - name: topic-partitions
         value: 2
-      - name: provided-kafka-bootstrap-servers
-        value: "ct-3993501252-kafka-bootstrap.ma.svc:9092"
       - name: proxy-listen-port
         value: 9200
       - name: proxy-destination

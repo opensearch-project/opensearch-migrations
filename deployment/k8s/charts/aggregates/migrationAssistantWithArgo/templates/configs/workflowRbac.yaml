@@ -1,4 +1,4 @@
-{{ if hasKey .Values.conditionalPackageInstalls "argo-workflows" }}
+{{ if get .Values.conditionalPackageInstalls "argo-workflows" }}
 ---
 apiVersion: v1
 kind: ServiceAccount
