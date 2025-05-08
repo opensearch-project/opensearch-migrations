@@ -125,7 +125,8 @@ def test_snapshot_status_full(request, snapshot_fixture):
 
     source_cluster.call_api.assert_called_with(
         f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}/_status",
-        HttpMethod.GET
+        HttpMethod.GET,
+        timeout=300
     )
 
 
@@ -438,7 +439,7 @@ def test_snapshot_delete(request, snapshot_fixture):
     snapshot.delete()
     source_cluster.call_api.assert_called_once()
     source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
-                                               HttpMethod.DELETE)
+                                               HttpMethod.DELETE, timeout=1200)
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
@@ -463,7 +464,8 @@ def test_snapshot_delete_repo(request, snapshot_fixture):
     source_cluster.call_api.assert_called_once()
     source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}",
                                                method=HttpMethod.DELETE,
-                                               raise_error=True)
+                                               raise_error=True,
+                                               timeout=1200)
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
