@@ -2,8 +2,8 @@ import logging
 import pytest
 import unittest
 import json
-from console_link.middleware.clusters import clear_cluster, clear_indices, call_api
-from console_link.models.cluster import Cluster, HttpMethod, AuthMethod
+from console_link.middleware.clusters import clear_indices
+from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot, delete_snapshot_repo, delete_all_snapshots
@@ -11,7 +11,6 @@ from console_link.cli import Context
 from console_link.models.snapshot import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
-from console_link.models.utils import SigV4AuthPlugin
 from .default_operations import DefaultOperationsLibrary
 from .common_utils import execute_api_call
 from datetime import datetime
@@ -96,7 +95,11 @@ def preload_data_cluster_es56(target_cluster: Cluster, test_config):
                     "timestamp": datetime.now().isoformat(),
                     "value": f"test_value_{i}",
                     "doc_number": i,
-                    "description": f"This is a detailed description for document {doc_id} containing information about the test data and its purpose in the large snapshot creation process.",
+                    "description": (
+                        f"This is a detailed description for document {doc_id} "
+                        "containing information about the test data and its purpose "
+                        "in the large snapshot creation process."
+                    ),
                     "metadata": {
                         "tags": [f"tag1_{i}", f"tag2_{i}", f"tag3_{i}"],
                         "category": f"category_{i % 10}",
@@ -107,8 +110,15 @@ def preload_data_cluster_es56(target_cluster: Cluster, test_config):
                         "region": f"region_{i % 12}",
                         "details": f"Detailed metadata information for document {doc_id} including test parameters."
                     },
-                    "content": f"Main content for document {doc_id}. This section contains the primary information and data relevant to the testing process. The content is designed to create minimal document for migration and multiplication.",
-                    "additional_info": f"Supplementary information for document {doc_id} providing extra context and details about the test data."
+                    "content": (
+                        f"Main content for document {doc_id}. This section contains the primary information "
+                        "and data relevant to the testing process. The content is designed to create minimal "
+                        "document for migration and multiplication."
+                    ),
+                    "additional_info": (
+                        f"Supplementary information for document {doc_id} "
+                        "providing extra context and details about the test data."
+                    )
                 }
             ])
 
@@ -168,7 +178,11 @@ def preload_data_cluster_es710(target_cluster: Cluster, test_config):
                     "timestamp": datetime.now().isoformat(),
                     "value": f"test_value_{i}",
                     "doc_number": i,
-                    "description": f"This is a detailed description for document {doc_id} containing information about the test data and its purpose in the large snapshot creation process.",
+                    "description": (
+                        f"This is a detailed description for document {doc_id} "
+                        "containing information about the test data and its purpose "
+                        "in the large snapshot creation process."
+                    ),
                     "metadata": {
                         "tags": [f"tag1_{i}", f"tag2_{i}", f"tag3_{i}"],
                         "category": f"category_{i % 10}",
@@ -179,8 +193,15 @@ def preload_data_cluster_es710(target_cluster: Cluster, test_config):
                         "region": f"region_{i % 12}",
                         "details": f"Detailed metadata information for document {doc_id} including test parameters."
                     },
-                    "content": f"Main content for document {doc_id}. This section contains the primary information and data relevant to the testing process. The content is designed to create minimal document for migration and multiplication.",
-                    "additional_info": f"Supplementary information for document {doc_id} providing extra context and details about the test data."
+                    "content": (
+                        f"Main content for document {doc_id}. This section contains the primary information "
+                        "and data relevant to the testing process. The content is designed to create minimal "
+                        "document for migration and multiplication."
+                    ),
+                    "additional_info": (
+                        f"Supplementary information for document {doc_id} "
+                        "providing extra context and details about the test data."
+                    )
                 }
             ])
 
@@ -253,7 +274,11 @@ def preload_data_cluster_os217(target_cluster: Cluster, test_config):
                     "timestamp": datetime.now().isoformat(),
                     "value": f"test_value_{i}",
                     "doc_number": i,
-                    "description": f"This is a detailed description for document {doc_id} containing information about the test data and its purpose in the large snapshot creation process.",
+                    "description": (
+                        f"This is a detailed description for document {doc_id} "
+                        "containing information about the test data and its purpose "
+                        "in the large snapshot creation process."
+                    ),
                     "metadata": {
                         "tags": [f"tag1_{i}", f"tag2_{i}", f"tag3_{i}"],
                         "category": f"category_{i % 10}",
@@ -264,8 +289,15 @@ def preload_data_cluster_os217(target_cluster: Cluster, test_config):
                         "region": f"region_{i % 12}",
                         "details": f"Detailed metadata information for document {doc_id} including test parameters."
                     },
-                    "content": f"Main content for document {doc_id}. This section contains the primary information and data relevant to the testing process. The content is designed to create minimal document for migration and multiplication.",
-                    "additional_info": f"Supplementary information for document {doc_id} providing extra context and details about the test data."
+                    "content": (
+                        f"Main content for document {doc_id}. This section contains the primary information "
+                        "and data relevant to the testing process. The content is designed to create minimal "
+                        "document for migration and multiplication."
+                    ),
+                    "additional_info": (
+                        f"Supplementary information for document {doc_id} "
+                        "providing extra context and details about the test data."
+                    )
                 }
             ])
 
@@ -335,7 +367,10 @@ def setup_test_environment(target_cluster: Cluster, test_config):
             "bindingsObject": "{}"
         }
     }
-    ops.create_transformation_json_file([transform_config], os.path.join(config['TRANSFORMATION_DIRECTORY'], "transformation.json"))
+    ops.create_transformation_json_file(
+        [transform_config],
+        os.path.join(config['TRANSFORMATION_DIRECTORY'], "transformation.json")
+    )
 
     # Select appropriate preload function based on cluster version
     cluster_version = config['CLUSTER_VERSION']
@@ -364,7 +399,11 @@ def setup_test_environment(target_cluster: Cluster, test_config):
         method=HttpMethod.POST,
         path="/_refresh"
     )
-    logger.info(f"Created {config['BATCH_COUNT'] * config['DOCS_PER_BATCH']} documents in bulk in index %s", PILOT_INDEX)
+    logger.info(
+        f"Created {config['BATCH_COUNT'] * config['DOCS_PER_BATCH']} documents "
+        f"in bulk in index %s",
+        PILOT_INDEX
+    )
 
 
 @pytest.fixture(scope="class")
@@ -486,7 +525,7 @@ def setup_environment(request):
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
     logger.info(f"Target Cluster Auth Type: {pytest.console_env.target_cluster.auth_type}")
-    logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")   
+    logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")
     logger.info("Starting tests...")
     yield
     # Note: Individual tests handle their own cleanup
@@ -514,9 +553,17 @@ class BackfillTest(unittest.TestCase):
         
         while True:
             if time.time() - start_time > timeout_seconds:
-                raise TimeoutError(f"Backfill monitoring timed out after {timeout_hours if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS']} hours. Last count: {previous_count:,}")
+                raise TimeoutError(
+                    f"Backfill monitoring timed out after "
+                    f"{timeout_hours if timeout_hours else self.config['BACKFILL_TIMEOUT_HOURS']} "
+                    f"hours. Last count: {previous_count:,}"
+                )
 
-            cluster_response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{pilot_index}/_count?format=json")
+            cluster_response = execute_api_call(
+                cluster=cluster,
+                method=HttpMethod.GET,
+                path=f"/{pilot_index}/_count?format=json"
+            )
             current_count = cluster_response.json()['count']
             
             # Get bulk loader pod status
@@ -527,7 +574,10 @@ class BackfillTest(unittest.TestCase):
                     path="/_cat/tasks?detailed",
                     headers={"Accept": "application/json"}
                 ).json()
-                bulk_loader_active = any(task.get('action', '').startswith('indices:data/write/bulk') for task in bulk_loader_pods)
+                bulk_loader_active = any(
+                    task.get('action', '').startswith('indices:data/write/bulk')
+                    for task in bulk_loader_pods
+                )
             except Exception as e:
                 logger.warning(f"Failed to check bulk loader status: {e}")
                 bulk_loader_active = True  # Assume active if we can't check
@@ -535,8 +585,20 @@ class BackfillTest(unittest.TestCase):
             elapsed_hours = (time.time() - start_time) / 3600
             logger.info(f"Backfill Progress - {elapsed_hours:.2f} hours elapsed:")
             logger.info(f"- Current doc count: {current_count:,}")
-            logger.info(f"- Target doc count: {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,}")
-            logger.info(f"- Progress: {(current_count/(self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']))*100:.2f}%")
+            target_doc_count = (
+                self.config['BATCH_COUNT'] *
+                self.config['DOCS_PER_BATCH'] *
+                self.config['MULTIPLICATION_FACTOR']
+            )
+            logger.info(f"- Target doc count: {target_doc_count:,}")
+            progress = (
+                (current_count / (
+                    self.config['BATCH_COUNT'] *
+                    self.config['DOCS_PER_BATCH'] *
+                    self.config['MULTIPLICATION_FACTOR']
+                )) * 100
+            )
+            logger.info(f"- Progress: {progress:.2f}%")
             logger.info(f"- Bulk loader active: {bulk_loader_active}")
             
             # Don't consider it stable if count is 0 and bulk loader is still active
@@ -545,19 +607,48 @@ class BackfillTest(unittest.TestCase):
                 stable_count = 0
                 stuck_count = 0
             # Only consider it stable if count matches previous and is non-zero
-            elif current_count == self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:
+            target_doc_count = (
+                self.config['BATCH_COUNT'] *
+                self.config['DOCS_PER_BATCH'] *
+                self.config['MULTIPLICATION_FACTOR']
+            )
+            elif current_count == target_doc_count:
                 stable_count += 1
-                logger.info(f"Count stable at target {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,} for {stable_count}/{required_stable_checks} checks")
+                target_doc_count = (
+                    self.config['BATCH_COUNT'] *
+                    self.config['DOCS_PER_BATCH'] *
+                    self.config['MULTIPLICATION_FACTOR']
+                )
+                logger.info(
+                    f"Count stable at target {target_doc_count:,} "
+                    f"for {stable_count}/{required_stable_checks} checks"
+                )
                 if stable_count >= required_stable_checks:
-                    logger.info(f"Document count reached target {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,} and stabilized for {required_stable_checks} consecutive checks")
+                    target_doc_count = (
+                        self.config['BATCH_COUNT'] *
+                        self.config['DOCS_PER_BATCH'] *
+                        self.config['MULTIPLICATION_FACTOR']
+                    )
+                    logger.info(
+                        f"Document count reached target {target_doc_count:,} and "
+                        f"stabilized for {required_stable_checks} consecutive checks"
+                    )
                     return
             # If count is less than expected and not zero, check for stuck condition
-            elif 0 < current_count < self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:
+            expected_doc_count = (
+                self.config['BATCH_COUNT'] *
+                self.config['DOCS_PER_BATCH'] *
+                self.config['MULTIPLICATION_FACTOR']
+            )
+            elif 0 < current_count < expected_doc_count:
                 if current_count == previous_count:
                     stuck_count += 1
                     logger.warning(f"Count has been stuck at {current_count:,} for {stuck_count}/60 checks")
                     if stuck_count >= 60:
-                        raise SystemExit(f"Document count has been stuck at {current_count:,} for too long. Possible issue with backfill.")
+                        raise SystemExit(
+                            f"Document count has been stuck at {current_count:,} for too long. "
+                            "Possible issue with backfill."
+                        )
                 else:
                     stuck_count = 0
 
@@ -597,7 +688,8 @@ class BackfillTest(unittest.TestCase):
                     break
 
             # Only check index if archive wasn't successful
-            if not archive_success and not index_deleted and (current_time - last_check_time) >= 5:  # Check every 5 seconds
+            # If checking, check every 5 seconds
+            if not archive_success and not index_deleted and (current_time - last_check_time) >= 5:
                 try:
                     response = execute_api_call(
                         cluster=pytest.console_env.target_cluster,
@@ -631,8 +723,11 @@ class BackfillTest(unittest.TestCase):
                 retries += 1
                 
         if retries >= max_retries:
-            logger.warning(f"Timeout after {max_retries * retry_interval} seconds. Archive success result: {archive_success}, Index deletion result: {index_deleted}")
-            
+            logger.warning(
+                f"Timeout after {max_retries * retry_interval} seconds. "
+                f"Archive success result: {archive_success}, "
+                f"Index deletion result: {index_deleted}"
+            )
         return archive_result if archive_success else None
 
     def test_data_multiplication(self):
@@ -655,7 +750,12 @@ class BackfillTest(unittest.TestCase):
         # Start backfill
         logger.info("\n=== Starting Backfill Process ===")
         logger.info(f"Expected Document Multiplication Factor: {self.config['MULTIPLICATION_FACTOR']}")
-        logger.info(f"Expected Final Document Count: {self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR']:,}")
+        expected_final_doc_count = (
+            self.config['BATCH_COUNT'] *
+            self.config['DOCS_PER_BATCH'] *
+            self.config['MULTIPLICATION_FACTOR']
+        )
+        logger.info(f"Expected Final Document Count: {expected_final_doc_count:,}")
         logger.info("Starting backfill...")
         backfill_start_result: CommandResult = backfill.start()
         assert backfill_start_result.success, f"Failed to start backfill: {backfill_start_result.error}"
@@ -688,7 +788,14 @@ class BackfillTest(unittest.TestCase):
 
         # Assert that documents were actually migrated
         assert final_doc_count > 0, "No documents were migrated to target index"
-        assert final_doc_count == self.config['BATCH_COUNT'] * self.config['DOCS_PER_BATCH'] * self.config['MULTIPLICATION_FACTOR'], f"Document count mismatch: source={initial_doc_count}, target={final_doc_count}"
+        calculate_final_doc_count = (
+            self.config['BATCH_COUNT'] *
+            self.config['DOCS_PER_BATCH'] *
+            self.config['MULTIPLICATION_FACTOR']
+        )
+        assert final_doc_count == calculate_final_doc_count, (
+            f"Document count mismatch: source={initial_doc_count}, target={final_doc_count}"
+        )
 
         # Stop backfill
         logger.info("\n=== Stopping Backfill ===")
@@ -701,7 +808,10 @@ class BackfillTest(unittest.TestCase):
         if archive_result and archive_result.success:
             logger.info("Backfill archive completed successfully")
         else:
-            logger.warning("Could not fully verify backfill archive completion. Proceeding with incomplete backfill stop.")
+            logger.warning(
+                "Could not fully verify backfill archive completion. "
+                "Proceeding with incomplete backfill stop."
+            )
 
         # Setup S3 Bucket
         snapshot: Snapshot = pytest.console_env.snapshot

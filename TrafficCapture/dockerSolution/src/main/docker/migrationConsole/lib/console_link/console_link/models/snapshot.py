@@ -365,9 +365,13 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str,
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'migration_assistant_repo', timeout: int = 1200):
+def delete_snapshot(
+    cluster: Cluster,
+    snapshot_name: str,
+    repository: str = 'migration_assistant_repo',
+    timeout: int = 1200
+):
     repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot_name)
-
     path = f"/_snapshot/{repository}/{snapshot_name}"
     response = cluster.call_api(path, HttpMethod.DELETE, timeout=timeout)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
