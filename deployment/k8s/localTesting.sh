@@ -26,26 +26,4 @@ kubectl port-forward svc/kube-prometheus-stack-grafana  9000:80 &
 # Grafana password...
 #  kubectl --namespace ma get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 
-
-# Function to find the migration console pod
-function find_migration_console() {
-  local pods=$(kubectl -n ma get pods | grep "migration-console" | grep "Running")
-  local count=$(echo "$pods" | wc -l)
-
-  if [ "$count" -ne 1 ]; then
-    echo "Error: Found $count running migration-console pods. Need exactly 1." >&2
-    return 1
-  fi
-
-  echo "$pods" | awk '{print $1}'
-}
-
-# Function to run the migration console
-function runmc() {
-  local pod=$(find_migration_console)
-  if [ $? -eq 0 ]; then
-    kubectl -n ma exec --stdin --tty "$pod" -- /bin/bash
-  else
-    return 1
-  fi
-}
+kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
