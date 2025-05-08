@@ -287,12 +287,11 @@ def setup_test_environment(target_cluster: Cluster, test_config):
         config_path = "/config/migration_services.yaml"
         env = Context(config_path).env
         target_cluster = env.target_cluster
+
         test_config = request.getfixturevalue('test_config')
-        env.target_cluster.auth_type = AuthMethod.SIGV4
-        env.target_cluster.auth_details = {
-            "region" : test_config['DEPLOY_REGION'],
-            "service" : "es"
-        }
+        logger.info("Updating target cluster to SIGV4 auth using our new method...")
+        target_cluster.update_auth_to_sigv4(region=test_config['DEPLOY_REGION'])
+
         if target_cluster is None:
             raise Exception("Target cluster is not available")
 
@@ -395,11 +394,8 @@ def setup_backfill(test_config, request):
     if env.target_cluster:
         logger.info("Setting Target cluster auth type from default NO_AUTH to be SIGV4_AUTH for Multiplication test")
         
-        pytest.console_env.target_cluster.auth_type = AuthMethod.SIGV4
-        pytest.console_env.target_cluster.auth_details = {
-            "region" : test_config['DEPLOY_REGION'],
-            "service" : "es"
-        }
+        logger.info("Updating target cluster to SIGV4 auth using our new method...")
+        target_cluster.update_auth_to_sigv4(region=test_config['DEPLOY_REGION'])
 
         logger.info(f"Target cluster endpoint: {env.target_cluster.endpoint}")
         logger.info(f"Target cluster auth type: {env.target_cluster.auth_type}")
@@ -495,12 +491,11 @@ def setup_environment(request):
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
+
     test_config = request.getfixturevalue('test_config')
-    pytest.console_env.target_cluster.auth_type = AuthMethod.SIGV4
-    pytest.console_env.target_cluster.auth_details = {
-        "region" : test_config['DEPLOY_REGION'],
-        "service" : "es"
-    }
+    logger.info("Updating target cluster to SIGV4 auth using our new method...")
+    target_cluster.update_auth_to_sigv4(region=test_config['DEPLOY_REGION'])
+    
     logger.info(f"Target Cluster Auth Type: {pytest.console_env.target_cluster.auth_type}")
     logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")   
     logger.info("Starting tests...")
