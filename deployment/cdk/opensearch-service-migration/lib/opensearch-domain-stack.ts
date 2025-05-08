@@ -132,7 +132,7 @@ export class OpenSearchDomainStack extends Stack {
   constructor(scope: Construct, id: string, props: OpensearchDomainStackProps) {
     super(scope, id, props);
 
-    const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
+    const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId
     // Retrieve existing account resources if defined
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined

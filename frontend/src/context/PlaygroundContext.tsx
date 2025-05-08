@@ -147,6 +147,8 @@ export const playgroundReducer = (
 type PlaygroundContextType = {
   state: PlaygroundState;
   dispatch: React.Dispatch<ActionType>;
+  storageSize: number;
+  isQuotaExceeded: boolean;
 };
 
 export const PlaygroundContext = createContext<
@@ -174,6 +176,8 @@ export const usePlayground = () => {
     return {
       state: initialState,
       dispatch: mockDispatch,
+      storageSize: 0,
+      isQuotaExceeded: false,
     };
   }
 

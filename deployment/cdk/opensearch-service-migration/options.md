@@ -93,6 +93,8 @@ In such case, the required fields in the snapshot object are:
 | mskBrokersPerAZCount             | number       | 1                                                                                                       | The number of broker nodes per MSK Availability Zone                                                                                                                                               |
 | mskARN (Not currently available) | string       | `"arn:aws:kafka:us-east-2:12345678912:cluster/msk-cluster-test/81fbae45-5d25-44bb-aff0-108e71cc079b-7"` | Supply an existing MSK cluster ARN to use. **NOTE** As MSK is using an L1 construct this is not currently available for use                                                                        |
 
+| MskEbsStorage                    | object       | `{ "maxCapacity": 16384 }`                                                                               | Configuration object for enabling MSK EBS storage autoscaling. `maxCapacity` sets the upper storage limit in GiB.                                                                                  | '
+
 ## Options being deprecated
 
 A number of options are currently available but deprecated. While they function now, we do not recommend using them, and they may be removed without warning in a future version.

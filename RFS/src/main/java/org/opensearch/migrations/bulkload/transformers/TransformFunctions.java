@@ -46,7 +46,7 @@ public class TransformFunctions {
     public static ObjectNode convertFlatSettingsToTree(ObjectNode flatSettings) {
         ObjectNode treeSettings = mapper.createObjectNode();
 
-        flatSettings.fields().forEachRemaining(entry -> {
+        flatSettings.properties().forEach(entry -> {
             String[] parts = entry.getKey().split("\\.");
             ObjectNode current = treeSettings;
 

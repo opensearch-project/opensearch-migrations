@@ -185,7 +185,7 @@ public class OpenSearchClientFactory {
 
             var nodes = objectMapper.readTree(resp.body)
                     .get("nodes");
-            nodes.fields().forEachRemaining(node -> {
+            nodes.properties().forEach(node -> {
                 var versionNumber = node.getValue().get("version").asText();
                 var nodeVersion = Version.fromString(getLikelyOpenSearchFlavor() + " " + versionNumber);
                 foundVersions.add(nodeVersion);
