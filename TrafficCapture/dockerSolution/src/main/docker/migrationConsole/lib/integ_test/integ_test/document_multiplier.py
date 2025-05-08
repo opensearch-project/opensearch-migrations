@@ -2,11 +2,11 @@ import logging
 import pytest
 import unittest
 import json
-from console_link.middleware.clusters import clear_cluster
+from console_link.middleware.clusters import clear_cluster, clear_indices, call_api
 from console_link.models.cluster import Cluster, HttpMethod, AuthMethod
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
-from console_link.models.snapshot import Snapshot
+from console_link.models.snapshot import Snapshot, delete_snapshot_repo, delete_all_snapshots
 from console_link.cli import Context
 from console_link.models.snapshot import S3Snapshot
 from console_link.models.backfill_rfs import RfsWorkersInProgress
@@ -295,28 +295,31 @@ def setup_test_environment(target_cluster: Cluster, test_config):
     logger.info(f"Target Cluster Auth Type: {pytest.console_env.target_cluster.auth_type}")
     logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")
     
-    # # Confirm cluster connection
-    # target_con_result: ConnectionResult = connection_check(target_cluster)
-    # assert target_con_result.connection_established is True, f"Failed to connect to cluster: {target_con_result.connection_message}"
-
-    # Clear indices and snapshots at the start
-    logger.info("Clearing indices and snapshots before starting test...")
+    # Clear indices
+    logger.info("Clearing indices in the target cluster...")
     try:
-        clear_cluster(target_cluster)
-        # Directly delete the index to ensure it's gone
-        logger.info(f"Explicitly deleting {PILOT_INDEX} if it exists...")
-        try:
-            execute_api_call(
-                cluster=target_cluster,
-                method=HttpMethod.DELETE,
-                path=f"/{PILOT_INDEX}"
-            )
-            logger.info(f"Successfully deleted {PILOT_INDEX}")
-        except Exception as e:
-            logger.info(f"Index delete returned: {str(e)}, continuing...")
+        response = clear_indices(target_cluster)
+        logger.info(f"Indices cleared successfully. Response: {response}")
     except Exception as e:
-        logger.warning(f"Non-fatal error during cluster cleanup: {str(e)}. Continuing with test...")
-    
+        logger.warning(f"Failed to clear indices: {str(e)}. Continuing with test...")
+
+    # Clear snapshots from the repository
+    repository = "migration_assistant_repo"
+    logger.info(f"Clearing all snapshots from repository '{repository}'...")
+    try:
+        delete_all_snapshots(target_cluster, repository)
+        logger.info(f"Successfully cleared all snapshots from '{repository}'.")
+    except Exception as e:
+        logger.warning(f"Failed to clear snapshots from '{repository}': {str(e)}")
+
+    # Delete the repository itself
+    logger.info(f"Deleting snapshot repository '{repository}'...")
+    try:
+        delete_snapshot_repo(target_cluster, repository)
+        logger.info(f"Successfully deleted repository '{repository}'.")
+    except Exception as e:
+        logger.warning(f"Failed to delete repository '{repository}': {str(e)}")
+
     # Cleanup generated transformation files
     try:
         shutil.rmtree(test_config['TRANSFORMATION_DIRECTORY'])
