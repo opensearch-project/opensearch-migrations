@@ -22,6 +22,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly serviceName?: string,
     readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
+    readonly taskInstanceCount?: number,
 }
 
 interface MigrationSSMDestinationConfig {
