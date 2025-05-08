@@ -544,6 +544,12 @@ class BackfillTest(unittest.TestCase):
 
     def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
+        def _calculate_expected_doc_count():
+            return int(self.config['BATCH_COUNT'] *
+                    self.config['DOCS_PER_BATCH'] *
+                    self.config['MULTIPLICATION_FACTOR'])
+
+        expected_doc_count = _calculate_expected_doc_count()
         previous_count = 0
         stable_count = 0
         required_stable_checks = 3  # Need 3 consecutive stable counts at EXPECTED_TOTAL_TARGET_DOCS
@@ -583,21 +589,10 @@ class BackfillTest(unittest.TestCase):
                 bulk_loader_active = True  # Assume active if we can't check
             
             elapsed_hours = (time.time() - start_time) / 3600
+            progress = ((current_count / expected_doc_count) * 100)
             logger.info(f"Backfill Progress - {elapsed_hours:.2f} hours elapsed:")
             logger.info(f"- Current doc count: {current_count:,}")
-            target_doc_count = (
-                self.config['BATCH_COUNT'] *
-                self.config['DOCS_PER_BATCH'] *
-                self.config['MULTIPLICATION_FACTOR']
-            )
-            logger.info(f"- Target doc count: {target_doc_count:,}")
-            progress = (
-                (current_count / (
-                    self.config['BATCH_COUNT'] *
-                    self.config['DOCS_PER_BATCH'] *
-                    self.config['MULTIPLICATION_FACTOR']
-                )) * 100
-            )
+            logger.info(f"- Expected doc count: {expected_doc_count:,}")
             logger.info(f"- Progress: {progress:.2f}%")
             logger.info(f"- Bulk loader active: {bulk_loader_active}")
             
@@ -607,39 +602,19 @@ class BackfillTest(unittest.TestCase):
                 stable_count = 0
                 stuck_count = 0
             # Only consider it stable if count matches previous and is non-zero
-            target_doc_count = (
-                self.config['BATCH_COUNT'] *
-                self.config['DOCS_PER_BATCH'] *
-                self.config['MULTIPLICATION_FACTOR']
-            )
-            elif current_count == target_doc_count:
+            elif current_count == expected_doc_count:
                 stable_count += 1
-                target_doc_count = (
-                    self.config['BATCH_COUNT'] *
-                    self.config['DOCS_PER_BATCH'] *
-                    self.config['MULTIPLICATION_FACTOR']
-                )
                 logger.info(
-                    f"Count stable at target {target_doc_count:,} "
+                    f"Count stable at target {expected_doc_count:,} "
                     f"for {stable_count}/{required_stable_checks} checks"
                 )
                 if stable_count >= required_stable_checks:
-                    target_doc_count = (
-                        self.config['BATCH_COUNT'] *
-                        self.config['DOCS_PER_BATCH'] *
-                        self.config['MULTIPLICATION_FACTOR']
-                    )
                     logger.info(
-                        f"Document count reached target {target_doc_count:,} and "
+                        f"Document count reached value {current_count:,} and "
                         f"stabilized for {required_stable_checks} consecutive checks"
                     )
                     return
             # If count is less than expected and not zero, check for stuck condition
-            expected_doc_count = (
-                self.config['BATCH_COUNT'] *
-                self.config['DOCS_PER_BATCH'] *
-                self.config['MULTIPLICATION_FACTOR']
-            )
             elif 0 < current_count < expected_doc_count:
                 if current_count == previous_count:
                     stuck_count += 1
