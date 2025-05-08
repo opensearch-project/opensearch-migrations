@@ -297,6 +297,8 @@ def setup_test_environment(target_cluster: Cluster, test_config):
             raise Exception("Target cluster is not available")
 
     logger.info(f"Using cluster endpoint: {target_cluster.endpoint}")
+    logger.info(f"Target Cluster Auth Type: {pytest.console_env.target_cluster.auth_type}")
+    logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")
     
     # # Confirm cluster connection
     # target_con_result: ConnectionResult = connection_check(target_cluster)
@@ -499,7 +501,8 @@ def setup_environment(request):
         "region" : test_config['DEPLOY_REGION'],
         "service" : "es"
     }
-    
+    logger.info(f"Target Cluster Auth Type: {pytest.console_env.target_cluster.auth_type}")
+    logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")   
     logger.info("Starting tests...")
     yield
     # Note: Individual tests handle their own cleanup
