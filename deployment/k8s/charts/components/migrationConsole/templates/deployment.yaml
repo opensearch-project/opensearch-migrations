@@ -4,18 +4,19 @@
 {{ $snapshotVolumeEnabled := .Values.snapshotVolumeEnabled }}
 {{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: {{ include "generic.fullname" . }}
+  name: migration-console
 spec:
+  serviceName: "migration-console"
   replicas: 1
   selector:
     matchLabels:
-      app: {{ include "generic.fullname" . }}
+      app: migration-console
   template:
     metadata:
       labels:
-        app: {{ include "generic.fullname" . }}
+        app: migration-console
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
