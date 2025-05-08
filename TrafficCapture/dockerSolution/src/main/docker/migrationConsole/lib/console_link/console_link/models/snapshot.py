@@ -115,15 +115,6 @@ class Snapshot(ABC):
         return command_args
 
 
-S3_SNAPSHOT_SCHEMA = {
-    'snapshot_name': {'type': 'string', 'required': True},
-    'otel_endpoint': {'type': 'string', 'required': False},
-    's3_repo_uri': {'type': 'string', 'required': True},
-    's3_region': {'type': 'string', 'required': True},
-    's3_endpoint': {'type': 'string', 'required': False}
-}
-
-
 class S3Snapshot(Snapshot):
     def __init__(self, config: Dict, cluster: Cluster) -> None:
         super().__init__(config, cluster)
