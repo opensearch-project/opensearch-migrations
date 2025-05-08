@@ -32,11 +32,11 @@ def test_config(request):
         'BACKFILL_TIMEOUT_HOURS': request.config.getoption("--backfill_timeout_hours"),
         'TRANSFORMATION_DIRECTORY': request.config.getoption("--transformation_directory"),
         'LARGE_SNAPSHOT_S3_URI': request.config.getoption("--large_snapshot_s3_uri"),
-        'DEPLOY_REGION': request.config.getoption("--deploy_region"),
+        # 'DEPLOY_REGION': request.config.getoption("--deploy_region"),
         'SNAPSHOT_REGION': request.config.getoption("--snapshot_region"),
         'LARGE_SNAPSHOT_RATE_MB_PER_NODE': request.config.getoption("--large_snapshot_rate_mb_per_node"),
         'RFS_WORKERS': request.config.getoption("--rfs_workers"),
-        'STAGE': request.config.getoption("--stage"),
+        # 'STAGE': request.config.getoption("--stage"),
         'CLUSTER_VERSION': request.config.getoption("--cluster_version")
     }
 
@@ -288,10 +288,6 @@ def setup_test_environment(target_cluster: Cluster, test_config):
         env = Context(config_path).env
         target_cluster = env.target_cluster
 
-        test_config = request.getfixturevalue('test_config')
-        logger.info("Updating target cluster to SIGV4 auth using our new method...")
-        target_cluster.update_auth_to_sigv4(region=test_config['DEPLOY_REGION'])
-
         if target_cluster is None:
             raise Exception("Target cluster is not available")
 
@@ -373,7 +369,6 @@ def setup_backfill(test_config, request):
     """Test setup with backfill lifecycle management"""
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
-    test_config = request.getfixturevalue('test_config')
     # Log config file path
     logger.info(f"Using config file: {config_path}")
     
@@ -393,10 +388,6 @@ def setup_backfill(test_config, request):
     # Log target cluster details
     if env.target_cluster:
         logger.info("Setting Target cluster auth type from default NO_AUTH to be SIGV4_AUTH for Multiplication test")
-        
-        logger.info("Updating target cluster to SIGV4 auth using our new method...")
-        target_cluster.update_auth_to_sigv4(region=test_config['DEPLOY_REGION'])
-
         logger.info(f"Target cluster endpoint: {env.target_cluster.endpoint}")
         logger.info(f"Target cluster auth type: {env.target_cluster.auth_type}")
         if hasattr(env.target_cluster, 'auth_details'):
@@ -491,11 +482,6 @@ def setup_environment(request):
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
-
-    test_config = request.getfixturevalue('test_config')
-    logger.info("Updating target cluster to SIGV4 auth using our new method...")
-    target_cluster.update_auth_to_sigv4(region=test_config['DEPLOY_REGION'])
-    
     logger.info(f"Target Cluster Auth Type: {pytest.console_env.target_cluster.auth_type}")
     logger.info(f"Target Cluster Auth Details: {pytest.console_env.target_cluster.auth_details}")   
     logger.info("Starting tests...")
