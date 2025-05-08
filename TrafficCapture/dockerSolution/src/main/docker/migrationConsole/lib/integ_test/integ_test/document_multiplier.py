@@ -361,9 +361,36 @@ def setup_test_environment(target_cluster: Cluster, test_config):
 
     # Transformer structure
     config = test_config
+    multiplication_factor = str(config['MULTIPLICATION_FACTOR'])
+    initialization_script = (
+        f"const MULTIPLICATION_FACTOR = {multiplication_factor}; "
+        "function transform(document) { "
+        "if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } "
+        "const indexCommandMap = document.get(\"index\"); "
+        "const originalSource = document.get(\"source\"); "
+        "const docsToCreate = []; "
+        "for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { "
+        "const newIndexMap = new Map(indexCommandMap); "
+        "const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); "
+        "newIndexMap.set(\"_id\", newId); "
+        "docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); "
+        "} "
+        "return docsToCreate; "
+        "} "
+        "function main(context) { "
+        "console.log(\"Context: \", JSON.stringify(context, null, 2)); "
+        "return (document) => { "
+        "if (Array.isArray(document)) { "
+        "return document.flatMap((item) => transform(item, context)); "
+        "} "
+        "return transform(document); "
+        "}; "
+        "} "
+        "(() => main)();"
+    )
     transform_config = {
         "JsonJSTransformerProvider": {
-            "initializationScript": "const MULTIPLICATION_FACTOR = " + str(config['MULTIPLICATION_FACTOR']) + "; function transform(document) { if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } const indexCommandMap = document.get(\"index\"); const originalSource = document.get(\"source\"); const docsToCreate = []; for (let i = 0; i < MULTIPLICATION_FACTOR; i++) { const newIndexMap = new Map(indexCommandMap); const newId = newIndexMap.get(\"_id\") + ((i !== 0) ? `_${i}` : \"\"); newIndexMap.set(\"_id\", newId); docsToCreate.push(new Map([[\"index\", newIndexMap], [\"source\", originalSource]])); } return docsToCreate; } function main(context) { console.log(\"Context: \", JSON.stringify(context, null, 2)); return (document) => { if (Array.isArray(document)) { return document.flatMap((item) => transform(item, context)); } return transform(document); }; } (() => main)();",
+            "initializationScript": initialization_script,
             "bindingsObject": "{}"
         }
     }
@@ -545,9 +572,11 @@ class BackfillTest(unittest.TestCase):
     def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
         def _calculate_expected_doc_count():
-            return int(self.config['BATCH_COUNT'] *
-                    self.config['DOCS_PER_BATCH'] *
-                    self.config['MULTIPLICATION_FACTOR'])
+            return int(
+                self.config['BATCH_COUNT'] *
+                self.config['DOCS_PER_BATCH'] *
+                self.config['MULTIPLICATION_FACTOR']
+            )
 
         expected_doc_count = _calculate_expected_doc_count()
         previous_count = 0
