@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
@@ -50,6 +51,7 @@ import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
+import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -193,12 +195,24 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--session-name", "--sessionName" },
             description = "Name to disambiguate fleets of RFS workers running against the same target.  " +
-                "This will be appended to the name of the index that is used for work coordination.")
+                "This will be appended to the name of the index that is used for work coordination.",
+            validateValueWith = IndexNameValidator.class)
         public String indexNameAppendage = "";
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
     }
+
+
+    private static class IndexNameValidator implements IValueValidator<String> {
+        @Override
+        public void validate(String name, String value) throws ParameterException {
+            final String REGEX_PATTERN = "[A-Za-z0-9-]+]";
+            if (!Pattern.compile(REGEX_PATTERN).matcher(value).matches()) {
+                throw new ParameterException("Incoming value did not match regex pattern " + REGEX_PATTERN);
+            }
+        }
+    };
 
     @Getter
     public static class DocParams implements TransformerParams {
