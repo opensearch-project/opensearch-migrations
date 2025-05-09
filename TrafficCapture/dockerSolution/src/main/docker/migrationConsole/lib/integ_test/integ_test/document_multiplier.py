@@ -19,10 +19,17 @@ import shutil
 import os
 
 
+# Constants
+PILOT_INDEX = "pilot_index"  # Name of the index used for testing
+
+logger = logging.getLogger(__name__)
+ops = DefaultOperationsLibrary()
+
 # Test configuration from pytest options
 @pytest.fixture(scope="session")
 def test_config(request):
     """Fixture to provide test configuration at class level"""
+    logger.info("\n>>> Method called def test_config(request) <<<")
     return {
         'NUM_SHARDS': request.config.getoption("--num_shards"),
         'MULTIPLICATION_FACTOR': request.config.getoption("--multiplication_factor"),
@@ -38,13 +45,6 @@ def test_config(request):
         # 'STAGE': request.config.getoption("--stage"),
         'CLUSTER_VERSION': request.config.getoption("--cluster_version")
     }
-
-
-# Constants
-PILOT_INDEX = "pilot_index"  # Name of the index used for testing
-
-logger = logging.getLogger(__name__)
-ops = DefaultOperationsLibrary()
 
 
 def preload_data_cluster_es56(target_cluster: Cluster, test_config):
@@ -217,7 +217,6 @@ def preload_data_cluster_es710(target_cluster: Cluster, test_config):
 
 def preload_data_cluster_os217(target_cluster: Cluster, test_config):
     config = test_config
-
     # Index settings for OpenSearch 2.17
     index_settings_os217 = {
         "settings": {
@@ -313,6 +312,7 @@ def preload_data_cluster_os217(target_cluster: Cluster, test_config):
 
 def setup_test_environment(target_cluster: Cluster, test_config):
     """Setup test data"""
+    logger.info("\n>>> Method called def setup_test_environment(target_cluster: Cluster, test_config) <<<")
     # If target_cluster is None, we'll need to get the target cluster from environment
     if target_cluster is None:
         logger.info("Target cluster is None, using target cluster from environment instead")
@@ -436,6 +436,7 @@ def setup_test_environment(target_cluster: Cluster, test_config):
 @pytest.fixture(scope="class")
 def setup_backfill(test_config, request):
     """Test setup with backfill lifecycle management"""
+    logger.info("\n>>> Method called def setup_backfill(test_config, request) <<<")
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
     # Log config file path
@@ -547,6 +548,7 @@ def setup_backfill(test_config, request):
 @pytest.fixture(scope="session", autouse=True)
 def setup_environment(request):
     """Initialize test environment"""
+    logger.info("\n>>> Method called def setup_environment(request) <<<")
     config_path = request.config.getoption("--config_file_path")
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
@@ -566,11 +568,13 @@ class BackfillTest(unittest.TestCase):
     @pytest.fixture(autouse=True)
     def setup_test(self, test_config, request):
         """Setup test configuration before each test method"""
+        logger.info("\n>>> Method called def setup_test(self, test_config, request) <<<")
         self.config = test_config
         self.request = request
 
     def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None):
         """Wait until document count stabilizes or bulk-loader pods terminate"""
+        logger.info("\n>>> Method called def wait_for_backfill_completion(self, cluster: Cluster, pilot_index: str, timeout_hours: int = None) <<<")
         def _calculate_expected_doc_count():
             return int(
                 self.config['BATCH_COUNT'] *
@@ -665,6 +669,7 @@ class BackfillTest(unittest.TestCase):
 
     def wait_for_working_state_archive(self, backfill, max_retries=30, retry_interval=10):
         """Wait for the working state to be properly archived before proceeding."""
+        logger.info("\n>>> def wait_for_working_state_archive(self, backfill, max_retries=30, retry_interval=10) <<<")
         logger.info("Archiving the working state of the backfill operation...")
         retries = 0
         archive_success = False
@@ -736,6 +741,7 @@ class BackfillTest(unittest.TestCase):
 
     def test_data_multiplication(self):
         """Monitor backfill progress and report final stats"""
+        logger.info("\n>>> def test_data_multiplication(self): <<<")
         source = pytest.console_env.target_cluster
         index_name = PILOT_INDEX
         backfill = pytest.console_env.backfill
@@ -904,6 +910,7 @@ class BackfillTest(unittest.TestCase):
 
     def get_cluster_stats(self, cluster: Cluster, pilot_index: str = None):
         """Get document count and size stats for a cluster (primary shards only)"""
+        logger.info("\n>>> def get_cluster_stats(self, cluster: Cluster, pilot_index: str = None): <<<")
         try:
             if pilot_index:
                 path = f"/{pilot_index}/_stats"
@@ -922,6 +929,7 @@ class BackfillTest(unittest.TestCase):
         
     def setup_s3_bucket(self, account_number: str, snapshot_region: str, test_config):
         """Check and create S3 bucket to store large snapshot"""
+        logger.info("\n>>> def setup_s3_bucket(self, account_number: str, snapshot_region: str, test_config): <<<")
         cluster_version = test_config['CLUSTER_VERSION']
         bucket_name = f"migration-jenkins-snapshot-{account_number}-{snapshot_region}"
         snapshot_folder = f"large-snapshot-{cluster_version}"
