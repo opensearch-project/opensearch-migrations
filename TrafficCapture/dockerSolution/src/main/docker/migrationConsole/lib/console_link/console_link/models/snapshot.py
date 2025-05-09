@@ -427,7 +427,7 @@ def delete_snapshot_repo(cluster: Cluster, repository: str, timeout: int = 1200)
     """
     try:
         delete_path = f"/_snapshot/{repository}"
-        response = cluster.call_api(delete_path, method=HttpMethod.DELETE, raise_error=True)
+        response = cluster.call_api(delete_path, method=HttpMethod.DELETE, raise_error=True, timeout=timeout)
         logging.debug(f"Raw delete snapshot repository status response: {response.text}")
         logger.info(f"Deleted repository: {repository}.")
     except Exception as e:
