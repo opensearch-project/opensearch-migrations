@@ -1,0 +1,60 @@
+#initContainers:
+#  - name: init-dirs
+#    image: migrations/migration_console:latest
+#    command: ["/bin/sh", "-c", "mkdir /shared_logs/source ; mkdir /shared_logs/json"]
+#    volumeMounts:
+#      - name: logs-pv
+#        mountPath: /shared_logs
+
+env:
+  - name: OUTPUT_FORMAT
+    valueFrom:
+      configMapKeyRef:
+        name: log-aggregation-config
+        key: OUTPUT_FORMAT
+
+extraVolumes:
+  - name: logs-pv
+    persistentVolumeClaim:
+      claimName: logs-pvc
+
+extraVolumeMounts:
+  - name: logs-pv
+    mountPath: /shared_logs
+
+config:
+  inputs: |
+    [INPUT]
+        Name             tail
+        Tag              kube.*
+        Path             /var/log/containers/*.log
+        multiline.parser docker, cri
+        Refresh_Interval 5
+        Mem_Buf_Limit    5MB
+        Skip_Long_Lines  Off
+        Skip_Empty_Lines On
+
+  filters: |
+    [FILTER]
+        Name             kubernetes
+        Match            kube.*
+        Kube_URL         https://kubernetes.default.svc:443
+        Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
+        Kube_Tag_Prefix  kube.var.log.containers.
+        Merge_Log        On
+        Merge_Log_Key    log_processed
+    
+    [FILTER]
+        Name          rewrite_tag
+        Match         kube.*
+        Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+        Emitter_Name  re_emitted
+
+  outputs: |
+    [OUTPUT]
+        Name          file
+        Match         *
+        Path          /shared_logs
+        Format        ${OUTPUT_FORMAT}
+        Template      {log}

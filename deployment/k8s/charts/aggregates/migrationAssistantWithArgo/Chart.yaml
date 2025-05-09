@@ -3,9 +3,3 @@ name: migration-assistant
 version: 0.1.0
 type: application
 appVersion: "1.16.0"
-
-dependencies:
-  - name: logs-volume
-    version: "0.1.0"
-    repository: "file://../../sharedResources/logsVolume"
-    condition: conditionalPackageInstalls.logs-volume

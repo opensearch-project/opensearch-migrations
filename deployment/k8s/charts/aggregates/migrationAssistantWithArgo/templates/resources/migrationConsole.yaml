@@ -1,4 +1,3 @@
----
 # kubernetes/rbac.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -38,7 +37,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
-{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolumeEnabled }}
+{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolume.enabled }}
 {{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -65,31 +64,31 @@ spec:
             - "/bin/sh"
             - "-c"
             - |
-              {{- if .Values.developerModeEnabled }}
+    {{- if .Values.developerModeEnabled }}
               source /.venv/bin/activate && pipenv install -e ~/lib/console_link
-              {{- end }}
+    {{- end }}
               export START_API_COMMAND="pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt"
               export WAIT_AND_DO_NOTHING_COMMAND="tail -f /dev/null"
               migrationEnabled=$(echo "$@" | grep -o -- "--migrationApiEnabled" | wc -l); if [ "$migrationEnabled" -gt 0 ]; then $START_API_COMMAND; else $WAIT_AND_DO_NOTHING_COMMAND; fi > run.sh
               exec migrationEnabled $ARGS
           volumeMounts:
-            {{- if $sharedLogsVolumeEnabled }}
+    {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
-            {{- end }}
-            {{- if $developerModeEnabled }}
+    {{- end }}
+    {{- if $developerModeEnabled }}
             - name: local-console-libs
               mountPath: /root/lib
-            {{- end }}
+    {{- end }}
       volumes:
-        {{- if $developerModeEnabled  }}
+    {{- if $developerModeEnabled  }}
         - name: local-console-libs
           hostPath:
             path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
             type: Directory
-        {{- end }}
-        {{- if $sharedLogsVolumeEnabled  }}
+    {{- end }}
+    {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:
-            claimName: {{ .Values.sharedLogsPvc }}
-        {{- end }}
+            claimName: {{ .Values.sharedLogsVolume.name }}
+    {{- end }}
