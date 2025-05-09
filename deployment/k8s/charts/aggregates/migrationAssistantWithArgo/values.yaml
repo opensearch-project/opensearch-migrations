@@ -71,6 +71,8 @@ charts:
     version: "11.2.1"
     repository: "https://charts.bitnami.com/bitnami"
     values:
+      preUpgrade:
+        enabled: false
       replicaCount: 1
       auth:
         rbac:
@@ -250,19 +252,6 @@ charts:
         service:
           type: ClusterIP
           port: 9090
-        # Configure service monitors to scrape OpenTelemetry endpoints
-        additionalServiceMonitors:
-          - name: opentelemetry-collector
-            selector:
-              matchLabels:
-                app.kubernetes.io/name: opentelemetry-collector
-            namespaceSelector:
-              matchNames:
-                - monitoring  # Replace with your OpenTelemetry namespace
-            endpoints:
-              - port: metrics  # The port name defined in OpenTelemetry service
-                interval: 15s
-                path: /metrics
       alertmanager:
         enabled: false
       nodeExporter:

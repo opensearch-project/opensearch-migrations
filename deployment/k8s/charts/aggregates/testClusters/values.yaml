@@ -61,7 +61,7 @@ source:
   image: "migrations/elasticsearch_searchguard"
   roles: [ master, data, ingest ]
   antiAffinity: "soft"
-  esJavaOpts: "-Xms128m -Xmx128m"
+  esJavaOpts: "-Xms512m -Xmx512m"
   protocol: https
   # for simplest dev testing
   replicas: 1

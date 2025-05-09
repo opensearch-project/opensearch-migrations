@@ -204,12 +204,12 @@ public class RfsMigrateDocuments {
     }
 
 
-    private static class IndexNameValidator implements IValueValidator<String> {
+    public static class IndexNameValidator implements IValueValidator<String> {
         @Override
         public void validate(String name, String value) throws ParameterException {
-            final String REGEX_PATTERN = "[A-Za-z0-9-]+]";
+            final String REGEX_PATTERN = "[A-Za-z0-9-]*";
             if (!Pattern.compile(REGEX_PATTERN).matcher(value).matches()) {
-                throw new ParameterException("Incoming value did not match regex pattern " + REGEX_PATTERN);
+                throw new ParameterException("Incoming value '" + value + "'did not match regex pattern " + REGEX_PATTERN);
             }
         }
     };
