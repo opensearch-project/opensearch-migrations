@@ -451,8 +451,8 @@ def test_snapshot_delete_all_snapshots(request, snapshot_fixture):
     snapshot.delete_all_snapshots()
     source_cluster.call_api.assert_called()
     source_cluster.call_api.assert_has_calls([
-        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True),
-        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot', HttpMethod.DELETE),
+        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True, timeout=1200),
+        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot', HttpMethod.DELETE, timeout=1200),
     ])
 
 
