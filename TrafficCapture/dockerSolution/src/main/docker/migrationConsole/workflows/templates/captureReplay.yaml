@@ -132,7 +132,7 @@ spec:
                 - name: kafka-traffic-group-id
                   value: "{{tasks.id-generator.id}}"
                 - name: replicas
-                  value: "2"
+                  value: "1"
 
           - name: run-migration-console
             templateRef:
