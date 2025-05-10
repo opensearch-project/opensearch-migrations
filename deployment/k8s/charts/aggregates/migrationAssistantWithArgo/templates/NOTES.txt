@@ -1,0 +1,23 @@
+============================================
+INSTALLATION SUMMARY FOR {{ .Release.Name }}
+============================================
+
+Your meta-installer has successfully deployed the following charts:
+
+{{- range $chart := .Values.charts }}
+{{- if (index $.Values.conditionalPackageInstalls $chart.name) }}
+* {{ $chart.name }} (version: {{ $chart.version }})
+  - Namespace: {{ $chart.namespace }}
+{{- end }}
+{{- end }}
+
+AGGREGATED INSTALLATION NOTES:
+------------------------------
+
+To view complete installation notes from all subcharts:
+
+  kubectl get configmap {{ .Release.Name }}-installation-notes -n {{ .Release.Namespace }} -o jsonpath='{.data.all-notes\.txt}' | less
+
+Or save to a file:
+
+  kubectl get configmap {{ .Release.Name }}-installation-notes -n {{ .Release.Namespace }} -o jsonpath='{.data.all-notes\.txt}' > {{ .Release.Name }}-notes.txt

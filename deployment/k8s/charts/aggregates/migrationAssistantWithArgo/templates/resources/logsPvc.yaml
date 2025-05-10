@@ -1,0 +1,21 @@
+# Only create PVC, if PVC with same name does not already exist
+{{- if .Values.logs.sharedLogsVolume.enabled }}
+{{- $pvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace .Values.logs.sharedLogsVolume.name -}}
+{{- if not $pvc }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.logs.sharedLogsVolume.name }}
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.logs.sharedLogsVolume.size }}
+  {{- if .Values.logs.sharedLogsVolume.storageClass }}
+  storageClassName: {{ .Values.logs.sharedLogsVolume.storageClass }}
+  {{- end }}
+{{- end }}
+{{- end }}

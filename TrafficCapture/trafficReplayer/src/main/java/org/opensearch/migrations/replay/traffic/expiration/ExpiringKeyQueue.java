@@ -10,9 +10,10 @@ import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * This is a sequence of (concurrent) hashmaps segmented by time.  Each element in the sequence is
- * composed of a timestamp and a map.  The timestamp at each element is guaranteed to be greater
- * than all items within all maps that preceded it.
+ * This is a sequence of (concurrent) hashmaps segmented by time.  The hashmaps are really just sets,
+ * the boolean value is just a dummy because there isn't a concurrent set class.  Each element in the
+ * sequence is composed of a timestamp and a map.  The timestamp at each element is guaranteed to be
+ * greater than all items within all maps that preceded it.
  */
 @Slf4j
 @EqualsAndHashCode(callSuper = true)

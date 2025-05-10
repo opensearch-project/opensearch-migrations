@@ -383,7 +383,7 @@ def test_cat_indices_with_refresh(requests_mock):
 
 def test_clear_indices(requests_mock):
     cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    mock = requests_mock.delete(f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state")
+    mock = requests_mock.delete(f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state*")
     clusters_.clear_indices(cluster)
     assert mock.call_count == 1
 

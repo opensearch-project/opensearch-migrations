@@ -1,0 +1,54 @@
+{{ if get .Values.conditionalPackageInstalls "argo-workflows" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo-workflow-executor
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-deployer-role
+  namespace: {{ .Release.Namespace }}
+rules:
+  # Existing permissions for deployments and replicasets
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Add permissions for Argo workflows
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Add permissions for pods and pod logs (needed for Argo workflow execution)
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # For services
+  - apiGroups: [ "apiextensions.k8s.io" ]
+    resources: [ "customresourcedefinitions" ]
+    verbs: [ "create", "get", "list", "watch", "update", "patch", "delete" ]
+
+  # Kafka resources permissions
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkatopics", "kafkanodepools"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-deployer-rolebinding
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: workflow-deployer-role
+  apiGroup: rbac.authorization.k8s.io
+{{ end }}
