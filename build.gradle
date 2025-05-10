@@ -555,18 +555,18 @@ def registerKanikoTask = { String serviceName, String contextDir, String registr
 //        dependsOn waitTask
 //    }
 
-    def uninstallTask = tasks.register("helmUninstall_${serviceName}", Exec) {
-        group = "kaniko"
-        description = "Uninstall Helm release for ${serviceName}"
-        commandLine 'helm', 'uninstall', releaseName
-        dependsOn installTask
-    }
+//    def uninstallTask = tasks.register("helmUninstall_${serviceName}", Exec) {
+//        group = "kaniko"
+//        description = "Uninstall Helm release for ${serviceName}"
+//        commandLine 'helm', 'uninstall', releaseName
+//        dependsOn installTask
+//    }
 
     // Register final wrapper task
     tasks.register("buildWithKaniko_${serviceName}") {
         group = "kaniko"
         description = "Full Kaniko build flow for ${serviceName}"
-        dependsOn uninstallTask
+        dependsOn waitTask
     }
 }
 
