@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: image-builder-{{ .Values.serviceName | lower }}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: local-mount
+          hostPath:
+            path: /opensearch-migrations
+            type: DirectoryOrCreate
+
+#      # Pull GitHub repo and build gradle apps
+#      containers:
+#        - name: prepare-repository
+#          image: amazoncorretto:17-al2023
+#          env:
+#            - name: GRADLE_OPTS
+#              value: "-Xms512m -Xmx4g -Dorg.gradle.daemon=false"
+#          command:
+#            - sh
+#            - -c
+#          args:
+#            - |
+#              echo "No local repo found. Cloning from GitHub..."
+#              yum update -y && yum install -y git findutils && yum clean all
+#              git clone --depth 1 --branch main https://github.com/lewijacn/opensearch-migrations.git
+#              cd opensearch-migrations
+#              tail -f /dev/null
+#          volumeMounts:
+#            - name: workspace
+#              mountPath: /workspace
+
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - --context=/workspace/{{ .Values.contextDir }}
+            - --dockerfile=/workspace/{{ .Values.contextDir }}/Dockerfile
+            - --destination={{ .Values.registryDestination }}
+            - --cache=true
+            - --insecure
+            - --skip-tls-verify
+          volumeMounts:
+            - name: local-mount
+              mountPath: /workspace

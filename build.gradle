@@ -513,33 +513,73 @@ tasks.register("listTestTasksAsJson") {
     }
 }
 
-def dockerImages = [
-        [name: "elasticsearch_test_console", context: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/Dockerfile"]
-]
+def registerKanikoTask = { String serviceName, String contextDir, String registryDestination ->
+    def uuid = UUID.randomUUID().toString().take(4)
+    def serviceNameLower = serviceName.toLowerCase()
+    def serviceNameForK8s = serviceNameLower + "-" + uuid
+    def releaseName = "kaniko-" + serviceNameLower + "-" + uuid
+    def chartPath = "deployment/k8s/charts/components/imageBuilder"
 
-def createBuildxPushTask = { String taskName, String imageName, String dockerfilePath ->
-    def contextDir = layout.projectDirectory.dir(dockerfilePath)
-
-    tasks.register(taskName, Exec) {
-        group = 'docker'
-        description = "Build and push Docker image '${imageName}' using docker buildx"
-
-        commandLine = [
-                'docker', 'buildx', 'build',
-                '--push',
-                '--tag',
-                imageName,
-                contextDir.asFile.path
+    def installTask = tasks.register("helmInstall_${serviceName}", Exec) {
+        group = "kaniko"
+        description = "Install Helm job for ${serviceName}"
+        def helmArgs = [
+                'helm', 'install', releaseName, chartPath,
+                '--set', "serviceName=${serviceNameForK8s}",
+                '--set', "contextDir=${contextDir}",
+                '--set', "registryDestination=${registryDestination}"
         ]
+
+        commandLine = helmArgs
+
+        doFirst {
+            println "[DEBUG] Running Helm install:"
+            println helmArgs.collect { it.contains(' ') ? "\"$it\"" : it }.join(' ')
+        }
+    }
+
+    def waitTask = tasks.register("kubectlWait_${serviceName}", Exec) {
+        group = "kaniko"
+        description = "Wait for Kaniko job to complete for ${serviceNameForK8s}"
+        commandLine 'kubectl', 'wait',
+                "job/image-builder-${serviceNameForK8s}",
+                '--for=condition=complete',
+                '--timeout=300s'
+        dependsOn installTask
+    }
+
+//    def logsTask = tasks.register("kubectlLogs_${serviceName}", Exec) {
+//        group = "kaniko"
+//        description = "Get logs from Kaniko job for ${serviceNameForK8s}"
+//        commandLine 'kubectl', 'logs', "job/image-builder-${serviceNameForK8s}"
+//        dependsOn waitTask
+//    }
+
+    def uninstallTask = tasks.register("helmUninstall_${serviceName}", Exec) {
+        group = "kaniko"
+        description = "Uninstall Helm release for ${serviceName}"
+        commandLine 'helm', 'uninstall', releaseName
+        dependsOn installTask
+    }
+
+    // Register final wrapper task
+    tasks.register("buildWithKaniko_${serviceName}") {
+        group = "kaniko"
+        description = "Full Kaniko build flow for ${serviceName}"
+        dependsOn uninstallTask
     }
 }
 
-createBuildxPushTask('buildElasticsearchTestConsole', 'localhost:5000/elasticsearch_test_console', 'TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole')
+
+registerKanikoTask("elasticsearchTestConsole", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole", "docker-registry:5000/elasticsearch_test_console:latest")
+registerKanikoTask("captureProxyBase", "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase", "docker-registry:5000/capture_proxy_base:latest")
+
 
 tasks.register("buildImagesToRegistry") {
-    dependsOn("buildElasticsearchTestConsole")
-    dependsOn {
-        project(":TrafficCapture:trafficReplayer").tasks.named("jib")
-    }
-    dependsOn(":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole")
+    dependsOn("buildWithKaniko_elasticsearchTestConsole")
+    dependsOn("buildWithKaniko_captureProxyBase")
+//    dependsOn {
+//        project(":TrafficCapture:trafficReplayer").tasks.named("jib")
+//    }
+//    dependsOn(":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole")
 }
