@@ -60,7 +60,7 @@ spec:
                   "allow_insecure": true,
                   "basic_auth": {
                       "username": "admin",
-                      "password": "myStrongPassword123!"
+                      "password": "admin"
                   }
               }
           ]

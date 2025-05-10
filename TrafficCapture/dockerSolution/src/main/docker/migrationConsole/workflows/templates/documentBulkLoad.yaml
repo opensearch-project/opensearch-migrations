@@ -305,6 +305,8 @@ spec:
                       value: "us-east-1"
                     - name: AWS_DEFAULT_REGION
                       value: "us-east-1"
+                    - name: OTEL_COLLECTOR_ENDPOINT
+                      value: "{{inputs.parameters.otel-collector-endpoint}}"
                   command:
                     - "/bin/sh"
                     - "-c"
@@ -332,6 +334,7 @@ spec:
                       ARGS="${ARGS}${TARGET_USERNAME:+ --targetUsername $TARGET_USERNAME}"
                       ARGS="${ARGS}${DOC_TRANSFORMER_BASE64:+ --docTransformerConfigBase64 $DOC_TRANSFORMER_BASE64}"
                       ARGS="${ARGS}${INDEX_ALLOW_LIST:+ --indexAllowList $INDEX_ALLOW_LIST}"
+                      ARGS="${ARGS}${OTEL_COLLECTOR_ENDPOINT:+ --otelCollectorEndpoint $OTEL_COLLECTOR_ENDPOINT}"
 
                       # Special handling for boolean flag
                       if [ "$TARGET_INSECURE" = "true" ] || [ "$TARGET_INSECURE" = "1" ]; then

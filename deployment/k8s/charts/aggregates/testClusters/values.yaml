@@ -106,6 +106,8 @@ source:
       value: null  # Set to null to disable
 
 target:
+  image:
+    tag: "2.11.1"
   extraEnvs:
     - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
       value: myStrongPassword123!

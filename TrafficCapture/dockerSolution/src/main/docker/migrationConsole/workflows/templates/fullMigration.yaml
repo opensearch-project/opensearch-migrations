@@ -43,7 +43,7 @@ spec:
 #                {"endpoint":"https://doesnt.resolve.example.com:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"myStrongPassword123!"}}
             value: |
               [
-               {"endpoint":"https://opensearch-cluster-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"myStrongPassword123!"}}
+               {"endpoint":"https://opensearch-cluster-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}}
               ]
       steps:
         - - name: get-configs-from-maps
@@ -304,11 +304,6 @@ spec:
           - name: migration-config
           - name: target-config
       steps: [[]]
-#      container:
-#        image: migrations/migration_console:latest
-#        imagePullPolicy: IfNotPresent
-#        command: [ echo ]
-#        args: [ "metadata migrate" ]
 
     # This is where we'd start running live-replay
     - name: run-replayer-for-target
