@@ -128,5 +128,6 @@ echo ""
 "${cmd[@]}" | gzip -c -9 > "$archive_path"
 
 if [ "$enable_s3" = true ]; then
+  #aws s3 cp - s3://amzn-s3-demo-bucket/stream.txt
   aws s3 mv "$archive_path" "$s3_bucket_uri" && echo "Export moved to S3: $s3_bucket_uri"
 fi

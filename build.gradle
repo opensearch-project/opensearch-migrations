@@ -9,6 +9,7 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.6' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.google.protobuf' version "0.9.5" apply false
+    id 'com.google.cloud.tools.jib' version '3.4.0' apply false
 
     // Used in top level build.gradle
     id 'jacoco' apply true
@@ -510,4 +511,35 @@ tasks.register("listTestTasksAsJson") {
     doLast {
         println JsonOutput.prettyPrint(JsonOutput.toJson(testTasksProvider.get()))
     }
+}
+
+def dockerImages = [
+        [name: "elasticsearch_test_console", context: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/Dockerfile"]
+]
+
+def createBuildxPushTask = { String taskName, String imageName, String dockerfilePath ->
+    def contextDir = layout.projectDirectory.dir(dockerfilePath)
+
+    tasks.register(taskName, Exec) {
+        group = 'docker'
+        description = "Build and push Docker image '${imageName}' using docker buildx"
+
+        commandLine = [
+                'docker', 'buildx', 'build',
+                '--push',
+                '--tag',
+                imageName,
+                contextDir.asFile.path
+        ]
+    }
+}
+
+createBuildxPushTask('buildElasticsearchTestConsole', 'localhost:5000/elasticsearch_test_console', 'TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole')
+
+tasks.register("buildImagesToRegistry") {
+    dependsOn("buildElasticsearchTestConsole")
+    dependsOn {
+        project(":TrafficCapture:trafficReplayer").tasks.named("jib")
+    }
+    dependsOn(":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole")
 }
