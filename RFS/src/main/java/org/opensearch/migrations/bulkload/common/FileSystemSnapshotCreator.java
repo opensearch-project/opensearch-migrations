@@ -29,7 +29,7 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
         // Assemble the request body
         ObjectNode settings = mapper.createObjectNode();
         settings.put("location", snapshotRepoDirectoryPath);
-
+        settings.put("compress", false);
         ObjectNode body = mapper.createObjectNode();
         body.put("type", "fs");
         body.set("settings", settings);

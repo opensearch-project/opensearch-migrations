@@ -25,7 +25,7 @@ public class WorkCoordinatorFactory {
             long tolerableClientServerClockDifferenceSeconds,
             String workerId
         ) {
-        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
+        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).or(VersionMatchers.isES_8_X).test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
                 indexNameAppendage,
                 tolerableClientServerClockDifferenceSeconds,
@@ -39,7 +39,7 @@ public class WorkCoordinatorFactory {
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
     }
-    
+
     public OpenSearchWorkCoordinator get(
             AbstractedHttpClient httpClient,
             long tolerableClientServerClockDifferenceSeconds,
@@ -47,7 +47,7 @@ public class WorkCoordinatorFactory {
             Clock clock,
             Consumer<WorkItemAndDuration> workItemConsumer
         ) {
-        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
+        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).or(VersionMatchers.isES_8_X).test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
                 indexNameAppendage,
                 tolerableClientServerClockDifferenceSeconds,

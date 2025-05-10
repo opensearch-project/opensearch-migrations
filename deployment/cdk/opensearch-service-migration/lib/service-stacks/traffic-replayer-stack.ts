@@ -73,7 +73,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             servicePolicies = servicePolicies.concat(mskConsumerPolicies)
         }
 
-        const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
+        const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
@@ -82,7 +82,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.KAFKA_BROKERS,
         });
-        const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
+        const groupId = props.customKafkaGroupId ?? `logging-group-${deployId}`
 
         let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint}`
         const extraArgsDict = parseArgsToDict(props.extraArgs)

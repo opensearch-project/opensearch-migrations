@@ -50,8 +50,8 @@ export class MigrationAssistanceStack extends Stack {
 
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
-        const storageContext = this.node.tryGetContext('MskEbsStorage') || {};
-        const maxCapacity = storageContext.maxCapacity || 16384; // Maximum capacity for each MSK broker node
+        const storageContext = this.node.tryGetContext('MskEbsStorage') ?? {};
+        const maxCapacity = storageContext.maxCapacity ?? 16384; // Maximum capacity for each MSK broker node
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: `migration-msk-config-${props.stage}`,
@@ -62,7 +62,7 @@ export class MigrationAssistanceStack extends Stack {
             retention: RetentionDays.THREE_MONTHS
         });
 
-        const brokerNodesPerAZ = props.mskBrokersPerAZCount ? props.mskBrokersPerAZCount : 1
+        const brokerNodesPerAZ = props.mskBrokersPerAZCount ?? 1
         if (brokerNodesPerAZ < 1) {
             throw new Error(`The MSK context option 'mskBrokersPerAZCount' must be set to at least 1`)
         }
