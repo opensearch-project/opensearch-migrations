@@ -56,7 +56,7 @@ public class WorkCoordinatorTest {
     private WorkCoordinatorFactory factory;
     
     static Stream<SearchClusterContainer.ContainerVersion> containerVersions() {
-        return SupportedClusters.supportedSources(true).stream();
+        return SupportedClusters.supportedTargets(true).stream();
     }
 
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";

@@ -13,7 +13,7 @@ import lombok.experimental.UtilityClass;
  */
 @UtilityClass
 public class SupportedClusters {
-    public static List<ContainerVersion> sources() {
+    private static List<ContainerVersion> sources() {
         return List.of(
             SearchClusterContainer.ES_V5_6_16,
             SearchClusterContainer.ES_V6_8_23,
@@ -24,10 +24,11 @@ public class SupportedClusters {
         );
     }
 
-    public static List<ContainerVersion> targets() {
+    private static List<ContainerVersion> targets() {
         return List.of(
             SearchClusterContainer.OS_V1_3_16,
-            SearchClusterContainer.OS_V2_19_1
+            SearchClusterContainer.OS_V2_19_1,
+            SearchClusterContainer.OS_V3_0_0
         );
     }
 
@@ -44,6 +45,7 @@ public class SupportedClusters {
         public ContainerVersion target() { return target; }
 
     }
+
     public static List<MigrationPair> supportedPairs(boolean includeRFSOnly) {
         var matrix = new java.util.ArrayList<>(sources().stream()
                 .flatMap(source -> targets().stream()
