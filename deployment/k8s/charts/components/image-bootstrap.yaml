@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: helm-job-runner
+  namespace: ma
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: helm-job-role
+  namespace: ma
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: helm-job-rolebinding
+  namespace: ma
+subjects:
+  - kind: ServiceAccount
+    name: helm-job-runner
+    namespace: ma
+roleRef:
+  kind: Role
+  name: helm-job-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: image-bootstrap-
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: helm-job-runner
+      restartPolicy: Never
+      # Pull GitHub repo and build gradle apps
+      containers:
+        - name: image-bootstrap
+          image: amazoncorretto:17-al2023
+          env:
+            - name: GRADLE_OPTS
+              value: "-Xms512m -Xmx4g -Dorg.gradle.daemon=false"
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              set +e
+              yum update -y && yum install -y git findutils tar && yum clean all
+              HELM_VERSION="v3.14.0" && ARCH="arm64" && \
+              curl -LO "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
+              tar -zxvf "helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
+              mv linux-${ARCH}/helm /usr/local/bin/helm && \
+              rm -rf "helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" linux-${ARCH} && \
+              helm version
+              echo "Cloning repo from GitHub..."
+              git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git
+              cd opensearch-migrations
+              tail -f /dev/null
