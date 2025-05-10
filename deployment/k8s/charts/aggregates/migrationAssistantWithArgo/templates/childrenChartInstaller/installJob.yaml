@@ -84,10 +84,9 @@ spec:
               echo "Preparing chart: {{ .name }}"
 
           {{- if .values }}
+              VALUES_B64="{{ .values | toYaml | b64enc }}"
+              echo "$VALUES_B64" | base64 -d > /tmp/values-{{ .name }}.yaml
               VALUE_PARAM="--values /tmp/values-{{ .name }}.yaml"
-              cat > /tmp/values-{{ .name }}.yaml << EOF
-            {{- .values | toYaml | nindent 16 }}
-              EOF
           {{- else }}
               VALUE_PARAM=""
           {{- end }}

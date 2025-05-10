@@ -5,6 +5,7 @@ conditionalPackageInstalls:
   kube-prometheus-stack: true    # will be needed for auto-scaling
   argo-workflows: true           # orchestrates the steps of a migration
   strimzi-kafka-operator: true   # Required by capture and replay
+  fluent-bit: true
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -16,7 +17,6 @@ conditionalPackageInstalls:
 
   # Support packages - installed as direct dependencies to this chart as opposed to via the installer job
   migration-console: true
-  logs-volume: false
 
   # Packages for testing and local development
   localstack: true
@@ -33,23 +33,13 @@ snapshotBucketConfiguration:
   useLocalStack: true
   endpoint: localstack
 
-
-extraOtelConfiguration:
-  version: "0.124.0"
-  configs:
-    metrics:
-      - prometheus
-      - cloudwatch
-    traces:
-      - jaeger
-      - xray
-
-
-#migration-console:
-#  snapshotVolumeEnabled: true
-#  snapshotVolumePvc: "snapshot-volume-pvc"
-#  sharedLogsVolumeEnabled: true
-#  sharedLogsPvc: "shared-logs-pvc"
+logs:
+  sharedLogsVolume:
+    enabled: true
+    name: logs-pvc
+    size: 10Gi
+    storageClass: ""
+  format: application # application or docker-json
 
 
 installer:
@@ -62,6 +52,16 @@ installer:
     name: "helm-installer"
   rbac:
     create: true
+
+extraOtelConfiguration:
+  version: "0.124.0"
+  configs:
+    metrics:
+      - prometheus
+      - cloudwatch
+    traces:
+      - jaeger
+      - xray
 
 
 charts:
@@ -216,6 +216,75 @@ charts:
         serviceAccount:
           create: false
           name: argo-workflow-executor
+
+  - name: fluent-bit
+    version: "0.49.0"
+    repository: "https://fluent.github.io/helm-charts"
+    values:
+      env:
+        - name: OUTPUT_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: log-aggregation-config
+              key: OUTPUT_FORMAT
+
+      extraVolumes:
+        - name: logs-pv
+          persistentVolumeClaim:
+            claimName: logs-pvc
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+
+      extraVolumeMounts:
+        - name: logs-pv
+          mountPath: /shared_logs
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true
+
+      config:
+        inputs: |
+          [INPUT]
+              Name             tail
+              Tag              kube.*
+              Path             /var/log/containers/*.log
+              multiline.parser docker, cri
+              Refresh_Interval 5
+              Mem_Buf_Limit    5MB
+              Skip_Long_Lines  Off
+              Skip_Empty_Lines On
+
+        filters: |
+          [FILTER]
+              Name             kubernetes
+              Match            kube.*
+              Kube_URL         https://kubernetes.default.svc:443
+              Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
+              Kube_Tag_Prefix  kube.var.log.containers.
+              Merge_Log        On
+              Merge_Log_Key    log_processed
+          
+          [FILTER]
+              Name          rewrite_tag
+              Match         kube.*
+              Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+              Emitter_Name  re_emitted
+          
+          [FILTER]
+              Name          lua
+              Match         *
+              script        /fluentbit/scripts/trim.lua
+              call          trim_log
+
+        outputs: |
+          [OUTPUT]
+              Name          file
+              Match         *
+              Path          /shared_logs
+              Format        ${OUTPUT_FORMAT}
+              Template      {log}
 
 
   # Will likely be required for auto-scaling.

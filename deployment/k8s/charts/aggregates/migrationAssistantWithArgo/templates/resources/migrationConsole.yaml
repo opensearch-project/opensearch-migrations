@@ -37,7 +37,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
-{{ $sharedLogsVolumeEnabled := .Values.sharedLogsVolume.enabled }}
+{{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
 {{ $developerModeEnabled := .Values.developerModeEnabled }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -90,5 +90,5 @@ spec:
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:
-            claimName: {{ .Values.sharedLogsVolume.name }}
+            claimName: {{ .Values.logs.sharedLogsVolume.name }}
     {{- end }}

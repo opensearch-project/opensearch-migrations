@@ -1,11 +1,3 @@
-#initContainers:
-#  - name: init-dirs
-#    image: migrations/migration_console:latest
-#    command: ["/bin/sh", "-c", "mkdir /shared_logs/source ; mkdir /shared_logs/json"]
-#    volumeMounts:
-#      - name: logs-pv
-#        mountPath: /shared_logs
-
 env:
   - name: OUTPUT_FORMAT
     valueFrom:
@@ -17,10 +9,16 @@ extraVolumes:
   - name: logs-pv
     persistentVolumeClaim:
       claimName: logs-pvc
+  - name: lua-scripts
+    configMap:
+      name: fluentbit-lua-scripts
 
 extraVolumeMounts:
   - name: logs-pv
     mountPath: /shared_logs
+  - name: lua-scripts
+    mountPath: /fluentbit/scripts
+    readOnly: true
 
 config:
   inputs: |
@@ -50,6 +48,12 @@ config:
         Match         kube.*
         Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
         Emitter_Name  re_emitted
+  
+    [FILTER]
+        Name          lua
+        Match         *
+        script        /fluentbit/scripts/trim.lua
+        call          trim_log
 
   outputs: |
     [OUTPUT]
