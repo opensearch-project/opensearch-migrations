@@ -112,6 +112,8 @@ describe("PlaygroundProvider", () => {
       inputDocuments: [],
       transformations: [],
       outputDocuments: [],
+      isProcessingTransformations: false,
+      transformationErrors: [],
     });
     expect(onDispatchReceived).toHaveBeenCalled();
     expect(localStorageMock.getItem).toHaveBeenCalledWith(STORAGE_KEY);
@@ -139,6 +141,8 @@ describe("PlaygroundProvider", () => {
       inputDocuments: savedState.inputDocuments,
       transformations: savedState.transformations,
       outputDocuments: [],
+      isProcessingTransformations: false,
+      transformationErrors: [],
     });
   });
 

@@ -5,5 +5,4 @@ export const defaultContent: string = `function main(context) {
   };
 }
 // Entrypoint function
-(() => main)();
-`;
+(() => main)();`;
