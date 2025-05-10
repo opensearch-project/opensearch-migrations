@@ -46,7 +46,7 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
      */
     protected String getConfigUsageStr() {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, " +
-            "with keys: " + String.join("', '", new String[]{INITIALIZATION_SCRIPT_KEY, BINDINGS_OBJECT}) + "." +
+            "with keys: " + INITIALIZATION_SCRIPT_KEY + ", " + BINDINGS_OBJECT + "." +
             INITIALIZATION_SCRIPT_KEY + " is a string consisting of Javascript which may define functions and ends in an evaluation that returns" +
             " a main function which takes in the " + BINDINGS_OBJECT + " and returns a transform function which takes in a json object and returns the transformed object." +
             BINDINGS_OBJECT + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array," +

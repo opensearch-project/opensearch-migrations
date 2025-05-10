@@ -65,7 +65,7 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
                         closeStream();
                         ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
                     }
-                    return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
+                    // fireChannelRead will be fired on the compressed contents via the compressorStream.
                 } finally {
                     contentBuf.release();
                 }

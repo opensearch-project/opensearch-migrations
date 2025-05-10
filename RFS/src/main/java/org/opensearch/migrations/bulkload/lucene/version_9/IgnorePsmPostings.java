@@ -30,6 +30,33 @@ import shadow.lucene9.org.apache.lucene.store.Directory;
  */
 public class IgnorePsmPostings extends PostingsFormat {
 
+    private static final FieldsProducer EMPTY_FIELDS_PRODUCER = new FieldsProducer() {
+        @Override
+        public void close() {
+            // No resources to close
+        }
+
+        @Override
+        public void checkIntegrity() {
+            // Nothing to fail 
+        }
+
+        @Override
+        public Iterator<String> iterator() {
+            return java.util.Collections.emptyIterator();
+        }
+
+        @Override
+        public Terms terms(String field) {
+            return null;
+        }
+
+        @Override
+        public int size() {
+            return 0;
+        }
+    };
+
     public IgnorePsmPostings() {
         super("ES812Postings");
     }
@@ -49,18 +76,6 @@ public class IgnorePsmPostings extends PostingsFormat {
                 );
             }
         }
-        return new FieldsProducer() {
-            @Override public void close() {}
-            @Override public void checkIntegrity() {}
-            @Override public Iterator<String> iterator() {
-                return java.util.Collections.emptyIterator();
-            }
-            @Override public Terms terms(String field) {
-                return null;
-            }
-            @Override public int size() {
-                return 0;
-            }
-        };
+        return EMPTY_FIELDS_PRODUCER;
     }
 }

@@ -1,7 +1,6 @@
 package org.opensearch.migrations.transform;
 
 import java.util.List;
-import java.util.Map;
 
 import com.bazaarvoice.jolt.Chainr;
 
@@ -19,6 +18,6 @@ public class JsonJoltTransformer implements IJsonTransformer {
 
     @Override
     public Object transformJson(Object incomingJson) {
-        return (Map<String, Object>) this.spec.transform(incomingJson);
+        return this.spec.transform(incomingJson);
     }
 }
