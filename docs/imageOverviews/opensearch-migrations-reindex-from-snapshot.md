@@ -2,17 +2,17 @@
 
 - **Maintained by:** [OpenSearch team](https://github.com/opensearch-project)
 - **Need help?** Ask questions and discuss on our [community forum](https://forum.opensearch.org/tag/migration)
-- **Need to file issues?** Use our [issue tracker](https://github.com/opensearch-project/opensearch-migrations/issues) to report problems with Migration Assistant for Amazon OpenSearch or the Docker images
+- **Need to file issues?** Use our [issue tracker](https://github.com/opensearch-project/opensearch-migrations/issues) to report problems with Migration Assistant for OpenSearch or the Docker images
 
-## What is the Migration Assistant for Amazon OpenSearch?
+## What is the Migration Assistant for OpenSearch?
 
-The Migration Assistant for Amazon OpenSearch is a tool that simplifies the migration of data from Elasticsearch to OpenSearch. It provides a comprehensive solution for migrating historical and/or live data.
+The Migration Assistant for OpenSearch is a tool that simplifies the migration of data from Elasticsearch to OpenSearch. It provides a comprehensive solution for migrating historical and/or live data.
 
-Learn more about the Migration Assistant for Amazon OpenSearch in the [Amazon Solutions page](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/).
+Learn more at the documentation for the [Migration Assistant for OpenSearch](https://docs.opensearch.org/docs/latest/migration-assistant).
 
 ## What is OpenSearch Migrations Reindex-from-Snapshot?
 
-The OpenSearch Migrations Reindex-from-Snapshot is the component of the Migration Assistant for Amazon OpenSearch that reads an Elasticsearch snapshot, extracts the source docs, and reindexes it into a target cluster.
+The OpenSearch Migrations Reindex-from-Snapshot is the component of the Migration Assistant for OpenSearch that reads an Elasticsearch snapshot, extracts the source docs, and reindexes it into a target cluster.
 
 ## How to Pull This Image
 
@@ -26,7 +26,7 @@ See [ECR](https://gallery.ecr.aws/opensearchproject/opensearch-migrations-reinde
 
 ## How to Use This Image
 
-OpenSearch Migration Reindex-from-Snapshot is a component of the Migration Assistant for Amazon OpenSearch. We recommend following the instructions in the [wiki documentation](https://github.com/opensearch-project/opensearch-migrations/wiki) to get started.
+OpenSearch Migration Reindex-from-Snapshot is a component of the Migration Assistant for OpenSearch. We recommend following the instructions in the [OpenSearch documentation](https://docs.opensearch.org/docs/latest/migration-assistant) to get started.
 
 ## Licensing
 
