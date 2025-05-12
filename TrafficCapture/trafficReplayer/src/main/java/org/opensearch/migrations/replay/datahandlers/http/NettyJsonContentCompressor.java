@@ -56,7 +56,6 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
             if (contentEncoding != null && contentEncoding.contains(CONTENT_ENCODING_GZIP_VALUE)) {
                 activateCompressorComponents(ctx);
             }
-            super.channelRead(ctx, msg);
         } else if (msg instanceof HttpContent) {
             if (compressorStream != null) {
                 var contentBuf = ((HttpContent) msg).content();
@@ -66,6 +65,7 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
                         closeStream();
                         ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
                     }
+                    return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
                 } finally {
                     contentBuf.release();
                 }
@@ -75,9 +75,8 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
                         + "to be passed-through without compression, but this object was used for compression and "
                         + "has since been closed.";
             }
-        } else {
-            super.channelRead(ctx, msg);
         }
+        super.channelRead(ctx, msg);
     }
 
     private void closeStream() throws IOException {
