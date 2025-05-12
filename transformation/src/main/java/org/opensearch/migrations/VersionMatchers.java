@@ -16,16 +16,11 @@ public class VersionMatchers {
 
     public static final Predicate<Version> isOS_1_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 1.0.0"));
     public static final Predicate<Version> isOS_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 2.0.0"));
-    public static final Predicate<Version> isOS_2_19 = VersionMatchers.matchesMinorVersion(Version.fromString("OS 2.19.1"));
-
-    public static final Predicate<Version> isBelowES_2_X = belowMajorVersion(Version.fromString("ES 2.0"));
-    public static final Predicate<Version> isBelowES_5_X = belowMajorVersion(Version.fromString("ES 5.0"));
+    public static final Predicate<Version> isOS_3_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 3.0.0"));
+    public static final Predicate<Version> isOS_2_19_OrGreater = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.19.0"))
+                                                                    .or(VersionMatchers.isOS_3_X);
+    public static final Predicate<Version> anyOS = VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isOS_3_X);
     public static final Predicate<Version> isBelowES_6_X = belowMajorVersion(Version.fromString("ES 6.0"));
-    public static final Predicate<Version> isBelowES_7_X = belowMajorVersion(Version.fromString("ES 7.0"));
-    public static final Predicate<Version> isBelowOS_1_X = belowMajorVersion(Version.fromString("ES 8.0"))
-            .and(equalOrGreaterThanMinorVersion(Version.fromString("ES 7.10.3")).negate());
-    public static final Predicate<Version> isBelowOS_2_X = isBelowOS_1_X.or(belowMajorVersion(Version.fromString("OS 2.0")));
-    public static final Predicate<Version> isBelowOS_3_X = isBelowOS_1_X.or(belowMajorVersion(Version.fromString("OS 3.0")));
 
     private static Predicate<Flavor> compatibleFlavor(final Flavor flavor) {
         return other -> {
