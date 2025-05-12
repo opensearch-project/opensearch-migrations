@@ -50,6 +50,7 @@ class EndToEndTest extends BaseMigrationTest {
                                     ? Stream.empty()
                                     : Stream.of(TemplateType.Legacy)),
                             (VersionMatchers.equalOrGreaterThanES_7_10.test(pair.source().getVersion())
+                                    || VersionMatchers.isES_8_X.test(pair.source().getVersion())
                                     ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
                                     : Stream.empty()))
                     .toList();
