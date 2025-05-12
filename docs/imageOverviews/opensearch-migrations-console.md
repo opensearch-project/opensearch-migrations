@@ -26,7 +26,7 @@ See [ECR](https://gallery.ecr.aws/opensearchproject/opensearch-migrations-consol
 
 ## How to Use This Image
 
-OpenSearch Migration Console is a component of the OpenSearch Migration Assistant. We recommend following the instructions in the [wiki documentation](https://github.com/opensearch-project/opensearch-migrations/wiki) to get started.
+OpenSearch Migration Console is a component of the OpenSearch Migration Assistant. We recommend following the instructions in the [OpenSearch documentation](https://docs.opensearch.org/docs/latest/migration-assistant) to get started.
 
 ## Licensing
 

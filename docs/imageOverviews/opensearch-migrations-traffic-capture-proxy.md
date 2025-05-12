@@ -26,7 +26,7 @@ See [ECR](https://gallery.ecr.aws/opensearchproject/opensearch-migrations-traffi
 
 ## How to Use This Image
 
-OpenSearch Migrations Traffic Capture Proxy is a component of the Migration Assistant for OpenSearch. We recommend following the instructions in the [wiki documentation](https://github.com/opensearch-project/opensearch-migrations/wiki) to get started.
+OpenSearch Migrations Traffic Capture Proxy is a component of the Migration Assistant for OpenSearch. We recommend following the instructions in the [OpenSearch documentation](https://docs.opensearch.org/docs/latest/migration-assistant) to get started.
 
 ## Licensing
 
