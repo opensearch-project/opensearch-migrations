@@ -223,38 +223,77 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
-        var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
-            ? "\"template\":\"" + pattern + "\","
-            : "\"index_patterns\": [\r\n" + //
-            "    \"" + pattern + "\"\r\n" + //
-            "  ],\r\n";
-        final var templateJson = "{\r\n" + //
-            "  " + matchPatternClause + //
-            "  \"settings\": {\r\n" + //
-            "    \"number_of_shards\": 1\r\n" + //
-            "  },\r\n" + //
-            "  \"aliases\": {\r\n" + //
-            "    \"alias_legacy\": {}\r\n" + //
-            "  },\r\n" + //
-            "  \"mappings\": {\r\n" + //
-            "    \"" + defaultDocType() + "\": {\r\n" + //
-            "      \"_source\": {\r\n" + //
-            "        \"enabled\": true\r\n" + //
-            "      },\r\n" + //
-            "      \"properties\": {\r\n" + //
-            "        \"host_name\": {\r\n" + //
-            "          \"type\": \"keyword\"\r\n" + //
-            "        },\r\n" + //
-            "        \"created_at\": {\r\n" + //
-            "          \"type\": \"date\",\r\n" + //
-            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" + //
-            "        }\r\n" + //
-            "      }\r\n" + //
-            "    }\r\n" + //
-            "  }\r\n" + //
-            "}";
+        boolean isES5 = VersionMatchers.isES_5_X.test(clusterVersion);
+        boolean isES8 = VersionMatchers.isES_8_X.test(clusterVersion);
 
-        var extraParameters = VersionMatchers.isES_5_X.test(clusterVersion) ? "" : "?include_type_name=true";
+        String matchPatternClause = isES5
+                ? "\"template\": \"" + pattern + "\",\r\n"
+                : "\"index_patterns\": [\r\n    \"" + pattern + "\"\r\n  ],\r\n";
+
+        String templateJson = "{\n" +
+                "  " + matchPatternClause;
+
+        // Settings structure
+        if (isES8) {
+            templateJson +=
+                    "  \"settings\": {\n" +
+                    "    \"index\": {\n" +
+                    "      \"number_of_shards\": \"1\"\n" +
+                    "    }\n" +
+                    "  },\n";
+        } else {
+            templateJson +=
+                    "  \"settings\": {\n" +
+                    "    \"number_of_shards\": 1\n" +
+                    "  },\n";
+        }
+
+        // Aliases structure
+        templateJson +=
+                "  \"aliases\": {\n" +
+                "    \"alias_legacy\": {}\n" +
+                "  },\n";
+
+        // Mappings structure
+        templateJson += "  \"mappings\": {\n";
+
+        if (isES8) {
+            templateJson +=
+                    "    \"dynamic\": false,\n" +
+                    "    \"_source\": {\n" +
+                    "      \"enabled\": true\n" +
+                    "    },\n" +
+                    "    \"properties\": {\n" +
+                    "      \"host_name\": {\n" +
+                    "        \"type\": \"keyword\"\n" +
+                    "      },\n" +
+                    "      \"created_at\": {\n" +
+                    "        \"type\": \"date\",\n" +
+                    "        \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\n" +
+                    "      }\n" +
+                    "    }\n";
+        } else {
+            templateJson +=
+                    "    \"" + defaultDocType() + "\": {\n" +
+                    "      \"_source\": {\n" +
+                    "        \"enabled\": true\n" +
+                    "      },\n" +
+                    "      \"properties\": {\n" +
+                    "        \"host_name\": {\n" +
+                    "          \"type\": \"keyword\"\n" +
+                    "        },\n" +
+                    "        \"created_at\": {\n" +
+                    "          \"type\": \"date\",\n" +
+                    "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\n" +
+                    "        }\n" +
+                    "      }\n" +
+                    "    }\n";
+        }
+
+        // Close JSON
+        templateJson += "  }\n}";
+
+        var extraParameters = (isES5 || isES8) ? "" : "?include_type_name=true";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
