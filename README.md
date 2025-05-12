@@ -50,23 +50,20 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 ### Migration Paths
 
-| **Source Version**   | **OpenSearch 1.3** | **OpenSearch 2.19** | **OpenSearch 3.0** |
-| -------------------- | ------------------ | ------------------- | ------------------ |
-| Elasticsearch 5.6    | :white_check_mark: | :white_check_mark:  | :white_check_mark: |
-| Elasticsearch 6.8    | :white_check_mark: | :white_check_mark:  | :white_check_mark: |
-| Elasticsearch 7.10.2 | :white_check_mark: | :white_check_mark:  | :white_check_mark: |
-| Elasticsearch 7.17   | :white_check_mark: | :white_check_mark:  | :white_check_mark: |
-| OpenSearch 1.3       | :white_check_mark: | :white_check_mark:  | :white_check_mark: |
-| OpenSearch 2.19      |                    | :white_check_mark:  | :white_check_mark: |
-| Elasticsearch 2.3    |                    | :soon: [^1]         | :soon: [^1]        |
-| Elasticsearch 1.5    |                    | :soon: [^2]         | :soon: [^2]        |
-| Elasticsearch 8.x    |                    |                     | :soon: [^3]        |
+| **Source Version**   | **OpenSearch 1.3** | **OpenSearch 2.19**                                                                    | **OpenSearch 3.0**                                                                     |
+| -------------------- | ------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Elasticsearch 5.6    | :white_check_mark: | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 6.8    | :white_check_mark: | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 7.10.2 | :white_check_mark: | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 7.17   | :white_check_mark: | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| OpenSearch 1.3       | :white_check_mark: | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| OpenSearch 2.19      |                    | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| OpenSearch 3.X       |                    |                                                                                        | :white_check_mark:                                                                     |
+| Elasticsearch 2.3    |                    | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) |
+| Elasticsearch 1.5    |                    | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) |
+| Elasticsearch 8.x    |                    |                                                                                        | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) |
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
-
-[^1]: Tracking issue for support of Elasticsearch 2.3 [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069)
-[^2]: Tracking issue for support of Elasticsearch 1.5 [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069)
-[^3]: Tracking issue for support of Elasticsearch 8.x [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069)
 
 ### Platforms
   - Self-managed (cloud provider hosted)
