@@ -214,25 +214,21 @@ jobs:
     needs:
       - gradle-tests
     runs-on: ubuntu-latest
-
     steps:
-      - name: Download all JUnit reports
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           pattern: test-reports-*
           merge-multiple: true
           path: reports
-
-      - name: Publish Test Summary
-        uses: dorny/test-reporter@v2
-        if: always()
+      - uses: dorny/test-reporter@v2
         with:
           name: Migration Assistant Tests
           path: "reports/**/*.xml"
           reporter: java-junit
           list-suites: failed
           max-annotations: 20
-            
+
   jacoco-aggregate:
     needs: [ gradle-tests ]
     runs-on: ubuntu-latest
