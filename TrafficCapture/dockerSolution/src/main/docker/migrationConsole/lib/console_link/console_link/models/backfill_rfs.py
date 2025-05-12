@@ -243,7 +243,7 @@ def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Opti
 def get_detailed_status_dict(target_cluster: Cluster, session_name: str = "") -> Optional[Dict]:
     # Check whether the working state index exists. If not, we can't run queries.
     index_to_check = ".migrations_working_state" + ("_" + session_name if session_name else "")
-    print("index to check = " + index_to_check)
+    logger.info("Checking status for index: " + index_to_check)
     try:
         target_cluster.call_api("/" + index_to_check)
     except requests.exceptions.RequestException:
