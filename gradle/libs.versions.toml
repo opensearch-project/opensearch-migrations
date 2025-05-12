@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.38.1"
+aws-crt = "0.38.2"
 aws-msk-iam-auth = "2.3.2"
-aws-sdk = "2.31.35"
+aws-sdk = "2.31.40"
 bouncycastle = "1.80"
 commons-collections = "4.5.0"
 commons-compress = "1.27.1"
@@ -30,9 +30,9 @@ lucene6 = '6.6.6'
 lucene7 = '7.7.3'
 lucene9 = "9.12.1"
 mockito = "5.17.0"
-netty = "4.1.121.Final"
+netty = "4.2.1.Final"
 opensearch-testcontainers = "2.0.1"
-opentelemetry = "1.49.0"
+opentelemetry = "1.50.0"
 opentelemetry-semconv = "1.23.1-alpha"
 protobuf = "4.30.2"
 reactor-netty = "1.2.5"
