@@ -198,7 +198,6 @@ jobs:
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/reports/tests/
-            **/build/test-results/
 
       - name: Publish Jacoco report artifact for stripe ${{ matrix.index }}
         if: always()
@@ -208,26 +207,6 @@ jobs:
           name: coverage-exec-artifacts-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/jacoco/*.exec
-
-  gradle-test-summary:
-    if: always()
-    needs:
-      - gradle-tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: test-reports-*
-          merge-multiple: true
-          path: reports
-      - uses: dorny/test-reporter@v2
-        with:
-          name: Migration Assistant Tests
-          path: "reports/**/*.xml"
-          reporter: java-junit
-          list-suites: failed
-          max-annotations: 20
 
   jacoco-aggregate:
     needs: [ gradle-tests ]

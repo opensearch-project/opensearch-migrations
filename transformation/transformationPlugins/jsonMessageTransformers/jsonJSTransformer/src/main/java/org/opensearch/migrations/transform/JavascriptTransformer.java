@@ -102,8 +102,10 @@ public class JavascriptTransformer implements IJsonTransformer {
             this.level = level;
         }
 
-        public void write(byte b[], int off, int len) throws IOException {
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
             super.write(b, off, len);
+            // Avoid S4349
         }
 
         @Override
