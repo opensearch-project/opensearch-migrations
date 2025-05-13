@@ -10,6 +10,9 @@ metadata:
   name: helm-job-role
   namespace: ma
 rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "create", "delete", "watch"]
@@ -38,7 +41,7 @@ spec:
     spec:
       serviceAccountName: helm-job-runner
       restartPolicy: Never
-      # Pull GitHub repo and build gradle apps
+      # Pull GitHub repo and build images into registry
       containers:
         - name: image-bootstrap
           image: amazoncorretto:17-al2023
@@ -52,12 +55,24 @@ spec:
             - |
               set +e
               yum update -y && yum install -y git findutils tar && yum clean all
-              HELM_VERSION="v3.14.0" && ARCH="arm64" && \
-              curl -LO "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
-              tar -zxvf "helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
+              
+              export ARCH="arm64"
+              export HELM_VERSION="3.14.0"
+              export KUBECTL_VERSION="1.32.1"
+              
+              echo "Installing kubectl"
+              curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" && \
+              chmod +x kubectl && \
+              mv kubectl /usr/local/bin/kubectl && \
+              kubectl version --client
+              
+              echo "Installing helm"
+              curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
+              tar -zxvf "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
               mv linux-${ARCH}/helm /usr/local/bin/helm && \
-              rm -rf "helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" linux-${ARCH} && \
+              rm -rf "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" linux-${ARCH} && \
               helm version
+              
               echo "Cloning repo from GitHub..."
               git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git
               cd opensearch-migrations

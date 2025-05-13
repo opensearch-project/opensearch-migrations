@@ -1,6 +1,3 @@
-import com.google.cloud.tools.jib.gradle.JibTask
-import com.google.cloud.tools.jib.gradle.BuildImageTask
-
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -84,37 +81,5 @@ application {
 jar {
     manifest {
         attributes 'Main-Class': application.mainClass
-    }
-}
-
-tasks.withType(JibTask).configureEach {
-    notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
-}
-
-tasks.withType(BuildImageTask).configureEach {
-    notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
-}
-
-jib {
-    from {
-        image = 'amazoncorretto:17-al2023-headless'
-    }
-    to {
-        image = 'localhost:5000/migrations/traffic_replayer_jib:latest'
-    }
-    extraDirectories {
-        paths {
-            path {
-                from = file("docker")
-                into = '/'
-            }
-        }
-        permissions = [
-                '/runJavaWithClasspath.sh': '755'
-        ]
-    }
-    allowInsecureRegistries = true
-    container {
-        entrypoint = ['tail', '-f', '/dev/null']
     }
 }

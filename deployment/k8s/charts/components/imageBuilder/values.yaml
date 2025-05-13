@@ -1,3 +1,5 @@
 serviceName: ""
 contextDir: ""
 registryDestination: ""
+buildArgs: {}
+workspaceVolumePvc: ""
