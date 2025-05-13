@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 def define_arguments(parser: argparse.ArgumentParser) -> None:
     """Defines arguments for disabling compatibility mode."""
     parser.description = "Disables compatibility mode on the OpenSearch cluster."
-    pass
 
 
 def modify_compatibility_mode(env: Environment, enable: bool) -> dict:
