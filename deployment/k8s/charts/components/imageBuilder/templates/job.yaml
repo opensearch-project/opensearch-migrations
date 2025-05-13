@@ -2,6 +2,11 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: image-builder-{{ .Values.serviceName | lower }}
+  labels:
+    app.kubernetes.io/name: kaniko
+    app.kubernetes.io/component: image-builder
+    service-name: {{ .Values.serviceName }}
+    release-name: {{ .Release.Name }}
 spec:
   backoffLimit: 0
   template:
@@ -38,3 +43,8 @@ spec:
           volumeMounts:
             - name: workspace-mount
               mountPath: /workspace
+          resources:
+            requests:
+              memory: "1Gi"
+            limits:
+              memory: "2Gi"

@@ -1,4 +1,6 @@
+import com.google.cloud.tools.jib.gradle.JibTask
 import groovy.json.JsonOutput
+import org.opensearch.migrations.common.RegistryImageBuildUtils
 
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
@@ -33,6 +35,9 @@ gradle.projectsEvaluated {
     }
     // Add the TrafficCaptureProxyServer project itself
     captureProxyDependencies << captureProxyProject.path
+    def imageHelper = new RegistryImageBuildUtils()
+    imageHelper.applyJibConfigurations(rootProject)
+    imageHelper.applyKanikoBuildTasks(rootProject)
 }
 
 // Modify sourceCompatibility during the execution phase
@@ -161,6 +166,12 @@ subprojects {
             leadingTabsToSpaces()
             endWithNewline()
             removeUnusedImports()
+        }
+    }
+
+    plugins.withId('com.google.cloud.tools.jib') {
+        tasks.withType(JibTask).configureEach {
+            notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
         }
     }
 
@@ -513,73 +524,32 @@ tasks.register("listTestTasksAsJson") {
     }
 }
 
-def registerKanikoTask = { String serviceName, String contextDir, String registryDestination ->
-    def uuid = UUID.randomUUID().toString().take(4)
-    def serviceNameLower = serviceName.toLowerCase()
-    def serviceNameForK8s = serviceNameLower + "-" + uuid
-    def releaseName = "kaniko-" + serviceNameLower + "-" + uuid
-    def chartPath = "deployment/k8s/charts/components/imageBuilder"
 
-    def installTask = tasks.register("helmInstall_${serviceName}", Exec) {
-        group = "kaniko"
-        description = "Install Helm job for ${serviceName}"
-        def helmArgs = [
-                'helm', 'install', releaseName, chartPath,
-                '--set', "serviceName=${serviceNameForK8s}",
-                '--set', "contextDir=${contextDir}",
-                '--set', "registryDestination=${registryDestination}"
-        ]
+def registryEndpoint = project.hasProperty('registryEndpoint') ? project.property('registryEndpoint') : 'localhost:5000'
+ext.registryEndpoint = registryEndpoint
+// This is mainly useful for local registries that have been mounted on a k8s cluster or created within the cluster
+def k8sRegistryEndpoint = registryEndpoint == 'localhost:5000' ? 'docker-registry:5000' : registryEndpoint
+ext.k8sRegistryEndpoint = k8sRegistryEndpoint
 
-        commandLine = helmArgs
-
-        doFirst {
-            println "[DEBUG] Running Helm install:"
-            println helmArgs.collect { it.contains(' ') ? "\"$it\"" : it }.join(' ')
+tasks.register("jibAll") {
+    dependsOn {
+        def replayer = project(":TrafficCapture:trafficReplayer").tasks.named("jib")
+        def proxy = project(":TrafficCapture:trafficCaptureProxyServer").tasks.named("jib")
+        proxy.configure {
+            dependsOn(tasks.named("buildWithKaniko_captureProxyBase"))
         }
-    }
-
-    def waitTask = tasks.register("kubectlWait_${serviceName}", Exec) {
-        group = "kaniko"
-        description = "Wait for Kaniko job to complete for ${serviceNameForK8s}"
-        commandLine 'kubectl', 'wait',
-                "job/image-builder-${serviceNameForK8s}",
-                '--for=condition=complete',
-                '--timeout=300s'
-        dependsOn installTask
-    }
-
-//    def logsTask = tasks.register("kubectlLogs_${serviceName}", Exec) {
-//        group = "kaniko"
-//        description = "Get logs from Kaniko job for ${serviceNameForK8s}"
-//        commandLine 'kubectl', 'logs', "job/image-builder-${serviceNameForK8s}"
-//        dependsOn waitTask
-//    }
-
-    def uninstallTask = tasks.register("helmUninstall_${serviceName}", Exec) {
-        group = "kaniko"
-        description = "Uninstall Helm release for ${serviceName}"
-        commandLine 'helm', 'uninstall', releaseName
-        dependsOn waitTask
-    }
-
-    // Register final wrapper task
-    tasks.register("buildWithKaniko_${serviceName}") {
-        group = "kaniko"
-        description = "Full Kaniko build flow for ${serviceName}"
-        dependsOn uninstallTask
+        return [replayer, proxy]
     }
 }
 
-
-registerKanikoTask("elasticsearchTestConsole", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole", "docker-registry:5000/elasticsearch_test_console:latest")
-registerKanikoTask("captureProxyBase", "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase", "docker-registry:5000/capture_proxy_base:latest")
-
+tasks.register("kanikoAll") {
+    println "Building images to registry: ${registryEndpoint} with the registry endpoint: ${k8sRegistryEndpoint} being used by k8s pods"
+    dependsOn("buildWithKaniko_captureProxyBase")
+    dependsOn("buildWithKaniko_reindexFromSnapshot")
+    dependsOn("buildWithKaniko_migrationConsole")
+}
 
 tasks.register("buildImagesToRegistry") {
-    dependsOn("buildWithKaniko_elasticsearchTestConsole")
-    dependsOn("buildWithKaniko_captureProxyBase")
-//    dependsOn {
-//        project(":TrafficCapture:trafficReplayer").tasks.named("jib")
-//    }
-//    dependsOn(":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole")
+    dependsOn("kanikoAll")
+    dependsOn("jibAll")
 }

@@ -3,12 +3,16 @@ kind: ServiceAccount
 metadata:
   name: helm-job-runner
   namespace: ma
+  labels:
+    app.kubernetes.io/component: image-bootstrap
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: helm-job-role
   namespace: ma
+  labels:
+    app.kubernetes.io/component: image-bootstrap
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -22,6 +26,8 @@ kind: RoleBinding
 metadata:
   name: helm-job-rolebinding
   namespace: ma
+  labels:
+    app.kubernetes.io/component: image-bootstrap
 subjects:
   - kind: ServiceAccount
     name: helm-job-runner
@@ -31,10 +37,26 @@ roleRef:
   name: helm-job-role
   apiGroup: rbac.authorization.k8s.io
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: image-bootstrap-pvc
+  namespace: ma
+  labels:
+    app.kubernetes.io/component: image-bootstrap
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
   generateName: image-bootstrap-
+  labels:
+    app.kubernetes.io/component: image-bootstrap
 spec:
   backoffLimit: 0
   template:
@@ -74,6 +96,11 @@ spec:
               helm version
               
               echo "Cloning repo from GitHub..."
-              git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git
-              cd opensearch-migrations
+              git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git /workspace/opensearch-migrations
+              cd /workspace/opensearch-migrations
+              ./gradlew buildImagesToRegistry -PregistryEndpoint="${REGISTRY_ENDPOINT:-docker-registry:5000}"
               tail -f /dev/null
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: image-bootstrap-pvc

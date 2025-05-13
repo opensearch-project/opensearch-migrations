@@ -1,4 +1,4 @@
-serviceName: ""
+serviceName: "default"
 contextDir: ""
 registryDestination: ""
 buildArgs: {}
