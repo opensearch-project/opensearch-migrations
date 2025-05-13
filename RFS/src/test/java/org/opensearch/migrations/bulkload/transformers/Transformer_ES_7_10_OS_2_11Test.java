@@ -23,11 +23,11 @@ public class Transformer_ES_7_10_OS_2_11Test {
         Version version = Version.fromString("ES 7.10");
 
         final var repo = new FileSystemRepo(snapshot.dir);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, snapshot.name);
 
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
 
-        GlobalMetadata globalMetadata = sourceResourceProvider.getGlobalMetadata().fromRepo(snapshot.name);
+        GlobalMetadata globalMetadata = sourceResourceProvider.getGlobalMetadata().fromRepo();
         GlobalMetadata transformedGlobalMetadata = transformer.transformGlobalMetadata(globalMetadata);
         GlobalMetadataData_OS_2_11 finalMetadata = new GlobalMetadataData_OS_2_11(transformedGlobalMetadata.toObjectNode());
 
@@ -46,23 +46,23 @@ public class Transformer_ES_7_10_OS_2_11Test {
         Version version = Version.fromString("ES 7.10");
 
         final var repo = new FileSystemRepo(snapshot.dir);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, snapshot.name);
 
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
 
-        IndexMetadata indexMetadataBwc = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "bwc_index_1");
+        IndexMetadata indexMetadataBwc = sourceResourceProvider.getIndexMetadata().fromRepo("bwc_index_1");
         IndexMetadata transformedIndexBwc = transformer.transformIndexMetadata(indexMetadataBwc).get(0);
         IndexMetadataData_OS_2_11 finalIndexBwc =new IndexMetadataData_OS_2_11(transformedIndexBwc.getRawJson(), transformedIndexBwc.getId(), transformedIndexBwc.getName());
 
-        IndexMetadata indexMetadataFwc = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "fwc_index_1");
+        IndexMetadata indexMetadataFwc = sourceResourceProvider.getIndexMetadata().fromRepo("fwc_index_1");
         IndexMetadata transformedIndexFwc = transformer.transformIndexMetadata(indexMetadataFwc).get(0);
         IndexMetadataData_OS_2_11 finalIndexFwc =new IndexMetadataData_OS_2_11(transformedIndexFwc.getRawJson(), transformedIndexFwc.getId(), transformedIndexFwc.getName());
 
-        IndexMetadata indexMetadataNoMappingNoDocs = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "no_mappings_no_docs");
+        IndexMetadata indexMetadataNoMappingNoDocs = sourceResourceProvider.getIndexMetadata().fromRepo("no_mappings_no_docs");
         IndexMetadata transformedIndexNoMappingNoDocs = transformer.transformIndexMetadata(indexMetadataNoMappingNoDocs).get(0);
         IndexMetadataData_OS_2_11 finalIndexNoMappingNoDocs = new IndexMetadataData_OS_2_11(transformedIndexNoMappingNoDocs.getRawJson(), transformedIndexNoMappingNoDocs.getId(), transformedIndexNoMappingNoDocs.getName());
 
-        IndexMetadata indexMetadataEmptyMappingNoDocs = sourceResourceProvider.getIndexMetadata().fromRepo(snapshot.name, "empty_mappings_no_docs");
+        IndexMetadata indexMetadataEmptyMappingNoDocs = sourceResourceProvider.getIndexMetadata().fromRepo("empty_mappings_no_docs");
         IndexMetadata transformedIndexEmptyMappingNoDocs = transformer.transformIndexMetadata(indexMetadataEmptyMappingNoDocs).get(0);
         IndexMetadataData_OS_2_11 finalIndexEmptyMappingNoDocs = new IndexMetadataData_OS_2_11(transformedIndexEmptyMappingNoDocs.getRawJson(), transformedIndexEmptyMappingNoDocs.getId(), transformedIndexEmptyMappingNoDocs.getName());
 

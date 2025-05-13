@@ -1,13 +1,11 @@
 package org.opensearch.migrations.bulkload.worker;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.bulkload.LuceneBasedDocumentRepository;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo;
-import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -29,8 +27,7 @@ public class ShardWorkPreparer {
 
     public void run(
         ScopedWorkCoordinator scopedWorkCoordinator,
-        IndexMetadata.Factory metadataFactory,
-        String snapshotName,
+        LuceneBasedDocumentRepository indexCollection,
         List<String> indexAllowlist,
         IRootDocumentMigrationContext rootContext
     ) throws IOException, InterruptedException {
@@ -40,14 +37,13 @@ public class ShardWorkPreparer {
         );
 
         try (var context = rootContext.createDocsMigrationSetupContext()) {
-            setupShardWorkItems(scopedWorkCoordinator, metadataFactory, snapshotName, indexAllowlist, context);
+            setupShardWorkItems(scopedWorkCoordinator, indexCollection, indexAllowlist, context);
         }
     }
 
     private void setupShardWorkItems(
         ScopedWorkCoordinator scopedWorkCoordinator,
-        IndexMetadata.Factory metadataFactory,
-        String snapshotName,
+        LuceneBasedDocumentRepository indexCollection,
         List<String> indexAllowlist,
         IDocumentMigrationContexts.IShardSetupAttemptContext context
     ) throws IOException, InterruptedException {
@@ -55,7 +51,7 @@ public class ShardWorkPreparer {
             try {
                 return wc.createOrUpdateLeaseForWorkItem(
                     SHARD_SETUP_WORK_ITEM_ID,
-                    Duration.ofMinutes(5),
+                    indexCollection.expectedMaxShardSetupTime(),
                     context::createWorkAcquisitionContext
                 );
             } catch (InterruptedException e) {
@@ -75,8 +71,7 @@ public class ShardWorkPreparer {
                 log.atInfo().setMessage("Acquired work to set the shard workitems").log();
                 prepareShardWorkItems(
                     scopedWorkCoordinator.workCoordinator,
-                    metadataFactory,
-                    snapshotName,
+                    indexCollection,
                     indexAllowlist,
                     context
                 );
@@ -93,49 +88,45 @@ public class ShardWorkPreparer {
     @SneakyThrows
     private static void prepareShardWorkItems(
         IWorkCoordinator workCoordinator,
-        IndexMetadata.Factory metadataFactory,
-        String snapshotName,
+        LuceneBasedDocumentRepository indexCollection,
         List<String> indexAllowlist,
         IDocumentMigrationContexts.IShardSetupAttemptContext context
     ) {
         log.atInfo()
             .setMessage("Setting up the Documents Work Items...")
             .log();
-        SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
         var allowedIndexes = FilterScheme.filterByAllowList(indexAllowlist);
-        var indicesInSnapshot = repoDataProvider.getIndicesInSnapshot(snapshotName);
-        if (indicesInSnapshot.isEmpty()) {
+        if (indexCollection.getIndexNamesInSnapshot().findAny().isEmpty()) {
             log.atWarn().setMessage("After filtering the snapshot no indices were found.").log();
         }
-        indicesInSnapshot
-            .stream()
+        indexCollection.getIndexNamesInSnapshot()
             .filter(index -> {
-                var accepted = allowedIndexes.test(index.getName());
+                var accepted = allowedIndexes.test(index);
                 if (!accepted) {
                     log.atInfo()
                         .setMessage("None of the documents in index {} will be reindexed, it was not included in the allowlist: {} ")
-                        .addArgument(index.getName())
+                        .addArgument(index)
                         .addArgument(indexAllowlist)
                         .log();
                 }
                 return accepted;
             })
             .forEach(index -> {
-                IndexMetadata indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+                var numShards = indexCollection.getNumShards(index);
                 log.atInfo()
                     .setMessage("Index {} has {} shards")
-                    .addArgument(indexMetadata.getName())
-                    .addArgument(indexMetadata.getNumberOfShards())
+                    .addArgument(index)
+                    .addArgument(numShards)
                     .log();
-                IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
+                IntStream.range(0, numShards).forEach(shardId -> {
                     log.atInfo()
                         .setMessage("Creating Documents Work Item for index: {}, shard: {}")
-                        .addArgument(indexMetadata.getName())
+                        .addArgument(index)
                         .addArgument(shardId)
                         .log();
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexMetadata.getName(), shardId, 0).toString(),
+                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(index, shardId, 0).toString(),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {

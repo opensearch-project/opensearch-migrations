@@ -34,7 +34,7 @@ public class IndexRunner {
         var results = IndexMetadataResults.builder();
         var skipCreation = FilterScheme.filterByAllowList(indexAllowlist).negate();
 
-        for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
+        for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot()) {
             List<CreationResult> creationResults;
             if (skipCreation.test(index.getName())) {
                 log.atInfo()
@@ -51,7 +51,7 @@ public class IndexRunner {
 
             creationResults.forEach(results::index);
 
-            var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+            var indexMetadata = metadataFactory.fromRepo(index.getName());
             indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
                 var aliasResult = CreationResult.builder().name(alias);
                 if (!creationResults.isEmpty()) {
@@ -64,7 +64,7 @@ public class IndexRunner {
     }
 
     private List<CreationResult> createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) {
-        var originalIndexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
+        var originalIndexMetadata = metadataFactory.fromRepo(indexName);
         var indexMetadata = originalIndexMetadata.deepCopy();
         List<CreationResult> creationResults = new ArrayList<>();
         try {

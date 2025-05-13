@@ -37,10 +37,10 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
         IOUtils.rm(unpackedShardDataDir);
 
         final var repo = new FileSystemRepo(Path.of(localPath));
-        SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
-        final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName).stream().map(index -> {
+        SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo, snapshotName);
+        final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot().stream().map(index -> {
             try {
-                return new IndexMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName());
+                return new IndexMetadataFactory_ES_7_10(snapShotProvider).fromRepo(index.getName());
             } catch (final Exception e) {
                 throw new RuntimeException(e);
             }
