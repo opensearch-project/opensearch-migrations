@@ -123,7 +123,7 @@ class RegistryImageBuildUtils {
 
                 // Kubectl check
                 try {
-                    def kubectl = ["kubectl", "cluster-info"].execute()
+                    def kubectl = ["kubectl", "get", "nodes"].execute()
                     kubectl.waitFor()
                     if (kubectl.exitValue() != 0) fail("Kubectl is not configured: ${kubectl.err.text}")
                 } catch (Exception e) {
