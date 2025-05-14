@@ -197,7 +197,7 @@ public class RfsMigrateDocuments {
             description = "Name to disambiguate fleets of RFS workers running against the same target.  " +
                 "This will be appended to the name of the index that is used for work coordination.",
             validateValueWith = IndexNameValidator.class)
-        public String indexNameAppendage = "";
+        public String indexNameSuffix = "";
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
@@ -321,7 +321,7 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameAppendage);
+        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion, arguments.indexNameSuffix);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(

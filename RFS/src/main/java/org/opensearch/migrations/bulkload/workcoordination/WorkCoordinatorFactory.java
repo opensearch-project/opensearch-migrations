@@ -18,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WorkCoordinatorFactory {
     private final Version version;
-    private String indexNameAppendage = "";
+    private String indexNameSuffix = "";
 
     public OpenSearchWorkCoordinator get(
             AbstractedHttpClient httpClient,
@@ -27,12 +27,12 @@ public class WorkCoordinatorFactory {
         ) {
         if (VersionMatchers.anyOS.or(VersionMatchers.isES_7_X).or(VersionMatchers.isES_8_X).test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
-                indexNameAppendage,
+                indexNameSuffix,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId);
         } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
             return new OpenSearchWorkCoordinator_ES_6_8(httpClient,
-                indexNameAppendage,
+                indexNameSuffix,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId);
         } else {
@@ -49,14 +49,14 @@ public class WorkCoordinatorFactory {
         ) {
         if (VersionMatchers.anyOS.or(VersionMatchers.isES_7_X).or(VersionMatchers.isES_8_X).test(version)) {
             return new OpenSearchWorkCoordinator_OS_2_11(httpClient,
-                indexNameAppendage,
+                indexNameSuffix,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId,
                 clock,
                 workItemConsumer);
         } else if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(version)) {
             return new OpenSearchWorkCoordinator_ES_6_8(httpClient,
-                indexNameAppendage,
+                indexNameSuffix,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId,
                 clock,
@@ -68,6 +68,6 @@ public class WorkCoordinatorFactory {
 
 
     public String getFinalIndexName() {
-        return OpenSearchWorkCoordinator.getFinalIndexName(indexNameAppendage);
+        return OpenSearchWorkCoordinator.getFinalIndexName(indexNameSuffix);
     }
 }

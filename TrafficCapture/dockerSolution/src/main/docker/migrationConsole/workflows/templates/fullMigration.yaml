@@ -30,8 +30,6 @@ spec:
       inputs:
         parameters:
           - name: source-migration-configs
-#                {\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]},{\"indices\":[\"index_2\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},
-#               {"source":{"endpoint":"https://doesnt.resolve.example.com:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}},"snapshot-and-migration-configs":[{"indices":["index_3","index_4"],"migrations":[{"metadata":{"mappings":{"properties":{}},"settings":{}},"documentBackfillConfigs":[{"indices":["index_3","index_4"]}]}]}],"replayer-config":{"batchSize":1000,"concurrency":4}}
             value: |
               [
                {"source":{"endpoint":"https://elasticsearch-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}},"snapshot-and-migration-configs":[{"indices":["index_3","index_4"],"migrations":[{"metadata":{"mappings":{"properties":{}},"settings":{}},"documentBackfillConfigs":[{"indices":["index_3","index_4"]}]}]}],"replayer-config":{"batchSize":1000,"concurrency":4}}

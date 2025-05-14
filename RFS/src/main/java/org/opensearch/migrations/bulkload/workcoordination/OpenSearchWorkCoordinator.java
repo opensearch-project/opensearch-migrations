@@ -120,7 +120,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         final List<String> successorWorkItemIds;
     }
 
-    public final String indexName;
+    protected final String indexName;
     private final long tolerableClientServerClockDifferenceSeconds;
     private final AbstractedHttpClient httpClient;
     private final String workerId;

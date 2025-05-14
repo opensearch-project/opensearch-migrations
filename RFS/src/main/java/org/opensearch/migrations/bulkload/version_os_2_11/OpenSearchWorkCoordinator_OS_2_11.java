@@ -11,23 +11,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class OpenSearchWorkCoordinator_OS_2_11 extends OpenSearchWorkCoordinator {    
         public OpenSearchWorkCoordinator_OS_2_11(
             AbstractedHttpClient httpClient,
-            String indexNameAppendage,
+            String indexNameSuffix,
             long tolerableClientServerClockDifferenceSeconds,
             String workerId
         ) {
-            super(httpClient, indexNameAppendage, tolerableClientServerClockDifferenceSeconds, workerId);
+            super(httpClient, indexNameSuffix, tolerableClientServerClockDifferenceSeconds, workerId);
         }
 
         public OpenSearchWorkCoordinator_OS_2_11(
             AbstractedHttpClient httpClient,
-            String indexNameAppendage,
+            String indexNameSuffix,
             long tolerableClientServerClockDifferenceSeconds,
             String workerId,
             Clock clock,
             Consumer<WorkItemAndDuration> workItemConsumer
         ) {
             super(httpClient,
-                indexNameAppendage,
+                indexNameSuffix,
                 tolerableClientServerClockDifferenceSeconds,
                 workerId,
                 clock,
