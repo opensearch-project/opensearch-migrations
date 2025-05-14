@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(force = true) // For Jackson
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE)
 @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
-public class IndexMetadataData_ES_7_10 extends IndexMetadata {
+public class IndexMetadataData_ES_7_10 implements IndexMetadata {
     @Getter
     @JsonProperty("body")
     private final ObjectNode rawJson;
