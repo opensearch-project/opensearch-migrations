@@ -4,13 +4,12 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 
-public abstract class HttpRequestTransformationStatus {
-    private HttpRequestTransformationStatus() {}
-
-    public static final class Completed extends HttpRequestTransformationStatus {
+public interface HttpRequestTransformationStatus {
+    final class Completed implements HttpRequestTransformationStatus {
         public static final Completed INSTANCE = new Completed();
 
-        private Completed() {}
+        private Completed() {
+        }
 
         @Override
         public boolean isCompleted() {
@@ -18,10 +17,11 @@ public abstract class HttpRequestTransformationStatus {
         }
     }
 
-    public static final class Skipped extends HttpRequestTransformationStatus {
+    final class Skipped implements HttpRequestTransformationStatus {
         public static final Skipped INSTANCE = new Skipped();
 
-        private Skipped() {}
+        private Skipped() {
+        }
 
         @Override
         public boolean isSkipped() {
@@ -31,7 +31,7 @@ public abstract class HttpRequestTransformationStatus {
 
     @Getter
     @AllArgsConstructor
-    public static final class Error extends HttpRequestTransformationStatus {
+    final class Error implements HttpRequestTransformationStatus {
         @NonNull
         private final Throwable exception;
 
@@ -41,22 +41,31 @@ public abstract class HttpRequestTransformationStatus {
         }
     }
 
+    static Completed completed() {
+        return Completed.INSTANCE;
+    }
 
-    public static Completed completed() { return Completed.INSTANCE; }
-    public static Skipped skipped() { return Skipped.INSTANCE; }
-    public static Error makeError(Throwable e) { return new Error(e); }
+    static Skipped skipped() {
+        return Skipped.INSTANCE;
+    }
 
-    public Throwable getException() {
+    static Error makeError(Throwable e) {
+        return new Error(e);
+    }
+
+    default Throwable getException() {
         return null;
     }
 
-    public boolean isCompleted() {
+    default boolean isCompleted() {
         return false;
     }
-    public boolean isSkipped() {
+
+    default boolean isSkipped() {
         return false;
     }
-    public boolean isError() {
+
+    default boolean isError() {
         return false;
     }
 }
