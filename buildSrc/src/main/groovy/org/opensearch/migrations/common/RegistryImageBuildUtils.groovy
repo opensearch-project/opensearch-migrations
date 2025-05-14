@@ -80,7 +80,10 @@ class RegistryImageBuildUtils {
                         serviceName: "reindexFromSnapshot",
                         contextDir: "DocumentsFromSnapshotMigration/docker",
                         imageName:  "reindex_from_snapshot",
-                        imageTag:   "latest"
+                        imageTag:   "latest",
+                        requiredDependencies: [
+                                ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars"
+                        ]
                 ],
                 [
                         serviceName: "migrationConsole",

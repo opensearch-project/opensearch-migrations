@@ -135,7 +135,7 @@ spec:
               echo "Cloning repo from GitHub..."
               git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git /workspace
               cd /workspace
-              ./gradlew buildImagesToRegistry -PregistryEndpoint="${REGISTRY_ENDPOINT:-docker-registry:5000}" -PbootstrapPvc="image-bootstrap-pvc" -PskipBaseImageBuild
+              ./gradlew buildImagesToRegistry -PregistryEndpoint="${REGISTRY_ENDPOINT:-docker-registry:5000}" -PbootstrapPvc="image-bootstrap-pvc" -PskipConsoleBaseImageBuild
               tail -f /dev/null
           volumeMounts:
             - name: workspace-mount

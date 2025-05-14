@@ -78,7 +78,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
     // Ensure the sync task depends on the assemble tasks
     syncTask.dependsOn assembleTasks
 
-    if (!project.hasProperty("skipBaseImageBuild")) {
+    if (!project.hasProperty("skipConsoleBaseImageBuild")) {
         // Migration Console base image is the test console
         syncTask.dependsOn "buildDockerImage_elasticsearch_client_test_console"
     }
