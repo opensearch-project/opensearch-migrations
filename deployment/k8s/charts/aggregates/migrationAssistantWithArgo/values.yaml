@@ -1,10 +1,10 @@
 conditionalPackageInstalls:
   # Migration infrastructure components
-  etcd: false                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
-  cert-manager: true             # needed by the otel operator
-  kube-prometheus-stack: true    # will be needed for auto-scaling
-  argo-workflows: true           # orchestrates the steps of a migration
-  strimzi-kafka-operator: true   # Required by capture and replay
+  etcd: true                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
+  cert-manager: true            # needed by the otel operator
+  kube-prometheus-stack: true   # will be needed for auto-scaling
+  argo-workflows: true          # orchestrates the steps of a migration
+  strimzi-kafka-operator: true  # Required by capture and replay
   fluent-bit: true
 
   # Simpler alternative to the opentelemetry-operator.

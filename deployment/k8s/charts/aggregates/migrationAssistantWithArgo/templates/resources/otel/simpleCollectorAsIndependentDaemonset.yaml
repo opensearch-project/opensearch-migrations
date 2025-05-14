@@ -137,6 +137,10 @@ kind: ServiceMonitor
 metadata:
   name: otel-collector-monitor
   namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": hook-succeeded
   labels:
     app: otel-collector
     release: kube-prometheus-stack
