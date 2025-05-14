@@ -436,7 +436,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private void completeWorkItemWithoutRetry(
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
-    ) throws IOException, InterruptedException {
+    ) throws IOException {
         try (var ctx = contextSupplier.get()) {
             final var markWorkAsCompleteBodyTemplate = "{\n"
                 + "  \"script\": {\n"
@@ -781,10 +781,11 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         } catch (IllegalArgumentException e) {
             log.atError().setCause(e).setMessage("Encountered error during update work item with successors").log();
             var resultTree = objectMapper.readTree(response.getPayloadBytes());
-            if (resultTree.has("error") &&
-                    resultTree.get("error").has("type") &&
-                    resultTree.get("error").get("type").asText().equals("illegal_argument_exception")) {
-                throw new NonRetryableException(new IllegalArgumentException(resultTree.get("error").get("caused_by").asText()));
+            final String ERROR_STR = "error";
+            if (resultTree.has(ERROR_STR) &&
+                    resultTree.get(ERROR_STR).has("type") &&
+                    resultTree.get(ERROR_STR).get("type").asText().equals("illegal_argument_exception")) {
+                throw new NonRetryableException(new IllegalArgumentException(resultTree.get(ERROR_STR).get("caused_by").asText()));
             }
             throw new IllegalStateException(
                     "Unexpected response for workItemId: "

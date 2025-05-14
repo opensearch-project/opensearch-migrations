@@ -29,7 +29,6 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.lifecycle.Startables;
 
-
 @Tag("isolatedTest")
 public class EndToEndTest extends SourceTestBase {
     @TempDir

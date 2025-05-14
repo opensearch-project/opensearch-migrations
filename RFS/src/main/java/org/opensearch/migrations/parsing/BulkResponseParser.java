@@ -43,7 +43,7 @@ public class BulkResponseParser {
 
             try {
                 while (parser.nextToken() != JsonToken.END_OBJECT) {
-                    var fieldName = parser.getCurrentName();
+                    var fieldName = parser.currentName();
 
                     if ("items".equals(fieldName)) {
                         scanItems(parser, successfulDocumentIds);
@@ -100,7 +100,7 @@ public class BulkResponseParser {
     private static DocInfo extractDocInfo(JsonParser parser) throws IOException {
         var docInfo = DocInfo.builder();
         while (parser.nextToken() != JsonToken.END_OBJECT) {
-            var innerFieldName = parser.getCurrentName();
+            var innerFieldName = parser.currentName();
             parser.nextToken(); // Move to the value of the field
 
             if ("_id".equals(innerFieldName)) {

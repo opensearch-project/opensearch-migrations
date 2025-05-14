@@ -23,7 +23,7 @@ public class TransformFunctions {
         int awarenessAttributes,
         MetadataTransformerParams metadataTransformerParams
     ) {
-        if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
+        if (VersionMatchers.anyOS.test(targetVersion)) {
             if (VersionMatchers.isES_5_X.test(sourceVersion)) {
                 return new Transformer_ES_5_6_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
             }
@@ -33,7 +33,7 @@ public class TransformFunctions {
             if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
             }
-            if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).test(sourceVersion)) {
+            if (VersionMatchers.anyOS.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
             }
         }
@@ -46,7 +46,7 @@ public class TransformFunctions {
     public static ObjectNode convertFlatSettingsToTree(ObjectNode flatSettings) {
         ObjectNode treeSettings = mapper.createObjectNode();
 
-        flatSettings.fields().forEachRemaining(entry -> {
+        flatSettings.properties().forEach(entry -> {
             String[] parts = entry.getKey().split("\\.");
             ObjectNode current = treeSettings;
 

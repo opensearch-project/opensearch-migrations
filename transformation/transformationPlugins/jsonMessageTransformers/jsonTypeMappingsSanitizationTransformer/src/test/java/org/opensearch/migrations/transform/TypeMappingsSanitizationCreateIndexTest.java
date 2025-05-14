@@ -108,9 +108,9 @@ public class TypeMappingsSanitizationCreateIndexTest {
             mappings.remove("following");
             var newProperties = new HashMap<String, Object>();
             var user = mappings.remove("user");
-            user.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
+            user.path("properties").properties().forEach(e -> newProperties.put(e.getKey(), e.getValue()));
             var tweet = mappings.remove("tweet");
-            tweet.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
+            tweet.path("properties").properties().forEach(e -> newProperties.put(e.getKey(), e.getValue()));
             mappings.set("properties", OBJECT_MAPPER.valueToTree(newProperties));
             ((ObjectNode) expected).put(JsonKeysForHttpMessage.URI_KEY, "/communal");
             Assertions.assertEquals(JsonNormalizer.fromObject(expected), JsonNormalizer.fromObject(result));
