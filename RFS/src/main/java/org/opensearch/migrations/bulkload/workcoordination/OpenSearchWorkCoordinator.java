@@ -454,7 +454,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private void completeWorkItemWithoutRetry(
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
-    ) throws IOException, InterruptedException {
+    ) throws IOException {
         try (var ctx = contextSupplier.get()) {
             final var markWorkAsCompleteBodyTemplate = "{\n"
                 + "  \"script\": {\n"
