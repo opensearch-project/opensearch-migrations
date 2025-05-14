@@ -215,13 +215,7 @@ class RegistryImageBuildUtils {
             outputs.upToDateWhen { false }
 
             commandLine 'bash', '-c', """
-            release="${releaseName}"
-            if helm status \$release > /dev/null 2>&1; then
-              echo "Uninstalling Helm release \$release"
-              helm uninstall \$release
-            else
-              echo "Release \$release not found. Skipping."
-            fi
+            echo "Hello"
             """
         }
 
