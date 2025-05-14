@@ -96,6 +96,10 @@ spec:
     spec:
       serviceAccountName: helm-job-runner
       restartPolicy: Never
+      volumes:
+        - name: workspace-mount
+          persistentVolumeClaim:
+            claimName: image-bootstrap-pvc
       # Pull GitHub repo and build images into registry
       containers:
         - name: image-bootstrap
@@ -116,24 +120,23 @@ spec:
               export KUBECTL_VERSION="1.32.1"
               
               echo "Installing kubectl"
-              curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" && \
+              curl -LO --retry 5 "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" && \
               chmod +x kubectl && \
               mv kubectl /usr/local/bin/kubectl && \
               kubectl version --client
               
               echo "Installing helm"
-              curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
+              curl -LO --retry 5  "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
               tar -zxvf "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
               mv linux-${ARCH}/helm /usr/local/bin/helm && \
               rm -rf "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" linux-${ARCH} && \
               helm version
               
               echo "Cloning repo from GitHub..."
-              git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git /workspace/opensearch-migrations
-              cd /workspace/opensearch-migrations
+              git clone --branch build-images-in-k8s https://github.com/lewijacn/opensearch-migrations.git /workspace
+              cd /workspace
               ./gradlew buildImagesToRegistry -PregistryEndpoint="${REGISTRY_ENDPOINT:-docker-registry:5000}" -PbootstrapPvc="image-bootstrap-pvc" -PskipBaseImageBuild
               tail -f /dev/null
-      volumes:
-        - name: workspace
-          persistentVolumeClaim:
-            claimName: image-bootstrap-pvc
+          volumeMounts:
+            - name: workspace-mount
+              mountPath: /workspace

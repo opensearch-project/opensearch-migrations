@@ -43,8 +43,9 @@ spec:
           volumeMounts:
             - name: workspace-mount
               mountPath: /workspace
+              readOnly: true
           resources:
             requests:
-              memory: "1Gi"
+              memory: "3Gi"
             limits:
-              memory: "2Gi"
+              memory: "6Gi"
