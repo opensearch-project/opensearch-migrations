@@ -72,9 +72,13 @@ export default function AceEditorComponent({
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Initialize content from the transformation only once
+  // Reset initialization flag when itemId changes
   useEffect(() => {
-    // Only initialize content if it hasn't been initialized yet or if the transformation ID changes
+    contentInitializedRef.current = false;
+  }, [itemId]);
+
+  // Initialize content from the transformation only once per itemId
+  useEffect(() => {
     if (transformation && !contentInitializedRef.current) {
       setContent(transformation.content ?? defaultContent);
       onSaveStatusChange({
@@ -82,6 +86,7 @@ export default function AceEditorComponent({
         savedAt: new Date(Date.now()),
         errors: [],
       });
+      contentInitializedRef.current = true;
     }
   }, [itemId, transformation, onSaveStatusChange]);
 

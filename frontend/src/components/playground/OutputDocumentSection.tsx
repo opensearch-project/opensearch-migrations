@@ -12,6 +12,7 @@ export default function OutputDocumentSection() {
   const { state } = usePlayground();
   const { isProcessingTransformations, transformationErrors } = state;
 
+  // This code is extracted to deal with sonarqube complaints about the depth of the function
   const renderOutputContent = (): ReactNode => {
     if (isProcessingTransformations) {
       return (
@@ -38,7 +39,7 @@ export default function OutputDocumentSection() {
       <SpaceBetween size="m">
         {transformationErrors.length > 0 && (
           <Alert type="error" header="Transformation errors">
-            <ul>
+            <SpaceBetween size="s">
               {transformationErrors.map((error) => {
                 const inputDoc = state.inputDocuments.find(
                   (doc) => doc.id === error.documentId,
@@ -48,16 +49,16 @@ export default function OutputDocumentSection() {
                 );
 
                 return (
-                  <li key={inputDoc?.id ?? error.documentId}>
+                  <Box key={error.documentId}>
                     Error in document `{inputDoc?.name ?? "Unknown"}`
                     {transformation
                       ? ` at transformation "${transformation.name}"`
                       : ""}
                     :{error.message}
-                  </li>
+                  </Box>
                 );
               })}
-            </ul>
+            </SpaceBetween>
           </Alert>
         )}
 

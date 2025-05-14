@@ -42,6 +42,24 @@ describe("transformationExecutor", () => {
       expect(result.document).toEqual(document); // Document should be unchanged
     });
 
+    it("should execute a transformation using the last expression convention", async () => {
+      const transformation = `
+        function newMain(context) {
+          return (document) => {
+            document.transformed = true;
+            return document;
+          };
+        }
+        newMain
+      `;
+
+      const document = { value: 42 };
+      const result = await executeTransformation(transformation, document);
+
+      expect(result.success).toBe(true);
+      expect(result.document).toEqual({ value: 42, transformed: true });
+    });
+
     it("should handle transformation that throws an error", async () => {
       const transformation = `
         function main(context) {
@@ -98,6 +116,7 @@ describe("transformationExecutor", () => {
 
       expect(result.success).toBe(true);
       expect(result.document).toEqual({ value: 42, step1: true, step2: true });
+      expect(Object.hasOwn(result.document, 'step3')).toBe(false);
     });
 
     it("should stop execution when a transformation fails", async () => {
