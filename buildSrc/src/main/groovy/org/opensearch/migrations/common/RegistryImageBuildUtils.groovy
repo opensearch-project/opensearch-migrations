@@ -160,6 +160,7 @@ class RegistryImageBuildUtils {
         def chartPath = "deployment/k8s/charts/components/imageBuilder"
         def registry = project.rootProject.ext.k8sRegistryEndpoint
         def registryDestination = "${registry}/migrations/${cfg.imageName}:${cfg.imageTag}"
+        def optionalBootstrapPvc = project.rootProject.ext.bootstrapPvc
 
         def installTask = project.tasks.register("helmInstall_${cfg.serviceName}", Exec) {
             group = "kaniko"
@@ -169,7 +170,8 @@ class RegistryImageBuildUtils {
                     "helm", "install", releaseName, chartPath, "--create-namespace",
                     "--set", "serviceName=${serviceNameForK8s}",
                     "--set", "contextDir=${cfg.contextDir}",
-                    "--set", "registryDestination=${registryDestination}"
+                    "--set", "registryDestination=${registryDestination}",
+                    "--set", "workspaceVolumePvc=${optionalBootstrapPvc}"
             ]
             cfg.get("buildArgs", [:]).each { key, value ->
                 helmArgs += ["--set", "buildArgs.${key}=${value}"]

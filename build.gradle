@@ -530,6 +530,8 @@ ext.registryEndpoint = registryEndpoint
 // This is mainly useful for local registries that have been mounted on a k8s cluster or created within the cluster
 def k8sRegistryEndpoint = registryEndpoint == 'localhost:5000' ? 'docker-registry:5000' : registryEndpoint
 ext.k8sRegistryEndpoint = k8sRegistryEndpoint
+def bootstrapPvc = project.hasProperty('bootstrapPvc') ? project.property('bootstrapPvc') : ""
+ext.bootstrapPvc = bootstrapPvc
 
 tasks.register("jibAll") {
     dependsOn {
