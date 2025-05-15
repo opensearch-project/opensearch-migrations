@@ -827,7 +827,11 @@ def test_cli_kafka_describe_topic(runner, mocker):
 
 
 def test_completion_script(runner):
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'completion', 'bash'], catch_exceptions=True)
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(VALID_SERVICES_YAML), 'completion', 'bash'],
+        catch_exceptions=True
+    )
     assert result.exit_code == 0
 
 
