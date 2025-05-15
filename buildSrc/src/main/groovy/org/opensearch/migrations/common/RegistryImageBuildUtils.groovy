@@ -6,13 +6,19 @@ import org.gradle.api.tasks.Exec
 
 class RegistryImageBuildUtils {
     def configureJibFor = { Project project, String baseImage, String imageName, String imageTag ->
+        def registry = project.rootProject.ext.registryEndpoint
+        def registryDestination = "${registry}/migrations/${imageName}:${imageTag}"
+        def isEcr = registry.contains(".ecr.") && registry.contains(".amazonaws.com")
+        if (isEcr) {
+            registryDestination = "${registry}:migrations_${imageName}_${imageTag}"
+        }
         project.plugins.withId('com.google.cloud.tools.jib') {
             project.jib {
                 from {
                     image = baseImage
                 }
                 to {
-                    image = project.rootProject.ext.registryEndpoint + "/migrations/${imageName}:${imageTag}"
+                    image = registryDestination
                 }
                 extraDirectories {
                     paths {
@@ -163,6 +169,10 @@ class RegistryImageBuildUtils {
         def chartPath = "deployment/k8s/charts/components/imageBuilder"
         def registry = project.rootProject.ext.k8sRegistryEndpoint
         def registryDestination = "${registry}/migrations/${cfg.imageName}:${cfg.imageTag}"
+        def isEcr = registry.contains(".ecr.") && registry.contains(".amazonaws.com")
+        if (isEcr) {
+            registryDestination = "${registry}:migrations_${cfg.imageName}_${cfg.imageTag}"
+        }
         def optionalBootstrapPvc = project.rootProject.ext.bootstrapPvc
 
         def installTask = project.tasks.register("helmInstall_${cfg.serviceName}", Exec) {
