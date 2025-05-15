@@ -132,7 +132,7 @@ public class OpenSearchClientFactory {
             var versionNode = body.get("version");
 
             var versionNumberString = versionNode.get("number").asText();
-            var parts = versionNumberString.split("\\.|-");
+            var parts = versionNumberString.split("[.\\-]");
             var versionBuilder = Version.builder()
                     .major(Integer.parseInt(parts[0]))
                     .minor(Integer.parseInt(parts[1]))
