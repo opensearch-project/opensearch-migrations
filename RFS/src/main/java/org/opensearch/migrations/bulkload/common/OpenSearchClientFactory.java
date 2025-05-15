@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -65,11 +66,11 @@ public class OpenSearchClientFactory {
     }
 
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
-        if (VersionMatchers.anyOS.or(VersionMatchers.isES_7_X).or(VersionMatchers.isES_8_X).test(version)) {
+        if (UnboundVersionMatchers.anyOS.or(UnboundVersionMatchers.isGreaterOrEqualES_7_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
         } else if (VersionMatchers.isES_6_X.test(version)) {
             return OpenSearchClient_ES_6_8.class;
-        } else if (VersionMatchers.isES_5_X.test(version)) {
+        } else if (UnboundVersionMatchers.isBelowES_6_X.test(version)) {
             return OpenSearchClient_ES_5_6.class;
         }
         throw new IllegalArgumentException("Unsupported version: " + version);

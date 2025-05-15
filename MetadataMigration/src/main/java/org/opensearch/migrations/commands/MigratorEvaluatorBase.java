@@ -6,8 +6,8 @@ import java.util.List;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
-import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
+import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
 import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
 import org.opensearch.migrations.bulkload.worker.IndexRunner;
@@ -49,7 +49,7 @@ public abstract class MigratorEvaluatorBase {
         var sourceCluster = clusterReaderCliExtractor.extractClusterReader();
         clusters.source(sourceCluster);
 
-        var targetCluster = ClusterProviderRegistry.getRemoteWriter(arguments.targetArgs.toConnectionContext(), null, arguments.dataFilterArgs);
+        var targetCluster = ClusterProviderRegistry.getRemoteWriter(arguments.targetArgs.toConnectionContext(), null, arguments.dataFilterArgs, arguments.versionStrictness.allowLooseVersionMatches);
         clusters.target(targetCluster);
         return clusters.build();
     }
@@ -68,12 +68,12 @@ public abstract class MigratorEvaluatorBase {
         return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
-    protected Transformer selectTransformer(Clusters clusters, int awarenessAttributes) {
-        var versionTransformer = TransformFunctions.getTransformer(
-                clusters.getSource().getVersion(),
-                clusters.getTarget().getVersion(),
+    protected Transformer selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches) {
+        var mapper = new TransformerMapper(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
+        var versionTransformer = mapper.getTransformer(
                 awarenessAttributes,
-                arguments.metadataTransformationParams
+                arguments.metadataTransformationParams,
+                allowLooseVersionMatches
         );
         var customTransformer = getCustomTransformer();
         var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
@@ -82,7 +82,7 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformer selectTransformer(Clusters clusters) {
-        return selectTransformer(clusters, arguments.clusterAwarenessAttributes);
+        return selectTransformer(clusters, arguments.clusterAwarenessAttributes, arguments.versionStrictness.allowLooseVersionMatches);
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {

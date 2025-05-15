@@ -16,7 +16,7 @@ import org.opensearch.migrations.metadata.IndexCreator;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class RemoteWriter_OS_6_8 implements RemoteCluster, ClusterWriter {
+public class RemoteWriter_ES_6_8 implements RemoteCluster, ClusterWriter {
     private Version version;
     private OpenSearchClient client;
     private ConnectionContext connection;
@@ -25,6 +25,11 @@ public class RemoteWriter_OS_6_8 implements RemoteCluster, ClusterWriter {
     @Override
     public boolean compatibleWith(Version version) {
         return VersionMatchers.isES_6_X.test(version);
+    }
+
+    @Override
+    public boolean looseCompatibleWith(Version version) {
+        return this.compatibleWith(version);
     }
 
     @Override

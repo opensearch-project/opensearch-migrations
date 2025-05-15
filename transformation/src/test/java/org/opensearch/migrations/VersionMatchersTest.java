@@ -10,7 +10,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class VersionMatchersTest {
 
-    private void testPredicate(Predicate<Version> predicate, String matcherName, List<String> expectMatches, List<String> expectDoesNotMatch) {
+    static void testPredicate(Predicate<Version> predicate, String matcherName, List<String> expectMatches, List<String> expectDoesNotMatch) {
         expectMatches.forEach(v -> {
             assertThat(v + " should be matched by " + matcherName, predicate.test(Version.fromString(v)), equalTo(true));
         });

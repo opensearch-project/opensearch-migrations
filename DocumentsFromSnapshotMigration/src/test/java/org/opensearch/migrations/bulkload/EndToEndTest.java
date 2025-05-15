@@ -6,6 +6,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -77,7 +78,7 @@ public class EndToEndTest extends SourceTestBase {
                 "  \"settings\": {" +
                 "    \"number_of_shards\": %d," +
                 "    \"number_of_replicas\": 0," +
-                (VersionMatchers.isBelowES_6_X.test(sourceVersion)
+                (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)
                         ? ""
                         : "    \"index.soft_deletes.enabled\": true,") +
                 "    \"refresh_interval\": -1" +

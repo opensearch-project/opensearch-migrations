@@ -67,6 +67,9 @@ public class MigrateOrEvaluateArgs {
     @ParametersDelegate
     public TransformerParams metadataCustomTransformationParams = new MetadataCustomTransformationParams();
 
+    @ParametersDelegate
+    public VersionStrictness versionStrictness = new VersionStrictness();
+
     @Getter
     public static class MetadataTransformationParams implements MetadataTransformerParams {
         @Parameter(names = {"--multi-type-behavior"}, description = "Define behavior for resolving multi type mappings.")

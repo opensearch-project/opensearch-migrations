@@ -20,59 +20,39 @@ public class VersionMatchers {
     public static final Predicate<Version> isOS_2_19_OrGreater = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.19.0"))
                                                                     .or(VersionMatchers.isOS_3_X);
     public static final Predicate<Version> anyOS = VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isOS_3_X);
-    public static final Predicate<Version> isBelowES_6_X = belowMajorVersion(Version.fromString("ES 6.0"));
 
-    private static Predicate<Flavor> compatibleFlavor(final Flavor flavor) {
+    static Predicate<Version> matchesFlavor(final Version version) {
         return other -> {
             if (other == null) {
                 return false;
             }
-            if (other.isOpenSearch() && flavor.isOpenSearch()) {
+            if (other.getFlavor().isOpenSearch() && version.getFlavor().isOpenSearch()) {
                 return true;
             }
-            return other == flavor;
+            return other.getFlavor() == version.getFlavor();
         };
     }
-
-    private static Predicate<Version> matchesMajorVersion(final Version version) {
+    
+    static Predicate<Version> matchesMajorVersion(final Version version) {
         return other -> {
             if (other == null) {
                 return false;
             }
-            var flavorMatches = compatibleFlavor(other.getFlavor()).test(version.getFlavor());
+            var flavorMatches = matchesFlavor(other).test(version);
             var majorVersionNumberMatches = version.getMajor() == other.getMajor();
             return flavorMatches && majorVersionNumberMatches;
         };
     }
 
-    private static Predicate<Version> matchesMinorVersion(final Version version) {
+    static Predicate<Version> matchesMinorVersion(final Version version) {
         return other -> matchesMajorVersion(version)
             .and(other2 -> version.getMinor() == other2.getMinor())
             .test(other);
     }
 
-    private static Predicate<Version> equalOrGreaterThanMinorVersion(final Version version) {
+    static Predicate<Version> equalOrGreaterThanMinorVersion(final Version version) {
         return other -> matchesMajorVersion(version)
             .and(other2 -> version.getMinor() <= other2.getMinor())
             .test(other);
-    }
-
-    /**
-     * Returns a predicate that checks if a given version is of the same flavor as the provided threshold version
-     * and has a major version number that is lower than the threshold's major version.
-     * This method ensures that only versions with a matching flavor are compared, thereby excluding incompatible OS or ES versions.
-     *
-     * @param version The threshold version used for comparison.
-     * @return A predicate that returns {@code true} if the tested version's major version is less than the threshold and the flavors match.
-     */
-    private static Predicate<Version> belowMajorVersion(final Version version) {
-        return other -> {
-            if (other == null) {
-                return false;
-            }
-            var flavorMatches = compatibleFlavor(other.getFlavor()).test(version.getFlavor());
-            var isLowerMajorVersion = other.getMajor() < version.getMajor();
-            return flavorMatches && isLowerMajorVersion;
-        };
     }
 }

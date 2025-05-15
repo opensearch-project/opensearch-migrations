@@ -185,6 +185,9 @@ public class RfsMigrateDocuments {
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
+
+        @ParametersDelegate
+        private VersionStrictness versionStrictness = new VersionStrictness();
     }
 
     @Getter
@@ -355,7 +358,7 @@ public class RfsMigrateDocuments {
             }
             var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo);
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
 
             var unpackerFactory = new SnapshotShardUnpacker.Factory(
                 repoAccessor,
