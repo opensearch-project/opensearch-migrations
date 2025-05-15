@@ -143,7 +143,7 @@ class Cluster:
         raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
-                 timeout=None, session=None, raise_error=True, **kwargs) -> requests.Response:
+                 timeout=300, session=None, raise_error=True, **kwargs) -> requests.Response:
         """
         Calls an API on the cluster.
         """

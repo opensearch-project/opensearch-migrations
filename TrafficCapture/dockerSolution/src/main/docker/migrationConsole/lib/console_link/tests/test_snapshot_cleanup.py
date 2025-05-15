@@ -69,7 +69,7 @@ def test_delete_all_snapshots_repository_missing(mock_cluster_with_missing_repo,
             },
         }
     }
-    snapshot = S3Snapshot(config=config["snapshot"], source_cluster=mock_cluster_with_missing_repo)
+    snapshot = S3Snapshot(config=config["snapshot"], cluster=mock_cluster_with_missing_repo)
     with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
         snapshot.delete_all_snapshots(cluster=mock_cluster_with_missing_repo, repository=snapshot.snapshot_repo_name)
         assert "Repository 'test-repo' is missing. Skipping snapshot clearing." in caplog.text
@@ -86,7 +86,7 @@ def test_delete_all_snapshots_success(mock_cluster_with_snapshots, caplog):
             },
         }
     }
-    snapshot = S3Snapshot(config=config["snapshot"], source_cluster=mock_cluster_with_snapshots)
+    snapshot = S3Snapshot(config=config["snapshot"], cluster=mock_cluster_with_snapshots)
     with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
         snapshot.delete_all_snapshots(cluster=mock_cluster_with_snapshots, repository=snapshot.snapshot_repo_name)
         assert f"Deleted snapshot: snapshot_1 from repository '{snapshot.snapshot_repo_name}'." in caplog.text

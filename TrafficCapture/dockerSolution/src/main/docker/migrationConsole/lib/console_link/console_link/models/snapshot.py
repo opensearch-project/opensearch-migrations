@@ -2,7 +2,7 @@ import datetime
 import logging
 from abc import ABC, abstractmethod
 from requests.exceptions import HTTPError
-from typing import Dict
+from typing import Dict, Optional
 
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
@@ -27,7 +27,8 @@ SNAPSHOT_SCHEMA = {
                 'schema': {
                     'repo_uri': {'type': 'string', 'required': True},
                     'aws_region': {'type': 'string', 'required': True},
-                    'role': {'type': 'string', 'required': False}
+                    'role': {'type': 'string', 'required': False},
+                    'endpoint': {'type': 'string', 'required': False}
                 }
             },
             'fs': {
@@ -46,9 +47,9 @@ class Snapshot(ABC):
     """
     Interface for creating and managing snapshots.
     """
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, cluster: Cluster) -> None:
         self.config = config
-        self.source_cluster = source_cluster
+        self.cluster = cluster
         v = Validator(SNAPSHOT_SCHEMA)
         if not v.validate({'snapshot': config}):
             raise ValueError("Invalid config file for snapshot", v.errors)
@@ -85,27 +86,27 @@ class Snapshot(ABC):
         command_args = {
             "--snapshot-name": self.snapshot_name,
             "--snapshot-repo-name": self.snapshot_repo_name,
-            "--source-host": self.source_cluster.endpoint
+            "--source-host": self.cluster.endpoint
         }
 
-        if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
+        if self.cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
                 command_args.update({
-                    "--source-username": self.source_cluster.auth_details.get("username"),
-                    "--source-password": self.source_cluster.get_basic_auth_password()
+                    "--source-username": self.cluster.auth_details.get("username"),
+                    "--source-password": self.cluster.get_basic_auth_password()
                 })
                 logger.info("Using basic auth for source cluster")
             except KeyError as e:
                 raise ValueError(f"Missing required auth details for source cluster: {e}")
-        elif self.source_cluster.auth_type == AuthMethod.SIGV4:
-            signing_name, region = self.source_cluster._get_sigv4_details(force_region=True)
+        elif self.cluster.auth_type == AuthMethod.SIGV4:
+            signing_name, region = self.cluster._get_sigv4_details(force_region=True)
             logger.info(f"Using sigv4 auth for source cluster with signing_name {signing_name} and region {region}")
             command_args.update({
                 "--source-aws-service-signing-name": signing_name,
                 "--source-aws-region": region
             })
 
-        if self.source_cluster.allow_insecure:
+        if self.cluster.allow_insecure:
             command_args["--source-insecure"] = None
 
         if self.otel_endpoint:
@@ -115,20 +116,26 @@ class Snapshot(ABC):
 
 
 class S3Snapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
-        super().__init__(config, source_cluster)
+    def __init__(self, config: Dict, cluster: Cluster) -> None:
+        super().__init__(config, cluster)
+        self.snapshot_name = config['snapshot_name']
+        self.otel_endpoint = config.get("otel_endpoint", None)
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
+        self.s3_endpoint = config['s3'].get('endpoint')
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        assert isinstance(self.cluster, Cluster)
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         s3_command_args = {
             "--s3-repo-uri": self.s3_repo_uri,
             "--s3-region": self.s3_region,
         }
+
+        if self.s3_endpoint:
+            s3_command_args["--s3-endpoint"] = self.s3_endpoint
 
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)
@@ -159,26 +166,35 @@ class S3Snapshot(Snapshot):
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+            return get_snapshot_status_full(self.cluster, self.snapshot_name)
+        return get_snapshot_status(self.cluster, self.snapshot_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
-        return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot(self.cluster, self.snapshot_name, timeout=timeout)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot_repo(self.cluster, self.snapshot_repo_name, timeout=timeout)
+    
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        try:
+            timeout = kwargs.get('timeout', 1200)
+            delete_all_snapshots(self.cluster, self.snapshot_repo_name, timeout)
+            return CommandResult(success=True, value="All snapshots deleted successfully.")
+        except Exception as e:
+            return CommandResult(success=False, value=f"Failed to delete all snapshots: {str(e)}")
 
 
 class FileSystemSnapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
-        super().__init__(config, source_cluster)
+    def __init__(self, config: Dict, cluster: Cluster) -> None:
+        super().__init__(config, cluster)
+        self.snapshot_name = config['snapshot_name']
+        self.otel_endpoint = config.get("otel_endpoint", None)
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        assert isinstance(self.cluster, Cluster)
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()
@@ -205,23 +221,31 @@ class FileSystemSnapshot(Snapshot):
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+            return get_snapshot_status_full(self.cluster, self.snapshot_name)
+        return get_snapshot_status(self.cluster, self.snapshot_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
-        return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot(self.cluster, self.snapshot_name, timeout=timeout)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
-        return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
+        timeout = kwargs.get('timeout', 1200)
+        return delete_snapshot_repo(self.cluster, self.snapshot_repo_name, timeout=timeout)
+    
+    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        try:
+            timeout = kwargs.get('timeout', 1200)
+            delete_all_snapshots(self.cluster, self.snapshot_repo_name, timeout)
+            return CommandResult(success=True, value="All snapshots deleted successfully.")
+        except Exception as e:
+            return CommandResult(success=False, value=f"Failed to delete all snapshots: {str(e)}")
 
 
-def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
+def get_snapshot_status(cluster: Cluster, snapshot: str,
+                        repository: str = 'migration_assistant_repo', timeout: int = 300) -> CommandResult:
     path = f"/_snapshot/{repository}/{snapshot}"
     try:
-        response = cluster.call_api(path, HttpMethod.GET)
+        response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
         logging.debug(f"Raw get snapshot status response: {response.text}")
         response.raise_for_status()
 
@@ -233,6 +257,21 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str) -> Com
         return CommandResult(success=True, value=snapshots[0].get("state"))
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get snapshot status: {str(e)}")
+
+
+def get_repository_for_snapshot(cluster: Cluster, snapshot: str, timeout: int = 300) -> Optional[str]:
+    url = f"/_snapshot/*/{snapshot}"
+    response = cluster.call_api(url, HttpMethod.GET, timeout=timeout)
+    logging.debug(f"Raw response: {response.text}")
+    response.raise_for_status()
+
+    snapshot_data = response.json()
+    snapshots = snapshot_data.get('snapshots', [])
+    if not snapshots:
+        logging.debug(f"Snapshot {snapshot} not found in any repository")
+        return None
+
+    return snapshots[0].get("repository")
 
 
 def format_date(millis: int) -> str:
@@ -291,10 +330,14 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
     )
 
 
-def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
+def get_snapshot_status_full(cluster: Cluster, snapshot: str,
+                             repository: str = 'migration_assistant_repo', timeout: int = 300) -> CommandResult:
     try:
+        if repository == '*':
+            repository = get_repository_for_snapshot(cluster, snapshot, timeout=timeout)
+
         path = f"/_snapshot/{repository}/{snapshot}"
-        response = cluster.call_api(path, HttpMethod.GET)
+        response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
         logging.debug(f"Raw get snapshot status response: {response.text}")
         response.raise_for_status()
 
@@ -307,7 +350,7 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str) -
         state = snapshot_info.get("state")
 
         path = f"/_snapshot/{repository}/{snapshot}/_status"
-        response = cluster.call_api(path, HttpMethod.GET)
+        response = cluster.call_api(path, HttpMethod.GET, timeout=timeout)
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
 
@@ -322,14 +365,20 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str) -
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str):
+def delete_snapshot(
+    cluster: Cluster,
+    snapshot_name: str,
+    repository: str = 'migration_assistant_repo',
+    timeout: int = 1200
+):
+    repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot_name)
     path = f"/_snapshot/{repository}/{snapshot_name}"
-    response = cluster.call_api(path, HttpMethod.DELETE)
+    response = cluster.call_api(path, HttpMethod.DELETE, timeout=timeout)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
     logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
 
 
-def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
+def delete_all_snapshots(cluster: Cluster, repository: str, timeout: int = 1200) -> None:
     logger.info(f"Clearing snapshots from repository '{repository}'")
     """
     Clears all snapshots from the specified repository.
@@ -341,7 +390,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
     try:
         # List all snapshots in the repository
         snapshots_path = f"/_snapshot/{repository}/_all"
-        response = cluster.call_api(snapshots_path, raise_error=True)
+        response = cluster.call_api(snapshots_path, raise_error=True, timeout=timeout)
         logger.debug(f"Raw response: {response.json()}")
         snapshots = response.json().get("snapshots", [])
         logger.info(f"Found {len(snapshots)} snapshots in repository '{repository}'.")
@@ -367,7 +416,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
         raise e
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
+def delete_snapshot_repo(cluster: Cluster, repository: str, timeout: int = 1200) -> None:
     logger.info(f"Deleting repository '{repository}'")
     """
     Delete repository. Should be empty before execution.
@@ -378,7 +427,7 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
     """
     try:
         delete_path = f"/_snapshot/{repository}"
-        response = cluster.call_api(delete_path, method=HttpMethod.DELETE, raise_error=True)
+        response = cluster.call_api(delete_path, method=HttpMethod.DELETE, raise_error=True, timeout=timeout)
         logging.debug(f"Raw delete snapshot repository status response: {response.text}")
         logger.info(f"Deleted repository: {repository}.")
     except Exception as e:
