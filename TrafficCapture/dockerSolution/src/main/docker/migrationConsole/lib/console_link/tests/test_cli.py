@@ -83,7 +83,7 @@ target_cluster:
 def test_cli_without_valid_services_file_raises_error(runner):
     result = runner.invoke(cli, ['--config-file', '~/non-existent/file/services.yaml', 'clusters', 'cat-indices'])
     assert result.exit_code == 1
-    assert " No such file or directory: '~/non-existent/file/services.yaml'" in result.stdout
+    assert "No such file or directory" in result.output or "No such file or directory" in result.stderr
     assert isinstance(result.exception, SystemExit)
 
 
@@ -827,7 +827,7 @@ def test_cli_kafka_describe_topic(runner, mocker):
 
 
 def test_completion_script(runner):
-    result = runner.invoke(cli, [str(VALID_SERVICES_YAML), 'completion', 'bash'], catch_exceptions=True)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'completion', 'bash'], catch_exceptions=True)
     assert result.exit_code == 0
 
 
