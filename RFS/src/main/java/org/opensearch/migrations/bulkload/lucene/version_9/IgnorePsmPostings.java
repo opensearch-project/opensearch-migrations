@@ -59,6 +59,7 @@ public class IgnorePsmPostings extends PostingsFormat {
 
     public IgnorePsmPostings() {
         super("ES812Postings");
+        System.out.println(">>>>> Loading stub IgnorePsmPostings class");
     }
 
     public FieldsConsumer fieldsConsumer(SegmentWriteState state) throws IOException {
