@@ -96,7 +96,6 @@ def identify_fields_to_chunk(doc: Dict[str, Any], max_request_size: int) -> List
         new_size = calculate_document_size(working_doc)
         
         # Calculate how much size was reduced
-        size_reduction = current_size - new_size
         current_size = new_size
         
         # Add field to chunking list
@@ -176,7 +175,7 @@ def update_field_with_chunks(env: Environment, index: str, doc_id: str,
 
 
 def verify_migration(env: Environment, src_index: str, src_id: str,
-                     dst_index: str, dst_id: str, src_type: str, 
+                     dst_index: str, dst_id: str, src_type: str,
                      src_source: Dict[str, Any] = None) -> bool:
     """Verifies that the source and target documents match."""
     try:
