@@ -29,7 +29,6 @@ def create_opensearch_container():
     """Create and start an OpenSearch container."""
     container = OpenSearchContainer("opensearchproject/opensearch:2.11.0")
     container.with_env("discovery.type", "single-node")
-    container.with_env("plugins.security.disabled", "true")
     container.start()
 
     url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"

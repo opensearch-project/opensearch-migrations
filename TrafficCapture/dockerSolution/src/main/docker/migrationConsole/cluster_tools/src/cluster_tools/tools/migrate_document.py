@@ -82,6 +82,7 @@ def identify_fields_to_chunk(doc: Dict[str, Any], max_request_size: int) -> List
         raise ValueError("No string fields found in the document")
 
     fields_to_chunk = []
+    current_size = doc_size
     working_doc = doc.copy()
 
     # Remove largest fields one by one until we're under the size limit
@@ -90,14 +91,19 @@ def identify_fields_to_chunk(doc: Dict[str, Any], max_request_size: int) -> List
         if not field_value:
             continue
 
+        # Calculate size with this field removed
+        working_doc[field_name] = ""
+        new_size = calculate_document_size(working_doc)
+        
+        # Calculate how much size was reduced
+        size_reduction = current_size - new_size
+        current_size = new_size
+        
         # Add field to chunking list
         fields_to_chunk.append((field_name, field_value))
 
-        # Remove field from working doc
-        working_doc[field_name] = ""
-
         # Check if we're under the size limit
-        if calculate_document_size(working_doc) <= max_request_size:
+        if current_size <= max_request_size:
             break
 
     if fields_to_chunk:
@@ -170,11 +176,15 @@ def update_field_with_chunks(env: Environment, index: str, doc_id: str,
 
 
 def verify_migration(env: Environment, src_index: str, src_id: str,
-                     dst_index: str, dst_id: str, src_type: str) -> bool:
+                     dst_index: str, dst_id: str, src_type: str, 
+                     src_source: Dict[str, Any] = None) -> bool:
     """Verifies that the source and target documents match."""
     try:
-        # Get documents from both clusters
-        src_source = get_document_source(env, src_index, src_id, src_type)
+        # Get source document if not provided
+        if src_source is None:
+            src_source = get_document_source(env, src_index, src_id, src_type)
+            
+        # Get target document
         dst_source = get_document_source(env, dst_index, dst_id, DST_CLUSTER)
 
         # Calculate sizes for logging
@@ -239,8 +249,8 @@ def main(env: Environment, args: argparse.Namespace) -> None:
             for field_name, field_value in fields_to_chunk:
                 update_field_with_chunks(env, dst_index, dst_id, field_name, field_value, max_request_size, DST_CLUSTER)
 
-        # 5. Verify the migration
-        success = verify_migration(env, src_index, src_id, dst_index, dst_id, src_type)
+        # 5. Verify the migration - pass the original document to avoid retrieving it again
+        success = verify_migration(env, src_index, src_id, dst_index, dst_id, src_type, doc)
 
         if not success:
             raise RuntimeError("Document migration failed: Source and target documents do not match")
