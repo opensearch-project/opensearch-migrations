@@ -17,6 +17,15 @@
             "label": "Migration Stage",
             "defaultValue": "placeholder-stage",
             "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_QUALIFIER",
+            "inputType": "input",
+            "id": "MA_QUALIFIER",
+            "label": "Migration Qualifier",
+            "defaultValue": "placeholder-qualifier",
+            "visible": false
         }
     ],
     "widgets": [
@@ -39,8 +48,8 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "bytesRead", "OTelLib", "captureProxy", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
-                    [ ".", "bytesWritten", ".", ".", { "label": "Request Bytes", "region": "REGION", "id": "c2", "visible": false } ],
+                    [ "OpenSearchMigrations", "bytesRead", "qualifier", "MA_QUALIFIER", "OTelLib", "captureProxy", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
+                    [ "OpenSearchMigrations", "bytesWritten", "qualifier", "MA_QUALIFIER", { "label": "Request Bytes", "region": "REGION", "id": "c2", "visible": false } ],
                     [ { "expression": "(c1 + c2) / 1048576 / PERIOD(c1)", "label": "Proxy", "id": "e1", "region": "REGION", "color": "#7f7f7f" } ],
                     [ { "expression": "SEARCH('{AWS/Kafka,\"Broker ID\",\"Cluster Name\",Topic} Topic=\"logging-traffic-topic\" MetricName=\"BytesInPerSec\" \"Cluster Name\"=\"migration-msk-cluster-MA_STAGE\"', 'Average', 60)", "id": "k1", "region": "REGION", "visible": false, "label": "Kafka Bytes In Per Second", "period": 60 } ],
                     [ { "expression": "SUM(k1) / 1048576", "label": "Kafka", "id": "k2", "region": "REGION" } ],
@@ -82,7 +91,7 @@
             "properties": {
                 "metrics": [
                     [ { "expression": "IF(m2 > 0, 1, 0)", "label": "CommitsObserved", "id": "e1", "region": "REGION", "period": 300 } ],
-                    [ "OpenSearchMigrations", "kafkaCommitCount", "OTelLib", "replayer", { "id": "m2", "region": "REGION", "visible": false } ]
+                    [ "OpenSearchMigrations", "kafkaCommitCount", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "m2", "region": "REGION", "visible": false } ]
                 ],
                 "sparkline": true,
                 "view": "timeSeries",
@@ -165,10 +174,8 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "OTelLib", "replayer", { "id": "m1", "region": "REGION", "stat": "Minimum", "visible": false, "label": "Min", "color": "#9edae5" } ],
-                    [ "...", { "id": "m4", "region": "REGION", "visible": false, "label": "Avg", "color": "#dbdb8d" } ],
-                    [ "...", { "id": "m5", "region": "REGION", "label": "Max", "stat": "Maximum", "visible": false, "color": "#c7c7c7" } ],
-                    [ { "expression": "FLOOR(METRICS()/1000)/60", "label": "Replay Lag", "id": "e2", "region": "REGION", "color": "#9edae5", "period": 300 } ]
+                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "m4", "region": "REGION", "label": "Avg", "color": "#dbdb8d", "visible": false } ],
+                    [ { "expression": "FLOOR(METRICS()/1000)/60", "label": "Replay Lag", "id": "e2", "region": "REGION", "color": "#9edae5", "period": 60 } ]
                 ],
                 "view": "timeSeries",
                 "title": "Replayer Performance Analysis",
@@ -180,7 +187,7 @@
                     }
                 },
                 "stat": "Average",
-                "period": 300,
+                "period": 60,
                 "liveData": true
             }
         },
@@ -192,7 +199,7 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,sourceStatusCode,statusCodesMatch,targetStatusCode} statusCodesMatch=\"true\"', 'Sum', 60)", "id": "e2", "period": 60, "region": "REGION", "label": "" } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,OTelLib, method, qualifier, sourceStatusCode, statusCodesMatch, targetStatusCode} qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)", "id": "e2", "period": 60, "region": "REGION", "label": "${PROP('Dim.method')} Status code class: ${PROP('Dim.sourceStatusCode')}" } ]
                 ],
                 "sparkline": true,
                 "view": "timeSeries",
@@ -220,15 +227,9 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "FLOOR(m1_avg/1000)", "label": "Lag (sec) - Avg", "id": "m3_avg", "visible": false, "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ { "expression": "IF(DIFF_TIME(m3_avg) > PERIOD(m3_avg), 0/0, -1*RATE(m3_avg)+1)", "label": "Speedup Factor - Avg", "id": "m4_avg", "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "OTelLib", "replayer", { "id": "m1_avg", "region": "REGION", "visible": false } ],
-                    [ { "expression": "FLOOR(m1_min/1000)", "label": "Lag (sec) - Min", "id": "m3_min", "visible": false, "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ { "expression": "IF(DIFF_TIME(m3_min) > PERIOD(m3_min), 0/0, -1*RATE(m3_min)+1)", "label": "Speedup Factor - Min", "id": "m4_min", "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "OTelLib", "replayer", { "id": "m1_min", "region": "REGION", "visible": false, "stat": "Minimum" } ],
-                    [ { "expression": "FLOOR(m1_max/1000)", "label": "Lag (sec) - Max", "id": "m3_max", "visible": false, "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ { "expression": "IF(DIFF_TIME(m3_max) > PERIOD(m3_max), 0/0, -1*RATE(m3_max)+1)", "label": "Speedup Factor - Max", "id": "m4_max", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "OTelLib", "replayer", { "id": "m1_max", "region": "REGION", "visible": false, "stat": "Maximum" } ]
+                    [ { "expression": "FLOOR(m1_avg/1000)", "label": "Lag (sec) - Avg", "id": "m3_avg", "visible": false, "region": "REGION", "stat": "Average", "period": 60 } ],
+                    [ { "expression": "IF(DIFF_TIME(m3_avg) > PERIOD(m3_avg), 0/0, -1*RATE(m3_avg)+1)", "label": "Speedup Factor - Avg", "id": "m4_avg", "region": "REGION", "stat": "Average", "period": 60 } ],
+                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "m1_avg", "region": "REGION", "visible": false } ]
                 ],
                 "view": "timeSeries",
                 "title": "Actual Speedup Factor",
@@ -241,7 +242,7 @@
                     }
                 },
                 "stat": "Average",
-                "period": 300
+                "period": 60
             }
         },
         {
@@ -252,7 +253,7 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "bytesReadFromTarget", "OTelLib", "replayer", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
+                    [ "OpenSearchMigrations", "bytesReadFromTarget", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
                     [ ".", "bytesWrittenToTarget", ".", ".", { "label": "Request Bytes", "region": "REGION", "id": "c2", "visible": false } ],
                     [ { "expression": "(c1 + c2) / (1024*1024) / PERIOD(c2)", "label": "Total", "id": "e1", "region": "REGION" } ],
                     [ { "expression": "(c2) / (1024*1024) / PERIOD(c2)", "label": "Request", "id": "e2", "region": "REGION" } ],
@@ -281,12 +282,12 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,sourceStatusCode,statusCodesMatch,targetStatusCode} statusCodesMatch=\"false\"', 'Sum', 300)", "id": "e2", "period": 300, "region": "REGION" } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\" MetricName=\"tupleComparison\"', 'Sum', 60)", "id": "e2", "period": 60, "region": "REGION", "label": "${PROP('Dim.method')} Status code class source: ${PROP('Dim.sourceStatusCode')} target: ${PROP('Dim.targetStatusCode')}" } ]
                 ],
                 "sparkline": true,
                 "view": "timeSeries",
                 "region": "REGION",
-                "period": 300,
+                "period": 60,
                 "stat": "Sum",
                 "title": "Replayer Status Code Mismatches",
                 "setPeriodToTimeRange": true,
@@ -335,13 +336,12 @@
             "properties": {
                 "metrics": [
                     [ { "expression": "lag_avg_ms/1000", "label": "Expression3", "id": "e3", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "OTelLib", "replayer", { "id": "lag_avg_ms", "region": "REGION", "visible": false, "label": "lag_avg_ms" } ],
+                    [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "lag_avg_ms", "region": "REGION", "label": "lag_avg_ms", "visible": false } ],
                     [ { "expression": "lag_avg_ms/1000", "label": "lag_avg_sec", "id": "lag_avg_sec", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "FLOOR(lag_avg_sec/60/5 + 0.5)*60*5", "label": "lag_avg_sec_cleaned", "id": "lag_avg_sec_cleaned", "visible": false, "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ { "expression": "lag_avg_sec/3600", "label": "lag_avg_hr", "id": "lag_avg_hr", "visible": false, "region": "REGION", "stat": "Average", "period": 300 } ],
-                    [ { "expression": "-1*RATE(lag_avg_sec_cleaned)+1", "label": "Speedup Factor", "id": "speedup", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "IF(DIFF_TIME(speedup) > PERIOD(speedup), 0/0, speedup)", "label": "Speedup Factor (cleaned)", "id": "speedup_cleaned", "region": "REGION", "period": 300, "visible": false } ],
-                    [ { "expression": "lag_avg_hr/(speedup_cleaned-1)", "label": "catchup_hours", "id": "catchup_hours", "region": "REGION", "period": 300 } ]
+                    [ { "expression": "lag_avg_sec/3600", "label": "lag_avg_hr", "id": "lag_avg_hr", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
+                    [ { "expression": "-1*RATE(lag_avg_sec)+1", "label": "Speedup Factor", "id": "speedup", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
+                    [ { "expression": "IF(DIFF_TIME(speedup) > PERIOD(speedup), speedup, speedup)", "label": "Speedup Factor (cleaned)", "id": "speedup_cleaned", "region": "REGION", "period": 300, "visible": false } ],
+                    [ { "expression": "IF(speedup_cleaned > lag_avg_hr*60 , 0, IF(speedup_cleaned<=1, 0/0,  lag_avg_hr/(speedup_cleaned-1)))", "label": "catchup_hours", "id": "catchup_hours", "region": "REGION", "period": 300 } ]
                 ],
                 "view": "singleValue",
                 "title": "Time to catchup in hours",
@@ -358,7 +358,7 @@
                 "setPeriodToTimeRange": false,
                 "singleValueFullPrecision": false,
                 "sparkline": true,
-                "stacked": true,
+                "stacked": false,
                 "liveData": false
             }
         },
@@ -370,12 +370,12 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "bytesReadFromTarget", "OTelLib", "replayer", { "label": "Response Bytes", "region": "REGION", "id": "r1", "visible": false } ],
+                    [ "OpenSearchMigrations", "bytesReadFromTarget", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "label": "Response Bytes", "region": "REGION", "id": "r1", "visible": false } ],
                     [ ".", "bytesWrittenToTarget", ".", ".", { "label": "Request Bytes", "region": "REGION", "id": "r2", "visible": false } ],
                     [ { "expression": "(r1 + r2) / (1024*1024) / PERIOD(r2)", "label": "Replayer", "id": "e1", "region": "REGION" } ],
                     [ { "expression": "(r2) / (1024*1024) / PERIOD(r2)", "label": "Request", "id": "e2", "region": "REGION", "visible": false } ],
                     [ { "expression": "(r1)/ (1024*1024) / PERIOD(r1)", "label": "Response", "id": "e3", "region": "REGION", "visible": false } ],
-                    [ "OpenSearchMigrations", "bytesRead", "OTelLib", "captureProxy", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
+                    [ "OpenSearchMigrations", "bytesRead", "qualifier", "MA_QUALIFIER", "OTelLib", "captureProxy", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
                     [ ".", "bytesWritten", ".", ".", { "label": "Request Bytes", "region": "REGION", "id": "c2", "visible": false } ],
                     [ { "expression": "(c1 + c2) / 1048576 / PERIOD(c1)", "label": "Proxy", "id": "e4", "region": "REGION" } ]
                 ],

@@ -36,7 +36,8 @@ export class MigrationDashboard extends Construct {
         const variableSetters = {
             'ACCOUNT_ID': props.account,
             'REGION': props.region,
-            'MA_STAGE': props.stage
+            'MA_STAGE': props.stage,
+            'MA_QUALIFIER': props.stage
         };
 
         Object.entries(variableSetters).forEach(([varName, value]) => {
