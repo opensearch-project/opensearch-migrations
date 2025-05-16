@@ -28,6 +28,7 @@ public class IgnorePsmPostings extends PostingsFormat {
 
     public IgnorePsmPostings() {
         super("ES812Postings");
+        System.out.println(">>>>> Loading stub IgnorePsmPostings class");
     }
 
     @Override
