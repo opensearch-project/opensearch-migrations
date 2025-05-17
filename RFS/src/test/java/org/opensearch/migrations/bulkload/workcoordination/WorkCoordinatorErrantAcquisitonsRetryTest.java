@@ -38,6 +38,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
 
     private static final String GET_NO_RESULTS_ASSIGNED_WORK_BODY = getAssignedWorkBody(0);
     private static final String GET_TWO_RESULTS_ASSIGNED_WORK_BODY = getAssignedWorkBody(2);
+    private static final String DUMMY_INDEX_NAME = OpenSearchWorkCoordinator.INDEX_BASENAME;
 
     private static String getAssignedWorkBody(int numDocs) {
         return
@@ -73,7 +74,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
 //        "    \"max_score\": 1.0,\n" +
         "    \"hits\": [\n" +
         "      {\n" +
-        "        \"_index\": \"" + OpenSearchWorkCoordinator.INDEX_NAME + "\",\n" +
+        "        \"_index\": \"" + DUMMY_INDEX_NAME + "\",\n" +
         "        \"_id\": \"SAMPLE_WORK_ITEM_DOC_ID\",\n" +
         "        \"_score\": 1.0,\n" +
         "        \"_source\": {\n" +
@@ -201,15 +202,15 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
     getCountingResponseMaker(PathCounts pathToCountMap, SimpleHttpResponse searchResponse) {
         return httpRequestFirstLine -> {
             final var uriPath = httpRequestFirstLine.getPath().getPath();
-            if (uriPath.startsWith("/" + OpenSearchWorkCoordinator.INDEX_NAME + "/_refresh")) {
+            if (uriPath.startsWith("/" + DUMMY_INDEX_NAME + "/_refresh")) {
                 ++pathToCountMap.refreshes;
                 return makeResponse(200, "OK",
                     "".getBytes(StandardCharsets.UTF_8));
-            } else if (uriPath.startsWith("/" + OpenSearchWorkCoordinator.INDEX_NAME + "/_update_by_query")) {
+            } else if (uriPath.startsWith("/" + DUMMY_INDEX_NAME + "/_update_by_query")) {
                 ++pathToCountMap.updates;
                 return makeResponse(200, "OK",
                     UPDATE_BY_QUERY_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8));
-            } else if (uriPath.startsWith("/" + OpenSearchWorkCoordinator.INDEX_NAME + "/_search")) {
+            } else if (uriPath.startsWith("/" + DUMMY_INDEX_NAME + "/_search")) {
                 ++pathToCountMap.searches;
                 return searchResponse;
             } else {

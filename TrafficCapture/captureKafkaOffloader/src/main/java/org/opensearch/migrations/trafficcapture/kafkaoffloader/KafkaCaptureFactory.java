@@ -25,7 +25,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 @Slf4j
 public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMetadata> {
 
-    private static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
+    public static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes
     // and
     // general Kafka message overhead

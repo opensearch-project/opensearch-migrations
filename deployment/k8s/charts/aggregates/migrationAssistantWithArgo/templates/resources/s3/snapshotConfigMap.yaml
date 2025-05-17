@@ -1,0 +1,16 @@
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-snapshot-config
+  labels:
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  AWS_REGION: {{ .Values.snapshotBucketConfiguration.region }}
+  {{- if .Values.snapshotBucketConfiguration.useLocalStack }}
+  ENDPOINT: "http://{{ .Values.snapshotBucketConfiguration.endpoint }}:4566"
+  {{- else }}
+  ENDPOINT: "http://s3.{{ required "A valid .Values.snapshotBucketConfiguration.region is required" .Values.snapshotBucketConfiguration.region }}.amazonaws.com"
+  {{- end }}
+  repo_uri: {{ .Values.snapshotBucketConfiguration.bucketName }}

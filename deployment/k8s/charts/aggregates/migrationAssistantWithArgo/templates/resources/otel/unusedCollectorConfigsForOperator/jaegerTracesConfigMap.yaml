@@ -1,0 +1,9 @@
+{{- if has "jaeger" .Values.extraOtelConfiguration.configs.traces }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-jaeger-traces-config
+data:
+  nothing: |
+    {}
+{{ end -}}

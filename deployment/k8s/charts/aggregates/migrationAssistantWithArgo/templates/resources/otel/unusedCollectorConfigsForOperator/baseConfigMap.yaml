@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-base-config
+data:
+  receivers: |
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+  processors: |
+    batch:
+      timeout: 10s
+      send_batch_size: 8192
+      send_batch_max_size: 10000
+  extensions: |
+    zpages:
+      endpoint: :55679
+    pprof:
+      endpoint: :1888
+    health_check:
+  # logging isn't for exporting upstream logs but to log results to the otel-collector's console
+  exporters: |
+    logging:
+      verbosity: detailed
+      sampling_initial: 5
+      sampling_thereafter: 200
+    prometheus:
+      endpoint: "0.0.0.0:8889"
+      send_timestamps: true
+      metric_expiration: 5m
+      enable_open_metrics: true
+  service: |
+    extensions: [zpages, pprof, health_check]
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors:
+        exporters: [logging]
+      metrics:
+        receivers: [otlp]
+        processors:
+        exporters: [logging]
+      logs:
+        receivers: [otlp]
+        processors:
+        exporters: [logging]
+

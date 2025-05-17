@@ -34,7 +34,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // Create a stable logger that descendants can use, and we can predictably read from in tests
     protected static final Logger log = LoggerFactory.getLogger(OpenSearchWorkCoordinator.class);
 
-    public static final String INDEX_NAME = ".migrations_working_state";
+    public static final String INDEX_BASENAME = ".migrations_working_state";
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
     static final long ACQUIRE_WORK_RETRY_BASE_MS = 10;
@@ -120,6 +120,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         final List<String> successorWorkItemIds;
     }
 
+    protected final String indexName;
     private final long tolerableClientServerClockDifferenceSeconds;
     private final AbstractedHttpClient httpClient;
     private final String workerId;
@@ -130,25 +131,40 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     protected OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
+        String indexNameAppendage,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId
     ) {
-        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC(), w -> {});
+        this(httpClient,
+            indexNameAppendage,
+            tolerableClientServerClockDifferenceSeconds,
+            workerId,
+            Clock.systemUTC(),
+            w -> {});
     }
 
     protected OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
+        String indexNameAppendage,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId,
         Clock clock,
         Consumer<WorkItemAndDuration> workItemConsumer
     ) {
+        this.indexName = getFinalIndexName(indexNameAppendage);
         this.tolerableClientServerClockDifferenceSeconds = tolerableClientServerClockDifferenceSeconds;
         this.httpClient = httpClient;
         this.workerId = workerId;
         this.clock = clock;
         this.objectMapper = new ObjectMapper();
         this.workItemConsumer = workItemConsumer;
+    }
+
+    public static String getFinalIndexName(String indexNameAppendage) {
+        return INDEX_BASENAME + Optional.ofNullable(indexNameAppendage)
+            .filter(s->!s.isEmpty())
+            .map(s->"_" + s)
+            .orElse("");
     }
 
     @FunctionalInterface
@@ -210,23 +226,25 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         var body = getCoordinationIndexSettingsBody();
 
         try {
-            doUntil("setup-" + INDEX_NAME, 100, MAX_SETUP_RETRIES, contextSupplier::get, () -> {
+            doUntil("setup-" + indexName, 100, MAX_SETUP_RETRIES, contextSupplier::get, () -> {
                 try {
                     var indexCheckResponse = httpClient.makeJsonRequest(
                         AbstractedHttpClient.HEAD_METHOD,
-                        INDEX_NAME,
+                        indexName,
                         null,
                         null
                     );
                     if (indexCheckResponse.getStatusCode() == 200) {
-                        log.info("Not creating " + INDEX_NAME + " because it already exists");
+                        log.atInfo().setMessage("Not creating {} because it already exists")
+                            .addArgument(indexName)
+                            .log();
                         return indexCheckResponse;
                     }
                     log.atInfo().setMessage("Creating {} because HEAD returned {}")
-                        .addArgument(INDEX_NAME)
+                        .addArgument(indexName)
                         .addArgument(indexCheckResponse::getStatusCode)
                         .log();
-                    return httpClient.makeJsonRequest(AbstractedHttpClient.PUT_METHOD, INDEX_NAME, null, body);
+                    return httpClient.makeJsonRequest(AbstractedHttpClient.PUT_METHOD, indexName, null, body);
                 } catch (Exception e) {
                     throw Lombok.sneakyThrow(e);
                 }
@@ -1018,7 +1036,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 try {
                     return httpClient.makeJsonRequest(
                         AbstractedHttpClient.POST_METHOD,
-                        INDEX_NAME + "/_refresh",
+                        indexName + "/_refresh",
                         null,
                         null
                     );

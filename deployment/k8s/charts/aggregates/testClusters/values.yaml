@@ -9,32 +9,105 @@ proxy:
       value: "http://elasticsearch:9200"
 
 source:
-  imageTag: "7.10.2"
-  image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
+  http:
+    tls:
+      enabled: true  # Enable HTTPS
+
+  # Configure authentication
+  auth:
+    enabled: true
+
+  # Configure health checks for Elasticsearch
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -k -s -u admin:admin -o /dev/null -w "%{http_code}" https://localhost:9200/_cluster/health)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+          KUBECONFIG=""
+          STATUS=$(curl -k -s -u admin:admin -o /dev/null -w "%{http_code}" https://localhost:9200/_cluster/health?timeout=5s)
+          if [[ "${STATUS}" == "200" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+  imageTag: "latest"
+  image: "migrations/elasticsearch_searchguard"
   roles: [ master, data, ingest ]
   antiAffinity: "soft"
-  esJavaOpts: "-Xmx128m -Xms128m"
-  protocol: http
+  esJavaOpts: "-Xms512m -Xmx512m"
+  protocol: https
   # for simplest dev testing
-  replicas: 2 # k8s replica count, not ES shard replicas
+  replicas: 1
   createCert: false
-  #  esConfig:
-  #    elasticsearch.yml: |
-  #      discovery.type: single-node
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "docker-cluster"
+      network.host: 0.0.0.0
+      
+      ######## Start Search Guard Demo Configuration ########
+      # WARNING: revise all the lines below before you go into production
+      searchguard.ssl.transport.pemcert_filepath: esnode.pem
+      searchguard.ssl.transport.pemkey_filepath: esnode-key.pem
+      searchguard.ssl.transport.pemtrustedcas_filepath: root-ca.pem
+      searchguard.ssl.transport.enforce_hostname_verification: false
+      searchguard.ssl.http.enabled: true
+      searchguard.ssl.http.pemcert_filepath: esnode.pem
+      searchguard.ssl.http.pemkey_filepath: esnode-key.pem
+      searchguard.ssl.http.pemtrustedcas_filepath: root-ca.pem
+      searchguard.allow_unsafe_democertificates: true
+      searchguard.allow_default_init_sgindex: true
+      searchguard.authcz.admin_dn:
+        - CN=kirk,OU=client,O=client,L=test, C=de
+      
+      searchguard.audit.type: internal_elasticsearch
+      searchguard.enable_snapshot_restore_privilege: true
+      searchguard.check_snapshot_restore_write_privileges: true
+      searchguard.restapi.roles_enabled: ["SGS_ALL_ACCESS"]
+      cluster.routing.allocation.disk.threshold_enabled: false
+      node.max_local_storage_nodes: 3
+      ######## End Search Guard Demo Configuration ########
+      discovery.type: single-node
+      
+      s3.client.default.endpoint: "http://localstack:4566"
+      s3.client.default.path_style_access: true
 
   minimumMasterNodes: 1
+  persistence:
+    enabled: false
   extraEnvs:
-    - name: path.repo
-      value: "/snapshot"
-  extraVolumes:
-    - name: snapshot-volume
-      persistentVolumeClaim:
-        claimName: snapshot-volume-pvc  # Should match existing snapshot volume PVC
-  extraVolumeMounts:
-    - name: snapshot-volume
-      mountPath: /snapshot
+    - name: cluster.initial_master_nodes
+      value: null  # Set to null to disable
 
 target:
+  image:
+    tag: "2.11.1"
   extraEnvs:
     - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
       value: myStrongPassword123!

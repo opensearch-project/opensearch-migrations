@@ -58,7 +58,7 @@ def run_test_benchmarks(cluster: Cluster):
 
 # As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
-    clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state"
+    clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state*"
     try:
         r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
         return r.content

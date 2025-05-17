@@ -1,0 +1,107 @@
+{{- if get .Values.conditionalPackageInstalls "opentelemetry-operator" }}
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel-collector
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade,pre-delete
+    "helm.sh/hook-weight": "-20"  # Run early during pre-delete
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  mode: daemonset
+  serviceAccount: otel-collector
+  image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.2
+  env:
+    - name: OTEL_CONFIG_LOG
+      value: "true"
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 200Mi
+  tolerations:
+    - operator: Exists
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 8192
+        send_batch_max_size: 10000
+    extensions:
+      zpages:
+        endpoint: :55679
+      pprof:
+        endpoint: :1888
+      health_check:
+    exporters:
+      debug:
+        verbosity: detailed
+        sampling_initial: 5
+        sampling_thereafter: 200
+      awsemf:
+        namespace: 'OpenSearchMigrations'
+      awsxray:
+        index_all_attributes: true
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        send_timestamps: true
+        metric_expiration: 5m
+        enable_open_metrics: true
+      otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
+        endpoint: jaeger:4317
+        tls:
+          insecure: true
+    service:
+      extensions: [ zpages, pprof, health_check ]
+      pipelines:
+        metrics:
+          receivers: [ otlp ]
+          processors: [ batch ]
+          exporters: [ debug, prometheus ]
+        traces:
+          receivers: [ otlp ]
+          processors: [ batch ]
+          exporters: [ debug, otlp/jaeger ]
+        logs:
+          receivers: [ otlp ]
+          processors:
+          exporters: [ debug ]
+
+{{/*  configMaps:*/}}
+{{/*    - otel-base-config*/}}
+{{/*    {{- if has "prometheus" .Values.extraOtelConfiguration.configs.metrics }}*/}}
+{{/*    - name: otel-prometheus-metrics-config*/}}
+{{/*      optional: true*/}}
+{{/*    {{- end }}*/}}
+{{/*    {{- if has "cloudwatch" .Values.extraOtelConfiguration.configs.metrics }}*/}}
+{{/*    - name: otel-cloudwatch-metrics-config*/}}
+{{/*      optional: true*/}}
+{{/*    {{- end }}*/}}
+{{/*    {{- if has "jaeger" .Values.extraOtelConfiguration.configs.traces }}*/}}
+{{/*    - name: otel-jaeger-logs-config*/}}
+{{/*      optional: true*/}}
+{{/*    {{- end }}*/}}
+{{/*    {{- if has "xray" .Values.extraOtelConfiguration.configs.traces }}*/}}
+{{/*    - name: otel-xray-logs-config*/}}
+{{/*      optional: true*/}}
+{{/*    {{- end }}*/}}
+{{/*    - name: otel-user-config*/}}
+{{/*      optional: true*/}}
+{{ end -}}

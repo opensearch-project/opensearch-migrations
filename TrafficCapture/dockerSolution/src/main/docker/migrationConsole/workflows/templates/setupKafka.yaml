@@ -1,0 +1,218 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: kafka-setup
+spec:
+  entrypoint: cluster-deploy
+  serviceAccountName: argo-workflow-executor
+
+  templates:
+    - name: cluster-deploy
+      inputs:
+        parameters:
+          - name: kafka-name
+          - name: use-kraft
+            value: "true"
+      outputs:
+        parameters:
+          - name: kafka-name
+            valueFrom:
+              expression: "inputs.parameters['kafka-name']"
+          - name: bootstrap-servers
+            valueFrom:
+              expression: >-
+                (tasks['deploy-kafka-cluster-kraft'].status == "Skipped" ? tasks['deploy-kafka-cluster-zookeeper'] : tasks['deploy-kafka-cluster-kraft']).outputs.parameters['brokers']
+      dag:
+        tasks:
+          - name: deploy-kafka-node-pool
+            template: deploy-kafka-node-pool
+            when: "{{inputs.parameters.use-kraft}} == true"
+            arguments:
+              parameters:
+                - name: kafka-name
+                  value: "{{inputs.parameters.kafka-name}}"
+
+          - name: deploy-kafka-cluster-kraft
+            template: deploy-kafka-cluster-kraft
+            when: "{{inputs.parameters.use-kraft}} == true"
+            arguments:
+              parameters:
+                - name: kafka-name
+                  value: "{{inputs.parameters.kafka-name}}"
+
+          - name: deploy-kafka-cluster-zookeeper
+            template: deploy-kafka-cluster-zookeeper
+            when: "{{inputs.parameters.use-kraft}} == false"
+            arguments:
+              parameters:
+                - name: kafka-name
+                  value: "{{inputs.parameters.kafka-name}}"
+
+
+    - name: deploy-kafka-cluster-zookeeper
+      inputs:
+        parameters:
+          - name: kafka-name
+      outputs:
+        parameters:
+          - name: brokers
+            valueFrom:
+              jsonPath: "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
+      resource:
+        action: create
+        setOwnerReference: true
+        successCondition: status.listeners
+        manifest: |
+          apiVersion: kafka.strimzi.io/v1beta2
+          kind: Kafka
+          metadata:
+            name: {{inputs.parameters.kafka-name}}
+          spec:
+            kafka:
+              version: 3.9.0
+              replicas: 1
+              listeners:
+                - name: tls
+                  port: 9093
+                  type: internal
+                  tls: true
+              config:
+                offsets.topic.replication.factor: 1
+                transaction.state.log.replication.factor: 1
+                transaction.state.log.min.isr: 1
+                default.replication.factor: 1
+                min.insync.replicas: 1
+                inter.broker.protocol.version: "3.9"
+              storage:
+                type: ephemeral
+            zookeeper:
+              replicas: 3
+              storage:
+                type: ephemeral
+            entityOperator:
+              topicOperator: {}
+              userOperator: {}
+
+
+    - name: deploy-kafka-node-pool
+      inputs:
+        parameters:
+          - name: kafka-name
+      resource:
+        action: apply
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaNodePool
+          metadata:
+            name: dual-role
+            labels:
+              strimzi.io/cluster: {{inputs.parameters.kafka-name}}
+          spec:
+            replicas: 1
+            roles:
+              - controller
+              - broker
+            storage:
+              type: jbod
+              volumes:
+                - id: 0
+                  type: persistent-claim
+                  size: 5Gi
+                  deleteClaim: false
+                  kraftMetadata: shared
+
+    - name: deploy-kafka-cluster-kraft
+      inputs:
+        parameters:
+          - name: kafka-name
+      outputs:
+        parameters:
+          - name: brokers
+            valueFrom:
+              jsonPath: "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
+      resource:
+        action: apply
+        setOwnerReference: true
+        successCondition: status.listeners
+        manifest: |
+          apiVersion: kafka.strimzi.io/v1beta2
+          kind: Kafka
+          metadata:
+            name: {{inputs.parameters.kafka-name}}
+            annotations:
+              strimzi.io/node-pools: enabled
+              strimzi.io/kraft: enabled
+          spec:
+            kafka:
+              version: 3.9.0
+              metadataVersion: 3.9-IV0
+              readinessProbe:
+                initialDelaySeconds: 1
+                periodSeconds: 2
+                timeoutSeconds: 2
+                failureThreshold: 1
+              livenessProbe:
+                initialDelaySeconds: 1
+                periodSeconds: 2
+                timeoutSeconds: 2
+                failureThreshold: 2
+              listeners:
+                - name: plain
+                  port: 9092
+                  type: internal
+                  tls: false
+                - name: tls
+                  port: 9093
+                  type: internal
+                  tls: true
+              config:
+                auto.create.topics.enable: false
+                offsets.topic.replication.factor: 1
+                transaction.state.log.replication.factor: 1
+                transaction.state.log.min.isr: 1
+                default.replication.factor: 1
+                min.insync.replicas: 1
+            entityOperator:
+                topicOperator: {}
+                userOperator: {}
+
+    - name: create-kafka-topic
+      inputs:
+        parameters:
+          - name: kafka-name
+          - name: topic-name
+          - name: topic-partitions
+            value: ""
+            description: "Number of partitions for the created topic"
+          - name: default-topic-partitions
+            value: "1"
+            description: "Default number of partitions for the created topic, which will be applied when the topic-partitions is empty or nil."
+          - name: topic-replicas
+            value: ""
+            description: "Number of replicas for the created topic"
+          - name: default-topic-replicas
+            value: "1"
+            description: "Default number of replicas for the created topic, which will be applied when the topic-replicas is empty or nil."
+      outputs:
+        parameters:
+          - name: topic-name
+            valueFrom:
+              jsonPath: "{.status.topicName}"
+      resource:
+        action: apply
+        setOwnerReference: true
+        successCondition: status.topicName
+        manifest: |
+          apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaTopic
+          metadata:
+            name: {{inputs.parameters.topic-name}}
+            labels:
+              strimzi.io/cluster: {{inputs.parameters.kafka-name}}
+          spec:
+            partitions: {{=let v=inputs.parameters['topic-partitions']; (v==nil || v=='') ? inputs.parameters['default-topic-partitions'] : v}}
+            replicas:   {{=let v=inputs.parameters['topic-replicas'];   (v==nil || v=='') ? inputs.parameters['default-topic-replicas']   : v}}
+            config:
+              retention.ms: 604800000
+              segment.bytes: 1073741824

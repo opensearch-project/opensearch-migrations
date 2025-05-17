@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-helm-uninstaller
+  labels:
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: Never
+      containers:
+        - name: helm-uninstaller
+          image: {{ .Values.installer.image.repository }}:{{ .Values.installer.image.tag }}
+          imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              #!/bin/sh
+              set -e
+
+              echo "Starting Helm uninstallation sequence..."
+              UMBRELLA_CHART_ID="{{ .Release.Name }}"
+
+              # Find all helm releases in the cluster across all namespaces
+              echo "Discovering all Helm releases in the cluster..."
+
+              # Get list of all namespaces
+              NAMESPACES=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
+
+              for NAMESPACE in $NAMESPACES; do
+                echo "Checking for Helm releases in namespace: $NAMESPACE"
+
+                # Get all Secret resources of type helm.sh/release.v1
+                HELM_SECRETS=$(kubectl get secrets -n $NAMESPACE -l "owner=helm" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+
+                if [ -n "$HELM_SECRETS" ]; then
+                  for SECRET in $HELM_SECRETS; do
+                    # Extract the release name from the secret
+                    RELEASE_NAME=$(echo $SECRET | sed -E 's/sh\.helm\.release\.v1\.([^\.]+).*$/\1/')
+
+                    if [ -n "$RELEASE_NAME" ]; then
+                      echo "Found Helm release: $RELEASE_NAME in namespace: $NAMESPACE"
+
+                      # Get the chart values and check for our ownership label
+                      OWNERSHIP=$(helm get values $RELEASE_NAME -n $NAMESPACE -o json 2>/dev/null | jq -r '.global.managedBy // empty')
+
+                      if [ "$OWNERSHIP" = "$UMBRELLA_CHART_ID" ]; then
+                        echo "Chart $RELEASE_NAME is managed by this umbrella chart. Uninstalling..."
+
+                        # Uninstall chart
+                        helm uninstall $RELEASE_NAME -n $NAMESPACE --debug &
+
+                        echo "Successfully uninstalled chart: $RELEASE_NAME"
+                      else
+                        echo "Chart $RELEASE_NAME exists but is not managed by this umbrella chart ($UMBRELLA_CHART_ID). Skipping."
+                      fi
+                    fi
+                  done
+                else
+                  echo "No Helm releases found in namespace: $NAMESPACE"
+                fi
+              done
+
+              wait
+              echo "Uninstallation sequence completed!"
