@@ -2,11 +2,16 @@ receivers:
   otlp:
     protocols:
       grpc:
+        endpoint: :4317
+      http:
+        endpoint: :4318
 processors:
   batch:
     timeout: 10s
     send_batch_size: 8192
     send_batch_max_size: 10000
+  probabilistic_sampler/traces:
+    sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE:-1}
 extensions:
   zpages:
     endpoint: :55679
@@ -36,7 +41,7 @@ service:
       exporters: [debug, prometheus]
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [probabilistic_sampler/traces, batch]
       exporters: [debug, otlp/jaeger]
     logs:
       receivers: [otlp]
