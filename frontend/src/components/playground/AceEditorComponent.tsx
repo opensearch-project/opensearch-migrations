@@ -99,11 +99,12 @@ export default function AceEditorComponent({
     if (!transformation || activeContent === transformation.content) return;
 
     // Check for validation errors
-    if (validationErrorsRef.current.length > 0) {
+    const blockingErrors = validationErrorsRef.current.filter(e => e.type === 'error')
+    if (blockingErrors.length > 0) {
       onSaveStatusChange({
         status: SaveStatus.BLOCKED,
         savedAt: null,
-        errors: validationErrorsRef.current,
+        errors: blockingErrors,
       });
       return;
     }
@@ -172,11 +173,12 @@ export default function AceEditorComponent({
     }
 
     // Check for validation errors
-    if (validationErrorsRef.current.length > 0) {
+    const blockingErrors = validationErrorsRef.current.filter(e => e.type === 'error')
+    if (blockingErrors.length > 0) {
       onSaveStatusChange({
         status: SaveStatus.BLOCKED,
         savedAt: null,
-        errors: validationErrorsRef.current,
+        errors: blockingErrors,
       });
     } else {
       // Mark as unsaved if content is different from saved content
