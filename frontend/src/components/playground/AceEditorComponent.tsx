@@ -99,7 +99,9 @@ export default function AceEditorComponent({
     if (!transformation || activeContent === transformation.content) return;
 
     // Check for validation errors
-    const blockingErrors = validationErrorsRef.current.filter(e => e.type === 'error')
+    const blockingErrors = validationErrorsRef.current.filter(
+      (e) => e.type === "error",
+    );
     if (blockingErrors.length > 0) {
       onSaveStatusChange({
         status: SaveStatus.BLOCKED,
@@ -173,7 +175,9 @@ export default function AceEditorComponent({
     }
 
     // Check for validation errors
-    const blockingErrors = validationErrorsRef.current.filter(e => e.type === 'error')
+    const blockingErrors = validationErrorsRef.current.filter(
+      (e) => e.type === "error",
+    );
     if (blockingErrors.length > 0) {
       onSaveStatusChange({
         status: SaveStatus.BLOCKED,
