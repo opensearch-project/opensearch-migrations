@@ -26,5 +26,5 @@ processors:
 service:
   pipelines:
     metrics:
-      processors: [resource/remove_default_attributes, resource/metrics, cumulativetodelta, batch]
+      processors: [resource/remove_default_attributes, resource/metrics, cumulativetodelta]
       exporters: [ awsemf ]

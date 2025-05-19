@@ -48,3 +48,11 @@ service:
       receivers: [otlp]
       processors:
       exporters: [debug]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: '0.0.0.0'
+                port: 8888

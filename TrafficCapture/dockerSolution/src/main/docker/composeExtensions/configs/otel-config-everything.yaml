@@ -61,7 +61,7 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta, batch]
+      processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
       exporters: [debug, awsemf, prometheus]
     traces:
       receivers: [otlp]
@@ -71,3 +71,11 @@ service:
       receivers: [otlp]
       processors:
       exporters: [debug]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: '0.0.0.0'
+                port: 8888
