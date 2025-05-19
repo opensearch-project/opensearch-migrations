@@ -18,6 +18,7 @@ extensions:
   pprof:
     endpoint: :1888
   health_check:
+    endpoint: :13133
 exporters:
   debug:
     verbosity: detailed

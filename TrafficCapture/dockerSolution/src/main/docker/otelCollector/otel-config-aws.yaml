@@ -30,6 +30,7 @@ processors:
         action: delete
 extensions:
   health_check:
+    endpoint: :13133
 exporters:
   awsemf:
     namespace: 'OpenSearchMigrations'
