@@ -14,7 +14,6 @@ public class TransformFunctions {
 
     private TransformFunctions() {}
 
-
     /* Turn dotted index settings into a tree, will start like:
      * {"index.number_of_replicas":"1","index.number_of_shards":"5","index.version.created":"6082499"}
      */
