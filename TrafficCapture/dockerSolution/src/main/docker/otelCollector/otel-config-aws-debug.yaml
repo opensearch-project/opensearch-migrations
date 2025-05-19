@@ -10,7 +10,7 @@ processors:
 extensions:
   health_check:
 exporters:
-  logging:
+  debug:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
@@ -24,12 +24,12 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, awsemf]
+      exporters: [debug, awsemf]
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, awsxray]
+      exporters: [debug, awsxray]
     logs:
       receivers: [otlp]
       processors:
-      exporters: [logging]
+      exporters: [debug]

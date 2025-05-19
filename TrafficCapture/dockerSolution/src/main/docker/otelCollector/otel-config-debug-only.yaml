@@ -10,7 +10,7 @@ extensions:
     endpoint: :1888
   health_check:
 exporters:
-  logging:
+  debug:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
@@ -20,12 +20,12 @@ service:
     traces:
       receivers: [otlp]
       processors:
-      exporters: [logging]
+      exporters: [debug]
     metrics:
       receivers: [otlp]
       processors:
-      exporters: [logging]
+      exporters: [debug]
     logs:
       receivers: [otlp]
       processors:
-      exporters: [logging]
+      exporters: [debug]

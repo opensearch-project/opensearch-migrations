@@ -14,7 +14,7 @@ extensions:
     endpoint: :1888
   health_check:
 exporters:
-  logging:
+  debug:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
@@ -33,12 +33,12 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, prometheus]
+      exporters: [debug, prometheus]
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, otlp/jaeger]
+      exporters: [debug, otlp/jaeger]
     logs:
       receivers: [otlp]
       processors:
-      exporters: [logging]
+      exporters: [debug]
