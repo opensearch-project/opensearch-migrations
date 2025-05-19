@@ -9,7 +9,6 @@ import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
 import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 import shadow.lucene9.org.apache.lucene.index.Terms;
-import shadow.lucene9.org.apache.lucene.store.Directory;
 
 /**
  * PostingsFormat fallback for Elasticsearch 8.7+ segment formats.
