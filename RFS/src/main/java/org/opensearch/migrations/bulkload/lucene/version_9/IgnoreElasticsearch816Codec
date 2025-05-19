@@ -24,7 +24,7 @@ public class IgnoreElasticsearch816Codec extends Codec {
 
     @Override public PostingsFormat postingsFormat() { return Codec.forName("Lucene912").postingsFormat(); }
     @Override public DocValuesFormat docValuesFormat() { return Codec.forName("Lucene912").docValuesFormat(); }
-    @Override public StoredFieldsFormat storedFieldsFormat() { return new ForgivingStoredFieldsFormat(); }
+    @Override public StoredFieldsFormat storedFieldsFormat() { return Codec.forName("Lucene912").storedFieldsFormat(); }
     @Override public TermVectorsFormat termVectorsFormat() { return Codec.forName("Lucene912").termVectorsFormat(); }
     @Override public FieldInfosFormat fieldInfosFormat() { return Codec.forName("Lucene912").fieldInfosFormat(); }
     @Override public SegmentInfoFormat segmentInfoFormat() { return Codec.forName("Lucene912").segmentInfoFormat(); }
