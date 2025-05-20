@@ -1,23 +1,25 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
-import shadow.lucene9.org.apache.lucene.codecs.*;
+import shadow.lucene9.org.apache.lucene.codecs.Codec;
+import shadow.lucene9.org.apache.lucene.codecs.CompoundFormat;
+import shadow.lucene9.org.apache.lucene.codecs.DocValuesFormat;
+import shadow.lucene9.org.apache.lucene.codecs.FieldInfosFormat;
+import shadow.lucene9.org.apache.lucene.codecs.KnnVectorsFormat;
+import shadow.lucene9.org.apache.lucene.codecs.LiveDocsFormat;
+import shadow.lucene9.org.apache.lucene.codecs.NormsFormat;
+import shadow.lucene9.org.apache.lucene.codecs.PointsFormat;
+import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
+import shadow.lucene9.org.apache.lucene.codecs.SegmentInfoFormat;
+import shadow.lucene9.org.apache.lucene.codecs.StoredFieldsFormat;
+import shadow.lucene9.org.apache.lucene.codecs.TermVectorsFormat;
 
 /**
  * Codec fallback for Elasticsearch 8.16+ segment formats.
- *
- * <p>This class provides a dummy implementation for "Elasticsearch816" to avoid runtime
- * errors when Lucene 9 attempts to load this postings format from snapshot-based
- * segment metadata during document migration.</p>
- *
- * <p>Registered via Lucene's SPI to allow dynamic loading based on Codec name
- * stored in segment metadata.</p>
- *
  */
-public class IgnoreElasticsearch816Codec extends Codec {
+public class Elasticsearch816CodecFallback extends Codec {
 
-    public IgnoreElasticsearch816Codec() {
+    public Elasticsearch816CodecFallback() {
         super("Elasticsearch816");
-        System.out.println(">>>>> Loaded stub Codec for Elasticsearch816");
     }
 
     @Override
