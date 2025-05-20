@@ -223,77 +223,40 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
-        boolean isES5 = VersionMatchers.isES_5_X.test(clusterVersion);
-        boolean isES6 = VersionMatchers.isES_6_X.test(clusterVersion);
-        boolean isES7 = VersionMatchers.isES_7_X.test(clusterVersion);
-        boolean isES8 = VersionMatchers.isES_8_X.test(clusterVersion);
-        boolean isOS1 = VersionMatchers.isOS_1_X.test(clusterVersion);
+        boolean useTypedMappings = !VersionMatchers.isES_8_X.test(clusterVersion);
 
-        String matchPatternClause = isES5
-                ? "\"template\": \"" + pattern + "\",\r\n"
-                : "\"index_patterns\": [\r\n    \"" + pattern + "\"\r\n  ],\r\n";
+        var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
+                ? "\"template\":\"" + pattern + "\","
+                : "\"index_patterns\": [\r\n" + //
+                "    \"" + pattern + "\"\r\n" + //
+                "  ],\r\n";
+        final var templateJson = "{\r\n" + //
+                "  " + matchPatternClause +
+                "  \"settings\": {\r\n" +
+                "    \"number_of_shards\": 1\r\n" +
+                "  },\r\n" +
+                "  \"aliases\": {\r\n" +
+                "    \"alias_legacy\": {}\r\n" +
+                "  },\r\n" +
+                "  \"mappings\": " + (useTypedMappings ? "{\r\n" + //
+                "    \"" + defaultDocType() + "\": {\r\n" : "{\r\n") + //
+                "      \"_source\": {\r\n" +
+                "        \"enabled\": true\r\n" +
+                "      },\r\n" +
+                "      \"properties\": {\r\n" +
+                "        \"host_name\": {\r\n" +
+                "          \"type\": \"keyword\"\r\n" +
+                "        },\r\n" +
+                "        \"created_at\": {\r\n" +
+                "          \"type\": \"date\",\r\n" +
+                "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" +
+                "        }\r\n" +
+                "      }\r\n" +
+                (useTypedMappings ? "    }\r\n" : "") +
+                "  }\r\n" +
+                "}";
 
-        // Unified settings block
-        String settingsBlock =
-                "  \"settings\": {\n" +
-                "    \"index\": {\n" +
-                "      \"number_of_shards\": " + (isES8 ? "\"1\"" : "1") + "\n" +
-                "    }\n" +
-                "  },\n";
-
-        // Common alias block
-        String aliasesBlock =
-                "  \"aliases\": {\n" +
-                "    \"alias_legacy\": {}\n" +
-                "  },\n";
-
-        // Properties block (shared)
-        String propertiesBlock =
-                "        \"host_name\": {\n" +
-                "          \"type\": \"keyword\"\n" +
-                "        },\n" +
-                "        \"created_at\": {\n" +
-                "          \"type\": \"date\",\n" +
-                "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\n" +
-                "        }\n";
-
-        // Mapping block
-        String mappingsBlock;
-        if (isES8) {
-            mappingsBlock =
-                    "  \"mappings\": {\n" +
-                    "    \"dynamic\": false,\n" +
-                    "    \"_source\": {\n" +
-                    "      \"enabled\": true\n" +
-                    "    },\n" +
-                    "    \"properties\": {\n" +
-                    propertiesBlock +
-                    "    }\n" +
-                    "  }\n";
-        } else {
-            mappingsBlock =
-                    "  \"mappings\": {\n" +
-                    "    \"" + defaultDocType() + "\": {\n" +
-                    "      \"_source\": {\n" +
-                    "        \"enabled\": true\n" +
-                    "      },\n" +
-                    "      \"properties\": {\n" +
-                    propertiesBlock +
-                    "      }\n" +
-                    "    }\n" +
-                    "  }\n";
-        }
-
-        // Compose full JSON
-        String templateJson =
-            "{\n" +
-            matchPatternClause +
-            settingsBlock +
-            aliasesBlock +
-            mappingsBlock +
-            "}";
-
-        var extraParameters = (isES6 || isES7 || isOS1) ? "?include_type_name=true" : "";
+        var extraParameters = (VersionMatchers.isES_5_X.or(VersionMatchers.isES_8_X) ).test(clusterVersion) ? "" : "?include_type_name=true";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
