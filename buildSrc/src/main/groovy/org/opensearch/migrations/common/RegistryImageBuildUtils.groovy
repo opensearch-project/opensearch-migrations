@@ -32,11 +32,11 @@ class RegistryImageBuildUtils {
 
     static def getFullTargetImageIdentifier(String registryEndpoint, String imageName, String imageTag) {
         def registryDestination = "${registryEndpoint}/migrations/${imageName}:${imageTag}"
-        def cacheDestination = "${registryEndpoint}/migrations/${imageName}/cache"
+        def cacheDestination = "${registryEndpoint}/migrations_cache"
         def isEcr = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
         if (isEcr) {
             registryDestination = "${registryEndpoint}:migrations_${imageName}_${imageTag}"
-            cacheDestination = "${registryEndpoint}:migrations_${imageName}_cache"
+            cacheDestination = "${registryEndpoint}"
         }
         return [registryDestination, cacheDestination]
     }
@@ -46,13 +46,32 @@ class RegistryImageBuildUtils {
         def registryEndpoint = project.rootProject.ext.registryEndpoint.toString()
         def baseImage = getFullBaseImageIdentifier(baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag)
         def registryDestination= getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)[0]
+        def isECRBaseImage = baseImageRegistryEndpoint.contains(".ecr.") && baseImageRegistryEndpoint.contains(".amazonaws.com")
+        def isECRTargetImage = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
+        if (isECRBaseImage || isECRTargetImage) {
+            if (!System.getProperty("jib.auth.password")) {
+                throw new GradleException("Missing required system property: -Djib.auth.password, could be provided similar to -Djib.auth.password=\$(aws ecr get-login-password --region <e.g. us-east-2>)")
+            }
+        }
         project.plugins.withId('com.google.cloud.tools.jib') {
             project.jib {
                 from {
                     image = baseImage
+                    if (isECRBaseImage) {
+                        auth {
+                            username = 'AWS'
+                            password = System.getProperty("jib.auth.password")
+                        }
+                    }
                 }
                 to {
                     image = registryDestination
+                    if (isECRTargetImage) {
+                        auth {
+                            username = 'AWS'
+                            password = System.getProperty("jib.auth.password")
+                        }
+                    }
                 }
                 extraDirectories {
                     paths {
