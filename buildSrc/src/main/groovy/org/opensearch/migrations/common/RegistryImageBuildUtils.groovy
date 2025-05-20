@@ -5,13 +5,47 @@ import org.gradle.api.Project
 import org.gradle.api.tasks.Exec
 
 class RegistryImageBuildUtils {
-    def configureJibFor = { Project project, String baseImage, String imageName, String imageTag ->
-        def registry = project.rootProject.ext.registryEndpoint
-        def registryDestination = "${registry}/migrations/${imageName}:${imageTag}"
-        def isEcr = registry.contains(".ecr.") && registry.contains(".amazonaws.com")
+
+    static def getFullBaseImageIdentifier(String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName,
+                                      String baseImageTag) {
+        def baseImage = ""
+        def isEcr = baseImageRegistryEndpoint.contains(".ecr.") && baseImageRegistryEndpoint.contains(".amazonaws.com")
         if (isEcr) {
-            registryDestination = "${registry}:migrations_${imageName}_${imageTag}"
+            baseImage = "${baseImageName}_${baseImageTag}"
+            if (baseImageGroup) {
+                baseImage = "${baseImageGroup}_${baseImage}"
+            }
+            if (baseImageRegistryEndpoint) {
+                baseImage = "${baseImageRegistryEndpoint}:${baseImage}"
+            }
+        } else {
+            baseImage = "${baseImageName}:${baseImageTag}"
+            if (baseImageGroup) {
+                baseImage = "${baseImageGroup}/${baseImage}"
+            }
+            if (baseImageRegistryEndpoint) {
+                baseImage = "${baseImageRegistryEndpoint}/${baseImage}"
+            }
         }
+        return baseImage
+    }
+
+    static def getFullTargetImageIdentifier(String registryEndpoint, String imageName, String imageTag) {
+        def registryDestination = "${registryEndpoint}/migrations/${imageName}:${imageTag}"
+        def cacheDestination = "${registryEndpoint}/migrations/${imageName}/cache"
+        def isEcr = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
+        if (isEcr) {
+            registryDestination = "${registryEndpoint}:migrations_${imageName}_${imageTag}"
+            cacheDestination = "${registryEndpoint}:migrations_${imageName}_cache"
+        }
+        return [registryDestination, cacheDestination]
+    }
+
+    def configureJibFor = { Project project, String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName,
+                            String baseImageTag, String imageName, String imageTag ->
+        def registryEndpoint = project.rootProject.ext.registryEndpoint.toString()
+        def baseImage = getFullBaseImageIdentifier(baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag)
+        def registryDestination= getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)[0]
         project.plugins.withId('com.google.cloud.tools.jib') {
             project.jib {
                 from {
@@ -42,12 +76,16 @@ class RegistryImageBuildUtils {
     void applyJibConfigurations(Project rootProject) {
         def projectsToConfigure = [
                 "TrafficCapture:trafficReplayer": [
-                        baseImage : "amazoncorretto:17-al2023-headless",
+                        baseImageName : "amazoncorretto",
+                        baseImageTag : "17-al2023-headless",
                         imageName : "traffic_replayer",
                         imageTag  : "latest"
                 ],
                 "TrafficCapture:trafficCaptureProxyServer": [
-                        baseImage : "${rootProject.ext.registryEndpoint}/migrations/capture_proxy_base:latest",
+                        baseImageRegistryEndpoint: "${rootProject.ext.registryEndpoint}",
+                        baseImageGroup: "migrations",
+                        baseImageName : "capture_proxy_base",
+                        baseImageTag : "latest",
                         imageName : "capture_proxy",
                         imageTag  : "latest"
                 ]
@@ -57,7 +95,10 @@ class RegistryImageBuildUtils {
             rootProject.configure(rootProject.project(projPath)) {
                 configureJibFor(
                         delegate,
-                        config.baseImage,
+                        config.get("baseImageRegistryEndpoint", ""),
+                        config.get("baseImageGroup", ""),
+                        config.baseImageName,
+                        config.baseImageTag,
                         config.imageName,
                         config.imageTag
                 )
@@ -66,9 +107,11 @@ class RegistryImageBuildUtils {
     }
 
     void applyKanikoBuildTasks(Project project) {
-        def registryEndpoint = project.rootProject.ext.k8sRegistryEndpoint
+        def registryEndpoint = project.rootProject.ext.k8sRegistryEndpoint.toString()
         registryK8sCheckTask(project)
 
+        def consoleBaseImage = getFullBaseImageIdentifier(registryEndpoint,"migrations",
+                "elasticsearch_test_console","latest")
         def kanikoImages = [
                 [
                         serviceName: "elasticsearchTestConsole",
@@ -97,7 +140,7 @@ class RegistryImageBuildUtils {
                         imageName:  "migration_console",
                         imageTag:   "latest",
                         buildArgs: [
-                                BASE_IMAGE: "${registryEndpoint}/migrations/elasticsearch_test_console:latest"
+                                BASE_IMAGE: "${consoleBaseImage}"
                         ],
                         requiredDependencies: [
                                 ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole",
@@ -167,12 +210,8 @@ class RegistryImageBuildUtils {
         def serviceNameForK8s = serviceNameLower + "-" + uuid
         def releaseName = "kaniko-" + serviceNameLower + "-" + uuid
         def chartPath = "deployment/k8s/charts/components/imageBuilder"
-        def registry = project.rootProject.ext.k8sRegistryEndpoint
-        def registryDestination = "${registry}/migrations/${cfg.imageName}:${cfg.imageTag}"
-        def isEcr = registry.contains(".ecr.") && registry.contains(".amazonaws.com")
-        if (isEcr) {
-            registryDestination = "${registry}:migrations_${cfg.imageName}_${cfg.imageTag}"
-        }
+        def registryEndpoint = project.rootProject.ext.k8sRegistryEndpoint.toString()
+        def (registryDestination, cacheDestination) = getFullTargetImageIdentifier(registryEndpoint, cfg.imageName.toString(), cfg.imageTag.toString())
         def optionalBootstrapPvc = project.rootProject.ext.bootstrapPvc
 
         def installTask = project.tasks.register("helmInstall_${cfg.serviceName}", Exec) {
@@ -181,11 +220,17 @@ class RegistryImageBuildUtils {
 
             def helmArgs = [
                     "helm", "install", releaseName, chartPath, "--create-namespace",
-                    "--set", "serviceName=${serviceNameForK8s}",
+                    "--set", "migrationServiceName=${serviceNameForK8s}",
                     "--set", "contextDir=${cfg.contextDir}",
                     "--set", "registryDestination=${registryDestination}",
+                    "--set", "cacheDestination=${cacheDestination}",
                     "--set", "workspaceVolumePvc=${optionalBootstrapPvc}"
             ]
+            def isEcr = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
+            if (isEcr) {
+                helmArgs += ["--set", "serviceAccountName=migrations-sa"]
+            }
+
             cfg.get("buildArgs", [:]).each { key, value ->
                 helmArgs += ["--set", "buildArgs.${key}=${value}"]
             }
@@ -205,7 +250,7 @@ class RegistryImageBuildUtils {
             set -e
             job=image-builder-${serviceNameForK8s}
             echo "⏳ Waiting for Job: \$job..."
-            for i in {1..60}; do
+            for i in {1..70}; do
               status=\$(kubectl get job \$job -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' || true)
               failed=\$(kubectl get job \$job -o jsonpath='{.status.failed}' 2>/dev/null)
               failed=\${failed:-0}

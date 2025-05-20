@@ -1,18 +1,20 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: image-builder-{{ .Values.serviceName | lower }}
+  name: image-builder-{{ .Values.migrationServiceName | lower }}
   labels:
     app.kubernetes.io/name: kaniko
     app.kubernetes.io/component: image-builder
-    service-name: {{ .Values.serviceName }}
+    service-name: {{ .Values.migrationServiceName }}
     release-name: {{ .Release.Name }}
 spec:
   backoffLimit: 0
   template:
     spec:
       restartPolicy: Never
-      serviceAccountName: migrations-sa
+      {{- if .Values.serviceAccountName }}
+      serviceAccountName: {{ .Values.serviceAccountName }}
+      {{- end }}
 
       volumes:
         # Mount specified PVC or use local mount
@@ -38,7 +40,8 @@ spec:
             - --build-arg={{ $key }}={{ $value }}
             {{- end }}
             - --cache=true
-            - --snapshotMode=redo
+            - --cache-repo={{ .Values.cacheDestination }}
+            - --snapshot-mode=redo
             - --cache-copy-layers
             - --compressed-caching=false
             - --use-new-run

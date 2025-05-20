@@ -1,5 +1,7 @@
-serviceName: "default"
+migrationServiceName: "default"
 contextDir: ""
 registryDestination: ""
+cacheDestination: ""
 buildArgs: {}
 workspaceVolumePvc: ""
+serviceAccountName: ""
