@@ -227,6 +227,7 @@ public class ClusterOperations {
         boolean isES6 = VersionMatchers.isES_6_X.test(clusterVersion);
         boolean isES7 = VersionMatchers.isES_7_X.test(clusterVersion);
         boolean isES8 = VersionMatchers.isES_8_X.test(clusterVersion);
+        boolean isOS1 = VersionMatchers.isOS_1_X.test(clusterVersion);
 
         String matchPatternClause = isES5
                 ? "\"template\": \"" + pattern + "\",\r\n"
@@ -292,7 +293,7 @@ public class ClusterOperations {
             mappingsBlock +
             "}";
 
-        var extraParameters = (isES6 || isES7) ? "?include_type_name=true" : "";
+        var extraParameters = (isES6 || isES7 || isOS1) ? "?include_type_name=true" : "";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
