@@ -222,25 +222,25 @@ class RegistryImageBuildUtils {
             """
         }
 
-        def uninstallTask = project.tasks.register("helmUninstall_${cfg.serviceName}", Exec) {
-            group = "kaniko"
-            description = "Uninstall Helm release for ${cfg.serviceName}"
-            outputs.upToDateWhen { false }
+//        def uninstallTask = project.tasks.register("helmUninstall_${cfg.serviceName}", Exec) {
+//            group = "kaniko"
+//            description = "Uninstall Helm release for ${cfg.serviceName}"
+//            outputs.upToDateWhen { false }
+//
+//            commandLine 'bash', '-c', """
+//            release="${releaseName}"
+//            if helm status \$release > /dev/null 2>&1; then
+//              echo "Uninstalling Helm release \$release"
+//              helm uninstall \$release
+//            else
+//              echo "Release \$release not found. Skipping."
+//            fi
+//            """
+//        }
 
-            commandLine 'bash', '-c', """
-            release="${releaseName}"
-            if helm status \$release > /dev/null 2>&1; then
-              echo "Uninstalling Helm release \$release"
-              helm uninstall \$release
-            else
-              echo "Release \$release not found. Skipping."
-            fi
-            """
-        }
-
-        waitTask.configure {
-            finalizedBy uninstallTask
-        }
+//        waitTask.configure {
+//            finalizedBy uninstallTask
+//        }
 
         def wrapperTask = project.tasks.register("buildWithKaniko_${cfg.serviceName}") {
             group = "kaniko"
