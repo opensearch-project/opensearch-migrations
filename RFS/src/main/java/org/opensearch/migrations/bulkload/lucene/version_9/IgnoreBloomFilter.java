@@ -9,6 +9,7 @@ import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
 import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 import shadow.lucene9.org.apache.lucene.index.Terms;
+import shadow.lucene9.org.apache.lucene.store.Directory;
 
 /**
  * PostingsFormat fallback for Elasticsearch 8.7+ segment formats.
@@ -16,18 +17,12 @@ import shadow.lucene9.org.apache.lucene.index.Terms;
  * <p>This class provides a dummy implementation for "ES87BloomFilter" to avoid runtime
  * errors when Lucene 9 attempts to load this postings format from snapshot-based
  * segment metadata during document migration.</p>
- *
- * <p>Registered via Lucene's SPI to allow dynamic loading based on PostingsFormat name
- * stored in segment metadata.</p>
- *
- * <p><b>NOTE:</b> This class is intentionally limited to fallback behavior and not meant
- * to parse actual ES 8.x Lucene segments.</p>
  */
-public class IgnoreBloomFilter extends PostingsFormat{
+public class IgnoreBloomFilter extends PostingsFormat {
 
     public IgnoreBloomFilter() {
         super("ES87BloomFilter");
-        System.out.println(">>>>> Loading stub IgnoreBloomFilter class");
+        System.out.println(">>>>> Loading stub IgnoreBloomFilter Class");
     }
 
     public FieldsConsumer fieldsConsumer(SegmentWriteState state) throws IOException {
@@ -36,16 +31,36 @@ public class IgnoreBloomFilter extends PostingsFormat{
 
     @Override
     public FieldsProducer fieldsProducer(SegmentReadState state) throws IOException {
+        Directory dir = state.directory;
+        for (String file : dir.listAll()) {
+            if (file.endsWith(".psm")) {
+                throw new UnsupportedOperationException(
+                        "Detected Bloom Filter" +
+                        "Your index may be using a newer/proprietary ES format. Migration cannot proceed."
+                );
+            }
+        }
         return new FieldsProducer() {
-            @Override public void close() {}
-            @Override public void checkIntegrity() {}
-            @Override public Iterator<String> iterator() {
+            @Override
+            public void close() {
+            }
+
+            @Override
+            public void checkIntegrity() {
+            }
+
+            @Override
+            public Iterator<String> iterator() {
                 return java.util.Collections.emptyIterator();
             }
-            @Override public Terms terms(String field) {
+
+            @Override
+            public Terms terms(String field) {
                 return null;
             }
-            @Override public int size() {
+
+            @Override
+            public int size() {
                 return 0;
             }
         };

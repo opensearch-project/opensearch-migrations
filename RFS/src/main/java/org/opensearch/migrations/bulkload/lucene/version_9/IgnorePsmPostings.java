@@ -72,8 +72,8 @@ public class IgnorePsmPostings extends PostingsFormat {
         for (String file : dir.listAll()) {
             if (file.endsWith(".psm")) {
                 throw new UnsupportedOperationException(
-                    "Detected .psm file in segment, which is not supported by the migration assistant. " +
-                    "Your index may be using a newer/proprietary ES format. Migration cannot proceed."
+                        "Detected .psm file in segment, which is not supported by the migration assistant. " +
+                                "Your index may be using a newer/proprietary ES format. Migration cannot proceed."
                 );
             }
         }
