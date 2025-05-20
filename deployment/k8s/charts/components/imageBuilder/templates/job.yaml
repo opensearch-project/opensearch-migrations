@@ -12,6 +12,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      serviceAccountName: migrations-sa
 
       volumes:
         # Mount specified PVC or use local mount
@@ -37,6 +38,10 @@ spec:
             - --build-arg={{ $key }}={{ $value }}
             {{- end }}
             - --cache=true
+            - --snapshotMode=redo
+            - --cache-copy-layers
+            - --compressed-caching=false
+            - --use-new-run
             - --insecure
             - --insecure-pull
             - --skip-tls-verify
