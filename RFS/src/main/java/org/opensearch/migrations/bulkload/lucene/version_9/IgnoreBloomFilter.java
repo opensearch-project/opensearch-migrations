@@ -9,12 +9,12 @@ import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 
 /**
- * PostingsFormat fallback for Elasticsearch 8.7+ segment formats.
+ * Bloom Filter PostingsFormat fallback for Elasticsearch 8.7+ segment formats.
  *
- * <p>This class provides a dummy implementation for "ES87BloomFilter" to avoid runtime
- * errors when Lucene 9 attempts to load this postings format from snapshot-based
- * segment metadata during document migration.</p>
- */
+ *  <p>Registered via Lucene's SPI to allow dynamic loading based on PostingsFormat name
+ *  stored in segment metadata.</p>
+ *
+ **/
 public class IgnoreBloomFilter extends PostingsFormat {
 
     public IgnoreBloomFilter() {

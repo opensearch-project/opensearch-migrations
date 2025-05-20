@@ -12,8 +12,8 @@ import shadow.lucene9.org.apache.lucene.store.Directory;
 /**
  * PostingsFormat fallback for Elasticsearch 8.12+ segment formats.
  *
- * <p>This class provides a dummy implementation for "ES812Postings" to avoid runtime
- * errors when Lucene 9 attempts to load this postings format from snapshot-based
+ * <p>This class provides a dummy implementation for "ES812Postings"
+ * when Lucene 9 attempts to load this postings format from snapshot-based
  * segment metadata during document migration.</p>
  *
  * <p>This migration assistant does not support reading real ES 8.x segment data that uses
@@ -42,7 +42,7 @@ public class IgnorePsmPostings extends PostingsFormat {
             if (file.endsWith(".psm")) {
                 throw new UnsupportedOperationException(
                     String.format(
-                        "Detected unsupported .psm file in segment [%s]. The index may be using an unrecognized format.",
+                        "Detected unsupported .psm file in segment [%s]. The index is using an unrecognized format.",
                         state.segmentInfo.name
                     )
                 );
