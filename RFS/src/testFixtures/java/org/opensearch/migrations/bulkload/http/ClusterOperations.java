@@ -224,76 +224,75 @@ public class ClusterOperations {
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
         boolean isES5 = VersionMatchers.isES_5_X.test(clusterVersion);
+        boolean isES6 = VersionMatchers.isES_6_X.test(clusterVersion);
+        boolean isES7 = VersionMatchers.isES_7_X.test(clusterVersion);
         boolean isES8 = VersionMatchers.isES_8_X.test(clusterVersion);
 
         String matchPatternClause = isES5
                 ? "\"template\": \"" + pattern + "\",\r\n"
                 : "\"index_patterns\": [\r\n    \"" + pattern + "\"\r\n  ],\r\n";
 
-        String templateJson = "{\n" +
-                "  " + matchPatternClause;
+        // Unified settings block
+        String settingsBlock =
+                "  \"settings\": {\n" +
+                "    \"index\": {\n" +
+                "      \"number_of_shards\": " + (isES8 ? "\"1\"" : "1") + "\n" +
+                "    }\n" +
+                "  },\n";
 
-        // Settings structure
-        if (isES8) {
-            templateJson +=
-                    "  \"settings\": {\n" +
-                    "    \"index\": {\n" +
-                    "      \"number_of_shards\": \"1\"\n" +
-                    "    }\n" +
-                    "  },\n";
-        } else {
-            templateJson +=
-                    "  \"settings\": {\n" +
-                    "    \"number_of_shards\": 1\n" +
-                    "  },\n";
-        }
-
-        // Aliases structure
-        templateJson +=
+        // Common alias block
+        String aliasesBlock =
                 "  \"aliases\": {\n" +
                 "    \"alias_legacy\": {}\n" +
                 "  },\n";
 
-        // Mappings structure
-        templateJson += "  \"mappings\": {\n";
+        // Properties block (shared)
+        String propertiesBlock =
+                "        \"host_name\": {\n" +
+                "          \"type\": \"keyword\"\n" +
+                "        },\n" +
+                "        \"created_at\": {\n" +
+                "          \"type\": \"date\",\n" +
+                "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\n" +
+                "        }\n";
 
+        // Mapping block
+        String mappingsBlock;
         if (isES8) {
-            templateJson +=
+            mappingsBlock =
+                    "  \"mappings\": {\n" +
                     "    \"dynamic\": false,\n" +
                     "    \"_source\": {\n" +
                     "      \"enabled\": true\n" +
                     "    },\n" +
                     "    \"properties\": {\n" +
-                    "      \"host_name\": {\n" +
-                    "        \"type\": \"keyword\"\n" +
-                    "      },\n" +
-                    "      \"created_at\": {\n" +
-                    "        \"type\": \"date\",\n" +
-                    "        \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\n" +
-                    "      }\n" +
-                    "    }\n";
+                    propertiesBlock +
+                    "    }\n" +
+                    "  }\n";
         } else {
-            templateJson +=
+            mappingsBlock =
+                    "  \"mappings\": {\n" +
                     "    \"" + defaultDocType() + "\": {\n" +
                     "      \"_source\": {\n" +
                     "        \"enabled\": true\n" +
                     "      },\n" +
                     "      \"properties\": {\n" +
-                    "        \"host_name\": {\n" +
-                    "          \"type\": \"keyword\"\n" +
-                    "        },\n" +
-                    "        \"created_at\": {\n" +
-                    "          \"type\": \"date\",\n" +
-                    "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\n" +
-                    "        }\n" +
+                    propertiesBlock +
                     "      }\n" +
-                    "    }\n";
+                    "    }\n" +
+                    "  }\n";
         }
 
-        // Close JSON
-        templateJson += "  }\n}";
+        // Compose full JSON
+        String templateJson =
+            "{\n" +
+            matchPatternClause +
+            settingsBlock +
+            aliasesBlock +
+            mappingsBlock +
+            "}";
 
-        var extraParameters = (isES5 || isES8) ? "" : "?include_type_name=true";
+        var extraParameters = (isES6 || isES7) ? "?include_type_name=true" : "";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
