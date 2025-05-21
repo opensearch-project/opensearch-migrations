@@ -60,7 +60,7 @@ class RegistryImageBuildUtils {
                     if (isECRBaseImage) {
                         auth {
                             username = 'AWS'
-                            password = System.getProperty("jib.auth.password")
+                            password = project.findProperty("jib.auth.password")
                         }
                     }
                 }
@@ -69,7 +69,7 @@ class RegistryImageBuildUtils {
                     if (isECRTargetImage) {
                         auth {
                             username = 'AWS'
-                            password = System.getProperty("jib.auth.password")
+                            password = project.findProperty("jib.auth.password")
                         }
                     }
                 }
