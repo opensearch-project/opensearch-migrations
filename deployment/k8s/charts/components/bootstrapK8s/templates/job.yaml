@@ -93,14 +93,14 @@ spec:
               cd /workspace
 
               GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -PbootstrapPvc='{{ .Values.workspaceVolumePvc }}' -PskipConsoleBaseImageBuild"
-{{/*              {{- if .Values.efsVolumeHandle }}*/}}
-{{/*              GRADLE_CMD="$GRADLE_CMD -PbootstrapPvc='{{ .Values.workspaceVolumePvc }}'"*/}}
-{{/*              {{- end }}*/}}
+              {{- if .Values.efsVolumeHandle }}
+              GRADLE_CMD="$GRADLE_CMD -Pjib.auth.password=$(aws ecr get-login-password --region {{ .Values.awsRegion }})"
+              {{- end }}
               echo "Running Gradle build with:"
-              echo "$GRADLE_CMD"
+              echo "$GRADLE_CMD" | sed -e 's/-Djib\.auth\.password=[^ ]*/-Djib.auth.password=[REDACTED]/g'
               eval "$GRADLE_CMD"
 
-              tail -f /dev/null
+{{/*              tail -f /dev/null*/}}
           volumeMounts:
             - name: workspace-mount
               mountPath: /workspace
