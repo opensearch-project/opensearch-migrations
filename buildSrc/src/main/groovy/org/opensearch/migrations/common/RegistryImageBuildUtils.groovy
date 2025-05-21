@@ -49,8 +49,8 @@ class RegistryImageBuildUtils {
         def isECRBaseImage = baseImageRegistryEndpoint.contains(".ecr.") && baseImageRegistryEndpoint.contains(".amazonaws.com")
         def isECRTargetImage = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
         if (isECRBaseImage || isECRTargetImage) {
-            if (!System.getProperty("jib.auth.password")) {
-                throw new GradleException("Missing required system property: -Djib.auth.password, could be provided similar to -Djib.auth.password=\$(aws ecr get-login-password --region <e.g. us-east-2>)")
+            if (!project.findProperty("jib.auth.password")) {
+                throw new GradleException("Missing required project property: -Pjib.auth.password. You can provide it like this: -Pjib.auth.password=\$(aws ecr get-login-password --region <e.g. us-east-2>)")
             }
         }
         project.plugins.withId('com.google.cloud.tools.jib') {
@@ -286,25 +286,27 @@ class RegistryImageBuildUtils {
             """
         }
 
-//        def uninstallTask = project.tasks.register("helmUninstall_${cfg.serviceName}", Exec) {
-//            group = "kaniko"
-//            description = "Uninstall Helm release for ${cfg.serviceName}"
-//            outputs.upToDateWhen { false }
-//
-//            commandLine 'bash', '-c', """
-//            release="${releaseName}"
-//            if helm status \$release > /dev/null 2>&1; then
-//              echo "Uninstalling Helm release \$release"
-//              helm uninstall \$release
-//            else
-//              echo "Release \$release not found. Skipping."
-//            fi
-//            """
-//        }
+        def uninstallTask = project.tasks.register("helmUninstall_${cfg.serviceName}", Exec) {
+            group = "kaniko"
+            description = "Uninstall Helm release for ${cfg.serviceName}"
+            outputs.upToDateWhen { false }
 
-//        waitTask.configure {
-//            finalizedBy uninstallTask
-//        }
+            commandLine 'bash', '-c', """
+            release="${releaseName}"
+            if helm status \$release > /dev/null 2>&1; then
+              echo "Uninstalling Helm release \$release"
+              helm uninstall \$release
+            else
+              echo "Release \$release not found. Skipping."
+            fi
+            """
+        }
+
+        if (!project.findProperty("kaniko.helm.uninstall.disable")) {
+            waitTask.configure {
+                finalizedBy uninstallTask
+            }
+        }
 
         def wrapperTask = project.tasks.register("buildWithKaniko_${cfg.serviceName}") {
             group = "kaniko"
