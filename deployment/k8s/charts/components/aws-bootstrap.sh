@@ -10,7 +10,7 @@ branch="build-images-in-k8s"
 namespace="ma"
 
 # Check required tools are installed
-for cmd in kubectl helm; do
+for cmd in kubectl helm jq; do
   command -v $cmd &>/dev/null || { echo "Missing required tool: $cmd"; missing=1; }
 done
 [ "$missing" ] && exit 1
@@ -31,6 +31,8 @@ aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_
 
 kubectl get namespace ma >/dev/null 2>&1 || kubectl create namespace ma
 
+helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver
+helm repo update
 helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver --namespace kube-system --set image.repository=602401143452.dkr.ecr.us-west-1.amazonaws.com/eks/aws-efs-csi-driver --set image.tag=v2.1.8
 
 DEFAULT_SC=$(kubectl get storageclass gp3 --no-headers --ignore-not-found | awk '{print $1}')
@@ -51,14 +53,13 @@ template_file_list=$(curl -s "https://api.github.com/repos/${project_name}/${rep
 mkdir -p $local_chart_dir/templates
 
 # Download each file using raw.githubusercontent.com
+echo "Downloading bootstrap chart..."
 for file in $chart_file_list; do
   raw_url="https://raw.githubusercontent.com/${project_name}/${repo_name}/${branch}/${bootstrap_chart_path}/${file}"
-  echo "Downloading ${file}..."
   curl -s -o "./${local_chart_dir}/${file}" "$raw_url"
 done
 for file in $template_file_list; do
   raw_url="https://raw.githubusercontent.com/${project_name}/${repo_name}/${branch}/${bootstrap_templates_path}/${file}"
-  echo "Downloading ${file}..."
   curl -s -o "./${local_chart_dir}/templates/${file}" "$raw_url"
 done
 
@@ -82,9 +83,16 @@ while (( elapsed < timeout )); do
   (( elapsed += interval ))
 done
 
-if [[ "$status" == "Succeeded" || "$status" == "Failed" ]]; then
-  echo "Pod $pod_name completed with status: $status"
+if [[ "$status" == "Succeeded" ]]; then
+  cmd="kubectl -n $namespace exec --stdin --tty $pod_name -- /bin/bash"
+  echo "Pod $pod_name has completed successfully. Entering migration console with command: $cmd"
+  eval "$cmd"
+elif [[ "$status" == "Failed" ]]; then
+  echo "Pod $pod_name has failed. Fetching logs:"
+  kubectl -n "$namespace" logs "$pod_name"
+  exit 1
 else
-  echo "Pod $pod_name did not complete within time limit of $((timeout / 60)) minutes."
+  echo "Pod $pod_name did not complete within the time limit of $((timeout / 60)) minutes. Fetching logs:"
+  kubectl -n "$namespace" logs "$pod_name"
   exit 1
 fi

@@ -101,8 +101,9 @@ spec:
               echo "Running Gradle build with:"
               echo "$GRADLE_CMD" | sed -e 's/-Pjib\.auth\.password=[^ ]*/-Pjib.auth.password=[REDACTED]/g'
               eval "$GRADLE_CMD"
-
+              {{- if .Values.keepJobAlive }}
               tail -f /dev/null
+              {{- end }}
           volumeMounts:
             - name: workspace-mount
               mountPath: /workspace

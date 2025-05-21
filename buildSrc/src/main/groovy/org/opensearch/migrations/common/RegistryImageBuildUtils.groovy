@@ -269,7 +269,7 @@ class RegistryImageBuildUtils {
             set -e
             job=image-builder-${serviceNameForK8s}
             echo "⏳ Waiting for Job: \$job..."
-            for i in {1..120}; do
+            for i in {1..180}; do
               status=\$(kubectl get job \$job -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' || true)
               failed=\$(kubectl get job \$job -o jsonpath='{.status.failed}' 2>/dev/null)
               failed=\${failed:-0}
