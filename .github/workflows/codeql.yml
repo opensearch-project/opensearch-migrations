@@ -8,7 +8,6 @@ on:
 
 jobs:
   analyze:
-    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     name: Analyze (${{ matrix.language }})
     runs-on: 'ubuntu-latest'
     permissions:
