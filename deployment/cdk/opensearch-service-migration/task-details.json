@@ -1,0 +1,169 @@
+{
+    "tasks": [
+        {
+            "attachments": [
+                {
+                    "id": "03340be2-1a47-4fce-b75c-91fb81756055",
+                    "type": "ElasticNetworkInterface",
+                    "status": "ATTACHED",
+                    "details": [
+                        {
+                            "name": "subnetId",
+                            "value": "subnet-04b78ef0a42d03a0b"
+                        },
+                        {
+                            "name": "networkInterfaceId",
+                            "value": "eni-0dafda6758f4ce40f"
+                        },
+                        {
+                            "name": "macAddress",
+                            "value": "0a:ff:f5:78:d1:41"
+                        },
+                        {
+                            "name": "privateDnsName",
+                            "value": "ip-10-212-227-96.ec2.internal"
+                        },
+                        {
+                            "name": "privateIPv4Address",
+                            "value": "10.212.227.96"
+                        },
+                        {
+                            "name": "ipv6Address",
+                            "value": "2600:1f18:3ad2:9503:be61:a1db:d63d:11b0"
+                        }
+                    ]
+                }
+            ],
+            "attributes": [
+                {
+                    "name": "ecs.cpu-architecture",
+                    "value": "x86_64"
+                }
+            ],
+            "availabilityZone": "us-east-1b",
+            "clusterArn": "arn:aws:ecs:us-east-1:336984078605:cluster/migration-dev2-ecs-cluster",
+            "connectivity": "CONNECTED",
+            "connectivityAt": 1747771355.585,
+            "containers": [
+                {
+                    "containerArn": "arn:aws:ecs:us-east-1:336984078605:container/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b/4373ea42-8281-4bc5-9655-c2a48f02ccdc",
+                    "taskArn": "arn:aws:ecs:us-east-1:336984078605:task/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b",
+                    "name": "otel-collector",
+                    "image": "336984078605.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-336984078605-us-east-1:c140a6cc3aa99494641724473e0b6c43ba14b13b2c1fe6f5282a3444d4441411",
+                    "imageDigest": "sha256:36f8c0681c405c2c59ff8d5bbe227bee5ef7b0cd2a26cdaab6b8fe803d0f5f4b",
+                    "runtimeId": "aa6a6415880642519057ca7d1bb8ca2b-3642950909",
+                    "lastStatus": "RUNNING",
+                    "networkBindings": [],
+                    "networkInterfaces": [
+                        {
+                            "attachmentId": "03340be2-1a47-4fce-b75c-91fb81756055",
+                            "privateIpv4Address": "10.212.227.96",
+                            "ipv6Address": "2600:1f18:3ad2:9503:be61:a1db:d63d:11b0"
+                        }
+                    ],
+                    "healthStatus": "HEALTHY",
+                    "managedAgents": [
+                        {
+                            "lastStartedAt": 1747771419.738,
+                            "name": "ExecuteCommandAgent",
+                            "lastStatus": "RUNNING"
+                        }
+                    ],
+                    "cpu": "0"
+                },
+                {
+                    "containerArn": "arn:aws:ecs:us-east-1:336984078605:container/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b/591f6019-e168-458f-99d8-fec4a823bb32",
+                    "taskArn": "arn:aws:ecs:us-east-1:336984078605:task/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b",
+                    "name": "website",
+                    "image": "336984078605.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-336984078605-us-east-1:88bb5f101608808b0d2dcffedde137df3d8bde039368f9916e8f5ea1d99dbc7c",
+                    "imageDigest": "sha256:3d36dabb199352146f65dbf0daa6e7f1867999f826ab225a698f2aca4c1ee15a",
+                    "runtimeId": "aa6a6415880642519057ca7d1bb8ca2b-4243573962",
+                    "lastStatus": "RUNNING",
+                    "networkBindings": [],
+                    "networkInterfaces": [
+                        {
+                            "attachmentId": "03340be2-1a47-4fce-b75c-91fb81756055",
+                            "privateIpv4Address": "10.212.227.96",
+                            "ipv6Address": "2600:1f18:3ad2:9503:be61:a1db:d63d:11b0"
+                        }
+                    ],
+                    "healthStatus": "UNKNOWN",
+                    "managedAgents": [
+                        {
+                            "lastStartedAt": 1747771419.738,
+                            "name": "ExecuteCommandAgent",
+                            "lastStatus": "RUNNING"
+                        }
+                    ],
+                    "cpu": "0"
+                },
+                {
+                    "containerArn": "arn:aws:ecs:us-east-1:336984078605:container/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b/e874b23c-fdba-46ec-81d7-92d16e6d5198",
+                    "taskArn": "arn:aws:ecs:us-east-1:336984078605:task/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b",
+                    "name": "migration-console",
+                    "image": "336984078605.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-336984078605-us-east-1:725a41d1dc66b597af486e41f35e46294c4dc5566f1aa1a68491319440e3fe01",
+                    "imageDigest": "sha256:6c9faf39af60c51fb8ffa3d06c7cfeb45b674eda625403f73ffcff1ad1da3378",
+                    "runtimeId": "aa6a6415880642519057ca7d1bb8ca2b-3380290059",
+                    "lastStatus": "RUNNING",
+                    "networkBindings": [],
+                    "networkInterfaces": [
+                        {
+                            "attachmentId": "03340be2-1a47-4fce-b75c-91fb81756055",
+                            "privateIpv4Address": "10.212.227.96",
+                            "ipv6Address": "2600:1f18:3ad2:9503:be61:a1db:d63d:11b0"
+                        }
+                    ],
+                    "healthStatus": "UNKNOWN",
+                    "managedAgents": [
+                        {
+                            "lastStartedAt": 1747771438.316,
+                            "name": "ExecuteCommandAgent",
+                            "lastStatus": "RUNNING"
+                        }
+                    ],
+                    "cpu": "0"
+                }
+            ],
+            "cpu": "2048",
+            "createdAt": 1747771352.066,
+            "desiredStatus": "RUNNING",
+            "enableExecuteCommand": true,
+            "group": "service:migration-dev2-migration-console",
+            "healthStatus": "HEALTHY",
+            "lastStatus": "RUNNING",
+            "launchType": "FARGATE",
+            "memory": "4096",
+            "overrides": {
+                "containerOverrides": [
+                    {
+                        "name": "website"
+                    },
+                    {
+                        "name": "migration-console"
+                    },
+                    {
+                        "name": "otel-collector"
+                    }
+                ],
+                "inferenceAcceleratorOverrides": []
+            },
+            "platformVersion": "1.4.0",
+            "platformFamily": "Linux",
+            "pullStartedAt": 1747771365.448,
+            "pullStoppedAt": 1747771415.298,
+            "startedAt": 1747771421.73,
+            "startedBy": "ecs-svc/0088376397119289947",
+            "tags": [],
+            "taskArn": "arn:aws:ecs:us-east-1:336984078605:task/migration-dev2-ecs-cluster/aa6a6415880642519057ca7d1bb8ca2b",
+            "taskDefinitionArn": "arn:aws:ecs:us-east-1:336984078605:task-definition/migration-dev2-migration-console:3",
+            "version": 5,
+            "ephemeralStorage": {
+                "sizeInGiB": 75
+            },
+            "fargateEphemeralStorage": {
+                "sizeInGiB": 75
+            }
+        }
+    ],
+    "failures": []
+}

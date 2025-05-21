@@ -1,0 +1,136 @@
+{
+    "StackResources": [
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "CDKMetadata",
+            "PhysicalResourceId": "3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "ResourceType": "AWS::CDK::Metadata",
+            "Timestamp": "2025-05-20T20:01:34.473Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "MigrationServiceTaskRoleC1CBA9DB",
+            "PhysicalResourceId": "OSMigrations-dev2-us-east-MigrationServiceTaskRoleC-XaZAC9hEHqm9",
+            "ResourceType": "AWS::IAM::Role",
+            "Timestamp": "2025-05-20T20:01:50.318Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "MigrationServiceTaskRoleDefaultPolicyD3C06183",
+            "PhysicalResourceId": "OSMig-Migra-M8PnX0boJdnK",
+            "ResourceType": "AWS::IAM::Policy",
+            "Timestamp": "2025-05-20T20:02:07.238Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "OtelCollectorLogGroup0FD207F7",
+            "PhysicalResourceId": "/migration/dev2/default/migration-console/otel-collector",
+            "ResourceType": "AWS::Logs::LogGroup",
+            "Timestamp": "2025-05-20T20:01:37.579Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "SSMParameterServicesYamlFileE7012841",
+            "PhysicalResourceId": "/migration/dev2/default/servicesYamlFile",
+            "ResourceType": "AWS::SSM::Parameter",
+            "Timestamp": "2025-05-20T20:01:35.039Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "ServiceFargateService44B4DE75",
+            "PhysicalResourceId": "arn:aws:ecs:us-east-1:336984078605:service/migration-dev2-ecs-cluster/migration-dev2-migration-console",
+            "ResourceType": "AWS::ECS::Service",
+            "Timestamp": "2025-05-20T20:06:32.224Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "ServiceLogGroup63E10E16",
+            "PhysicalResourceId": "/migration/dev2/default/migration-console",
+            "ResourceType": "AWS::Logs::LogGroup",
+            "Timestamp": "2025-05-20T20:01:34.829Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "ServiceTaskDef35F813FB",
+            "PhysicalResourceId": "arn:aws:ecs:us-east-1:336984078605:task-definition/migration-dev2-migration-console:3",
+            "ResourceType": "AWS::ECS::TaskDefinition",
+            "Timestamp": "2025-05-20T20:01:55.412Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "ServiceTaskDefExecutionRoleDE8ADC73",
+            "PhysicalResourceId": "OSMigrations-dev2-us-east-ServiceTaskDefExecutionRo-6kSCQ3hynkwW",
+            "ResourceType": "AWS::IAM::Role",
+            "Timestamp": "2025-05-20T20:01:50.386Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "ServiceTaskDefExecutionRoleDefaultPolicyD835A16F",
+            "PhysicalResourceId": "OSMig-Servi-ADoeHeEgIylu",
+            "ResourceType": "AWS::IAM::Policy",
+            "Timestamp": "2025-05-20T20:02:07.956Z",
+            "ResourceStatus": "UPDATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        },
+        {
+            "StackName": "OSMigrations-dev2-us-east-1-MigrationConsole",
+            "StackId": "arn:aws:cloudformation:us-east-1:336984078605:stack/OSMigrations-dev2-us-east-1-MigrationConsole/3ef1cdd0-119c-11f0-a04b-0ec83d2248e9",
+            "LogicalResourceId": "WebsiteLogGroup1DB17838",
+            "PhysicalResourceId": "/migration/dev2/default/migration-console/website",
+            "ResourceType": "AWS::Logs::LogGroup",
+            "Timestamp": "2025-05-20T20:01:45.414Z",
+            "ResourceStatus": "CREATE_COMPLETE",
+            "DriftInformation": {
+                "StackResourceDriftStatus": "NOT_CHECKED"
+            }
+        }
+    ]
+}
