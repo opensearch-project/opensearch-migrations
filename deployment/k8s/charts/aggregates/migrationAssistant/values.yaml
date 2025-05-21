@@ -135,7 +135,7 @@ replayer:
       configMapKey: "basicAuthHeader"
     speedupFactor:
       source: parameterConfig
-      value: 10
+      value: "10"
       allowRuntimeOverride: true
 
 captured-traffic-kafka-cluster:
