@@ -95,6 +95,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 .put("node.name", "test-node")
                 .put("xpack.ml.enabled", "false")
                 .put("xpack.watcher.enabled", "false")
+                .put("cluster.routing.allocation.disk.watermark.low", "95%")
+                .put("cluster.routing.allocation.disk.watermark.high", "98%")
+                .put("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
+                .put("node.store.allow_mmap", "false")
                 .build()),
         OPENSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
