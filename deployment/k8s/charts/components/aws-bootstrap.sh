@@ -87,7 +87,8 @@ while (( elapsed < timeout )); do
 done
 
 if [[ "$status" == "Succeeded" ]]; then
-  cmd="kubectl -n $namespace exec --stdin --tty $pod_name -- /bin/bash"
+  kubectl -n ma run migration-console --image="${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" --restart=Never
+  cmd="kubectl -n $namespace exec --stdin --tty migration-console -- /bin/bash"
   echo "Pod $pod_name has completed successfully. Entering migration console with command: $cmd"
   eval "$cmd"
 elif [[ "$status" == "Failed" ]]; then
