@@ -61,7 +61,7 @@ for file in $template_file_list; do
   curl -s -o "./${local_chart_dir}/templates/${file}" "$raw_url"
 done
 
-helm upgrade --install bootstrap-ma ${local_chart_dir} --set cloneRepository=true --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" --set awsRegion="${AWS_CFN_REGION}"
+helm upgrade --install bootstrap-ma ${local_chart_dir} --namespace "$namespace" --set cloneRepository=true --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" --set awsRegion="${AWS_CFN_REGION}"
 
 namespace="ma"
 pod_name=$(kubectl get pods -n "$namespace" --sort-by=.metadata.creationTimestamp --no-headers | awk '/^bootstrap-k8s/ { pod=$1 } END { print pod }')

@@ -97,10 +97,10 @@ spec:
               GRADLE_CMD="$GRADLE_CMD -Pjib.auth.password=$(aws ecr get-login-password --region {{ .Values.awsRegion }})"
               {{- end }}
               echo "Running Gradle build with:"
-              echo "$GRADLE_CMD" | sed -e 's/-Djib\.auth\.password=[^ ]*/-Djib.auth.password=[REDACTED]/g'
+              echo "$GRADLE_CMD" | sed -e 's/-Pjib\.auth\.password=[^ ]*/-Pjib.auth.password=[REDACTED]/g'
               eval "$GRADLE_CMD"
 
-{{/*              tail -f /dev/null*/}}
+              tail -f /dev/null
           volumeMounts:
             - name: workspace-mount
               mountPath: /workspace
