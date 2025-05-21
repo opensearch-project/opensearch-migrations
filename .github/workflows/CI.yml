@@ -33,6 +33,7 @@ jobs:
           echo "key=${key}" >> "$GITHUB_OUTPUT"
 
   workflow-info:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     runs-on: ubuntu-latest
     steps:
       - name: Create JSON Artifact
@@ -77,6 +78,7 @@ jobs:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
   python-lint:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +94,7 @@ jobs:
           flake8 $(git ls-files '*.py')
 
   python-tests:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -250,6 +253,7 @@ jobs:
             **/jacocoMergedReport.xml
 
   python-e2e-tests:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     needs: [ generate-cache-key ]
     runs-on: ubuntu-latest
     steps:
@@ -303,6 +307,7 @@ jobs:
           docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
   node-tests:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -325,6 +330,7 @@ jobs:
         run: npm run test
 
   link-checker:
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'fast-gradle-only')
     runs-on: ubuntu-latest
 
     steps:
