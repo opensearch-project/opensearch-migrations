@@ -70,6 +70,7 @@ timeout=1200
 elapsed=0
 interval=5
 
+echo "Waiting for bootstrap job to complete..."
 while (( elapsed < timeout )); do
   status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}' 2>/dev/null)
 
@@ -77,6 +78,8 @@ while (( elapsed < timeout )); do
     echo "Pod $pod_name not found. Waiting..."
   elif [[ "$status" == "Succeeded" || "$status" == "Failed" ]]; then
     break
+  else
+    echo "Pod is currently in '$status' status"
   fi
 
   sleep $interval
