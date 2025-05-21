@@ -7,6 +7,7 @@ bootstrap_chart_path="deployment/k8s/charts/components/bootstrapK8s"
 bootstrap_templates_path="deployment/k8s/charts/components/bootstrapK8s/templates"
 local_chart_dir="bootstrapChart"
 branch="build-images-in-k8s"
+namespace="ma"
 
 # Check required tools are installed
 for cmd in kubectl helm; do
@@ -63,7 +64,6 @@ done
 
 helm upgrade --install bootstrap-ma ${local_chart_dir} --namespace "$namespace" --set cloneRepository=true --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" --set awsRegion="${AWS_CFN_REGION}"
 
-namespace="ma"
 pod_name=$(kubectl get pods -n "$namespace" --sort-by=.metadata.creationTimestamp --no-headers | awk '/^bootstrap-k8s/ { pod=$1 } END { print pod }')
 timeout=1200
 elapsed=0

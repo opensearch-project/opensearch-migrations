@@ -84,6 +84,8 @@ spec:
               rm -rf "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" linux-${ARCH} && \
               helm version
 
+              rm -rf /workspace/*
+              rm -rf /workspace/.??*
               {{- if .Values.cloneRepository }}
               echo "Cloning repo from {{ .Values.repositoryUrl }} (branch: {{ .Values.repositoryBranch }})..."
               git clone --branch {{ .Values.repositoryBranch }} {{ .Values.repositoryUrl }} /workspace
@@ -107,4 +109,5 @@ spec:
             {{- if not .Values.cloneRepository }}
             - name: local-mount
               mountPath: /local-workspace
+              readOnly: true
             {{- end }}
