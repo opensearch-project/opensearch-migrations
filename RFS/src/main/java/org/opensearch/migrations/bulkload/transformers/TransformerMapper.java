@@ -43,6 +43,9 @@ public class TransformerMapper {
             if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
             }
+            if (VersionMatchers.isES_8_X.test(sourceVersion)) {
+                return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
+            }
             if (VersionMatchers.anyOS.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
             }
