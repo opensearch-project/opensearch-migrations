@@ -20,6 +20,7 @@ public class Elasticsearch816CodecFallback extends Codec {
 
     public Elasticsearch816CodecFallback() {
         super("Elasticsearch816");
+        System.out.println(">>>>> Loading stub Elasticsearch816CodecFallback class");
     }
 
     @Override
