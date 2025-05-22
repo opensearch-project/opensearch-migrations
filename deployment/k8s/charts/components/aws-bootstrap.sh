@@ -80,7 +80,7 @@ if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
   echo "Helm release 'bootstrap-ma' already exists in namespace '$namespace'. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
   exit 1
 fi
-helm --install bootstrap-ma "${local_chart_dir}" \
+helm install bootstrap-ma "${local_chart_dir}" \
   --namespace "$namespace" \
   --set cloneRepository=true \
   --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" \
@@ -89,12 +89,20 @@ helm --install bootstrap-ma "${local_chart_dir}" \
   --set skipImageBuild="${skip_image_build}" \
   --set keepJobAlive="${keep_job_alive}"
 
+if [[ "$skip_image_build" == "true" || "$keep_job_alive" == "true" ]]; then
+  echo "Either skipImageBuild or keepJobAlive was enabled, no pod monitoring needed"
+  exit 0
+fi
+
 pod_name=$(kubectl get pods -n "$namespace" --sort-by=.metadata.creationTimestamp --no-headers | awk '/^bootstrap-k8s/ { pod=$1 } END { print pod }')
 echo "Waiting for pod ${pod_name} to be ready..."
 kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
+sleep 5
 echo "Tailing logs for ${pod_name}..."
+echo "-------------------------------"
 kubectl -n "$namespace" logs -f "$pod_name"
-
+echo "-------------------------------"
+sleep 5
 final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
 echo "Pod ${pod_name} ended with status: ${final_status}"
 
@@ -105,6 +113,6 @@ if [[ "$final_status" == "Succeeded" ]]; then
   echo "Accessing migration console with command: $cmd"
   eval "$cmd"
 else
-  echo "Pod $pod_name has failed. Exiting..."
+  echo "Pod $pod_name did not end with 'Succeeded'. Exiting..."
   exit 1
 fi
