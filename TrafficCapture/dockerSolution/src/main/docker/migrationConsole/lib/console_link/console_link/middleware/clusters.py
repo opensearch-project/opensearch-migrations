@@ -53,7 +53,7 @@ def run_test_benchmarks(cluster: Cluster):
     cluster.execute_benchmark_workload(workload="geonames")
     cluster.execute_benchmark_workload(workload="http_logs")
     cluster.execute_benchmark_workload(workload="nested")
-    cluster.execute_benchmark_workload(workload="nyc_taxis")
+#     cluster.execute_benchmark_workload(workload="nyc_taxis")
 
 
 # As a default we exclude system indices and searchguard indices
