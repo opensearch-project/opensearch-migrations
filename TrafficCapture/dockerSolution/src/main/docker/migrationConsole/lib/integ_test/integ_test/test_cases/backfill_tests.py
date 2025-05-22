@@ -26,7 +26,7 @@ full_indices = {
     "logs-181998": {"count": "1000"},
     "logs-201998": {"count": "1000"},
     "logs-191998": {"count": "1000"},
-    "sonested": {"count": "2977"},
+    "sonested": {"count": "1000"},
     "nyc_taxis": {"count": "1000"}
 }
 empty_indices_no_taxi = {
@@ -119,7 +119,7 @@ class Test0007EndToEndTestForES8WithOSBenchmarks(MATestBase):
 
         # Disable bloom filter for each index in benchmarks
         # and refresh indexes
-        for index_name in empty_indices_no_taxi:
+        for index_name in empty_indices:
             self.source_operations.disable_bloom(cluster=self.source_cluster, index_name=index_name)
             self.source_operations.refresh(cluster=self.source_cluster, index_name=index_name)
 
@@ -131,7 +131,7 @@ class Test0007EndToEndTestForES8WithOSBenchmarks(MATestBase):
         )
 
     def metadata_migrate(self):
-        comma_separated_indices = ",".join(empty_indices_no_taxi.keys())
+        comma_separated_indices = ",".join(empty_indices.keys())
         metadata_result: CommandResult = self.metadata.migrate(
             extra_args=[
                 "--transformer-config-file", self.transform_config_file,
@@ -145,7 +145,7 @@ class Test0007EndToEndTestForES8WithOSBenchmarks(MATestBase):
     def metadata_after(self):
         self.target_operations.check_doc_counts_match(
             cluster=self.target_cluster,
-            expected_index_details=empty_indices_no_taxi,
+            expected_index_details=empty_indices,
             delay=3,
             max_attempts=20
         )
@@ -153,7 +153,7 @@ class Test0007EndToEndTestForES8WithOSBenchmarks(MATestBase):
     def backfill_wait_for_stop(self):
         self.target_operations.check_doc_counts_match(
             cluster=self.target_cluster,
-            expected_index_details=full_indices_no_taxi,
+            expected_index_details=full_indices,
             delay=5,
             max_attempts=30
         )
