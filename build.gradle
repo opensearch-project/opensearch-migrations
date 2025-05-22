@@ -163,6 +163,10 @@ subprojects {
         }
     }
 
+    tasks.withType(Javadoc).configureEach {
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+
     plugins.withId('java') {
 
         java {
