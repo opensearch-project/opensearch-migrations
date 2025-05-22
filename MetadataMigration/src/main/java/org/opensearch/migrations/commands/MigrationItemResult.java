@@ -1,8 +1,5 @@
 package org.opensearch.migrations.commands;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
@@ -14,19 +11,6 @@ public interface MigrationItemResult extends Result {
     Clusters getClusters();
     Items getItems();
 
-    default List<String> collectErrors() {
-        var errors = new ArrayList<String>();
-        if (getClusters().getSource() == null) {
-            errors.add("No source was defined");
-        }
-        if (getClusters().getTarget() == null) {
-            errors.add("No target was defined");
-        }
-
-        errors.addAll(getItems().getAllErrors());
-        return errors;
-    }
-
     default String asCliOutput() {
         var sb = new StringBuilder();
         if (getClusters() != null) {
@@ -36,16 +20,10 @@ public interface MigrationItemResult extends Result {
             sb.append(getItems().asCliOutput() + System.lineSeparator());
         }
         sb.append("Results:" + System.lineSeparator());
-        var innerErrors = collectErrors();
-        if (Strings.isNotBlank(getErrorMessage()) || !innerErrors.isEmpty()) {
+        if (Strings.isNotBlank(getErrorMessage())) {
             sb.append(Format.indentToLevel(1) + "Issue(s) detected" + System.lineSeparator());
             sb.append("Issues:" + System.lineSeparator());
-            if (Strings.isNotBlank(getErrorMessage())) {
-                sb.append(Format.indentToLevel(1) + getErrorMessage() + System.lineSeparator());
-            }
-            if (!innerErrors.isEmpty()) {
-                innerErrors.forEach(err -> sb.append(Format.indentToLevel(1) + err + System.lineSeparator()));
-            }
+            sb.append(Format.indentToLevel(1) + getErrorMessage() + System.lineSeparator());
         } else {
             sb.append(Format.indentToLevel(1) + getExitCode() + " issue(s) detected" + System.lineSeparator());
         }
