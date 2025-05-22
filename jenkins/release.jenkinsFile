@@ -83,31 +83,32 @@ pipeline {
                             autoPublish: true
                         )
 
-                        // def copyDockerImage = {imageName ->
-                        //     def registries = ['opensearchproject', 'public.ecr.aws/opensearchproject']
-                        //     destRegistries.each { destRegistry ->
-                        //         build job: 'docker-copy',
-                        //         parameters: [
-                        //             string(name: 'SOURCE_IMAGE_REGISTRY', value: sourceRegistry),
-                        //             string(name: 'SOURCE_IMAGE', value: sourceImage),
-                        //             string(name: 'DESTINATION_IMAGE_REGISTRY', value: destRegistry),
-                        //             string(name: 'DESTINATION_IMAGE', value: "${imageName}:${tag}")
-                        //         ]
+                        def sourceRegistry = "opensearchstaging"
+                        def copyDockerImage = {imageName ->
+                            def registries = ['public.ecr.aws/opensearchproject']
+                            registries.each { destRegistry ->
+                                build job: 'docker-copy',
+                                parameters: [
+                                    string(name: 'SOURCE_IMAGE_REGISTRY', value: sourceRegistry),
+                                    string(name: 'SOURCE_IMAGE', value: "${imageName}:${tag}"),
+                                    string(name: 'DESTINATION_IMAGE_REGISTRY', value: destRegistry),
+                                    string(name: 'DESTINATION_IMAGE', value: "${imageName}:${tag}")
+                                ]
 
-                        //         build job: 'docker-copy',
-                        //         parameters: [
-                        //             string(name: 'SOURCE_IMAGE_REGISTRY', value: sourceRegistry),
-                        //             string(name: 'SOURCE_IMAGE', value: sourceImage),
-                        //             string(name: 'DESTINATION_IMAGE_REGISTRY', value: destRegistry),
-                        //             string(name: 'DESTINATION_IMAGE', value: "${imageName}:latest")
-                        //         ]
-                        //     }
-                        // }
+                                build job: 'docker-copy',
+                                parameters: [
+                                    string(name: 'SOURCE_IMAGE_REGISTRY', value: sourceRegistry),
+                                    string(name: 'SOURCE_IMAGE', value: "${imageName}:${tag}"),
+                                    string(name: 'DESTINATION_IMAGE_REGISTRY', value: destRegistry),
+                                    string(name: 'DESTINATION_IMAGE', value: "${imageName}:latest")
+                                ]
+                            }
+                        }
 
-                        // copyDockerImage('opensearch-migrations-console');
-                        // copyDockerImage('opensearch-migrations-traffic-replayer');
-                        // copyDockerImage('opensearch-migrations-traffic-capture-proxy');
-                        // copyDockerImage('opensearch-migrations-reindex-from-snapshot');
+                        copyDockerImage('opensearch-migrations-console');
+                        copyDockerImage('opensearch-migrations-traffic-replayer');
+                        copyDockerImage('opensearch-migrations-traffic-capture-proxy');
+                        copyDockerImage('opensearch-migrations-reindex-from-snapshot');
                     }
                 }
             }
