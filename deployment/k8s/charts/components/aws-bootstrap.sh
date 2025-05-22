@@ -119,8 +119,14 @@ for file in $template_file_list; do
 done
 
 if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
-  echo "Helm release 'bootstrap-ma' already exists in namespace '$namespace'. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
-  exit 1
+  read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
+  if [[ "$answer" == [Yy]* ]]; then
+    helm uninstall bootstrap-ma -n "$namespace"
+    sleep 2
+  else
+    echo "Helm release 'bootstrap-ma' already exists in namespace '$namespace'. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+    exit 1
+  fi
 fi
 helm install bootstrap-ma "${local_chart_dir}" \
   --namespace "$namespace" \

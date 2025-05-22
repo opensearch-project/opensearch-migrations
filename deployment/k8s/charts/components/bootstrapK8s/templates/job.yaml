@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/component: bootstrap-k8s
 spec:
   backoffLimit: 0
+  ttlSecondsAfterFinished: 3600  # keep for 1 hour
   template:
     spec:
       serviceAccountName: {{ .Values.serviceAccountName }}
