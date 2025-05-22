@@ -1,7 +1,9 @@
 package org.opensearch.migrations.cli;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -34,16 +36,13 @@ public class Items {
         if (failureMessage != null) {
             errors.add(failureMessage);
         }
-        Stream.concat(
-            Stream.concat(
-                Stream.concat(
-                    indexTemplates.stream(),
-                    componentTemplates.stream()),
-                indexes.stream()),
-            aliases.stream()
-        ).filter(result -> result.getFailureType() != null && result.getFailureType().isFatal())
-        .map(this::failureMessage)
-        .forEach(errors::add);
+
+        Stream.of(indexTemplates, componentTemplates, indexes, aliases)
+            .filter(Objects::nonNull)
+            .flatMap(Collection::stream)
+            .filter(result -> result.getFailureType() != null && result.getFailureType().isFatal())
+            .map(this::failureMessage)
+            .forEach(errors::add);
 
         return errors;
     }

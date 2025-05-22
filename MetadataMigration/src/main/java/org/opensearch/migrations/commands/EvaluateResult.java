@@ -18,7 +18,6 @@ public class EvaluateResult implements MigrationItemResult {
 
     @Override
     public int getExitCode() {
-        System.out.println("Bye!!");
         return Math.max(exitCode, collectErrors().size());
     }
 }

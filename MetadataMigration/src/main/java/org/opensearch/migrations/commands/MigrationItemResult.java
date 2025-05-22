@@ -16,14 +16,16 @@ public interface MigrationItemResult extends Result {
 
     default List<String> collectErrors() {
         var errors = new ArrayList<String>();
-        if (getClusters().getSource() == null) {
+        if (getClusters() == null || getClusters().getSource() == null) {
             errors.add("No source was defined");
         }
-        if (getClusters().getTarget() == null) {
+        if (getClusters() == null || getClusters().getTarget() == null) {
             errors.add("No target was defined");
         }
 
-        errors.addAll(getItems().getAllErrors());
+        if (getItems() != null) {
+            errors.addAll(getItems().getAllErrors());
+        }
         return errors;
     }
 
