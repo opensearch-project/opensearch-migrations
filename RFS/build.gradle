@@ -56,6 +56,8 @@ dependencies {
     implementation project(':coreUtilities')
     implementation project(':transformation')
 
+    implementation 'com.github.luben:zstd-jni:1.5.5-10'
+
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
