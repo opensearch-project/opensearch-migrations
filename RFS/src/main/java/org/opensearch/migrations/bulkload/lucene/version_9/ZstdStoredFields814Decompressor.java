@@ -16,21 +16,27 @@ public class ZstdStoredFields814Decompressor extends Decompressor {
         }
 
         byte[] compressed = new byte[length];
-        in.readBytes(compressed, 0, length);
-
-        System.out.printf(">>> Zstd decompress input size: %d, offset=%d, length=%d%n", compressed.length, offset, length);
-        if (compressed.length >= 4) {
-            System.out.printf(">>> First 4 bytes: %02x %02x %02x %02x%n",
-                    compressed[0], compressed[1], compressed[2], compressed[3]);
+        for (int i = 0; i < length; i++) {
+            compressed[i] = in.readByte();
         }
 
-        long actualSize = Zstd.decompress(bytes.bytes, 0, compressed, 0, compressed.length);
-        if (actualSize != originalLength) {
-            throw new IOException("Unexpected decompressed size: " + actualSize + " != " + originalLength);
+        // Log first few bytes for debug
+        System.out.printf(">>> Zstd decompress input size: %d, offset=%d, length=%d%n", compressed.length, offset, length);
+        if (compressed.length >= 4) {
+            System.out.printf(">>> First 4 bytes: %02x %02x %02x %02x%n", compressed[0], compressed[1], compressed[2], compressed[3]);
+        }
+
+        // Zstd decompress (standard method)
+        long decompressedSize = Zstd.decompress(
+                bytes.bytes, 0, bytes.bytes.length,
+                compressed, 0, length
+        );
+        if (decompressedSize != originalLength) {
+            throw new IOException("Unexpected decompressed size: " + decompressedSize + " != " + originalLength);
         }
 
         bytes.offset = 0;
-        bytes.length = (int) actualSize;
+        bytes.length = (int) decompressedSize;
     }
 
     @Override

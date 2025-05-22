@@ -17,7 +17,7 @@ public class ZstdStoredFields814CompressionMode extends CompressionMode {
 
     @Override
     public Decompressor newDecompressor() {
-        return new ZstdStoredFields814Decompressor(); // You’ll implement this next
+        return new ZstdStoredFields814Decompressor();
     }
 
     @Override
