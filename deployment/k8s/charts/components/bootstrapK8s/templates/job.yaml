@@ -114,4 +114,9 @@ spec:
               mountPath: /local-workspace
               readOnly: true
             {{- end }}
+          resources:
+            requests:
+              memory: "3Gi"
+            limits:
+              memory: "6Gi"
 {{- end }}

@@ -124,7 +124,7 @@ if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
     helm uninstall bootstrap-ma -n "$namespace"
     sleep 2
   else
-    echo "Helm release 'bootstrap-ma' already exists in namespace '$namespace'. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+    echo "The 'bootstrap-ma' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
     exit 1
   fi
 fi
