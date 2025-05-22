@@ -2,6 +2,7 @@ package org.opensearch.migrations.commands;
 
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Items;
+
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
