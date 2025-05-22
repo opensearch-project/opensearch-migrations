@@ -6,6 +6,7 @@ repositoryUrl: "https://github.com/lewijacn/opensearch-migrations.git"
 repositoryBranch: "build-images-in-k8s"
 workspaceVolumePvc: "bootstrap-k8s-pvc"
 keepJobAlive: false
+skipImageBuild: false
 
 awsRegion: ""
 efsVolumeHandle: ""

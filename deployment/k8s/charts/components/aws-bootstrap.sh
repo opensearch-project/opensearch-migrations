@@ -1,5 +1,8 @@
 #!/bin/bash
+# Execute directly
 # curl -s https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/charts/components/aws-bootstrap.sh | bash
+# Store to file, then execute with ./aws-bootstrap.sh
+# curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/charts/components/aws-bootstrap.sh && chmod +x aws-bootstrap.sh
 
 project_name="lewijacn"
 repo_name="opensearch-migrations"
@@ -8,6 +11,8 @@ bootstrap_templates_path="deployment/k8s/charts/components/bootstrapK8s/template
 local_chart_dir="bootstrapChart"
 branch="build-images-in-k8s"
 namespace="ma"
+skip_image_build=false
+keep_job_alive=false
 
 # Check required tools are installed
 for cmd in kubectl helm jq; do
@@ -31,9 +36,17 @@ aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_
 
 kubectl get namespace ma >/dev/null 2>&1 || kubectl create namespace ma
 
-helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver
-helm repo update
-helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver --namespace kube-system --set image.repository=602401143452.dkr.ecr.us-west-1.amazonaws.com/eks/aws-efs-csi-driver --set image.tag=v2.1.8
+if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
+  echo "Installing aws-efs-csi-driver Helm chart..."
+  helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver
+  helm repo update
+  helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
+    --namespace kube-system \
+    --set image.repository=602401143452.dkr.ecr.us-west-1.amazonaws.com/eks/aws-efs-csi-driver \
+    --set image.tag=v2.1.8
+else
+  echo "aws-efs-csi-driver Helm release already exists. Skipping install."
+fi
 
 DEFAULT_SC=$(kubectl get storageclass gp3 --no-headers --ignore-not-found | awk '{print $1}')
 if [ -z "$DEFAULT_SC" ]; then
@@ -63,40 +76,35 @@ for file in $template_file_list; do
   curl -s -o "./${local_chart_dir}/templates/${file}" "$raw_url"
 done
 
-helm upgrade --install bootstrap-ma ${local_chart_dir} --namespace "$namespace" --set cloneRepository=true --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" --set awsRegion="${AWS_CFN_REGION}"
+if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
+  echo "Helm release 'bootstrap-ma' already exists in namespace '$namespace'. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+  exit 1
+fi
+helm --install bootstrap-ma "${local_chart_dir}" \
+  --namespace "$namespace" \
+  --set cloneRepository=true \
+  --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" \
+  --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
+  --set awsRegion="${AWS_CFN_REGION}" \
+  --set skipImageBuild="${skip_image_build}" \
+  --set keepJobAlive="${keep_job_alive}"
 
 pod_name=$(kubectl get pods -n "$namespace" --sort-by=.metadata.creationTimestamp --no-headers | awk '/^bootstrap-k8s/ { pod=$1 } END { print pod }')
-timeout=1200
-elapsed=0
-interval=5
+echo "Waiting for pod ${pod_name} to be ready..."
+kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
+echo "Tailing logs for ${pod_name}..."
+kubectl -n "$namespace" logs -f "$pod_name"
 
-echo "Waiting for bootstrap job to complete..."
-while (( elapsed < timeout )); do
-  status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}' 2>/dev/null)
+final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
+echo "Pod ${pod_name} ended with status: ${final_status}"
 
-  if [[ -z "$status" ]]; then
-    echo "Pod $pod_name not found. Waiting..."
-  elif [[ "$status" == "Succeeded" || "$status" == "Failed" ]]; then
-    break
-  else
-    echo "Pod is currently in '$status' status"
-  fi
-
-  sleep $interval
-  (( elapsed += interval ))
-done
-
-if [[ "$status" == "Succeeded" ]]; then
+if [[ "$final_status" == "Succeeded" ]]; then
   kubectl -n ma run migration-console --image="${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" --restart=Never
+  sleep 10
   cmd="kubectl -n $namespace exec --stdin --tty migration-console -- /bin/bash"
-  echo "Pod $pod_name has completed successfully. Entering migration console with command: $cmd"
+  echo "Accessing migration console with command: $cmd"
   eval "$cmd"
-elif [[ "$status" == "Failed" ]]; then
-  echo "Pod $pod_name has failed. Fetching logs:"
-  kubectl -n "$namespace" logs "$pod_name"
-  exit 1
 else
-  echo "Pod $pod_name did not complete within the time limit of $((timeout / 60)) minutes. Fetching logs:"
-  kubectl -n "$namespace" logs "$pod_name"
+  echo "Pod $pod_name has failed. Exiting..."
   exit 1
 fi
