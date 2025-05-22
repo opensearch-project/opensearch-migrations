@@ -108,7 +108,8 @@ echo "Pod ${pod_name} ended with status: ${final_status}"
 
 if [[ "$final_status" == "Succeeded" ]]; then
   kubectl -n ma run migration-console --image="${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" --restart=Never
-  sleep 10
+  kubectl -n ma wait --for=condition=ready pod/migration-console --timeout=300s
+  sleep 5
   cmd="kubectl -n $namespace exec --stdin --tty migration-console -- /bin/bash"
   echo "Accessing migration console with command: $cmd"
   eval "$cmd"
