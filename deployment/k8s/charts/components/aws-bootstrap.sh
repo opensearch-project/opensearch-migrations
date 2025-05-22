@@ -14,11 +14,53 @@ namespace="ma"
 skip_image_build=false
 keep_job_alive=false
 
-# Check required tools are installed
-for cmd in kubectl helm jq; do
-  command -v $cmd &>/dev/null || { echo "Missing required tool: $cmd"; missing=1; }
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) ARCH="amd64" ;;
+  aarch64) ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+HELM_VERSION="3.14.0"
+
+install_helm() {
+  echo "Installing Helm ${HELM_VERSION} for ${OS}/${ARCH}..."
+
+  tmp_dir=$(mktemp -d)
+  cd "$tmp_dir" || exit 1
+
+  curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
+  tar -zxvf "helm-v${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
+  sudo mv "${OS}-${ARCH}/helm" /usr/local/bin/helm
+  cd - >/dev/null || exit 1
+  rm -rf "$tmp_dir"
+
+  echo "Helm installed successfully."
+}
+
+# Check required tools
+missing=0
+for cmd in kubectl jq; do
+  if ! command -v $cmd &>/dev/null; then
+    echo "Missing required tool: $cmd"
+    missing=1
+  fi
 done
-[ "$missing" ] && exit 1
+
+# Prompt for installing helm
+if ! command -v helm &>/dev/null; then
+  echo "Helm is not installed."
+  read -rp "Would you like to install Helm now? (y/n): " answer
+  if [[ "$answer" == [Yy]* ]]; then
+    install_helm
+  else
+    echo "Helm is required. Exiting."
+    missing=1
+  fi
+fi
+
+# Exit if any tool was missing and not resolved
+[ "$missing" -ne 0 ] && exit 1
 
 key="MigrationsExportString"
 output=$(aws cloudformation describe-stacks \
