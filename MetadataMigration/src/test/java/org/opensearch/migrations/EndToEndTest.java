@@ -44,13 +44,13 @@ class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(false).stream()
-            .filter(pair -> !VersionMatchers.isES_8_X.test(pair.source().getVersion()))
             .flatMap(pair -> {
                 List<TemplateType> templateTypes = Stream.concat(
                             (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
                                     ? Stream.empty()
                                     : Stream.of(TemplateType.Legacy)),
-                            (VersionMatchers.equalOrGreaterThanES_7_10.test(pair.source().getVersion())
+                                (UnboundVersionMatchers.isGreaterOrEqualES_7_X
+                                    .test(pair.source().getVersion())
                                     ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
                                     : Stream.empty()))
                     .toList();
@@ -153,7 +153,7 @@ class EndToEndTest extends BaseMigrationTest {
 
         // Set up data filters for ES 7.17 as we do not currently have transformations in place to support breaking
         // changes from default templates and settings here: https://opensearch.atlassian.net/browse/MIGRATIONS-2447
-        if (sourceCluster.getContainerVersion().getVersion().equals(Version.fromString("ES 7.17.22"))) {
+        if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceCluster.getContainerVersion().getVersion())) {
             var dataFilterArgs = new DataFilterArgs();
             dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
                     Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
