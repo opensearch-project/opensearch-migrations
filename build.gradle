@@ -500,18 +500,18 @@ tasks.register('mergeJacocoReports') {
     }
 }
 
-task listPublishedArtifacts {
-    doLast {
-        subprojects.each { proj ->
-            def publishingExtension = proj.extensions.findByType(PublishingExtension)
-            if (publishingExtension) {
-                publishingExtension.publications.each { publication ->
-                    if (publication instanceof MavenPublication) {
-                        println "${publication.groupId}.${publication.artifactId}"
-                    }
-                }
-            }
+def publishedArtifacts = []
+subprojects.each { proj ->
+    def publishingExtension = proj.extensions.findByType(PublishingExtension)
+    if (publishingExtension) {
+        publishingExtension.publications.withType(MavenPublication).all { publication ->
+            publishedArtifacts << "${publication.groupId}.${publication.artifactId}"
         }
+    }
+}
+tasks.register('listPublishedArtifacts') {
+    doLast {
+        publishedArtifacts.each { println it }
     }
 }
 
