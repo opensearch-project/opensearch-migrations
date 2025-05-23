@@ -6,6 +6,7 @@ import java.util.Comparator;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 @Builder
 @EqualsAndHashCode
 public class Version {
+    @NonNull
     private final Flavor flavor;
     private final int major;
     private final int minor;

@@ -11,11 +11,14 @@ import { Transformation, usePlayground } from "@/context/PlaygroundContext";
 import TransformationItem from "./TransformationItem";
 import { usePlaygroundActions } from "@/hooks/usePlaygroundActions";
 import { transformationBoardLayoutStrings } from "./TransformationBoardLayoutStrings";
+import { useTransformationExecutor } from "@/hooks/useTransformationExecutor";
+import { defaultContent } from "@/components/playground/DefaultTransformationContent";
 
 export default function TransformationSection() {
   const { state } = usePlayground();
   const { addTransformation, removeTransformation, reorderTransformation } =
     usePlaygroundActions();
+  const { runTransformations, isProcessing } = useTransformationExecutor();
 
   // Local state to track rowSpan values for each transformation
   const [itemDimensions, setItemDimensions] = useState<
@@ -68,10 +71,13 @@ export default function TransformationSection() {
   }, [state.transformations]);
 
   const handleAddTransformation = () => {
-    addTransformation(`Transformation ${state.transformations.length + 1}`, "");
+    addTransformation(
+      `Transformation ${state.transformations.length + 1}`,
+      defaultContent,
+    );
   };
 
-  const handleRemoveTransportation = (id: string) => {
+  const handleRemoveTransformation = (id: string) => {
     removeTransformation(id);
   };
 
@@ -121,7 +127,7 @@ export default function TransformationSection() {
           renderItem={(item: BoardProps.Item<Transformation>) => (
             <TransformationItem
               item={item}
-              onRemove={handleRemoveTransportation}
+              onRemove={handleRemoveTransformation}
             />
           )}
           empty={
@@ -135,9 +141,23 @@ export default function TransformationSection() {
           }
         />
         <Box margin={{ vertical: "xs" }} textAlign="center" color="inherit">
-          <Button iconName="add-plus" onClick={handleAddTransformation}>
-            Add a transformation
-          </Button>
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button iconName="add-plus" onClick={handleAddTransformation}>
+              Add a transformation
+            </Button>
+            <Button
+              iconName="refresh"
+              onClick={runTransformations}
+              loading={isProcessing}
+              disabled={
+                state.transformations.length === 0 ||
+                state.inputDocuments.length === 0
+              }
+              ariaLabel="Run transformations"
+            >
+              Run transformations
+            </Button>
+          </SpaceBetween>
         </Box>
       </SpaceBetween>
     </Container>
