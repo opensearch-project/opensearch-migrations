@@ -21,6 +21,10 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
     /** A key that we use to map to a mode */
     public static final String MODE_KEY = ZstdStoredFields814Format.class.getSimpleName() + ".mode";
 
+    private static final String ZSTD_CODEC_HEADER = "ZstdStoredFields814";
+    // Assuming same value for testing
+    private static final String ZSTD_NO_DICT_CODEC_HEADER = "ZstdStoredFields814";
+
     protected static final int ZSTD_BLOCK_LENGTH = 10 * 48 * 1024;
     protected static final int ZSTD_MAX_DOCS_PER_BLOCK = 4096;
     protected static final int ZSTD_BLOCK_SHIFT = 10;
@@ -64,18 +68,20 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
      * Returns a {@link StoredFieldsReader} to load stored fields.
      * @param directory The index directory.
      * @param si The SegmentInfo that stores segment information.
-     * @param fn The fieldInfos.
+     * @param fn The fieldInxfos.
      * @param context The IOContext that holds additional details on the merge/search context.
      */
     @Override
     public StoredFieldsReader fieldsReader(Directory directory, SegmentInfo si, FieldInfos fn, IOContext context) throws IOException {
-        if (si.getAttribute(MODE_KEY) != null) {
-            String value = si.getAttribute(MODE_KEY);
-            Mode mode = Mode.valueOf(value);
-            return impl(mode).fieldsReader(directory, si, fn, context);
+        String value = si.getAttribute(MODE_KEY);
+        Mode mode;
+        if (value != null) {
+            mode = Mode.valueOf(value);
         } else {
-            throw new IllegalStateException("missing value for " + MODE_KEY + " for segment: " + si.name);
+            System.out.println(">>>>> WARNING: No MODE_KEY in SegmentInfo " + si.name + ", falling back to Mode.ZSTD");
+            mode = Mode.ZSTD;
         }
+        return impl(mode).fieldsReader(directory, si, fn, context);
     }
 
     /**
@@ -87,7 +93,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
     @Override
     public StoredFieldsWriter fieldsWriter(Directory directory, SegmentInfo si, IOContext context) throws IOException {
         String previous = si.putAttribute(MODE_KEY, mode.name());
-        if (previous != null && previous.equals(mode.name()) == false) {
+        if (previous != null && !previous.equals(mode.name())) {
             throw new IllegalStateException(
                     "found existing value for " + MODE_KEY + " for segment: " + si.name + " old = " + previous + ", new = " + mode.name()
             );
@@ -98,9 +104,9 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
     StoredFieldsFormat impl(Mode mode) {
         switch (mode) {
             case ZSTD:
-                return getCustomCompressingStoredFieldsFormat("CustomStoredFieldsZstd", this.zstdCompressionMode);
+                return getCustomCompressingStoredFieldsFormat(ZSTD_CODEC_HEADER, this.zstdCompressionMode);
             case ZSTD_NO_DICT:
-                return getCustomCompressingStoredFieldsFormat("CustomStoredFieldsZstdNoDict", this.zstdNoDictCompressionMode);
+                return getCustomCompressingStoredFieldsFormat(ZSTD_NO_DICT_CODEC_HEADER, this.zstdNoDictCompressionMode);
             default:
                 throw new IllegalStateException("Unsupported compression mode: " + mode);
         }
