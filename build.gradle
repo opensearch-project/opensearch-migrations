@@ -453,40 +453,6 @@ gradle.projectsEvaluated {
     }
 }
 
-task mergeJacocoReports {
-    def jacocoReportTasks = subprojects.collect { it.tasks.withType(JacocoReport).matching { it.name == "jacocoTestReport" } }.flatten()
-    dependsOn jacocoReportTasks
-
-    // Create a Sync task to collect all exec files
-    def syncJacocoExecFiles = tasks.create("syncJacocoExecFiles", Sync) {
-        from jacocoReportTasks.collect { it.executionData }
-        into "${buildDir}/jacocoMerged/"
-        duplicatesStrategy = DuplicatesStrategy.FAIL
-    }
-
-    // Make sure sync task runs after all report tasks
-    syncJacocoExecFiles.mustRunAfter jacocoReportTasks
-    dependsOn syncJacocoExecFiles
-
-    // Finalize with jacocoAggregateReport
-    finalizedBy jacocoAggregateReport
-}
-
-task listPublishedArtifacts {
-    doLast {
-        subprojects.each { proj ->
-            def publishingExtension = proj.extensions.findByType(PublishingExtension)
-            if (publishingExtension) {
-                publishingExtension.publications.each { publication ->
-                    if (publication instanceof MavenPublication) {
-                        println "${publication.groupId}.${publication.artifactId}"
-                    }
-                }
-            }
-        }
-    }
-}
-
 // Define a provider for test tasks list
 def testTasksProvider = provider {
     def testTasks = []
@@ -508,6 +474,45 @@ def testTasksProvider = provider {
         }
     }
     return testTasks
+}
+
+tasks.register('mergeJacocoReports') {
+    def jacocoReportTasks = testTasksProvider.get()
+    dependsOn jacocoReportTasks
+    // Assertion: fail if no Jacoco report tasks are found
+    if (jacocoReportTasks.isEmpty()) {
+        throw new GradleException("No jacocoTestReport tasks found in subprojects.")
+    }
+    doLast {
+        // Create a Sync task to collect all exec files
+        def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
+            from jacocoReportTasks.collect { it.executionData }
+            into "${buildDir}/jacocoMerged/"
+            duplicatesStrategy = DuplicatesStrategy.FAIL
+        }
+
+        // Make sure sync task runs after all report tasks
+        syncJacocoExecFiles.mustRunAfter jacocoReportTasks
+        dependsOn syncJacocoExecFiles
+
+        // Finalize with jacocoAggregateReport
+        finalizedBy jacocoAggregateReport
+    }
+}
+
+def publishedArtifacts = []
+subprojects.each { proj ->
+    def publishingExtension = proj.extensions.findByType(PublishingExtension)
+    if (publishingExtension) {
+        publishingExtension.publications.withType(MavenPublication).all { publication ->
+            publishedArtifacts << "${publication.groupId}.${publication.artifactId}"
+        }
+    }
+}
+tasks.register('listPublishedArtifacts') {
+    doLast {
+        publishedArtifacts.each { println it }
+    }
 }
 
 tasks.register("listTestTasksAsJson") {
