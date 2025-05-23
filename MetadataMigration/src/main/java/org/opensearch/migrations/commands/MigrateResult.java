@@ -7,10 +7,17 @@ import lombok.Builder;
 import lombok.Getter;
 
 @Builder
-@Getter
 public class MigrateResult implements MigrationItemResult {
+    @Getter
     private final Clusters clusters;
+    @Getter
     private final Items items;
+    @Getter
     private final String errorMessage;
     private final int exitCode;
+
+    public int getExitCode() {
+        System.out.println("Hello!");
+        return Math.max(exitCode, collectErrors().size());
+    }
 }
