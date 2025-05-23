@@ -1,0 +1,320 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: full-migration
+spec:
+  serviceAccountName: argo-workflow-executor
+#  ttlStrategy:
+#    secondsAfterCompletion: 86400  # Delete workflow so many seconds after completion
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: etcd-endpoints
+        value: "http://etcd.ma.svc.cluster.local:2379"
+      - name: etcd-user
+        value: "root"
+      - name: etcd-password
+        value: "password"
+      - name: etcd-image
+        value: "migrations/migration_console:latest"
+      - name: demo-max-sleep-time
+        value: "60"
+      - name: s3-snapshot-configmap
+        value: "s3-snapshot-config"
+
+  templates:
+    # Main workflow template
+    - name: main
+      inputs:
+        parameters:
+          - name: source-migration-configs
+            value: |
+              [
+               {"source":{"endpoint":"https://elasticsearch-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}},"snapshot-and-migration-configs":[{"indices":["index_3","index_4"],"migrations":[{"metadata":{"mappings":{"properties":{}},"settings":{}},"documentBackfillConfigs":[{"indices":["index_3","index_4"]}]}]}],"replayer-config":{"batchSize":1000,"concurrency":4}}
+              ]
+          - name: replayer-config
+            value: |
+              { "speedupFactor": 1.2, "replicas": 2 }
+          - name: targets
+#                {"endpoint":"https://doesnt.resolve.example.com:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"myStrongPassword123!"}}
+            value: |
+              [
+               {"endpoint":"https://opensearch-cluster-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}}
+              ]
+      steps:
+        - - name: get-configs-from-maps
+            template: get-configs-from-args
+            arguments:
+              parameters:
+                - name: aws-region
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: AWS_REGION
+                - name: s3-endpoint
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: ENDPOINT
+                - name: repo-uri
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: repo_uri
+        - - name: main-direct
+            template: main-direct
+            arguments:
+              parameters:
+                - name: source-migration-configs
+                  value: "{{inputs.parameters.source-migration-configs}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: s3-config
+                  value: "{{steps.get-configs-from-maps.outputs.parameters.s3-config}}"
+
+    - name: get-configs-from-args
+      steps: [[]]
+      inputs:
+        parameters:
+          - name: aws-region
+          - name: s3-endpoint
+          - name: repo-uri
+      outputs:
+        parameters:
+          - name: s3-config
+            valueFrom:
+              # add this too... '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' +
+              expression: >- 
+                '{' + 
+                  '"aws_region": "' + inputs.parameters['aws-region'] + '", ' + 
+                  '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' + 
+                  '"repo_uri": "s3://' + inputs.parameters['repo-uri'] + '"' +
+                '}'
+
+    # All configmaps from main have been resolved.  Use this version to bypass those global configurations.
+    - name: main-direct
+      inputs:
+        parameters:
+          - name: source-migration-configs
+            value: "[{\"source\":{\"endpoint\":\"https://sourceA.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_1\",\"index_2\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_1\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}},{\"source\":{\"endpoint\":\"https://sourceB.example.com\",\"allow_insecure\":true,\"basic_auth\":{\"username\":\"admin\",\"password\":\"admin\"}},\"snapshot-and-migration-configs\":[{\"indices\":[\"index_3\",\"index_4\"],\"migrations\":[{\"metadata\":{\"mappings\":{\"properties\":{}},\"settings\":{}},\"documentBackfillConfigs\":[{\"indices\":[\"index_3\",\"index_4\"]}]}]}],\"replayer-config\":{\"batchSize\":1000,\"concurrency\":4}}]"
+          - name: targets
+            value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
+          - name: s3-config
+            #value: '{}'
+      steps:
+        - - name: init
+            templateRef:
+              name: target-latch-helpers
+              template: init-etcd-keys
+            arguments:
+              parameters:
+                - name: configurations
+                  value: "{{inputs.parameters.source-migration-configs}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: prefix
+                  value: "workflow-{{workflow.uid}}"
+
+        - - name: pipeline-source-migration
+            template: pipeline-source-migration
+            withParam: "{{inputs.parameters.source-migration-configs}}"
+            arguments:
+              parameters:
+                - name: source-migration-config
+                  value: "{{item}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: s3-config
+                  value: "{{inputs.parameters.s3-config}}"
+                - name: latch-coordination-prefix
+                  value: "{{steps.init.outputs.parameters.prefix}}"
+
+        - - name: cleanup
+            templateRef:
+              name: target-latch-helpers
+              template: cleanup-etcd-keys
+            arguments:
+              parameters:
+                - name: prefix
+                  value: "{{steps.init.outputs.parameters.prefix}}"
+
+
+    # Unroll snapshotting and their dependent steps ('source-migration-configs')
+    - name: pipeline-source-migration
+      inputs:
+        parameters:
+          - name: source-migration-config
+          - name: targets
+          - name: s3-config
+          - name: latch-coordination-prefix
+      steps:
+        - - name: pipeline-snapshot
+            template: pipeline-snapshot
+            withParam: "{{=fromJSON(inputs.parameters['source-migration-config'])['snapshot-and-migration-configs']}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{=fromJSON(inputs.parameters['source-migration-config'])['source']}}"
+                - name: snapshot-and-migration-config
+                  value: "{{item}}"
+                - name: targets
+                  value: "{{inputs.parameters.targets}}"
+                - name: source-pipeline-name
+                  value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
+                - name: s3-config
+                  value: "{{inputs.parameters.s3-config}}"
+                - name: latch-coordination-prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
+
+    - name: pipeline-snapshot
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-and-migration-config
+          - name: targets
+          - name: source-pipeline-name
+          - name: s3-config
+          - name: latch-coordination-prefix
+      steps:
+        - - name: create-or-get-snapshot
+            templateRef:
+              name: create-or-get-snapshot
+              template: create-or-get-snapshot
+            arguments:
+              parameters:
+                - name: source-name
+                  value: "{{inputs.parameters.source-pipeline-name}}"
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-and-migration-config
+                  value: "{{inputs.parameters.snapshot-and-migration-config}}"
+                - name: s3-config
+                  value: "{{inputs.parameters.s3-config}}"
+        - - name: pipeline-snapshot-to-target
+            template: pipeline-snapshot-to-target
+            withParam: "{{inputs.parameters.targets}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-config
+                  value: "{{steps.create-or-get-snapshot.outputs.parameters.snapshot-config}}"
+                - name: migration-configs
+                  value: "{{=fromJSON(inputs.parameters['snapshot-and-migration-config'])['migrations']}}"
+                - name: target-config
+                  value: "{{item}}"
+                - name: latch-coordination-prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
+
+    - name: pipeline-snapshot-to-target
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-config
+          - name: migration-configs
+          - name: target-config
+          - name: latch-coordination-prefix
+      steps:
+        - - name: pipeline-migrate-from-snapshot
+            template: pipeline-migrate-from-snapshot
+            withParam: "{{inputs.parameters.migration-configs}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: migration-config
+                  value: "{{item}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: latch-coordination-prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
+
+    - name: pipeline-migrate-from-snapshot
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-config
+          - name: migration-config
+          - name: target-config
+          - name: latch-coordination-prefix
+      steps:
+        - - name: id-generator
+            template: do-nothing
+        - - name: migrate-metadata
+            template: migrate-metadata
+#            when: "{{=fromJSON(inputs.parameters['migration-config'])['metadata'] != nil}}"
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: migration-config
+                  value: "{{fromJSON(inputs.parameters['migration-config'])['metadata']}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+        - - name: bulk-load-documents
+            templateRef:
+              name: bulk-load
+              template: run-bulk-load-from-config
+            withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
+            arguments:
+              parameters:
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: rfs-config
+                  value: "{{item}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: session-name
+                  value: "{{steps.id-generator.id}}"
+        # Check target readiness after processing and bump it to the next phase if ready
+        - - name: target-backfill-complete-check
+            templateRef:
+              name: target-latch-helpers
+              template: target-processed-latch
+            arguments:
+              parameters:
+                - name: processor
+                  value: "{{steps.id-generator.id}}"
+                - name: target
+                  value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
+                - name: prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
+        - - name: run-replayer-for-target
+            template: run-replayer-for-target
+            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
+            arguments:
+              parameters:
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+
+
+    - name: migrate-metadata
+      inputs:
+        parameters:
+          - name: source-config
+          - name: snapshot-config
+          - name: migration-config
+          - name: target-config
+      steps: [[]]
+
+    # This is where we'd start running live-replay
+    - name: run-replayer-for-target
+      inputs:
+        parameters:
+          - name: target-config
+      container:
+        image: "{{workflow.parameters.etcd-image}}"
+        imagePullPolicy: Never
+        command: [sh, -c] # dummy implementation that preserves some stats about the work that was done
+        args:
+          - |
+            echo "run-replayer-for-target"
+
+    - name: do-nothing
+      steps: [[]]

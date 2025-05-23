@@ -1,0 +1,9 @@
+{{- if has "prometheus" .Values.extraOtelConfiguration.configs.metrics }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-prometheus-metrics-config
+data:
+  nothing: |
+    {}
+{{ end -}}

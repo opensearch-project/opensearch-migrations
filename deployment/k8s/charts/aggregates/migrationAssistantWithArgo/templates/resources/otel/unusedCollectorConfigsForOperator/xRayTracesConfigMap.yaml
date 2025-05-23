@@ -1,0 +1,9 @@
+{{- if has "xray" .Values.extraOtelConfiguration.configs.traces }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-xray-traces-config
+data:
+  nothing: |
+    {}
+{{ end -}}

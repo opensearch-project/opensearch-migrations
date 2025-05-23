@@ -17,8 +17,6 @@ import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
-import static org.opensearch.migrations.replay.HttpByteBufFormatter.LF_LINE_DELIMITER;
-
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
     @AllArgsConstructor
@@ -40,7 +38,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
                             HttpByteBufFormatter.httpPacketBytesToString(
                                 HttpByteBufFormatter.HttpMessageType.RESPONSE,
                                 d,
-                                LF_LINE_DELIMITER
+                                HttpByteBufFormatter.LF_LINE_DELIMITER
                             )
                         )
                 );
@@ -99,7 +97,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
                                 : HttpByteBufFormatter.httpPacketBufsToString(
                                     HttpByteBufFormatter.HttpMessageType.REQUEST,
                                     d.streamUnretained(),
-                                    LF_LINE_DELIMITER
+                                HttpByteBufFormatter.LF_LINE_DELIMITER
                                 )
                         )
                 );
