@@ -1,8 +1,30 @@
 exporters:
   awsemf:
     namespace: 'OpenSearchMigrations'
+    dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
+    resource_to_telemetry_conversion:
+      enabled: true
+
+processors:
+  cumulativetodelta:
+  resource/metrics:
+    attributes:
+      - key: qualifier
+        value: ${env:QUALIFIER}
+        action: upsert
+  resource/remove_default_attributes:
+    attributes:
+      - key: telemetry.sdk.name
+        action: delete
+      - key: telemetry.sdk.version
+        action: delete
+      - key: telemetry.sdk.language
+        action: delete
+      - key: service.name
+        action: delete
 
 service:
   pipelines:
     metrics:
+      processors: [resource/remove_default_attributes, resource/metrics, cumulativetodelta]
       exporters: [ awsemf ]

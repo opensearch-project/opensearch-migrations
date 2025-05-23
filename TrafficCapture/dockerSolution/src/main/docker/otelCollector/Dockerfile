@@ -1,4 +1,4 @@
-FROM public.ecr.aws/aws-observability/aws-otel-collector:v0.38.0
+FROM public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
 
 COPY otel-config*.yaml /etc/
 CMD ["--config", "/etc/otel-config-debug-only.yaml"]

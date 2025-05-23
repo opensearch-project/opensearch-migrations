@@ -1,5 +1,6 @@
 extensions:
   health_check:
+    endpoint: :13133
 
 service:
   extensions: [ health_check ]

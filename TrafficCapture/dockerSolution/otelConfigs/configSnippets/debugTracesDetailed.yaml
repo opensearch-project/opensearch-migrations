@@ -1,4 +1,4 @@
 service:
   pipelines:
     traces:
-      exporters: [logging]
+      exporters: [debug]
