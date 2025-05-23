@@ -1,4 +1,4 @@
-package org.opensearch.index.codec.customcodecs;
+package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
 
@@ -30,7 +30,7 @@ public class ZstdCompressionMode extends CompressionMode {
      * default constructor
      */
     protected ZstdCompressionMode() {
-        this.compressionLevel = DEFAULT_COMPRESSION_LEVEL;
+        this.compressionLevel = Lucene912CustomCodec.DEFAULT_COMPRESSION_LEVEL;
     }
 
     /**

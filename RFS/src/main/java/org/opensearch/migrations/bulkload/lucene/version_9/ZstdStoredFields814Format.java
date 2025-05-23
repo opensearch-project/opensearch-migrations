@@ -1,7 +1,9 @@
-package org.opensearch.index.codec.customcodecs.backward_codecs.lucene912;
+package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
 import java.util.Objects;
+
+import org.opensearch.migrations.bulkload.lucene.version_9.Lucene912CustomCodec.Mode;
 
 import shadow.lucene9.org.apache.lucene.codecs.StoredFieldsFormat;
 import shadow.lucene9.org.apache.lucene.codecs.StoredFieldsReader;
@@ -12,8 +14,6 @@ import shadow.lucene9.org.apache.lucene.index.FieldInfos;
 import shadow.lucene9.org.apache.lucene.index.SegmentInfo;
 import shadow.lucene9.org.apache.lucene.store.Directory;
 import shadow.lucene9.org.apache.lucene.store.IOContext;
-
-import static org.opensearch.index.codec.customcodecs.backward_codecs.lucene99.Lucene99CustomCodec.DEFAULT_COMPRESSION_LEVEL;
 
 /** Stored field format used by pluggable codec */
 public class ZstdStoredFields814Format extends StoredFieldsFormat {
@@ -28,12 +28,12 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
     private final CompressionMode zstdCompressionMode;
     private final CompressionMode zstdNoDictCompressionMode;
 
-    private final Lucene912CustomCodec.Mode mode;
+    private final Mode mode;
     private final int compressionLevel;
 
     /** default constructor */
     public ZstdStoredFields814Format() {
-        this(Lucene912CustomCodec.Mode.ZSTD, DEFAULT_COMPRESSION_LEVEL);
+        this(Mode.ZSTD, Lucene912CustomCodec.DEFAULT_COMPRESSION_LEVEL);
     }
 
     /**
@@ -41,8 +41,8 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
      *
      * @param mode The mode represents ZSTD or ZSTDNODICT
      */
-    public ZstdStoredFields814Format(Lucene912CustomCodec.Mode mode) {
-        this(mode, DEFAULT_COMPRESSION_LEVEL);
+    public ZstdStoredFields814Format(Mode mode) {
+        this(mode, Lucene912CustomCodec.DEFAULT_COMPRESSION_LEVEL);
     }
 
     /**
@@ -51,7 +51,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
      * @param mode The mode represents ZSTD or ZSTDNODICT
      * @param compressionLevel The compression level for the mode.
      */
-    public ZstdStoredFields814Format(Lucene912CustomCodec.Mode mode, int compressionLevel) {
+    public ZstdStoredFields814Format(Mode mode, int compressionLevel) {
         this.mode = Objects.requireNonNull(mode);
         this.compressionLevel = compressionLevel;
         zstdCompressionMode = new ZstdCompressionMode(compressionLevel) {
@@ -71,7 +71,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
     public StoredFieldsReader fieldsReader(Directory directory, SegmentInfo si, FieldInfos fn, IOContext context) throws IOException {
         if (si.getAttribute(MODE_KEY) != null) {
             String value = si.getAttribute(MODE_KEY);
-            Lucene912CustomCodec.Mode mode = Lucene912CustomCodec.Mode.valueOf(value);
+            Mode mode = Mode.valueOf(value);
             return impl(mode).fieldsReader(directory, si, fn, context);
         } else {
             throw new IllegalStateException("missing value for " + MODE_KEY + " for segment: " + si.name);
@@ -95,7 +95,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
         return impl(mode).fieldsWriter(directory, si, context);
     }
 
-    StoredFieldsFormat impl(Lucene912CustomCodec.Mode mode) {
+    StoredFieldsFormat impl(Mode mode) {
         switch (mode) {
             case ZSTD:
                 return getCustomCompressingStoredFieldsFormat("CustomStoredFieldsZstd", this.zstdCompressionMode);
@@ -116,7 +116,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
         );
     }
 
-    public Lucene912CustomCodec.Mode getMode() {
+    public Mode getMode() {
         return mode;
     }
 
@@ -128,7 +128,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
     }
 
     public CompressionMode getCompressionMode() {
-        return mode == Lucene912CustomCodec.Mode.ZSTD_NO_DICT ? zstdNoDictCompressionMode : zstdCompressionMode;
+        return mode == Mode.ZSTD_NO_DICT ? zstdNoDictCompressionMode : zstdCompressionMode;
     }
 
 }
