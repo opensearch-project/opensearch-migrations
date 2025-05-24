@@ -4,6 +4,6 @@ registryEndpoint: "docker-registry:5000"
 repositoryUrl: "https://github.com/lewijacn/opensearch-migrations.git"
 repositoryBranch: "build-images-in-k8s"
 awsEKSEnabled: false
-keepJobAlive: true
+keepJobAlive: false
 skipImageBuild: false
-localRepoMount: true
+localRepoMount: false

@@ -12,7 +12,7 @@ local_chart_dir="bootstrapChart"
 branch="build-images-in-k8s"
 namespace="ma"
 skip_image_build=false
-keep_job_alive=false
+keep_job_alive=true
 
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -130,10 +130,8 @@ if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
 fi
 helm install bootstrap-ma "${local_chart_dir}" \
   --namespace "$namespace" \
-  --set cloneRepository=true \
-  --set efsVolumeHandle="${MIGRATIONS_EFS_ID}" \
   --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
-  --set awsRegion="${AWS_CFN_REGION}" \
+  --set awsEKSEnabled=true \
   --set skipImageBuild="${skip_image_build}" \
   --set keepJobAlive="${keep_job_alive}"
 

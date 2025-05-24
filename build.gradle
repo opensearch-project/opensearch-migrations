@@ -11,7 +11,7 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.6' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.google.protobuf' version "0.9.5" apply false
-    id 'com.google.cloud.tools.jib' version '3.4.0' apply false
+    id 'com.google.cloud.tools.jib' version '3.4.3' apply false
 
     // Used in top level build.gradle
     id 'jacoco' apply true
@@ -36,8 +36,8 @@ gradle.projectsEvaluated {
     // Add the TrafficCaptureProxyServer project itself
     captureProxyDependencies << captureProxyProject.path
     def imageHelper = new RegistryImageBuildUtils()
+    imageHelper.registerLoginTask(rootProject)
     imageHelper.applyJibConfigurations(rootProject)
-    imageHelper.applyKanikoBuildTasks(rootProject)
     imageHelper.applyBuildKitConfigurations(rootProject)
 }
 
@@ -528,31 +528,39 @@ tasks.register("listTestTasksAsJson") {
 
 def registryEndpoint = project.hasProperty('registryEndpoint') ? project.property('registryEndpoint') : 'localhost:5000'
 ext.registryEndpoint = registryEndpoint
-// This is mainly useful for local registries that have been mounted on a k8s cluster or created within the cluster
-def k8sRegistryEndpoint = registryEndpoint == 'localhost:5000' ? 'docker-registry:5000' : registryEndpoint
-ext.k8sRegistryEndpoint = k8sRegistryEndpoint
-def bootstrapPvc = project.hasProperty('bootstrapPvc') ? project.property('bootstrapPvc') : ""
-ext.bootstrapPvc = bootstrapPvc
+def buildKitRegistryEndpoint = registryEndpoint == "localhost:5000" ? 'docker-registry:5000' : registryEndpoint
+ext.buildKitRegistryEndpoint = buildKitRegistryEndpoint
+def imageArch = project.hasProperty('imageArch') ? project.property('imageArch') : ''
+if (!imageArch) {
+    def arch = System.getProperty("os.arch")
+    if (arch == "aarch64") {
+        imageArch = "arm64"
+    } else if (arch == "x86_64" || arch == "amd64") {
+        imageArch= "amd64"
+    } else {
+        throw new GradleException("Unsupported architecture detected: ${arch}")
+    }
+}
+ext.imageArch = imageArch
+
 
 tasks.register("jibAll") {
     dependsOn {
         def replayer = project(":TrafficCapture:trafficReplayer").tasks.named("jib")
         def proxy = project(":TrafficCapture:trafficCaptureProxyServer").tasks.named("jib")
-        proxy.configure {
-            dependsOn(tasks.named("buildWithKaniko_captureProxyBase"))
-        }
         return [replayer, proxy]
     }
 }
 
-tasks.register("kanikoAll") {
-    println "Building images to registry: ${registryEndpoint} with the registry endpoint: ${k8sRegistryEndpoint} being used by k8s pods"
-    dependsOn("buildWithKaniko_captureProxyBase")
-    dependsOn("buildWithKaniko_reindexFromSnapshot")
-    dependsOn("buildWithKaniko_migrationConsole")
+tasks.register("buildKitAll") {
+    dependsOn("buildKit_captureProxyBase")
+    dependsOn("buildKit_reindexFromSnapshot")
+    dependsOn("buildKit_elasticsearchTestConsole")
+    dependsOn("buildKit_migrationConsole")
 }
 
 tasks.register("buildImagesToRegistry") {
-    dependsOn("kanikoAll")
+    println "Building images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    dependsOn("buildKitAll")
     dependsOn("jibAll")
 }
