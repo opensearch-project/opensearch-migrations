@@ -1,0 +1,40 @@
+{{- if .Values.efsVolumeHandle }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: bootstrap-k8s-pv
+  namespace: {{ .Values.namespace }}
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: {{ .Values.efsVolumeHandle }}
+---
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bootstrap-k8s-pvc
+  namespace: {{ .Values.namespace }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  {{- if .Values.efsVolumeHandle }}
+  storageClassName: efs-sc
+  {{- end }}
+  resources:
+    requests:
+      storage: 10Gi

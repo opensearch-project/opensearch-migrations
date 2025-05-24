@@ -32,11 +32,11 @@ class RegistryImageBuildUtils {
 
     static def getFullTargetImageIdentifier(String registryEndpoint, String imageName, String imageTag) {
         def registryDestination = "${registryEndpoint}/migrations/${imageName}:${imageTag}"
-        def cacheDestination = "${registryEndpoint}/migrations_cache"
+        def cacheDestination = "${registryEndpoint}/migrations/${imageName}:cache"
         def isEcr = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
         if (isEcr) {
             registryDestination = "${registryEndpoint}:migrations_${imageName}_${imageTag}"
-            cacheDestination = "${registryEndpoint}"
+            cacheDestination = "${registryEndpoint}:migrations_${imageName}_cache"
         }
         return [registryDestination, cacheDestination]
     }
@@ -113,7 +113,7 @@ class RegistryImageBuildUtils {
         projectsToConfigure.each { projPath, config ->
             rootProject.configure(rootProject.project(projPath)) {
                 configureJibFor(
-                        delegate,
+                        rootProject,
                         config.get("baseImageRegistryEndpoint", ""),
                         config.get("baseImageGroup", ""),
                         config.baseImageName,
@@ -124,6 +124,125 @@ class RegistryImageBuildUtils {
             }
         }
     }
+
+    // TODO use temp directory for docker config
+    // TODO is jib auth necessary with this?
+    void registerEcrLoginTask(Project project, String region, String registry) {
+        project.tasks.register("loginToECR", Exec) {
+            group = "docker"
+            description = "Login to ECR registry ${registry}"
+            commandLine 'sh', '-c', """
+            aws ecr get-login-password --region ${region} | \
+            docker login --username AWS --password-stdin ${registry}
+        """.stripIndent()
+        }
+    }
+
+    void registerBuildKitTask(Project project, Map cfg) {
+        def registryEndpoint = project.findProperty("registryEndpoint") ?: cfg.get("registryEndpoint", "docker-registry:5000")
+        def builder = project.findProperty("builder") ?: cfg.get("builder", "local-remote-builder")
+        def imageName = cfg.get("imageName").toString()
+        def imageTag = cfg.get("imageTag", "latest").toString()
+        def contextDir = cfg.get("contextDir", ".")
+        def region = cfg.get("region", "")
+        def serviceName = cfg.get("serviceName")
+        def contextPath = project.file(contextDir).path
+        def (registryDestination, cacheDestination) = getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)
+
+        def registryDomain = registryEndpoint.split("/")[0]
+        def isEcr = registryDomain.contains(".ecr.") && registryDomain.contains(".amazonaws.com")
+        if (isEcr && !region) {
+            def matcher = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)
+            if (matcher.matches()) {
+                region = matcher[0][2]
+            } else {
+                throw new GradleException("Could not extract region from ECR registry endpoint: ${registryDomain}")
+            }
+        }
+
+        if (isEcr && !project.tasks.findByName("loginToECR")) {
+            registerEcrLoginTask(project, region, registryEndpoint)
+        }
+
+        def buildTaskName = "buildKit_${serviceName}"
+        project.tasks.register(buildTaskName, Exec) {
+            group = "docker"
+            description = "Build and push ${registryDestination} with caching"
+
+            cfg.get("requiredDependencies", []).each {
+                dependsOn it
+            }
+            if (isEcr) {
+                dependsOn "loginToECR"
+            }
+
+            def buildArgFlags = cfg.get("buildArgs", [:]).collect { key, value ->
+                "--build-arg ${key}=${value}"
+            }
+
+            // TODO allow using the default builder
+            def fullArgs = [
+                    "docker buildx build",
+                    "--builder ${builder}",
+                    "-t ${registryDestination}",
+                    "--push",
+                    "--cache-to=type=registry,ref=${cacheDestination},mode=max",
+                    "--cache-from=type=registry,ref=${cacheDestination}"
+            ]
+            buildArgFlags.each { fullArgs.add(it) }
+            fullArgs.add(contextPath)
+            def buildCommand = fullArgs.join(" ")
+
+            doFirst {
+                println "Executing buildx command: ${buildCommand}"
+            }
+
+            commandLine 'sh', '-c', buildCommand
+        }
+    }
+
+    void applyBuildKitConfigurations(Project rootProject) {
+        def projects = [
+                [
+                        serviceName: "elasticsearchTestConsole",
+                        contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
+                        imageName:  "elasticsearch_test_console",
+                        imageTag:   "latest"
+                ],
+//                [
+//                        serviceName: "migrationConsole",
+//                        contextDir: "TrafficCapture/dockerSolution/build/docker/migration_console_migrationConsole",
+//                        imageName:  "migration_console",
+//                        imageTag:   "latest",
+//                        buildArgs: [
+//                                BASE_IMAGE: "${consoleBaseImage}"
+//                        ],
+//                        requiredDependencies: [
+//                                ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole",
+//                                "buildWithKaniko_elasticsearchTestConsole"
+//                        ]
+//                ]
+        ]
+        projects.each { cfg ->
+            registerBuildKitTask(rootProject, cfg)
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     void applyKanikoBuildTasks(Project project) {
         def registryEndpoint = project.rootProject.ext.k8sRegistryEndpoint.toString()

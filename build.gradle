@@ -38,6 +38,7 @@ gradle.projectsEvaluated {
     def imageHelper = new RegistryImageBuildUtils()
     imageHelper.applyJibConfigurations(rootProject)
     imageHelper.applyKanikoBuildTasks(rootProject)
+    imageHelper.applyBuildKitConfigurations(rootProject)
 }
 
 // Modify sourceCompatibility during the execution phase

@@ -1,9 +1,12 @@
 serviceAccountName: "migrations-sa"
 namespace: "ma"
 registryEndpoint: "docker-registry:5000"
+cloneRepository: false
 repositoryUrl: "https://github.com/lewijacn/opensearch-migrations.git"
 repositoryBranch: "build-images-in-k8s"
-awsEKSEnabled: false
-keepJobAlive: true
+workspaceVolumePvc: "bootstrap-k8s-pvc"
+keepJobAlive: false
 skipImageBuild: false
-localRepoMount: true
+
+awsRegion: ""
+efsVolumeHandle: ""
