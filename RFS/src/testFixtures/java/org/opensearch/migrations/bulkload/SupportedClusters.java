@@ -54,6 +54,7 @@ public class SupportedClusters {
 
         // Individual Pairs
         matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1));
+        matrix.add(new MigrationPair(SearchClusterContainer.ES_V7_17, SearchClusterContainer.ES_V7_10_2));
 
         if (includeRFSOnly) {
             matrix.add(new MigrationPair(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V5_6_16));

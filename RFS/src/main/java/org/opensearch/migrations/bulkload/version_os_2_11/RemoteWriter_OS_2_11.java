@@ -31,6 +31,7 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
     @Override
     public boolean looseCompatibleWith(Version version) {
         return UnboundVersionMatchers.anyOS
+            .or(VersionMatchers.isES_7_X)
             .test(version);
     }
 
