@@ -151,9 +151,9 @@ class EndToEndTest extends BaseMigrationTest {
         }
 
         // If the target is not part of  supported target matrix enable loose version matching
-        if (!SupportedClusters.supportedTargets(false)
+        if (!(SupportedClusters.supportedTargets(false)
             .stream()
-            .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion()))) {
+            .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
             arguments.versionStrictness.allowLooseVersionMatches = true;
         }
 
@@ -164,7 +164,6 @@ class EndToEndTest extends BaseMigrationTest {
         if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceCluster.getContainerVersion().getVersion())) {
             var dataFilterArgs = new DataFilterArgs();
             dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
-                    Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
                     Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
             dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
             dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
