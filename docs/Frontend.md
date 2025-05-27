@@ -30,7 +30,7 @@ Migration Assistant consists of data stores and compute clusters described in de
 
 ### Authorization
 
-Operators of Migration Assistant will forward ports from the webserver onto their local machines and access the website via a broswer pointed to that port.  This port tunnelling process limits the need for additional infrastructure and permissions associated with authorization.
+Operators of Migration Assistant will forward ports from the webserver onto their local machines and access the website via a browser pointed to that port.  This port tunnelling process limits the need for additional infrastructure and permissions associated with authorization.
 
 #### Components with No Direct Access
 
