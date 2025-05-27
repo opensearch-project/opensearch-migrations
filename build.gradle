@@ -453,50 +453,54 @@ gradle.projectsEvaluated {
     }
 }
 
-// Define a provider for test tasks list
-def testTasksProvider = provider {
-    def testTasks = []
+def jacocoExecFilesProvider = provider {
+    def execFiles = []
     rootProject.subprojects.each { subproject ->
-        def projectPath = subproject.path
-
         subproject.tasks.withType(Test).configureEach { testTask ->
             def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            if (!(jacocoExtension?.enabled ?: false)) {
-                testTasks << "${projectPath}:${testTask.name}"
+            if (jacocoExtension?.enabled) {
+                execFiles << jacocoExtension.destinationFile
             }
         }
+    }
+    return execFiles
+}
 
-        if (subproject.tasks.withType(Test).any { testTask ->
+def jacocoTestTasksProvider = provider {
+    def testTasks = []
+    rootProject.subprojects.each { subproject ->
+        subproject.tasks.withType(Test).configureEach { testTask ->
             def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            jacocoExtension?.enabled ?: false
-        }) {
-            testTasks << "${projectPath}:jacocoTestReport"
+            if (jacocoExtension?.enabled) {
+                testTasks << testTask
+            }
+        }
+        // Add jacocoTestReport tasks if they exist
+        if (subproject.tasks.findByName('jacocoTestReport')) {
+            testTasks << subproject.tasks.jacocoTestReport
         }
     }
     return testTasks
 }
 
+def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    into layout.buildDirectory.dir("jacocoMerged")
+
+    from jacocoExecFilesProvider
+    dependsOn jacocoTestTasksProvider
+}
+
 tasks.register('mergeJacocoReports') {
-    def jacocoReportTasks = testTasksProvider.get()
-    dependsOn jacocoReportTasks
-    // Assertion: fail if no Jacoco report tasks are found
-    if (jacocoReportTasks.isEmpty()) {
-        throw new GradleException("No jacocoTestReport tasks found in subprojects.")
-    }
+    dependsOn syncJacocoExecFiles
+    finalizedBy jacocoAggregateReport
+
     doLast {
-        // Create a Sync task to collect all exec files
-        def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
-            from jacocoReportTasks.collect { it.executionData }
-            into "${buildDir}/jacocoMerged/"
-            duplicatesStrategy = DuplicatesStrategy.FAIL
+        def execFiles = jacocoExecFilesProvider.get()
+        if (execFiles.isEmpty()) {
+            throw new GradleException("No Jacoco exec files found in subprojects.")
         }
-
-        // Make sure sync task runs after all report tasks
-        syncJacocoExecFiles.mustRunAfter jacocoReportTasks
-        dependsOn syncJacocoExecFiles
-
-        // Finalize with jacocoAggregateReport
-        finalizedBy jacocoAggregateReport
+        println "Merged ${execFiles.size()} Jacoco execution files"
     }
 }
 
