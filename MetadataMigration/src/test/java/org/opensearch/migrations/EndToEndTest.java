@@ -149,6 +149,14 @@ class EndToEndTest extends BaseMigrationTest {
             default:
                 throw new RuntimeException("Invalid Option");
         }
+
+        // If the target is not part of  supported target matrix enable loose version matching
+        if (!(SupportedClusters.supportedTargets(false)
+            .stream()
+            .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
+            arguments.versionStrictness.allowLooseVersionMatches = true;
+        }
+
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters for ES 7.17 as we do not currently have transformations in place to support breaking
