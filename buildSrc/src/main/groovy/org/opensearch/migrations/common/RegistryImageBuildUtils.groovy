@@ -226,7 +226,7 @@ class RegistryImageBuildUtils {
                                 BASE_IMAGE: "${consoleBaseImage}"
                         ],
                         requiredDependencies: [
-                                ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole",
+                                ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole_noDockerBuild",
                                 "buildKit_elasticsearchTestConsole"
                         ]
                 ]

@@ -562,15 +562,14 @@ tasks.register("jibAll") {
     group = "build"
     description = "Build all Jib images in all subprojects"
     dependsOn subprojects.collect { proj ->
-        proj.tasks.withType(JibTask)
+        proj.tasks.matching { it.name == "jib" }
     }.flatten()
 }
 
 tasks.register("buildKitAll") {
-    dependsOn("buildKit_captureProxyBase")
-    dependsOn("buildKit_reindexFromSnapshot")
-    dependsOn("buildKit_elasticsearchTestConsole")
-    dependsOn("buildKit_migrationConsole")
+    group = "build"
+    description = "Build all BuildKit images"
+    dependsOn tasks.matching { it.name.startsWith("buildKit_") }
 }
 
 tasks.register("buildImagesToRegistry") {

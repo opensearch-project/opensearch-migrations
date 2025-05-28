@@ -74,7 +74,7 @@ spec:
 
               docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
 
-              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}' -PskipConsoleBaseImageBuild"
+              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}'"
               echo "Running Gradle build with:"
               echo "$GRADLE_CMD"
               eval "$GRADLE_CMD"
