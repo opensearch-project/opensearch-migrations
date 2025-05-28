@@ -559,11 +559,11 @@ ext.imageArch = imageArch
 
 
 tasks.register("jibAll") {
-    dependsOn {
-        def replayer = project(":TrafficCapture:trafficReplayer").tasks.named("jib")
-        def proxy = project(":TrafficCapture:trafficCaptureProxyServer").tasks.named("jib")
-        return [replayer, proxy]
-    }
+    group = "build"
+    description = "Build all Jib images in all subprojects"
+    dependsOn subprojects.collect { proj ->
+        proj.tasks.withType(JibTask)
+    }.flatten()
 }
 
 tasks.register("buildKitAll") {
