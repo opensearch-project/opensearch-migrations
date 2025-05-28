@@ -25,11 +25,6 @@ dependencies {
     testImplementation libs.log4j.core
     testImplementation libs.log4j.slf4j2.impl
 
-    // Log4j
-    implementation libs.log4j.api
-    implementation libs.log4j.core
-    implementation libs.log4j.slf4j2.impl
-
     implementation libs.jackson.databind
     implementation libs.jackson.core
 

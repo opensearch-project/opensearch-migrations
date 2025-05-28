@@ -1,0 +1,94 @@
+# kubernetes/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: migration-console-access-role
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: migration-console-access-role
+rules:
+  - apiGroups: [ "" ]
+    resources: ["secrets"]
+    verbs: ["list"]
+  - apiGroups: [ "" ]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log"]
+    verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: [ "apps" ]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: migration-console-access-role
+subjects:
+  - kind: ServiceAccount
+    name: migration-console-access-role
+roleRef:
+  kind: Role
+  name: migration-console-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+{{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
+{{ $developerModeEnabled := .Values.developerModeEnabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: migration-console
+spec:
+  serviceName: "migration-console"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: migration-console
+  template:
+    metadata:
+      labels:
+        app: migration-console
+        env: v1
+    spec:
+      serviceAccountName: migration-console-access-role
+      containers:
+        - name: console
+          image: migrations/migration_console:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+    {{- if .Values.developerModeEnabled }}
+              source /.venv/bin/activate && pipenv install -e ~/lib/console_link
+    {{- end }}
+              export START_API_COMMAND="pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt"
+              export WAIT_AND_DO_NOTHING_COMMAND="tail -f /dev/null"
+              migrationEnabled=$(echo "$@" | grep -o -- "--migrationApiEnabled" | wc -l); if [ "$migrationEnabled" -gt 0 ]; then $START_API_COMMAND; else $WAIT_AND_DO_NOTHING_COMMAND; fi > run.sh
+              exec migrationEnabled $ARGS
+          volumeMounts:
+    {{- if $sharedLogsVolumeEnabled }}
+            - name: shared-logs
+              mountPath: /shared-logs-output
+    {{- end }}
+    {{- if $developerModeEnabled }}
+            - name: local-console-libs
+              mountPath: /root/lib
+    {{- end }}
+      volumes:
+    {{- if $developerModeEnabled  }}
+        - name: local-console-libs
+          hostPath:
+            path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib
+            type: Directory
+    {{- end }}
+    {{- if $sharedLogsVolumeEnabled  }}
+        - name: shared-logs
+          persistentVolumeClaim:
+            claimName: {{ .Values.logs.sharedLogsVolume.name }}
+    {{- end }}

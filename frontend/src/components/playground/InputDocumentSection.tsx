@@ -147,7 +147,7 @@ export default function InputDocumentSection() {
               files.length > 0 && (
                 <Button
                   variant="primary"
-                  disabled={isProcessing || isQuotaExceeded}
+                  disabled={isProcessing ?? isQuotaExceeded}
                 >
                   Upload
                 </Button>

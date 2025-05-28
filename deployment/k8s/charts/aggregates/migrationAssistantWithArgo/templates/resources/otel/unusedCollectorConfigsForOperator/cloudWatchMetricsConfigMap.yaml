@@ -1,0 +1,9 @@
+{{- if has "cloudwatch" .Values.extraOtelConfiguration.configs.metrics }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-cloudwatch-metrics-config
+data:
+  nothing: |
+    {}
+{{ end -}}

@@ -103,6 +103,12 @@ public class JavascriptTransformer implements IJsonTransformer {
         }
 
         @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+            // Avoid S4349
+        }
+
+        @Override
         public void flush() throws IOException {
             super.flush();
             if (out instanceof ByteArrayOutputStream) {

@@ -1,0 +1,92 @@
+# templates/create-s3-bucket-job.yaml
+{{- if .Values.snapshotBucketConfiguration.create }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-s3-bucket-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: s3-bucket-creator
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws-cli
+          image: amazon/aws-cli:2.25.11
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: "test"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "test"
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: s3-snapshot-config
+                  key: AWS_REGION
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: s3-snapshot-config
+                  key: ENDPOINT
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -x
+
+              # Setting up variables
+              export AWS_DEFAULT_REGION=AWS_REGION
+              BUCKET_NAME="{{ .Values.snapshotBucketConfiguration.bucketName }}"
+              MAX_RETRIES=10
+              RETRY_INTERVAL=5
+
+              echo "Using endpoint: $S3_ENDPOINT_URL"
+              echo "Target bucket: $BUCKET_NAME"
+
+              # Function to check if S3 is available
+              check_s3_available() {
+                aws --endpoint-url=$S3_ENDPOINT_URL s3 ls >/dev/null 2>&1
+                return $?
+              }
+
+              # Wait for S3 to be available
+              retry_count=0
+              while ! check_s3_available; do
+                retry_count=$((retry_count + 1))
+                if [ $retry_count -ge $MAX_RETRIES ]; then
+                  echo "S3 endpoint not available after $MAX_RETRIES attempts. Exiting."
+                  exit 1
+                fi
+                echo "S3 endpoint not available yet. Retrying in $RETRY_INTERVAL seconds... (Attempt $retry_count/$MAX_RETRIES)"
+                sleep $RETRY_INTERVAL
+              done
+
+              echo "S3 endpoint is available. Proceeding with bucket operations."
+
+              # Check if bucket exists
+              if aws --endpoint-url=$S3_ENDPOINT_URL s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+                echo "Bucket $BUCKET_NAME already exists."
+              else
+                echo "Creating bucket $BUCKET_NAME..."
+                aws --endpoint-url=$S3_ENDPOINT_URL s3 mb s3://$BUCKET_NAME
+
+                # Verify bucket creation
+                if aws --endpoint-url=$S3_ENDPOINT_URL s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+                  echo "Successfully created bucket $BUCKET_NAME."
+                else
+                  echo "Failed to create bucket $BUCKET_NAME."
+                  exit 1
+                fi
+              fi
+
+              # List all buckets to confirm
+              echo "Listing all buckets:"
+              aws --endpoint-url=$S3_ENDPOINT_URL s3 ls
+{{- end }}

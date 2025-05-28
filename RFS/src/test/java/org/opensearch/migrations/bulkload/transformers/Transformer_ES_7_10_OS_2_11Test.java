@@ -23,7 +23,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         Version version = Version.fromString("ES 7.10");
 
         final var repo = new FileSystemRepo(snapshot.dir);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
 
@@ -46,7 +46,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         Version version = Version.fromString("ES 7.10");
 
         final var repo = new FileSystemRepo(snapshot.dir);
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
 

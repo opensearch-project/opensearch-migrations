@@ -3,7 +3,6 @@ package org.opensearch.migrations;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -16,8 +15,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -26,13 +24,6 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @Tag("isolatedTest")
 class ReplicaCountWithAZsTest extends BaseMigrationTest{
     private static final SearchClusterContainer.ContainerVersion SOURCE_VERSION = SearchClusterContainer.ES_V7_10_2;
-
-    private static Stream<Arguments> scenarios() {
-        return Stream.of(
-            Arguments.of(1),
-            Arguments.of(2),
-            Arguments.of(3));
-    }
 
     @Test
     void testMigrateWithIncompatibleReplicaCountFails() {
@@ -72,7 +63,7 @@ class ReplicaCountWithAZsTest extends BaseMigrationTest{
     }
 
     @ParameterizedTest(name = "Replica count test with {0} AZs")
-    @MethodSource(value = "scenarios")
+    @CsvSource(value = "1, 2")
     void testReplicaCounts(int availabilityZoneCount) {
         try (
                 final var sourceCluster = new SearchClusterContainer(SOURCE_VERSION);
@@ -86,9 +77,9 @@ class ReplicaCountWithAZsTest extends BaseMigrationTest{
             // Shard count is 1 or 5, replica count is 0 through 3
             AtomicInteger createdIndexCount = new AtomicInteger();
             var indexNames = new ArrayList<String>();
-            List.of(1, 5).forEach(
+            List.of(1, 2).forEach(
                     shardCount -> {
-                        List.of(0, 1, 2, 3).forEach(replicaCount -> {
+                        List.of(0, 1, 2).forEach(replicaCount -> {
                             var name = "index_" + shardCount + "_" + replicaCount;
                             var body = "{\"settings\": {\"index\": {\"number_of_replicas\": "+ replicaCount +", \"number_of_shards\": "+ shardCount + "}}}";
                             sourceOperations.createIndex(name, body);

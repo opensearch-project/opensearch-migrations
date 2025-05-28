@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE)
 @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
 @Getter
-public class RemoteIndexMetadata extends IndexMetadata {
+public class RemoteIndexMetadata implements IndexMetadata {
     @JsonProperty("name")
     private String name;
     @JsonProperty("id")

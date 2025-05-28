@@ -176,6 +176,10 @@ subprojects {
         }
     }
 
+    tasks.withType(Javadoc).configureEach {
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+
     plugins.withId('java') {
 
         java {
@@ -462,61 +466,70 @@ gradle.projectsEvaluated {
     }
 }
 
-task mergeJacocoReports {
-    def jacocoReportTasks = subprojects.collect { it.tasks.withType(JacocoReport).matching { it.name == "jacocoTestReport" } }.flatten()
-    dependsOn jacocoReportTasks
-
-    // Create a Sync task to collect all exec files
-    def syncJacocoExecFiles = tasks.create("syncJacocoExecFiles", Sync) {
-        from jacocoReportTasks.collect { it.executionData }
-        into "${buildDir}/jacocoMerged/"
-        duplicatesStrategy = DuplicatesStrategy.FAIL
-    }
-
-    // Make sure sync task runs after all report tasks
-    syncJacocoExecFiles.mustRunAfter jacocoReportTasks
-    dependsOn syncJacocoExecFiles
-
-    // Finalize with jacocoAggregateReport
-    finalizedBy jacocoAggregateReport
-}
-
-task listPublishedArtifacts {
-    doLast {
-        subprojects.each { proj ->
-            def publishingExtension = proj.extensions.findByType(PublishingExtension)
-            if (publishingExtension) {
-                publishingExtension.publications.each { publication ->
-                    if (publication instanceof MavenPublication) {
-                        println "${publication.groupId}.${publication.artifactId}"
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Define a provider for test tasks list
-def testTasksProvider = provider {
-    def testTasks = []
+def jacocoExecFilesProvider = provider {
+    def execFiles = []
     rootProject.subprojects.each { subproject ->
-        def projectPath = subproject.path
-
         subproject.tasks.withType(Test).configureEach { testTask ->
             def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            if (!(jacocoExtension?.enabled ?: false)) {
-                testTasks << "${projectPath}:${testTask.name}"
+            if (jacocoExtension?.enabled) {
+                execFiles << jacocoExtension.destinationFile
             }
         }
+    }
+    return execFiles
+}
 
-        if (subproject.tasks.withType(Test).any { testTask ->
+def jacocoTestTasksProvider = provider {
+    def testTasks = []
+    rootProject.subprojects.each { subproject ->
+        subproject.tasks.withType(Test).configureEach { testTask ->
             def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            jacocoExtension?.enabled ?: false
-        }) {
-            testTasks << "${projectPath}:jacocoTestReport"
+            if (jacocoExtension?.enabled) {
+                testTasks << testTask
+            }
+        }
+        // Add jacocoTestReport tasks if they exist
+        if (subproject.tasks.findByName('jacocoTestReport')) {
+            testTasks << subproject.tasks.jacocoTestReport
         }
     }
     return testTasks
+}
+
+def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    into layout.buildDirectory.dir("jacocoMerged")
+
+    from jacocoExecFilesProvider
+    dependsOn jacocoTestTasksProvider
+}
+
+tasks.register('mergeJacocoReports') {
+    dependsOn syncJacocoExecFiles
+    finalizedBy jacocoAggregateReport
+
+    doLast {
+        def execFiles = jacocoExecFilesProvider.get()
+        if (execFiles.isEmpty()) {
+            throw new GradleException("No Jacoco exec files found in subprojects.")
+        }
+        println "Merged ${execFiles.size()} Jacoco execution files"
+    }
+}
+
+def publishedArtifacts = []
+subprojects.each { proj ->
+    def publishingExtension = proj.extensions.findByType(PublishingExtension)
+    if (publishingExtension) {
+        publishingExtension.publications.withType(MavenPublication).all { publication ->
+            publishedArtifacts << "${publication.groupId}.${publication.artifactId}"
+        }
+    }
+}
+tasks.register('listPublishedArtifacts') {
+    doLast {
+        publishedArtifacts.each { println it }
+    }
 }
 
 tasks.register("listTestTasksAsJson") {

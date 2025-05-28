@@ -253,7 +253,7 @@ public class SourceTestBase {
                 return d;
             };
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo);
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false);
 
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(

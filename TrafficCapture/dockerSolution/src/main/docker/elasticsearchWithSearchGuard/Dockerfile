@@ -7,6 +7,13 @@ ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
 ENV ELASTIC_SEARCH_JVM_CONFIG_FILE=/usr/share/elasticsearch/config/jvm.options
 
+RUN bin/elasticsearch-plugin install --batch repository-s3
+RUN  bin/elasticsearch-keystore create --silent && \
+     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key && \
+     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key && \
+     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.session_token
+
+
 # without this line, elasticsearch will complain that there aren't enough nodes
 RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
 COPY disableTlsConfig.sh enableTlsConfig.sh /root/

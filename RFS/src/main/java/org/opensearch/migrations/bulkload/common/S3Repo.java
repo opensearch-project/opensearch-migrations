@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -91,6 +92,10 @@ public class S3Repo implements SourceRepo {
     }
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region) {
+        return create(s3LocalDir, s3Uri, s3Region, null);
+    }
+
+    public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint) {
         S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
             .region(Region.of(s3Region))
             .credentialsProvider(DefaultCredentialsProvider.create())
@@ -98,6 +103,7 @@ public class S3Repo implements SourceRepo {
             .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
             .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
             .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
+            .endpointOverride(s3Endpoint)
             .build();
 
         return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client);

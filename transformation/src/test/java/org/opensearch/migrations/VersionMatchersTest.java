@@ -10,7 +10,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class VersionMatchersTest {
 
-    private void testPredicate(Predicate<Version> predicate, String matcherName, List<String> expectMatches, List<String> expectDoesNotMatch) {
+    static void testPredicate(Predicate<Version> predicate, String matcherName, List<String> expectMatches, List<String> expectDoesNotMatch) {
         expectMatches.forEach(v -> {
             assertThat(v + " should be matched by " + matcherName, predicate.test(Version.fromString(v)), equalTo(true));
         });
@@ -68,6 +68,16 @@ public class VersionMatchersTest {
             "isOS_2_X",
             List.of("OS 2.0", "OS 2.15"),
             List.of("OS 1.3", "OS 3.0", "ES 2.3")
+        );
+    }
+
+    @Test
+    void isOS_3_XTest() {
+        testPredicate(
+            VersionMatchers.isOS_3_X,
+            "isOS_3_X",
+            List.of("OS 3.0", "OS 3.15"),
+            List.of("OS 1.3", "OS 2.3", "OS 4.0", "ES 2.3")
         );
     }
 }
