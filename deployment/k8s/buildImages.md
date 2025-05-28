@@ -1,8 +1,8 @@
 # Building Images Locally
-This guide walks through setting up a local docker registry container that can be used to store images for this project, as opposed to the local Docker daemon storage system. The advantage of this approach is that these images can be used anywhere locally that can reference the local docker registry endpoint, including within a Kubernetes Minikube environment.  Additionally, a buildkit container can be setup to enable building the images within this container.
+This guide walks through setting up a local docker registry container that can be used to store images for this project, as opposed to the local Docker daemon storage system that comes packaged with Docker. The advantage of this approach is that these images can be used anywhere locally that can reference the local docker registry endpoint, including within a Kubernetes Minikube environment, as well as sets up the structure to be able to push images to a remote repository like AWS ECR.  Additionally, a buildkit container can be setup to enable building the images within its container.
 
 ### Create a docker network
-A docker network is created so that the docker registry and buildkit containers can communicate with each other via their container name e.g. `http://docker-registry:5000`
+A docker network is created so that the docker registry and buildkit containers can communicate with each other via their container name e.g. `http://docker-registry:5000`. This step should only be needed once, unless the network gets deleted.
 ```shell
 docker network create local-migrations-network
 ```
@@ -30,4 +30,9 @@ docker buildx create --name local-remote-builder --driver remote tcp://localhost
 The following gradle command can be used after setting up the previous steps to build images to the docker registry created
 ```shell
 ./gradlew buildImagesToRegistry
+```
+
+Or customized to use a specific registry endpoint and architecture
+```shell
+./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repo -PimageArch=arm64
 ```

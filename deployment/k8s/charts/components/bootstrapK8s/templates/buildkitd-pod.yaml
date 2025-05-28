@@ -35,7 +35,7 @@ spec:
   serviceAccountName: {{ .Values.serviceAccountName }}
   containers:
     - name: buildkitd
-      image: moby/buildkit:latest
+      image: moby/buildkit:v0.22.0
       args: [
         "--addr", "tcp://0.0.0.0:1234",
         "--config", "/etc/buildkit/buildkitd.toml"
@@ -48,6 +48,15 @@ spec:
         - name: buildkitd-config
           mountPath: /etc/buildkit
           readOnly: true
+      resources:
+        requests:
+          cpu: "1000m"
+          memory: "2Gi"
+          ephemeral-storage: "5Gi"
+        limits:
+          cpu: "4000m"
+          memory: "6Gi"
+          ephemeral-storage: "20Gi"
   volumes:
     - name: buildkitd-config
       configMap:
