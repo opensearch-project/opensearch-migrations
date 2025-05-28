@@ -51,12 +51,12 @@ spec:
       resources:
         requests:
           cpu: "1000m"
-          memory: "2Gi"
-          ephemeral-storage: "5Gi"
+          memory: "5Gi"
+          ephemeral-storage: "10Gi"
         limits:
-          cpu: "4000m"
-          memory: "6Gi"
-          ephemeral-storage: "20Gi"
+          cpu: "6000m"
+          memory: "8Gi"
+          ephemeral-storage: "40Gi"
   volumes:
     - name: buildkitd-config
       configMap:
