@@ -1,8 +1,15 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.github.luben.zstd.Zstd;
+import com.github.luben.zstd.ZstdException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import shadow.lucene9.org.apache.lucene.codecs.compressing.CompressionMode;
 import shadow.lucene9.org.apache.lucene.codecs.compressing.Compressor;
 import shadow.lucene9.org.apache.lucene.codecs.compressing.Decompressor;
@@ -15,6 +22,7 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 /** ZSTD Compression Mode (without a dictionary support). */
 public class ZstdNoDictCompressionMode extends CompressionMode {
 
+    private static final Logger logger = LogManager.getLogger(ZstdNoDictCompressionMode.class);
     private static final int NUM_SUB_BLOCKS = 10;
 
     private final int compressionLevel;
@@ -145,12 +153,44 @@ public class ZstdNoDictCompressionMode extends CompressionMode {
                 compressed = ArrayUtil.growNoCopy(compressed, compressedLength);
                 in.readBytes(compressed, 0, compressedLength);
 
+                logger.debug(">>> Decompressing block at offset={} compressedLength={}", offsetInBlock, compressedLength);
+                if (compressedLength >= 4) {
+                    String headerHex = IntStream.range(0, 4)
+                            .mapToObj(i -> String.format("0x%02X", compressed[i]))
+                            .collect(Collectors.joining(" "));
+                    logger.warn(">>> Frame header bytes: {}", headerHex);
+                }
+
+                // Log a hex dump of the entire compressed block
+                byte[] blockCopy = Arrays.copyOf(compressed, compressedLength);
+                String fullHexDump = IntStream.range(0, blockCopy.length)
+                        .mapToObj(i -> String.format("%02X", blockCopy[i]))
+                        .collect(Collectors.joining(" "));
+                logger.warn(">>> Full compressed block (hex): {}", fullHexDump);
+
+                // Optionally log Base64 as well
+                String base64 = Base64.getEncoder().encodeToString(Arrays.copyOf(compressed, compressedLength));
+                logger.warn(">>> Full compressed block (Base64): {}", base64);
+
                 final int l = Math.min(blockLength, originalLength - offsetInBlock);
                 bytes.bytes = ArrayUtil.grow(bytes.bytes, bytes.length + l);
 
-                final int uncompressed = (int) Zstd.decompressByteArray(bytes.bytes, bytes.length, l, compressed, 0, compressedLength);
+                try {
+                    final long uncompressed = Zstd.decompressByteArray(
+                            bytes.bytes, bytes.length, l,
+                            compressed, 0, compressedLength
+                    );
 
-                bytes.length += uncompressed;
+                    if (uncompressed != l) {
+                        throw new IOException("Zstd decompressed " + uncompressed + " bytes, but expected " + l + " at block offset " + offsetInBlock);
+                    }
+
+                    bytes.length += (int) uncompressed;
+                } catch (ZstdException ex) {
+                    throw new IOException("Failed to decompress Zstd block at offset=" + offsetInBlock +
+                            ", compressedLen=" + compressedLength, ex);
+                }
+
                 offsetInBlock += blockLength;
             }
 

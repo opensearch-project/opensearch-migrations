@@ -37,7 +37,7 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
 
     /** default constructor */
     public ZstdStoredFields814Format() {
-        this(Mode.ZSTD, Lucene912CustomCodec.DEFAULT_COMPRESSION_LEVEL);
+        this(Mode.ZSTD_NO_DICT, Lucene912CustomCodec.DEFAULT_COMPRESSION_LEVEL);
     }
 
     /**
@@ -78,8 +78,8 @@ public class ZstdStoredFields814Format extends StoredFieldsFormat {
         if (value != null) {
             mode = Mode.valueOf(value);
         } else {
-            System.out.println(">>>>> WARNING: No MODE_KEY in SegmentInfo " + si.name + ", falling back to Mode.ZSTD");
-            mode = Mode.ZSTD;
+            System.out.println(">>>>> WARNING: No MODE_KEY in SegmentInfo " + si.name + ", falling back to Mode.ZSTD_NO_DICT");
+            mode = Mode.ZSTD_NO_DICT;
         }
         return impl(mode).fieldsReader(directory, si, fn, context);
     }
