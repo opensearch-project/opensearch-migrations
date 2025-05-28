@@ -1,7 +1,6 @@
 import 'source-map-support/register';
 import { App, DefaultStackSynthesizer } from 'aws-cdk-lib';
 import { SolutionsInfrastructureStack } from '../lib/solutions-stack';
-import {SolutionsInfrastructureEKSStack} from "../lib/solutions-stack-eks";
 
 const getProps = () => {
   const { CODE_BUCKET, SOLUTION_NAME, CODE_VERSION, STACK_NAME_SUFFIX } = process.env;
@@ -35,24 +34,17 @@ const getProps = () => {
 
 const app = new App();
 const infraProps = getProps()
-new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Create-VPC", {
+new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Import-VPC", {
+  synthesizer: new DefaultStackSynthesizer({
+    generateBootstrapVersionRule: false
+  }),
+  createVPC: false,
+  ...infraProps
+});
+new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
   synthesizer: new DefaultStackSynthesizer({
     generateBootstrapVersionRule: false
   }),
   createVPC: true,
   ...infraProps
 });
-// new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Import-VPC", {
-//   synthesizer: new DefaultStackSynthesizer({
-//     generateBootstrapVersionRule: false
-//   }),
-//   createVPC: false,
-//   ...infraProps
-// });
-// new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
-//   synthesizer: new DefaultStackSynthesizer({
-//     generateBootstrapVersionRule: false
-//   }),
-//   createVPC: true,
-//   ...infraProps
-// });
