@@ -538,7 +538,8 @@ if (!imageArch) {
     } else if (arch == "x86_64" || arch == "amd64") {
         imageArch= "amd64"
     } else {
-        throw new GradleException("Unsupported architecture detected: ${arch}")
+        logger.warn("Unsupported architecture detected: ${arch}, defaulting to 'amd64'")
+        imageArch= "amd64"
     }
 }
 ext.imageArch = imageArch

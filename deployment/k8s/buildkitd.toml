@@ -1,0 +1,2 @@
+[registry."docker-registry:5000"]
+  http=true

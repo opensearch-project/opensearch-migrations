@@ -119,7 +119,6 @@ class RegistryImageBuildUtils {
         }
     }
 
-    // TODO use temp directory for docker config
     void registerLoginTask(Project project) {
         def registryEndpoint = project.ext.registryEndpoint.toString()
         def registryDomain = registryEndpoint.split("/")[0]
@@ -171,7 +170,6 @@ class RegistryImageBuildUtils {
                 "--build-arg ${key}=${value}"
             }
 
-            // TODO allow using the default builder
             def fullArgs = [
                     "docker buildx build",
                     "--platform linux/${project.ext.imageArch}",
