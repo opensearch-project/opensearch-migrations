@@ -1,3 +1,6 @@
+nameOverride: ""
+fullnameOverride: ""
+
 conditionalPackageInstalls:
   bulkLoader: true
   grafana: false

@@ -277,25 +277,23 @@ def main() -> None:
     helm_dependency_script_path = f"{helm_k8s_base_path}/update_deps.sh"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistant"
-    elasticsearch_cluster_chart_path = f"{helm_charts_base_path}/components/elasticsearchCluster"
-    opensearch_cluster_chart_path = f"{helm_charts_base_path}/components/opensearchCluster"
 
     source_type, source_major, source_minor = parse_version_string(args.source_version)
     source_chart = "elasticsearchCluster" if source_type == "es" else "opensearchCluster"
-    source_values = (f"{helm_charts_base_path}/components/{source_chart}/"
-                     f"environments/{source_type}-{source_major}-{source_minor}-single-node-cluster.yaml")
+    source_values = f"{helm_charts_base_path}/components/{source_chart}/environments/os-2-x-single-node-cluster-source.yaml"
+    source_chart_path = f"{helm_charts_base_path}/components/{source_chart}"
     target_type, target_major, target_minor = parse_version_string(args.target_version)
     target_chart = "elasticsearchCluster" if target_type == "es" else "opensearchCluster"
-    target_values = (f"{helm_charts_base_path}/components/{target_chart}/"
-                     f"environments/{target_type}-{target_major}-{target_minor}-single-node-cluster.yaml")
+    target_values = f"{helm_charts_base_path}/components/{target_chart}/environments/os-2-x-single-node-cluster-target.yaml"
+    target_chart_path = f"{helm_charts_base_path}/components/{target_chart}"
     ma_chart_values_path = f"{source_type}-{source_major}-to-{target_type}-{target_major}-values.yaml"
 
     test_cluster_env = TestClusterEnvironment(source_version=args.source_version,
                                               source_helm_values_path=source_values,
-                                              source_chart_path=elasticsearch_cluster_chart_path,
+                                              source_chart_path=source_chart_path,
                                               target_version=args.target_version,
                                               target_helm_values_path=target_values,
-                                              target_chart_path=opensearch_cluster_chart_path)
+                                              target_chart_path=target_chart_path)
 
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
