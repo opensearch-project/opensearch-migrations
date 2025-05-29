@@ -2,10 +2,8 @@ import {Construct} from 'constructs';
 import {CfnCluster, CfnPodIdentityAssociation} from 'aws-cdk-lib/aws-eks';
 import {IVpc, Port, SecurityGroup} from 'aws-cdk-lib/aws-ec2';
 import {
-    CfnPolicy,
-    CfnRole,
     Effect,
-    ManagedPolicy,
+    ManagedPolicy, Policy,
     PolicyStatement,
     Role,
     ServicePrincipal,
@@ -113,91 +111,79 @@ export class EKSInfra extends Construct {
             Port.allTraffic()
         );
 
-        const podIdentityRole = new CfnRole(this, 'MigrationsPodIdentityRole', {
+        const podIdentityRole = new Role(this, 'MigrationsPodIdentityRole', {
             roleName: `${props.clusterName}-migrations-role`,
-            assumeRolePolicyDocument: {
-                Version: '2012-10-17',
-                Statement: [
-                    {
-                        Effect: 'Allow',
-                        Principal: {
-                            Service: 'pods.eks.amazonaws.com',
-                        },
-                        Action: [
-                            "sts:AssumeRole",
-                            "sts:TagSession"
-                        ]
-                    },
-                ],
-            },
-            managedPolicyArns: [
-                ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryFullAccess').managedPolicyArn,
-            ],
             description: 'Migrations IAM role assumed by pods via EKS Pod Identity',
+            assumedBy: new ServicePrincipal('pods.eks.amazonaws.com'),
+            managedPolicies: [
+                ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryFullAccess'),
+            ],
         });
-
-        new CfnPolicy(this, 'MigrationsPodIdentityPolicy', {
+        podIdentityRole.assumeRolePolicy?.addStatements(
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ['sts:AssumeRole', 'sts:TagSession'],
+                principals: [new ServicePrincipal('pods.eks.amazonaws.com')]
+            })
+        );
+        const podIdentityPolicy = new Policy(this, 'MigrationsPodIdentityPolicy', {
             policyName: 'MigrationsPodPolicy',
-            roles: [podIdentityRole.ref],
-            policyDocument: {
-                Version: '2012-10-17',
-                Statement: [
-                    {
-                        Effect: 'Allow',
-                        Action: [
-                            'ecr:GetAuthorizationToken',
-                            'ecr:BatchGetImage',
-                            'ecr:GetDownloadUrlForLayer',
-                            'ecr:DescribeRepositories',
-                            'ecr:BatchCheckLayerAvailability',
-                            'ecr:CompleteLayerUpload',
-                            'ecr:InitiateLayerUpload',
-                            'ecr:PutImage',
-                            'ecr:UploadLayerPart',
-                        ],
-                        Resource: '*',
-                    },
-                    {
-                        Effect: 'Allow',
-                        Action: [
-                            'elasticfilesystem:ClientMount',
-                            'elasticfilesystem:ClientWrite',
-                        ],
-                        Resource: '*',
-                    },
-                    {
-                        Effect: 'Allow',
-                        Action: ['es:ESHttp*', 'aoss:APIAccessAll'],
-                        Resource: '*',
-                    },
-                    {
-                        Effect: 'Allow',
-                        Action: [
-                            'secretsmanager:GetSecretValue',
-                            'secretsmanager:DescribeSecret',
-                            'secretsmanager:ListSecrets'
-                        ],
-                        Resource: '*',
-                    },
-                    {
-                        Effect: 'Allow',
-                        Action: [
-                            's3:GetObject',
-                            's3:PutObject',
-                            's3:ListBucket',
-                            's3:DeleteObject'
-                        ],
-                        Resource: '*',
-                    },
-                ],
-            },
+            roles: [podIdentityRole],
         });
-
+        podIdentityPolicy.addStatements(
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'ecr:GetAuthorizationToken',
+                    'ecr:BatchGetImage',
+                    'ecr:GetDownloadUrlForLayer',
+                    'ecr:DescribeRepositories',
+                    'ecr:BatchCheckLayerAvailability',
+                    'ecr:CompleteLayerUpload',
+                    'ecr:InitiateLayerUpload',
+                    'ecr:PutImage',
+                    'ecr:UploadLayerPart',
+                ],
+                resources: ['*'],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'elasticfilesystem:ClientMount',
+                    'elasticfilesystem:ClientWrite',
+                ],
+                resources: ['*'],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ['es:ESHttp*', 'aoss:APIAccessAll'],
+                resources: ['*'],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'secretsmanager:GetSecretValue',
+                    'secretsmanager:DescribeSecret',
+                    'secretsmanager:ListSecrets',
+                ],
+                resources: ['*'],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    's3:GetObject',
+                    's3:PutObject',
+                    's3:ListBucket',
+                    's3:DeleteObject',
+                ],
+                resources: ['*'],
+            }),
+        );
         const podIdentityAssociation = new CfnPodIdentityAssociation(this, 'MigrationsPodIdentityAssociation', {
             clusterName: props.clusterName,
             namespace: namespace,
             serviceAccount: serviceAccountName,
-            roleArn: podIdentityRole.attrArn,
+            roleArn: podIdentityRole.roleArn,
         });
         podIdentityAssociation.node.addDependency(this.cluster)
 

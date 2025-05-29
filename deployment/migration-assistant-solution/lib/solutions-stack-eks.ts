@@ -18,8 +18,14 @@ import {
     IpProtocol,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
-import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {EKSInfra} from "./eks-infra";
+import {
+    addParameterLabel,
+    applyAppRegistry,
+    generateExportString,
+    getVpcEndpointForEFS,
+    ParameterLabel
+} from "./common-utils";
 
 export interface SolutionsInfrastructureStackEKSProps extends StackProps {
     readonly solutionId: string;
@@ -30,52 +36,6 @@ export interface SolutionsInfrastructureStackEKSProps extends StackProps {
     readonly stackNameSuffix?: string;
 }
 
-interface ParameterLabel {
-    default: string;
-}
-
-function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackEKSProps): string {
-    const application = new Application(stack, "AppRegistry", {
-        applicationName: Fn.join("-", [
-            infraProps.solutionName,
-            Aws.REGION,
-            Aws.ACCOUNT_ID,
-            stage
-        ]),
-        description: `Service Catalog application to track and manage all your resources for the solution ${infraProps.solutionName}`,
-    });
-    application.associateApplicationWithStack(stack);
-    Tags.of(application).add("Solutions:SolutionID", infraProps.solutionId);
-    Tags.of(application).add("Solutions:SolutionName", infraProps.solutionName);
-    Tags.of(application).add("Solutions:SolutionVersion", infraProps.solutionVersion);
-    Tags.of(application).add("Solutions:ApplicationType", "AWS-Solutions");
-
-    const attributeGroup = new AttributeGroup(
-        stack,
-        "DefaultApplicationAttributes",
-        {
-            attributeGroupName: Fn.join("-", [
-                Aws.REGION,
-                stage,
-                "attributes"
-            ]),
-            description: "Attribute group for solution information",
-            attributes: {
-                applicationType: "AWS-Solutions",
-                version: infraProps.solutionVersion,
-                solutionID: infraProps.solutionId,
-                solutionName: infraProps.solutionName,
-            },
-        }
-    );
-    attributeGroup.associateWith(application)
-    return application.applicationArn
-}
-
-function addParameterLabel(labels: Record<string, ParameterLabel>, parameter: CfnParameter, labelName: string) {
-    labels[parameter.logicalId] = {"default": labelName}
-}
-
 function importVPC(stack: Stack, vpdIdParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter): IVpc {
     // TODO add support for import VPC scenario with VPC validations
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -83,20 +43,6 @@ function importVPC(stack: Stack, vpdIdParameter: CfnParameter, privateSubnetIdsP
     return Vpc.fromLookup(stack, 'ImportedVPC', {
         vpcId: vpdIdParameter.valueAsString,
     });
-}
-
-function generateExportString(exports:  Record<string, string>): string {
-    return Object.entries(exports)
-        .map(([key, value]) => `export ${key}=${value}`)
-        .join("; ");
-}
-
-function getVpcEndpointForEFS(stack: Stack): InterfaceVpcEndpointAwsService {
-    const isGovRegion = stack.region?.startsWith('us-gov-')
-    if (isGovRegion) {
-        return InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM_FIPS;
-    }
-    return InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM;
 }
 
 export class SolutionsInfrastructureEKSStack extends Stack {
