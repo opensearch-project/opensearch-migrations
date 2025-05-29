@@ -58,7 +58,6 @@ include 'TrafficCapture:captureProtobufs'
 include 'TrafficCapture:dockerSolution'
 include 'TrafficCapture:nettyWireLogging'
 include 'TrafficCapture:trafficCaptureProxyServer'
-include 'TrafficCapture:trafficCaptureProxyServerTest'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
 

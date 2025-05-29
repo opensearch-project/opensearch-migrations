@@ -393,8 +393,7 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
     classDirectories.setFrom(
             files(javaProjects.collect { project ->
                 project.sourceSets.main.output.classesDirs.filter { dir ->
-                    !dir.path.contains('captureProtobufs') &&
-                            !dir.path.contains('trafficCaptureProxyServerTest')
+                    !dir.path.contains('captureProtobufs')
                 }
             })
     )
