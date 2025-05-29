@@ -243,6 +243,7 @@ jobs:
           name: coverage-reports-gradle-tests-aggregate
           path: |
             **/jacocoMergedReport.xml
+            **mergedReport/html/*
 
   python-e2e-tests:
     needs: [ generate-cache-key ]
