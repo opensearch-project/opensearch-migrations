@@ -32,9 +32,6 @@ class CommonUtils {
         // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
         // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
         var dstCopyTask = dockerBuildProject.task("copyArtifact_${destProjectName}", type: Sync) {
-            if (destProjectName == "trafficCaptureProxyServerTest") {
-                include "*.properties"
-            }
             from { sourceArtifactProject.configurations.findByName("runtimeClasspath").files }
             from { sourceArtifactProject.tasks.getByName('jar') }
             into destDir
