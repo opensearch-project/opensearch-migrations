@@ -6,46 +6,13 @@ import org.gradle.api.tasks.Exec
 
 class RegistryImageBuildUtils {
 
-    static def getFullBaseImageIdentifier(String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName,
-                                      String baseImageTag) {
-        def baseImage = ""
-        def isEcr = baseImageRegistryEndpoint.contains(".ecr.") && baseImageRegistryEndpoint.contains(".amazonaws.com")
-        if (isEcr) {
-            baseImage = "${baseImageName}_${baseImageTag}"
-            if (baseImageGroup) {
-                baseImage = "${baseImageGroup}_${baseImage}"
-            }
-            if (baseImageRegistryEndpoint) {
-                baseImage = "${baseImageRegistryEndpoint}:${baseImage}"
-            }
-        } else {
-            baseImage = "${baseImageName}:${baseImageTag}"
-            if (baseImageGroup) {
-                baseImage = "${baseImageGroup}/${baseImage}"
-            }
-            if (baseImageRegistryEndpoint) {
-                baseImage = "${baseImageRegistryEndpoint}/${baseImage}"
-            }
-        }
-        return baseImage
-    }
-
-    static def getFullTargetImageIdentifier(String registryEndpoint, String imageName, String imageTag) {
-        def registryDestination = "${registryEndpoint}/migrations/${imageName}:${imageTag}"
-        def cacheDestination = "${registryEndpoint}/migrations/${imageName}:cache"
-        def isEcr = registryEndpoint.contains(".ecr.") && registryEndpoint.contains(".amazonaws.com")
-        if (isEcr) {
-            registryDestination = "${registryEndpoint}:migrations_${imageName}_${imageTag}"
-            cacheDestination = "${registryEndpoint}:migrations_${imageName}_cache"
-        }
-        return [registryDestination, cacheDestination]
-    }
-
     def configureJibFor = { Project project, String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName,
                             String baseImageTag, String imageName, String imageTag, List<String> requiredDependencies ->
         def registryEndpoint = project.rootProject.ext.registryEndpoint.toString()
-        def baseImage = getFullBaseImageIdentifier(baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag)
-        def registryDestination= getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)[0]
+        def baseFormatter = ImageRegistryFormatterFactory.getFormatter(baseImageRegistryEndpoint)
+        def targetFormatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
+        def baseImage = baseFormatter.getFullBaseImageIdentifier(baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag)
+        def registryDestination= targetFormatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)[0]
         requiredDependencies.each { taskPath ->
             project.tasks.named("jib").configure {
                 dependsOn project.rootProject.tasks.named(taskPath)
@@ -155,7 +122,8 @@ class RegistryImageBuildUtils {
         def contextDir = cfg.get("contextDir", ".")
         def serviceName = cfg.get("serviceName")
         def contextPath = project.file(contextDir).path
-        def (registryDestination, cacheDestination) = getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)
+        def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
+        def (registryDestination, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)
 
         def buildTaskName = "buildKit_${serviceName}"
         project.tasks.register(buildTaskName, Exec) {
@@ -193,7 +161,8 @@ class RegistryImageBuildUtils {
 
     void applyBuildKitConfigurations(Project rootProject) {
         def registryEndpoint = rootProject.ext.buildKitRegistryEndpoint.toString()
-        def consoleBaseImage = getFullBaseImageIdentifier(registryEndpoint,"migrations",
+        def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
+        def consoleBaseImage = formatter.getFullBaseImageIdentifier(registryEndpoint,"migrations",
                 "elasticsearch_test_console","latest")
         def projects = [
                 [

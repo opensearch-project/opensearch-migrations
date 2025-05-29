@@ -1,8 +1,8 @@
 #!/bin/bash
 # Execute directly
-# curl -s https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/charts/components/aws-bootstrap.sh | bash
+# curl -s https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh | bash
 # Store to file, then execute with ./aws-bootstrap.sh
-# curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/charts/components/aws-bootstrap.sh && chmod +x aws-bootstrap.sh
+# curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh
 
 project_name="lewijacn"
 repo_name="opensearch-migrations"
