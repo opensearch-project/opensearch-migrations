@@ -80,6 +80,9 @@ export class EKSInfra extends Construct {
         this.cluster = new CfnCluster(this, 'MigrationsEKSCluster', {
             name: props.clusterName,
             version: '1.32',
+            upgradePolicy: {
+                supportType: 'STANDARD'
+            },
             roleArn: clusterRole.roleArn,
             resourcesVpcConfig: {
                 subnetIds: subnetIds,
