@@ -25,6 +25,12 @@ conditionalPackageInstalls:
   grafana: false
   jaeger: true
 
+images:
+  migrationConsole:
+    repository: migrations/migration_console
+    tag: latest
+    pullPolicy: IfNotPresent
+
 
 snapshotBucketConfiguration:
   create: true
@@ -43,10 +49,6 @@ logs:
 
 
 installer:
-  image:
-    repository: migrations/migration_console
-    tag: latest
-    pullPolicy: IfNotPresent
   serviceAccount:
     create: true
     name: "helm-installer"
