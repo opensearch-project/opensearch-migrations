@@ -4,7 +4,7 @@ import { SolutionsInfrastructureStack } from '../lib/solutions-stack';
 import {SolutionsInfrastructureEKSStack} from "../lib/solutions-stack-eks";
 
 const getProps = () => {
-  const { CODE_BUCKET, SOLUTION_NAME, CODE_VERSION, STACK_NAME_SUFFIX, EKS_ENABLED } = process.env;
+  const { CODE_BUCKET, SOLUTION_NAME, CODE_VERSION, STACK_NAME_SUFFIX } = process.env;
   if (typeof CODE_BUCKET !== 'string' || CODE_BUCKET.trim() === '') {
     console.warn(`Missing environment variable CODE_BUCKET, using a default value`);
   }
@@ -15,12 +15,6 @@ const getProps = () => {
 
   if (typeof CODE_VERSION !== 'string' || CODE_VERSION.trim() === '') {
     console.warn(`Missing environment variable CODE_VERSION, using a default value`);
-  }
-
-  let eksEnabled = false
-  if (typeof EKS_ENABLED === 'string' && EKS_ENABLED.trim() === 'true') {
-    eksEnabled = true
-    console.warn(`The environment variable EKS_ENABLED=true has been provided, will only create the EKS solutions stack`);
   }
 
   const codeBucket = CODE_BUCKET ?? "Unknown";
@@ -35,34 +29,30 @@ const getProps = () => {
     solutionId,
     solutionName,
     description,
-    stackNameSuffix,
-    eksEnabled
+    stackNameSuffix
   };
 };
 
 const app = new App();
 const infraProps = getProps()
-if (!infraProps.eksEnabled) {
-  new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Import-VPC", {
-    synthesizer: new DefaultStackSynthesizer({
-      generateBootstrapVersionRule: false
-    }),
-    createVPC: false,
-    ...infraProps
-  });
-  new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
-    synthesizer: new DefaultStackSynthesizer({
-      generateBootstrapVersionRule: false
-    }),
-    createVPC: true,
-    ...infraProps
-  });
-} else {
-  new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Create-VPC", {
-    synthesizer: new DefaultStackSynthesizer({
-      generateBootstrapVersionRule: false
-    }),
-    createVPC: true,
-    ...infraProps
-  });
-}
+new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Import-VPC", {
+  synthesizer: new DefaultStackSynthesizer({
+    generateBootstrapVersionRule: false
+  }),
+  createVPC: false,
+  ...infraProps
+});
+new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
+  synthesizer: new DefaultStackSynthesizer({
+    generateBootstrapVersionRule: false
+  }),
+  createVPC: true,
+  ...infraProps
+});
+new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Create-VPC-v3", {
+  synthesizer: new DefaultStackSynthesizer({
+    generateBootstrapVersionRule: false
+  }),
+  createVPC: true,
+  ...infraProps
+});
