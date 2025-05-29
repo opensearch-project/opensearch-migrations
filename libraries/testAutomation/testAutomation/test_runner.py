@@ -13,7 +13,7 @@ from typing import List, Optional
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.x"]
+VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.x", "OS_2.x"]
 VALID_TARGET_VERSIONS = ["OS_2.x"]
 SOURCE_RELEASE_NAME = "source"
 TARGET_RELEASE_NAME = "target"

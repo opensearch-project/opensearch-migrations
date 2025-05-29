@@ -182,8 +182,85 @@ class Test0008EndToEndTestForES8WithSimpleDocs(MATestBase):
     def test_before(self):
         # Create a single index
         self.source_operations.create_index(cluster=self.source_cluster, index_name=self.index_name)
-        self.source_operations.disable_bloom(cluster=self.source_cluster, index_name=self.index_name)
-        self.source_operations.refresh(cluster=self.source_cluster, index_name=self.index_name)
+        self.source_operations.get_index(cluster=self.source_cluster, index_name=self.index_name)
+
+        # Create a single document
+        self.source_operations.create_document(
+            cluster=self.source_cluster,
+            index_name=self.index_name,
+            doc_id=self.doc_id1
+        )
+        self.source_operations.get_document(
+            cluster=self.source_cluster,
+            index_name=self.index_name,
+            doc_id=self.doc_id1
+        )
+
+        # Create a single document
+        self.source_operations.create_document(
+            cluster=self.source_cluster,
+            index_name=self.index_name,
+            doc_id=self.doc_id2
+        )
+        self.source_operations.get_document(
+            cluster=self.source_cluster,
+            index_name=self.index_name,
+            doc_id=self.doc_id2
+        )
+
+        # Use no-op transformer
+        noop_transform = self.source_operations.get_noop_transformation()
+        self.source_operations.create_transformation_json_file(
+            transform_config_data=[noop_transform],
+            file_path_to_create=self.transform_config_file
+        )
+
+    def metadata_migrate(self):
+        metadata_result: CommandResult = self.metadata.migrate(
+            extra_args=[
+                "--transformer-config-file", self.transform_config_file,
+                "--index-allowlist", self.index_name,
+                "--component-template-allowlist", "none",
+                "--index-template-allowlist", "none"
+            ]
+        )
+        assert metadata_result.success
+
+    def metadata_after(self):
+        self.target_operations.get_index(
+            cluster=self.target_cluster,
+            index_name=self.index_name,
+            max_attempts=5,
+            delay=2.0
+        )
+
+    def backfill_wait_for_stop(self):
+        return super().backfill_wait_for_stop()
+
+
+
+class Test0009OS2TestsWithBestCompression(MATestBase):
+    def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str):
+        allow_combinations = [
+            (ElasticsearchV2_X, OpensearchV2_X)
+        ]
+        run_isolated = True
+        description = "For ES 8x test using 2 simple docs in 1 index to perform metadata and backfill."
+        super().__init__(console_config_path=console_config_path,
+                         console_link_env=console_link_env,
+                         unique_id=unique_id,
+                         description=description,
+                         allow_source_target_combinations=allow_combinations,
+                         migrations_required=[MigrationType.BACKFILL, MigrationType.METADATA],
+                         run_isolated=run_isolated)
+        self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
+        self.index_name = f"test_0010_{self.unique_id}"
+        self.doc_id1 = "test_1000_doc"
+        self.doc_id2 = "test_2000_doc"
+
+    def test_before(self):
+        # Create a single index
+        self.source_operations.create_index(cluster=self.source_cluster, index_name=self.index_name)
         self.source_operations.get_index(cluster=self.source_cluster, index_name=self.index_name)
 
         # Create a single document
