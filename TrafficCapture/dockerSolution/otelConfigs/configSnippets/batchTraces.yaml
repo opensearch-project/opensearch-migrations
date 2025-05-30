@@ -1,4 +1,8 @@
+processors:
+  probabilistic_sampler/traces:
+    sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE:-1}
+
 service:
   pipelines:
     traces:
-      processors: [ batch ]
+      processors: [probabilistic_sampler/traces, batch]
