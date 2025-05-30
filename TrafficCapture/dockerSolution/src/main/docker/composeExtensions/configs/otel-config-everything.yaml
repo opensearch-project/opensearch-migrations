@@ -2,24 +2,49 @@ receivers:
   otlp:
     protocols:
       grpc:
+        endpoint: :4317
+      http:
+        endpoint: :4318
 processors:
   batch:
     timeout: 10s
     send_batch_size: 8192
     send_batch_max_size: 10000
+  probabilistic_sampler/traces:
+    sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE:-1}
+  cumulativetodelta:
+  resource/metrics:
+    attributes:
+      - key: qualifier
+        value: ${env:QUALIFIER}
+        action: upsert
+  resource/remove_default_attributes:
+    attributes:
+      - key: telemetry.sdk.name
+        action: delete
+      - key: telemetry.sdk.version
+        action: delete
+      - key: telemetry.sdk.language
+        action: delete
+      - key: service.name
+        action: delete
 extensions:
   zpages:
     endpoint: :55679
   pprof:
     endpoint: :1888
   health_check:
+    endpoint: :13133
 exporters:
-  logging:
+  debug:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
   awsemf:
     namespace: 'OpenSearchMigrations'
+    dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
+    resource_to_telemetry_conversion:
+      enabled: true
   awsxray:
     index_all_attributes: true
   prometheus:
@@ -36,13 +61,21 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [logging, awsemf, prometheus]
+      processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
+      exporters: [debug, awsemf, prometheus]
     traces:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [logging, awsxray, otlp/jaeger]
+      processors: [probabilistic_sampler/traces, batch]
+      exporters: [debug, awsxray, otlp/jaeger]
     logs:
       receivers: [otlp]
       processors:
-      exporters: [logging]
+      exporters: [debug]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: '0.0.0.0'
+                port: 8888
