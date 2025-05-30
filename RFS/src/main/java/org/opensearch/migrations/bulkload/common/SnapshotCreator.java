@@ -65,6 +65,7 @@ public abstract class SnapshotCreator {
         body.put("indices", this.getIndexAllowlist());
         body.put("ignore_unavailable", true);
         body.put("include_global_state", true);
+        body.put("compress", false);
 
         // Create the snapshot; idempotent operation
         try {
