@@ -1,0 +1,3 @@
+apiVersion: v2
+name: bootstrap-k8s
+version: 0.1.0

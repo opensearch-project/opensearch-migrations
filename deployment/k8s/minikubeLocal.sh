@@ -18,8 +18,14 @@ start() {
   helm repo add opensearch-operator https://opensearch-project.github.io/opensearch-k8s-operator/
   helm repo add strimzi https://strimzi.io/charts/
 
-  minikube start
+  # Development setup to allow using an insecure registry
+  minikube start --insecure-registry="0.0.0.0/0"
   minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
+  if ! docker network inspect minikube --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw docker-registry; then
+    docker network connect minikube docker-registry 2>/dev/null || echo "⚠️  Warning: Could not connect docker-registry to minikube network"
+  else
+    echo "ℹ️  docker-registry is already connected to minikube network"
+  fi
 }
 
 pause() {
@@ -29,6 +35,11 @@ pause() {
 
 delete() {
   kill_minikube_processes
+  if docker network inspect minikube --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw docker-registry; then
+    docker network disconnect minikube docker-registry 2>/dev/null || echo "⚠️  Warning: Could not disconnect docker-registry from minikube network"
+  else
+    echo "ℹ️  docker-registry is not connected to minikube network"
+  fi
   minikube delete
 }
 
