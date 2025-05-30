@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
+import org.opensearch.migrations.bulkload.lucene.version_9.Lucene912CustomCodec.Mode;
+
 import shadow.lucene9.org.apache.lucene.codecs.Codec;
 import shadow.lucene9.org.apache.lucene.codecs.CompoundFormat;
 import shadow.lucene9.org.apache.lucene.codecs.DocValuesFormat;
@@ -20,6 +22,7 @@ public class Elasticsearch816CodecFallback extends Codec {
 
     public Elasticsearch816CodecFallback() {
         super("Elasticsearch816");
+        System.out.println(">>>>> Loading stub Elasticsearch816CodecFallback class");
     }
 
     @Override
@@ -34,7 +37,7 @@ public class Elasticsearch816CodecFallback extends Codec {
 
     @Override
     public StoredFieldsFormat storedFieldsFormat() {
-        return Codec.forName("Lucene912").storedFieldsFormat();
+        return new ZstdStoredFields814Format(Mode.ZSTD_NO_DICT, 3);
     }
 
     @Override

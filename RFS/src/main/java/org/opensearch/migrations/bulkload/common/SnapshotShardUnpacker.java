@@ -54,6 +54,21 @@ public class SnapshotShardUnpacker {
                         .addArgument(fileMetadata::getName)
                         .addArgument(fileMetadata::getPhysicalName)
                         .log();
+
+                    log.atInfo()
+                        .setMessage("Unpacking File - Name: {}, Physical: {}, Size: {} bytes")
+                        .addArgument(fileMetadata::getName)
+                        .addArgument(fileMetadata::getPhysicalName)
+                        .addArgument(fileMetadata.getLength())
+                        .log();
+                    String name = fileMetadata.getName();
+                    if (name.endsWith(".fdt") || name.endsWith(".fdx") || name.endsWith(".cfs") || name.endsWith(".si")) {
+                        log.atInfo()
+                                .setMessage("Identified important Lucene file: {}")
+                                .addArgument(name)
+                                .log();
+                    }
+
                     try (
                         IndexOutput indexOutput = primaryDirectory.createOutput(
                             fileMetadata.getPhysicalName(),

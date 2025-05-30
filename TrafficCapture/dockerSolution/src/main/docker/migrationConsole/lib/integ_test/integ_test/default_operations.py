@@ -201,6 +201,48 @@ class DefaultOperationsLibrary:
         return {
             "NoopTransformerProvider": ""
         }
-    
+
     def run_test_benchmarks(self, cluster: Cluster):
         run_test_benchmarks(cluster=cluster)
+
+    def disable_bloom(self, cluster: Cluster, index_name: str):
+        """
+        Disable bloom_filter_for_id_field for a given index (ES 8.x specific).
+        """
+        path = f"/{index_name}/_settings"
+        headers = {'Content-Type': 'application/json'}
+        payload = {
+            "index": {
+                "bloom_filter_for_id_field": {
+                    "enabled": False
+                }
+            }
+        }
+
+        response = execute_api_call(
+            cluster=cluster,
+            method=HttpMethod.PUT,
+            path=path,
+            headers=headers,
+            data=json.dumps(payload),
+            expected_status_code=200
+        )
+
+        logger.info(f"Successfully disabled bloom filter on index: {index_name}. Response: {response}")
+
+    def refresh(self, cluster: Cluster, index_name: str):
+        """
+        Refresh the index to make recent changes (like settings updates) visible to search.
+        """
+        path = f"/{index_name}/_refresh"
+        headers = {'Content-Type': 'application/json'}
+
+        response = execute_api_call(
+            cluster=cluster,
+            method=HttpMethod.POST,
+            path=path,
+            headers=headers,
+            expected_status_code=200
+        )
+
+        logger.info(f"Successfully refreshed index: {index_name}. Response: {response}")
