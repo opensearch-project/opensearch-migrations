@@ -19,7 +19,6 @@ public class IgnoreBloomFilter extends PostingsFormat {
 
     public IgnoreBloomFilter() {
         super("ES87BloomFilter");
-        System.out.println(">>>>> Loading stub IgnoreBloomFilter class");
     }
 
     @Override

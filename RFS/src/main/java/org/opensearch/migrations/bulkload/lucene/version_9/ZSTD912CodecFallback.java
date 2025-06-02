@@ -7,7 +7,6 @@ public class ZSTD912CodecFallback extends Codec {
 
     public ZSTD912CodecFallback() {
         super("ZSTD912");
-        System.out.println(">>>>> Loaded stub ZSTD912CodecFallback");
     }
 
     @Override
