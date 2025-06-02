@@ -146,8 +146,8 @@ export class CaptureProxyStack extends MigrationServiceCore {
             taskRolePolicies: servicePolicies,
             portMappings: [servicePort],
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 512,
-            taskMemoryLimitMiB: 2048,
+            taskCpuUnits: 2048,
+            taskMemoryLimitMiB: 4096,
             ...props
         });
     }
