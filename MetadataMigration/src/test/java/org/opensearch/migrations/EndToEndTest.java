@@ -78,6 +78,30 @@ class EndToEndTest extends BaseMigrationTest {
         }
     }
 
+    private static Stream<Arguments> extendedScenarios() {
+        return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
+    }
+
+    @ParameterizedTest(name = "From version {0} to version OS 3.0")
+    @MethodSource(value = "extendedScenarios")
+    void extendedMetadata(SearchClusterContainer.ContainerVersion sourceVersion) {
+        try (
+                final var sourceCluster = new SearchClusterContainer(sourceVersion);
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0);
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            metadataCommandOnClusters(
+                    TransferMedium.SnapshotImage,
+                    MetadataCommands.EVALUATE,
+                    List.of(TemplateType.Legacy));
+            metadataCommandOnClusters(
+                    TransferMedium.SnapshotImage,
+                    MetadataCommands.MIGRATE,
+                    List.of(TemplateType.Legacy));
+        }
+    }
+
     private enum TransferMedium {
         SnapshotImage,
         Http

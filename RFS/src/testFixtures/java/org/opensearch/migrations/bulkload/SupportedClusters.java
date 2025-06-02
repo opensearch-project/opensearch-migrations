@@ -24,6 +24,13 @@ public class SupportedClusters {
         );
     }
 
+    public static List<ContainerVersion> extendedSources() {
+        return List.of(
+                SearchClusterContainer.ES_V7_4,
+                SearchClusterContainer.ES_V7_1
+        );
+    }
+
     private static List<ContainerVersion> targets() {
         return List.of(
             SearchClusterContainer.OS_V1_3_16,
