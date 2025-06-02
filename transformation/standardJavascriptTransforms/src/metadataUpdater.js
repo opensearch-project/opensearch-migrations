@@ -1,14 +1,33 @@
+function applyRulesToMap(when, set, remove, map) {
+  const matches = Object.entries(when).every(([k, v]) => map.get(k) === v);
+  if (matches) {
+    Object.entries(set).every(([k, v]) => map.set(k, v));
+    remove.forEach((key) => map.delete(key));
+  }
+}
+
+function applyRulesToObject(when, set, remove, obj) {
+  const matches = Object.entries(when).every(([k, v]) => obj[k] === v);
+  if (matches) {
+    Object.assign(obj, set);
+    remove.forEach((key) => delete obj[key]);
+  }
+}
+
 function applyRules(node, rules) {
   if (Array.isArray(node)) {
     node.forEach((child) => applyRules(child, rules));
+  } else if (node instanceof Map) {
+    for (const { when, set, remove = [] } of rules) {
+      applyRulesToMap(when, set, remove, node);
+    }
+    // recurse
+    for (const child of node.values()) {
+      applyRules(child, rules);
+    }
   } else if (node && typeof node === "object") {
     for (const { when, set, remove = [] } of rules) {
-      const matches = Object.entries(when).every(([k, v]) => node[k] === v);
-      if (matches) {
-        // apply the rule
-        Object.assign(node, set);
-        remove.forEach((key) => delete node[key]);
-      }
+      applyRulesToObject(when, set, remove, node);
     }
     // recurse
     Object.values(node).forEach((child) => applyRules(child, rules));

@@ -107,36 +107,42 @@ let indexDescription = {
 };
 
 const flattenToFlatObjectConfig = {
-  rules: [{
-    when: { type: "flattened" },
-    set: { type: "flat_object" },
-    remove: ["index"],
-  }]
+  rules: [
+    {
+      when: { type: "flattened" },
+      set: { type: "flat_object" },
+      remove: ["index"],
+    },
+  ],
 };
 
 const constantKeywordToKeywordConfig = {
-  rules: [{
-    when: { type: "constant_keyword" },
-    set: { type: "keyword" },
-  }]
+  rules: [
+    {
+      when: { type: "constant_keyword" },
+      set: { type: "keyword" },
+    },
+  ],
 };
 
 const multipleCriteriaConfig = {
-    rules: [{
-        when: { type: "keyword", ignore_above: 2048 },
-        set: { type: "keyword", ignore_above: 999 },
-      }]
-}
+  rules: [
+    {
+      when: { type: "keyword", ignore_above: 2048 },
+      set: { type: "keyword", ignore_above: 999 },
+    },
+  ],
+};
 
 function wrapAsDoc(obj) {
-    return { type: "index", name: "doc_name", body: clone(obj) };
+  return { type: "index", name: "doc_name", body: obj };
 }
 
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-describe("TypeMappingsSanitizer", () => {
+describe("Metadata Updater", () => {
   test("null context throws", () => {
     expect(() => main(null)).toThrow();
   });
@@ -163,10 +169,53 @@ describe("TypeMappingsSanitizer", () => {
 
   test("Multiple criteria are matched", () => {
     const updaterInstance = main(multipleCriteriaConfig);
-    const result = updaterInstance(wrapAsDoc(indexDescription)).body
+    const result = updaterInstance(wrapAsDoc(indexDescription)).body;
     expect(result).not.toStrictEqual(indexDescription);
     const resultAsString = JSON.stringify(result, null, 2);
     expect(resultAsString).toEqual(expect.not.stringContaining("2048"));
     expect(resultAsString).toEqual(expect.stringContaining("999"));
-  })
+  });
+});
+
+describe("Metadata updater internals", () => {
+  let simpleConfig = {
+    rules: [{ when: { a: 1 }, set: { a: 2 }, remove: ["c"] }],
+  };
+
+  test("Decomposes arrays", () => {
+    const updaterInstance = main(simpleConfig);
+
+    const testObj = [{ a: 1 }, { a: 1, c: 1 }];
+    const result = updaterInstance(wrapAsDoc(testObj)).body;
+
+    expect(result).toEqual([{ a: 2 }, { a: 2 }]);
+  });
+
+  test("Decomposes Maps", () => {
+    const updaterInstance = main(simpleConfig);
+
+    const testObj = new Map([
+      ["a", 1],
+      ["c", 1],
+    ]);
+    const result = updaterInstance(wrapAsDoc(testObj)).body;
+    expect(result).toEqual(new Map([["a", 2]]));
+  });
+
+  test("Decomposes Objects", () => {
+    const updaterInstance = main(simpleConfig);
+
+    const testObj = { a: 1, c: 1 };
+    const result = updaterInstance(wrapAsDoc(testObj)).body;
+    expect(result).toEqual({ a: 2 });
+  });
+
+  test("Removal only occurs with matches", () => {
+    const updaterInstance = main(simpleConfig);
+
+    const testObj = [{ c: 1 }, { a: 1, c: 1 }];
+    const result = updaterInstance(wrapAsDoc(testObj)).body;
+
+    expect(result).toEqual([{ c: 1 }, { a: 2 }]);
+  });
 });
