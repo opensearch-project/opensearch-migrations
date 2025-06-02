@@ -12,6 +12,12 @@ public class VersionMatchers {
     public static final Predicate<Version> isES_7_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 7.10"));
     public static final Predicate<Version> isES_7_10 = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.10.2"));
     public static final Predicate<Version> isES_8_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 8.17"));
+    public static final Predicate<Version> isES_7_0_to_7_9 =
+            v -> v != null
+                    && v.getFlavor() == Flavor.ELASTICSEARCH
+                    && v.getMajor() == 7
+                    && v.getMinor() >= 0
+                    && v.getMinor() < 10;
     public static final Predicate<Version> equalOrGreaterThanES_7_10 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.10"));
 
     public static final Predicate<Version> isOS_1_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 1.0.0"));
