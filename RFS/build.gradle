@@ -36,6 +36,7 @@ task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
     archiveClassifier.set('lucene9-shadow')
     configurations = [project.configurations.lucene9]
     relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
+    relocate 'org.opensearch.plugin.customcodecs', 'shadow.opensearch.plugin.customcodecs'
 }
 
 tasks.register('prepareShadowJars') {
@@ -83,6 +84,7 @@ dependencies {
     lucene9 libs.lucene.v9.core
     lucene9 libs.lucene.v9.analysis.common
     lucene9 libs.lucene.v9.backward.codecs
+    lucene9 'org.opensearch.plugin:opensearch-custom-codecs:3.0.0.0'
 
     implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files

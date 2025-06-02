@@ -35,15 +35,24 @@ public class TemporaryTest extends SourceTestBase {
     public void testOS2xToOS2xSimpleDocMigration() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
-        var os2xPair = SupportedClusters.supportedPairs(false).stream()
+//        var os3xVersions = SupportedClusters.supportedSourcesOrTargets(false).stream()
+//                .filter(v -> VersionMatchers.isOS_3_X.test(v.getVersion()))
+//                .toList();
+//        if (os3xVersions.isEmpty()) {
+//            throw new IllegalStateException("No OS 3.x clusters found in supportedSourcesOrTargets()");
+//        }
+//        var version = os3xVersions.get(0);  // use first match
+//        var os3xToOs3xPair = new SupportedClusters.MigrationPair(version, version);
+
+        var es8ToOs2xPair = SupportedClusters.supportedPairs(false).stream()
                 .filter(pair -> VersionMatchers.isOS_2_X.test(pair.source().getVersion())
                         && VersionMatchers.isOS_2_X.test(pair.target().getVersion()))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No OS 2.x to OS 2.x pair found"));
+                .orElseThrow(() -> new IllegalStateException("No ES 8.x to OS 3.x pair found"));
 
         try (
-            var sourceCluster = new SearchClusterContainer(os2xPair.source());
-            var targetCluster = new SearchClusterContainer(os2xPair.target());
+            var sourceCluster = new SearchClusterContainer(es8ToOs2xPair.source());
+            var targetCluster = new SearchClusterContainer(es8ToOs2xPair.target());
         ) {
             Startables.deepStart(sourceCluster, targetCluster).join();
 
@@ -56,7 +65,7 @@ public class TemporaryTest extends SourceTestBase {
                     "    \"number_of_shards\": 1,\n" +
                     "    \"number_of_replicas\": 0,\n" +
                     "    \"refresh_interval\": -1,\n" +
-                    "    \"codec\": \"best_compression\"\n" +
+                    "    \"codec\": \"zstd\"\n" +
                     "  }\n" +
                     "}";
 
@@ -66,16 +75,28 @@ public class TemporaryTest extends SourceTestBase {
             // Print the "codec" index setting for verification
             var sourceSettingsEntry = sourceOps.get("/" + indexName + "/_settings");
             JsonNode sourceSettings = mapper.readTree(sourceSettingsEntry.getValue());
-            System.out.println("Codec: " + sourceSettings.get(indexName).get("settings").get("index").get("codec").asText());
+
+            // Try to get codec value, or log if it's missing
+            JsonNode codecNode = sourceSettings.path(indexName).path("settings").path("index").path("codec");
+            if (codecNode.isMissingNode() || codecNode.isNull()) {
+                System.out.println("Codec: (missing during index creation)");
+            } else {
+                System.out.println("Codec: " + codecNode.asText());
+            }
+
+            // Always print full index settings
             System.out.println("Full index settings:");
-            System.out.println(sourceSettings);
+            System.out.println(sourceSettings.toPrettyString());
 
             // Create index on target
-            targetOps.createIndex(indexName, body);
+//            targetOps.createIndex(indexName, body);
 
             // Ingest one simple document
             String simpleDoc = "{\"message\": \"Hello OpenSearch!\"}";
             sourceOps.createDocument(indexName, "doc1", simpleDoc);
+
+            // Wait for green status on Index
+            sourceOps.waitForGreenStatus(indexName);
 
             // Refresh so it's visible in snapshot
             sourceOps.post("/" + indexName + "/_refresh", null);
@@ -112,8 +133,8 @@ public class TemporaryTest extends SourceTestBase {
                     runCounter,
                     new Random(1),
                     DocumentMigrationTestContext.factory().noOtelTracking(),
-                    os2xPair.source().getVersion(),
-                    os2xPair.target().getVersion(),
+                    es8ToOs2xPair.source().getVersion(),
+                    es8ToOs2xPair.target().getVersion(),
                     null
             ));
 

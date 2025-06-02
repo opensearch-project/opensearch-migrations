@@ -9,6 +9,8 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
@@ -389,5 +391,27 @@ public class ClusterOperations {
         } else {
             return defaultDocType + "/";
         }
+    }
+
+    @SneakyThrows
+    public void waitForGreenStatus(String indexName) {
+        final int maxRetries = 10;
+        final long delayMillis = 1000;
+
+        for (int i = 0; i < maxRetries; i++) {
+            var response = get("/_cluster/health/" + indexName + "?wait_for_status=green&timeout=1s");
+            JsonNode responseJson = new ObjectMapper().readTree(response.getValue());
+
+            String status = responseJson.path("status").asText();
+            log.info("Index [{}] health status: {}", indexName, status);
+
+            if ("green".equals(status)) {
+                return;
+            }
+
+            Thread.sleep(delayMillis);
+        }
+
+        throw new IllegalStateException("Index [" + indexName + "] failed to reach green status within retry window");
     }
 }
