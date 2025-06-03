@@ -156,20 +156,20 @@ describe("Metadata Updater", () => {
 
   test("Constant_keywords are replaced", () => {
     const instance = main(constantKeywordToKeywordConfig);
-    const result = instance(wrapAsDoc(templateDescription)).body;
+    const result = instance(wrapAsDoc(clone(templateDescription))).body;
 
     expect(result).not.toStrictEqual(templateDescription);
   });
 
   test("Flattened are replaced", () => {
-    const updaterInstance = main(flattenToFlatObjectConfig);
-    const result = updaterInstance(wrapAsDoc(indexDescription)).body;
+    const instance = main(flattenToFlatObjectConfig);
+    const result = instance(wrapAsDoc(clone(indexDescription))).body;
     expect(result).not.toStrictEqual(indexDescription);
   });
 
   test("Multiple criteria are matched", () => {
-    const updaterInstance = main(multipleCriteriaConfig);
-    const result = updaterInstance(wrapAsDoc(indexDescription)).body;
+    const instance = main(multipleCriteriaConfig);
+    const result = instance(wrapAsDoc(clone(indexDescription))).body;
     expect(result).not.toStrictEqual(indexDescription);
     const resultAsString = JSON.stringify(result, null, 2);
     expect(resultAsString).toEqual(expect.not.stringContaining("2048"));
