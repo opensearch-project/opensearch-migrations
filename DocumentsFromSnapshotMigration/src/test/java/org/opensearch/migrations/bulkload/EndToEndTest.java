@@ -154,11 +154,6 @@ public class EndToEndTest extends SourceTestBase {
                     "[{\"NoopTransformerProvider\":{}}]" // skip transformations including doc type removal
                     : null;
 
-            // Add --allow-loose-version-matching flag for loose compatibility
-            if (VersionMatchers.isES_7_0_to_7_9.test(sourceVersion)) {
-                testDocMigrationContext.allowLooseVersionMatches = true;
-            }
-
             // ExpectedMigrationWorkTerminationException is thrown on completion.
             var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,

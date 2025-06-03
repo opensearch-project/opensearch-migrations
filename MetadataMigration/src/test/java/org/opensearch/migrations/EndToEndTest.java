@@ -174,10 +174,11 @@ class EndToEndTest extends BaseMigrationTest {
                 throw new RuntimeException("Invalid Option");
         }
 
-        // If the target is not part of  supported target matrix enable loose version matching
-        if (!(SupportedClusters.supportedTargets(false)
-            .stream()
-            .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
+
+        // If target is ES and the target is not part of  supported target matrix enable loose version matching
+        Version target = targetCluster.getContainerVersion().getVersion();
+        if (target.getFlavor() == Flavor.ELASTICSEARCH &&
+                !SupportedClusters.supportedTargets(false).contains(target)) {
             arguments.versionStrictness.allowLooseVersionMatches = true;
         }
 

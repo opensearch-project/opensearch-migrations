@@ -8,7 +8,6 @@ import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 public class DocumentMigrationTestContext extends RootDocumentMigrationContext {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
-    public boolean allowLooseVersionMatches = false;
 
     public DocumentMigrationTestContext(
         InMemoryInstrumentationBundle inMemoryInstrumentationBundle,
