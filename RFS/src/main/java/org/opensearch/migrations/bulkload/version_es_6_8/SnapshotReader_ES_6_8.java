@@ -19,13 +19,13 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
     public boolean compatibleWith(Version version) {
         return VersionMatchers.isES_6_X
             .or(VersionMatchers.isES_5_X)
+            .or(VersionMatchers.isES_7_0_to_7_9)
             .test(version);
     }
 
     @Override
     public boolean looseCompatibleWith(Version version) {
         return UnboundVersionMatchers.isBelowES_6_X
-            .or(VersionMatchers.isES_7_0_to_7_9)
             .test(version);
     }
 
