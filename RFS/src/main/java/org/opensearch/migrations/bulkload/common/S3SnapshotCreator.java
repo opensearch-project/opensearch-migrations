@@ -52,7 +52,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         settings.put("bucket", getBucketName());
         settings.put("region", s3Region);
         settings.put("base_path", getBasePath());
-
+        settings.put("compress", false);
         if (snapshotRoleArn != null) {
             settings.put("role_arn", snapshotRoleArn);
         }
