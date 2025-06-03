@@ -3,13 +3,9 @@ package org.opensearch.migrations;
 import java.util.function.Predicate;
 
 import lombok.experimental.UtilityClass;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @UtilityClass
 public class VersionMatchers {
-    private static final Logger log = LoggerFactory.getLogger(VersionMatchers.class);
-
     public static final Predicate<Version> isES_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 2.4"));
     public static final Predicate<Version> isES_5_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 5.6"));
     public static final Predicate<Version> isES_6_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 6.8"));
