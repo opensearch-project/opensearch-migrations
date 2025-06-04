@@ -82,12 +82,12 @@ class EndToEndTest extends BaseMigrationTest {
         return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
     }
 
-    @ParameterizedTest(name = "From version {0} to version OS 3.0")
+    @ParameterizedTest(name = "From version {0} to version OS 2.19")
     @MethodSource(value = "extendedScenarios")
     void extendedMetadata(SearchClusterContainer.ContainerVersion sourceVersion) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
-                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0);
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1);
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
@@ -174,11 +174,10 @@ class EndToEndTest extends BaseMigrationTest {
                 throw new RuntimeException("Invalid Option");
         }
 
-
         // If the target is not part of  supported target matrix enable loose version matching
         if (!(SupportedClusters.supportedTargets(false)
-                .stream()
-                .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
+            .stream()
+            .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
             arguments.versionStrictness.allowLooseVersionMatches = true;
         }
 
