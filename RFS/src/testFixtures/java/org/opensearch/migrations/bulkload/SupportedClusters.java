@@ -30,6 +30,9 @@ public class SupportedClusters {
 
     public static List<ContainerVersion> extendedSources() {
         return List.of(
+                SearchClusterContainer.ES_V7_9,
+                SearchClusterContainer.ES_V7_8,
+                SearchClusterContainer.ES_V7_7,
                 SearchClusterContainer.ES_V7_4,
                 SearchClusterContainer.ES_V7_1
         );
