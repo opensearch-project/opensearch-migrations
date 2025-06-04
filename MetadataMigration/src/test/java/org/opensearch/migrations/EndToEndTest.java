@@ -175,10 +175,10 @@ class EndToEndTest extends BaseMigrationTest {
         }
 
 
-        // If target is ES and the target is not part of  supported target matrix enable loose version matching
-        Version target = targetCluster.getContainerVersion().getVersion();
-        if (target.getFlavor() == Flavor.ELASTICSEARCH &&
-                !SupportedClusters.supportedTargets(false).contains(target)) {
+        // If the target is not part of  supported target matrix enable loose version matching
+        if (!(SupportedClusters.supportedTargets(false)
+                .stream()
+                .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
             arguments.versionStrictness.allowLooseVersionMatches = true;
         }
 
