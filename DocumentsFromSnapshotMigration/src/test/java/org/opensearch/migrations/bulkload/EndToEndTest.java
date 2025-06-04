@@ -53,6 +53,21 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
+    private static Stream<Arguments> extendedScenarios() {
+        return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
+    }
+    @ParameterizedTest(name = "Source {0} to Target OS 2.19")
+    @MethodSource(value = "extendedScenarios")
+    public void extendedMigrationDocuments(
+            final SearchClusterContainer.ContainerVersion sourceVersion) {
+        try (
+                final var sourceCluster = new SearchClusterContainer(sourceVersion);
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+        ) {
+            migrationDocumentsWithClusters(sourceCluster, targetCluster);
+        }
+    }
+
     @SneakyThrows
     private void migrationDocumentsWithClusters(
         final SearchClusterContainer sourceCluster,
