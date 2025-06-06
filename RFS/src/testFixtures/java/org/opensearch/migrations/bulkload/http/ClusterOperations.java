@@ -256,7 +256,13 @@ public class ClusterOperations {
             "  }\r\n" +
             "}";
 
-        var extraParameters = (VersionMatchers.isES_5_X.or(VersionMatchers.isES_8_X) ).test(clusterVersion) ? "" : "?include_type_name=true";
+        var extraParameters = (
+                VersionMatchers.isES_5_X
+                        .or(VersionMatchers.isES_8_X)
+                        .or(VersionMatchers.isES_6_0_to_6_5)
+            ).test(clusterVersion)
+                    ? ""
+                    : "?include_type_name=true";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));

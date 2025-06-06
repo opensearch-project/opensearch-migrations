@@ -17,7 +17,8 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
 
     @Override
     public boolean compatibleWith(Version version) {
-        return VersionMatchers.equalOrGreaterThanES_7_10
+        return VersionMatchers.isES_7_9_X
+            .or(VersionMatchers.equalOrGreaterThanES_7_10)
             .or(VersionMatchers.isES_8_X)
             .or(VersionMatchers.isOS_1_X)
             .or(VersionMatchers.isOS_2_X)
@@ -26,7 +27,8 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
 
     @Override
     public boolean looseCompatibleWith(Version version) {
-        return UnboundVersionMatchers.isGreaterOrEqualES_7_10
+        return VersionMatchers.isES_7_9_X
+            .or(UnboundVersionMatchers.isGreaterOrEqualES_7_10)
             .or(UnboundVersionMatchers.anyOS)
             .test(version);
     }

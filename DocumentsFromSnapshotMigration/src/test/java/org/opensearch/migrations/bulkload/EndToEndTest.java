@@ -88,14 +88,17 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
+            boolean supportsSoftDeletes =
+                sourceVersion.getMajor() > 6 ||
+                (sourceVersion.getMajor() == 6 && sourceVersion.getMinor() >= 5);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
                 "    \"number_of_shards\": %d," +
                 "    \"number_of_replicas\": 0," +
-                (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)
-                        ? ""
-                        : "    \"index.soft_deletes.enabled\": true,") +
+                (supportsSoftDeletes
+                        ? "    \"index.soft_deletes.enabled\": true,"
+                        : "") +
                 "    \"refresh_interval\": -1" +
                 "  }" +
                 "}",

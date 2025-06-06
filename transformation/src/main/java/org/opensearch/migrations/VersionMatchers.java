@@ -12,8 +12,9 @@ public class VersionMatchers {
     public static final Predicate<Version> isES_7_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 7.10"));
     public static final Predicate<Version> isES_7_10 = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.10.2"));
     public static final Predicate<Version> isES_8_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 8.17"));
-    public static final Predicate<Version> isES_7_0_to_7_9 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.0"))
-                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 7.9")));
+    public static final Predicate<Version> isES_7_0_to_7_8 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.0"))
+                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 7.8")));
+    public static final Predicate<Version> isES_7_9_X = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.9.0"));
     public static final Predicate<Version> equalOrGreaterThanES_7_10 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.10"));
 
     public static final Predicate<Version> isOS_1_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 1.0.0"));
@@ -22,6 +23,8 @@ public class VersionMatchers {
     public static final Predicate<Version> isOS_2_19_OrGreater = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.19.0"))
                                                                     .or(VersionMatchers.isOS_3_X);
     public static final Predicate<Version> anyOS = VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isOS_3_X);
+    public static final Predicate<Version> isES_6_0_to_6_5 = version ->
+            version.getMajor() == 6 && version.getMinor() < 6;
 
     static Predicate<Version> matchesFlavor(final Version version) {
         return other -> {
