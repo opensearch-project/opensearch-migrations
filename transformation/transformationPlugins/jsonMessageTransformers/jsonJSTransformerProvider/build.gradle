@@ -9,8 +9,14 @@ dependencies {
 
     implementation libs.jackson.core
     implementation libs.jackson.databind
-}
 
-tasks.named('test') {
-    useJUnitPlatform()
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.slf4j.api
+    testImplementation libs.hamcrest
+    testRuntimeOnly libs.junit.jupiter.engine
+
 }
