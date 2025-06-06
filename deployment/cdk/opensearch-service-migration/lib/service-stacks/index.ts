@@ -1,4 +1,3 @@
-export * from './capture-proxy-es-stack'
 export * from './capture-proxy-stack'
 export * from './elasticsearch-stack'
 export * from './kafka-stack'
