@@ -34,6 +34,8 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
     readonly sourceCluster?: ClusterYaml,
+    readonly sourceClusterDisabled?: boolean,
+    readonly targetCluster?: ClusterYaml,
     readonly managedServiceSourceSnapshotEnabled?: boolean
 }
 
@@ -277,11 +279,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }
 
-        if (props.managedServiceSourceSnapshotEnabled && servicesYaml.snapshot?.s3) {
-            servicesYaml.snapshot.s3.role =
-                createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
-                    this.region, props.stage, props.defaultDeployId)
-                    .roleArn;
+        // Always create the snapshot role regardless of any conditions
+        const snapshotRole = createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
+            this.region, props.stage, props.defaultDeployId);
+        
+        // If snapshot s3 config exists, add the role ARN to it
+        if (servicesYaml.snapshot?.s3) {
+            servicesYaml.snapshot.s3.role = snapshotRole.roleArn;
         }
 
         const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
