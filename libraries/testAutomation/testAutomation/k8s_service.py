@@ -160,10 +160,17 @@ class K8sService:
         if helm_release_exists:
             logger.info(f"Helm release {release_name} already exists, skipping install")
             return True
+
         logger.info(f"Installing {release_name} from {chart_path} with values {values_file}")
         command = ["helm", "install", release_name, chart_path, "-n", self.namespace, "--create-namespace"]
+
         if values_file:
             command.extend(["-f", values_file])
+
+        # Inject nameOverride/fullnameOverride only for source or target
+        if release_name in ("source", "target"):
+            command.extend(["--set", f"nameOverride={release_name},fullnameOverride={release_name}"])
+
         return self.run_command(command)
 
     def helm_uninstall(self, release_name: str) -> CompletedProcess | bool:

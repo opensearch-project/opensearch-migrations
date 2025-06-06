@@ -92,7 +92,7 @@ class MATestBase:
     def backfill_start(self):
         if MigrationType.BACKFILL in self.migrations_required:
             # Flip this bool to only use one worker otherwise use the default worker count (5), useful for debugging
-            single_worker_mode = False
+            single_worker_mode = True
             if not single_worker_mode:
                 backfill_start_result: CommandResult = self.backfill.start()
                 assert backfill_start_result.success

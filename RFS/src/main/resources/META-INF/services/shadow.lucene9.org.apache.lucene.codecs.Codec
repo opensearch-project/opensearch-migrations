@@ -1,1 +1,2 @@
 org.opensearch.migrations.bulkload.lucene.version_9.Elasticsearch816CodecFallback
+org.opensearch.migrations.bulkload.lucene.version_9.ZSTD912CodecFallback
