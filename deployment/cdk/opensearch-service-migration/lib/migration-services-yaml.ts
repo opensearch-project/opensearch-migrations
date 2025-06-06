@@ -24,7 +24,10 @@ export class ClusterYaml {
 }
 
 export class MetricsSourceYaml {
-    cloudwatch? : object | null = null;
+    cloudwatch?: {
+        aws_region?: string
+        qualifier: string;
+    } | null = null;
 }
 
 export class ECSService {
