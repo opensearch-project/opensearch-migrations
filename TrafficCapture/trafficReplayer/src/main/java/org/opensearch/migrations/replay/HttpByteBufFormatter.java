@@ -259,10 +259,12 @@ public class HttpByteBufFormatter {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));
             T output = channel.readInbound();
             if (output == null && HttpMessageType.RESPONSE.equals(msgType)) {
-                log.debug("HTTP response was not processed after decoding all bytes." +
-                        "Manually writing empty last content to the channel to signal end of stream." +
-                        "This will happen for HEAD and CONNECT responses since we" +
-                        "are not decoding the request in the same channel.");
+                log.atDebug().setMessage( () ->
+                        "HTTP response was not processed after decoding all bytes. " +
+                        "Manually writing empty last content to the channel to signal" +
+                        " end of stream to channel handlers." +
+                        "This will happen HEAD and CONNECT responses or if a server " +
+                        "sends a malformed or incomplete response.").log();
                 channel.writeInbound(LastHttpContent.EMPTY_LAST_CONTENT);
                 output = channel.readInbound();
             }
