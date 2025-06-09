@@ -10,18 +10,18 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.CantParseRepoFile;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class SnapshotRepoData_ES_6_8 {
 
     public static SnapshotRepoData_ES_6_8 fromRepoFile(Path filePath) {
         ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         try {
             SnapshotRepoData_ES_6_8 data = mapper.readValue(
                 new File(filePath.toString()),
@@ -52,7 +52,6 @@ public class SnapshotRepoData_ES_6_8 {
     @Getter
     @AllArgsConstructor
     @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Snapshot implements SnapshotRepo.Snapshot {
         private String name;
         private String uuid;
@@ -67,7 +66,6 @@ public class SnapshotRepoData_ES_6_8 {
     @Getter
     @AllArgsConstructor
     @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RawIndex {
         private String id;
         private List<String> snapshots;

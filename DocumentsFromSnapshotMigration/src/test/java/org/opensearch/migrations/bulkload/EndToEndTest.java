@@ -6,7 +6,6 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -88,9 +87,7 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
-            boolean supportsSoftDeletes =
-                sourceVersion.getMajor() > 6 ||
-                (sourceVersion.getMajor() == 6 && sourceVersion.getMinor() >= 5);
+            boolean supportsSoftDeletes = VersionMatchers.isES_6_5_orAbove.test(sourceVersion);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
