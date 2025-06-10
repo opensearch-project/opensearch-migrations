@@ -26,6 +26,9 @@ public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
 
         try {
             ObjectNode objectNodeRoot = (ObjectNode) root;
+            System.out.println("====== START Smile Decoded JSON for indexId=" + indexId + ", shardId=" + shardId + " ======");
+            System.out.println(objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(objectNodeRoot));
+            System.out.println("====== END Smile JSON ======");
             ShardMetadataData_ES_6_8.DataRaw shardMetadataRaw = objectMapper.treeToValue(
                 objectNodeRoot,
                 ShardMetadataData_ES_6_8.DataRaw.class
