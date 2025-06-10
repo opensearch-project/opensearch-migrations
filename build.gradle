@@ -1,6 +1,5 @@
 import com.google.cloud.tools.jib.gradle.JibTask
 import groovy.json.JsonOutput
-import org.opensearch.migrations.common.RegistryImageBuildUtils
 
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
@@ -35,10 +34,6 @@ gradle.projectsEvaluated {
     }
     // Add the TrafficCaptureProxyServer project itself
     captureProxyDependencies << captureProxyProject.path
-    def imageHelper = new RegistryImageBuildUtils()
-    imageHelper.registerLoginTask(rootProject)
-    imageHelper.applyJibConfigurations(rootProject)
-    imageHelper.applyBuildKitConfigurations(rootProject)
 }
 
 // Modify sourceCompatibility during the execution phase
@@ -536,44 +531,4 @@ tasks.register("listTestTasksAsJson") {
     doLast {
         println JsonOutput.prettyPrint(JsonOutput.toJson(testTasksProvider.get()))
     }
-}
-
-
-def registryEndpoint = project.hasProperty('registryEndpoint') ? project.property('registryEndpoint') : 'localhost:5000'
-ext.registryEndpoint = registryEndpoint
-def buildKitRegistryEndpoint = registryEndpoint == "localhost:5000" ? 'docker-registry:5000' : registryEndpoint
-ext.buildKitRegistryEndpoint = buildKitRegistryEndpoint
-def imageArch = project.hasProperty('imageArch') ? project.property('imageArch') : ''
-if (!imageArch) {
-    def arch = System.getProperty("os.arch")
-    if (arch == "aarch64") {
-        imageArch = "arm64"
-    } else if (arch == "x86_64" || arch == "amd64") {
-        imageArch= "amd64"
-    } else {
-        logger.warn("Unsupported architecture detected: ${arch}, defaulting to 'amd64'")
-        imageArch= "amd64"
-    }
-}
-ext.imageArch = imageArch
-
-
-tasks.register("jibAll") {
-    group = "build"
-    description = "Build all Jib images in all subprojects"
-    dependsOn subprojects.collect { proj ->
-        proj.tasks.matching { it.name == "jib" }
-    }.flatten()
-}
-
-tasks.register("buildKitAll") {
-    group = "build"
-    description = "Build all BuildKit images"
-    dependsOn tasks.matching { it.name.startsWith("buildKit_") }
-}
-
-tasks.register("buildImagesToRegistry") {
-    println "Building images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
-    dependsOn("buildKitAll")
-    dependsOn("jibAll")
 }

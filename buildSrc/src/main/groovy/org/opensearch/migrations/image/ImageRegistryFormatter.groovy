@@ -1,4 +1,4 @@
-package org.opensearch.migrations.common
+package org.opensearch.migrations.image
 
 interface ImageRegistryFormatter {
     String getFullBaseImageIdentifier(String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName, String baseImageTag)

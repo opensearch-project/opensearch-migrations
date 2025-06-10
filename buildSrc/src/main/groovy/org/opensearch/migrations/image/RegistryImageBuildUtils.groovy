@@ -1,4 +1,4 @@
-package org.opensearch.migrations.common
+package org.opensearch.migrations.image
 
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -51,25 +51,7 @@ class RegistryImageBuildUtils {
         }
     }
 
-    void applyJibConfigurations(Project rootProject) {
-        def projectsToConfigure = [
-                "TrafficCapture:trafficReplayer": [
-                        baseImageName : "amazoncorretto",
-                        baseImageTag : "17-al2023-headless",
-                        imageName : "traffic_replayer",
-                        imageTag  : "latest",
-                ],
-                "TrafficCapture:trafficCaptureProxyServer": [
-                        baseImageRegistryEndpoint: "${rootProject.ext.registryEndpoint}",
-                        baseImageGroup: "migrations",
-                        baseImageName : "capture_proxy_base",
-                        baseImageTag : "latest",
-                        imageName : "capture_proxy",
-                        imageTag  : "latest",
-                        requiredDependencies:  ["buildKit_captureProxyBase"]
-                ]
-        ]
-
+    void applyJibConfigurations(Project rootProject, Map<String, Map> projectsToConfigure) {
         projectsToConfigure.each { projPath, config ->
             rootProject.configure(rootProject.project(projPath)) {
                 configureJibFor(
@@ -159,47 +141,7 @@ class RegistryImageBuildUtils {
         }
     }
 
-    void applyBuildKitConfigurations(Project rootProject) {
-        def registryEndpoint = rootProject.ext.buildKitRegistryEndpoint.toString()
-        def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
-        def consoleBaseImage = formatter.getFullBaseImageIdentifier(registryEndpoint,"migrations",
-                "elasticsearch_test_console","latest")
-        def projects = [
-                [
-                        serviceName: "elasticsearchTestConsole",
-                        contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
-                        imageName:  "elasticsearch_test_console",
-                        imageTag:   "latest"
-                ],
-                [
-                        serviceName: "captureProxyBase",
-                        contextDir: "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase",
-                        imageName:  "capture_proxy_base",
-                        imageTag:   "latest"
-                ],
-                [
-                        serviceName: "reindexFromSnapshot",
-                        contextDir: "DocumentsFromSnapshotMigration/docker",
-                        imageName:  "reindex_from_snapshot",
-                        imageTag:   "latest",
-                        requiredDependencies: [
-                                ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars"
-                        ]
-                ],
-                [
-                        serviceName: "migrationConsole",
-                        contextDir: "TrafficCapture/dockerSolution/build/docker/migration_console_migrationConsole",
-                        imageName:  "migration_console",
-                        imageTag:   "latest",
-                        buildArgs: [
-                                BASE_IMAGE: "${consoleBaseImage}"
-                        ],
-                        requiredDependencies: [
-                                ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole_noDockerBuild",
-                                "buildKit_elasticsearchTestConsole"
-                        ]
-                ]
-        ]
+    void applyBuildKitConfigurations(Project rootProject, List<Map> projects) {
         projects.each { cfg ->
             registerBuildKitTask(rootProject, cfg)
         }
