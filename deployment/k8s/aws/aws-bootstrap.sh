@@ -1,37 +1,46 @@
 #!/bin/bash
-# Execute directly
-# curl -s https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh | bash
-# Store to file, then execute with ./aws-bootstrap.sh
-# curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh
-
-project_name="lewijacn"
+# -----------------------------------------------------------------------------
+# Bootstrap EKS Environment for OpenSearch Migration Assistant
+#
+# This script prepares an existing EKS cluster to use the Migration Assistant tooling.
+# If desired it has the ability to kick-off a bootstrapHelm chart which will build required
+# images for the Migration Assistant inside of an EKS pod and push these images to a
+# private ECR, otherwise this step can be skipped with the 'skip_image_build' flag and
+# public images can be utilized
+#
+# Usage:
+#   Run directly: curl -s https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh | bash
+#   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
+# -----------------------------------------------------------------------------
+org_name="lewijacn"
 repo_name="opensearch-migrations"
-bootstrap_chart_path="deployment/k8s/charts/components/bootstrapK8s"
-bootstrap_templates_path="deployment/k8s/charts/components/bootstrapK8s/templates"
-local_chart_dir="bootstrapChart"
+bootstrap_chart_path="deployment/k8s/charts/components/bootstrapHelm"
+bootstrap_templates_path="${bootstrap_chart_path}/templates"
+local_chart_dir="./bootstrapChart"
+skip_chart_pull=false
 branch="build-images-in-k8s"
 namespace="ma"
 skip_image_build=false
 keep_job_alive=true
 
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64) ARCH="amd64" ;;
-  aarch64) ARCH="arm64" ;;
-  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+TOOLS_ARCH=$(uname -m)
+case "$TOOLS_ARCH" in
+  x86_64) TOOLS_ARCH="amd64" ;;
+  aarch64) TOOLS_ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $TOOLS_ARCH"; exit 1 ;;
 esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 HELM_VERSION="3.14.0"
 
 install_helm() {
-  echo "Installing Helm ${HELM_VERSION} for ${OS}/${ARCH}..."
+  echo "Installing Helm ${HELM_VERSION} for ${OS}/${TOOLS_ARCH}..."
 
   tmp_dir=$(mktemp -d)
   cd "$tmp_dir" || exit 1
 
-  curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
-  tar -zxvf "helm-v${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
-  sudo mv "${OS}-${ARCH}/helm" /usr/local/bin/helm
+  curl -LO "https://get.helm.sh/helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
+  tar -zxvf "helm-v${HELM_VERSION}-${OS}-${TOOLS_ARCH}.tar.gz"
+  sudo mv "${OS}-${TOOLS_ARCH}/helm" /usr/local/bin/helm
   cd - >/dev/null || exit 1
   rm -rf "$tmp_dir"
 
@@ -62,6 +71,9 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
+
+# Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
+# export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
 key="MigrationsExportString"
 output=$(aws cloudformation describe-stacks \
   --query "Stacks[?Outputs[?OutputKey=='$key']].[Outputs[?OutputKey=='$key'].OutputValue | [0], CreationTime]" \
@@ -102,21 +114,23 @@ else
   exit 1
 fi
 
-# Get list of files in the target directory from GitHub API
-chart_file_list=$(curl -s "https://api.github.com/repos/${project_name}/${repo_name}/contents/${bootstrap_chart_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
-template_file_list=$(curl -s "https://api.github.com/repos/${project_name}/${repo_name}/contents/${bootstrap_templates_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
-mkdir -p $local_chart_dir/templates
+if [[ "$skip_chart_pull" == "false" ]]; then
+  # Get list of files in the target directory from GitHub API
+  chart_file_list=$(curl -s "https://api.github.com/repos/${org_name}/${repo_name}/contents/${bootstrap_chart_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
+  template_file_list=$(curl -s "https://api.github.com/repos/${org_name}/${repo_name}/contents/${bootstrap_templates_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
+  mkdir -p $local_chart_dir/templates
 
-# Download each file using raw.githubusercontent.com
-echo "Downloading bootstrap chart..."
-for file in $chart_file_list; do
-  raw_url="https://raw.githubusercontent.com/${project_name}/${repo_name}/${branch}/${bootstrap_chart_path}/${file}"
-  curl -s -o "./${local_chart_dir}/${file}" "$raw_url"
-done
-for file in $template_file_list; do
-  raw_url="https://raw.githubusercontent.com/${project_name}/${repo_name}/${branch}/${bootstrap_templates_path}/${file}"
-  curl -s -o "./${local_chart_dir}/templates/${file}" "$raw_url"
-done
+  # Download each file using raw.githubusercontent.com
+  echo "Downloading bootstrap chart..."
+  for file in $chart_file_list; do
+    raw_url="https://raw.githubusercontent.com/${org_name}/${repo_name}/${branch}/${bootstrap_chart_path}/${file}"
+    curl -s -o "${local_chart_dir}/${file}" "$raw_url"
+  done
+  for file in $template_file_list; do
+    raw_url="https://raw.githubusercontent.com/${org_name}/${repo_name}/${branch}/${bootstrap_templates_path}/${file}"
+    curl -s -o "${local_chart_dir}/templates/${file}" "$raw_url"
+  done
+fi
 
 if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
   read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
@@ -140,7 +154,7 @@ if [[ "$skip_image_build" == "true" || "$keep_job_alive" == "true" ]]; then
   exit 0
 fi
 
-pod_name=$(kubectl get pods -n "$namespace" --sort-by=.metadata.creationTimestamp --no-headers | awk '/^bootstrap-k8s/ { pod=$1 } END { print pod }')
+pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
 echo "Waiting for pod ${pod_name} to be ready..."
 kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
 sleep 5

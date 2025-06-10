@@ -4,7 +4,7 @@ metadata:
   name: {{ .Values.serviceAccountName }}
   namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/component: bootstrap-k8s
+    app.kubernetes.io/component: bootstrap-helm
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -12,7 +12,7 @@ metadata:
   name: migration-role
   namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/component: bootstrap-k8s
+    app.kubernetes.io/component: bootstrap-helm
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -33,7 +33,7 @@ metadata:
   name: migration-role-rolebinding
   namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/component: bootstrap-k8s
+    app.kubernetes.io/component: bootstrap-helm
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccountName }}
@@ -48,7 +48,7 @@ kind: ClusterRole
 metadata:
   name: migration-role-create-namespaces
   labels:
-    app.kubernetes.io/component: bootstrap-k8s
+    app.kubernetes.io/component: bootstrap-helm
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -59,7 +59,7 @@ kind: ClusterRoleBinding
 metadata:
   name: migration-role-create-namespaces-binding
   labels:
-    app.kubernetes.io/component: bootstrap-k8s
+    app.kubernetes.io/component: bootstrap-helm
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccountName }}

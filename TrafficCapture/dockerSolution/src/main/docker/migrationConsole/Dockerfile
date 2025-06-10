@@ -1,4 +1,5 @@
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
+
 FROM ${BASE_IMAGE} AS migration-console-base
 
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
@@ -39,7 +40,6 @@ RUN ARCH=$(cat /arch.env) && \
     rm -rf etcd-${ETCD_VER}-linux-amd64 etcd.tar.gz
 
 
-ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
 FROM ${BASE_IMAGE}
 
 # Define the virtual environment path

@@ -3,9 +3,9 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   namespace: {{ .Values.namespace }}
-  name: bootstrap-k8s
+  name: bootstrap-helm
   labels:
-    app.kubernetes.io/component: bootstrap-k8s
+    app.kubernetes.io/component: bootstrap-helm
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 3600  # keep for 1 hour
@@ -26,8 +26,8 @@ spec:
         eks.amazonaws.com/compute-type: auto
       {{- end }}
       containers:
-        - name: bootstrap-k8s
-          image: amazoncorretto:17-al2023
+        - name: bootstrap-helm
+          image: {{ .Values.bootstrapJobBaseImage }}
           env:
             - name: GRADLE_OPTS
               value: "-Xms512m -Xmx4g"
@@ -39,18 +39,18 @@ spec:
               set +e
               yum update -y && yum install -y git findutils tar unzip rsync docker vim && yum clean all
 
-              ARCH=$(uname -m)
-                case "$ARCH" in
+              TOOLS_ARCH=$(uname -m)
+                case "$TOOLS_ARCH" in
                 aarch64)
-                  ARCH="arm64"
+                  TOOLS_ARCH="arm64"
                   AWS_CLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
                   ;;
                 x86_64)
-                  ARCH="amd64"
+                  TOOLS_ARCH="amd64"
                   AWS_CLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
                   ;;
                 *)
-                  echo "Unsupported architecture: $ARCH"
+                  echo "Unsupported architecture: $TOOLS_ARCH"
                   exit 1
                 ;;
               esac
@@ -72,6 +72,7 @@ spec:
               {{- end }}
               cd /workspace
 
+              # This created builder uses the buildkitd-pod that this chart also deploys to build images
               docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
 
               GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}'"

@@ -3,6 +3,7 @@ namespace: "ma"
 registryEndpoint: "docker-registry:5000"
 repositoryUrl: "https://github.com/lewijacn/opensearch-migrations.git"
 repositoryBranch: "build-images-in-k8s"
+bootstrapJobBaseImage: "amazoncorretto:17-al2023"
 awsEKSEnabled: false
 keepJobAlive: false
 skipImageBuild: false
