@@ -20,7 +20,6 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -31,7 +30,7 @@ import reactor.util.retry.Retry;
 @Slf4j
 public abstract class OpenSearchClient {
 
-    protected static final ObjectMapper objectMapper = new ObjectMapper();
+    protected static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
 
     private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
     private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
@@ -54,10 +53,6 @@ public abstract class OpenSearchClient {
         .maxBackoff(BULK_MAX_BACKOFF);
     public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
-
-    static {
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-    }
 
     protected final RestClient client;
     protected final FailedRequestsLogger failedRequestsLogger;

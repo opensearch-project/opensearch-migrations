@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -11,7 +12,6 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,11 +20,7 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 @Getter
 public class ShardMetadataData_ES_7_10 implements ShardMetadata {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
-    static {
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-    }
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
 
     private final String snapshotName;
     private final String indexName;

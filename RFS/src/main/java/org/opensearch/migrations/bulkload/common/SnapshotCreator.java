@@ -5,7 +5,6 @@ import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -14,10 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public abstract class SnapshotCreator {
-    private static final ObjectMapper mapper = new ObjectMapper();
-    static {
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-    }
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
 
     private final OpenSearchClient client;
     private final IRfsContexts.ICreateSnapshotContext context;
