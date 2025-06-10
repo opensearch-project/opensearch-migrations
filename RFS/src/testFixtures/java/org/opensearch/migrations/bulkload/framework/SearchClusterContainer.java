@@ -74,23 +74,23 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             Version.fromString("ES 6.4.3")
     );
     public static final ContainerVersion ES_V6_3 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch:6.3.2", // TODO: Doesn't resolve
+            "docker.elastic.co/elasticsearch/elasticsearch:6.3.2",
             Version.fromString("ES 6.3")
     );
     public static final ContainerVersion ES_V6_2 = new ElasticsearchOssVersion(
-            "elasticsearch-oss:6.2.4",  // Matches your local image
-            Version.fromString("ES 6.2.4")  // Must match image tag for fallback lookup
+            "elasticsearch-oss:6.2.4",  // Matches local image
+            Version.fromString("ES 6.2.4")
     );
     public static final ContainerVersion ES_V6_1 = new ElasticsearchOssVersion(
-            "elasticsearch-oss:6.1.4",  // Matches your local image
-            Version.fromString("ES 6.1.4")  // <-- not ES 6.1
+            "elasticsearch-oss:6.1.4",  // Matches local image
+            Version.fromString("ES 6.1.4")
     );
     public static final ContainerVersion ES_V6_0 = new ElasticsearchOssVersion(
-            "elasticsearch-oss:6.0.1",  // Matches your local image
-            Version.fromString("ES 6.0.1")  // <-- not ES 6.0
+            "elasticsearch-oss:6.0.1",  // Matches local image
+            Version.fromString("ES 6.0.1")
     );
 
-    public static final ContainerVersion ES_V5_6_16 = new Elasticsearch5Version(
+    public static final ContainerVersion ES_V5_6_16 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
         Version.fromString("ES 5.6.16")
     );
@@ -131,14 +131,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 .build()),
         ELASTICSEARCH_OSS(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("bootstrap.system_call_filter", "false")
-                .build()),
-        ELASTICSEARCH_5(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("xpack.security.enabled", "false")
-                .put("xpack.watcher.enabled", "false")
-                .put("xpack.monitoring.enabled", "false")
-                .put("xpack.ml.enabled", "false")
                 .put("bootstrap.system_call_filter", "false")
                 .build()),
         ELASTICSEARCH_8(
@@ -324,12 +316,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
-        }
-    }
-
-    public static class Elasticsearch5Version extends ContainerVersion {
-        public Elasticsearch5Version(String imageName, Version version) {
-            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_5, "elasticsearch");
         }
     }
 
