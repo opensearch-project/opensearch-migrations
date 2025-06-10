@@ -34,10 +34,10 @@ public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
-     private static Stream<Arguments> scenarios() {
-         return SupportedClusters.supportedPairs(true).stream()
-                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
-     }
+    private static Stream<Arguments> scenarios() {
+        return SupportedClusters.supportedPairs(true).stream()
+                .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
+    }
 
     @ParameterizedTest(name = "Source {0} to Target {1}")
     @MethodSource(value = "scenarios")
