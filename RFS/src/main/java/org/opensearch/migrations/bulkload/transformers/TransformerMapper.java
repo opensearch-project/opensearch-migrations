@@ -40,13 +40,10 @@ public class TransformerMapper {
             if (VersionMatchers.isES_6_X.test(sourceVersion)) {
                 return new Transformer_ES_6_8_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
             }
-            if (VersionMatchers.isES_7_0_to_7_8.test(sourceVersion)) {
+            if (VersionMatchers.equalOrBetween_ES_7_0_and_7_8.test(sourceVersion)) {
                 return new Transformer_ES_6_8_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
             }
-            if (VersionMatchers.isES_7_9_X.test(sourceVersion)) {
-                return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
-            }
-            if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
+            if (VersionMatchers.equalOrGreaterThanES_7_9.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
             }
             if (VersionMatchers.isES_8_X.test(sourceVersion)) {

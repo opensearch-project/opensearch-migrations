@@ -259,7 +259,7 @@ public class ClusterOperations {
         var extraParameters = (
                 VersionMatchers.isES_5_X
                         .or(VersionMatchers.isES_8_X)
-                        .or(VersionMatchers.isES_6_0_to_6_5)
+                        .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_5)
             ).test(clusterVersion)
                     ? ""
                     : "?include_type_name=true";

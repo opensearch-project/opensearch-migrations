@@ -87,7 +87,7 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
-            boolean supportsSoftDeletes = VersionMatchers.isES_6_5_orAbove.test(sourceVersion);
+            boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(sourceVersion);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +

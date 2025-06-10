@@ -6,12 +6,12 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.CantParseRepoFile;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -21,8 +21,7 @@ import lombok.RequiredArgsConstructor;
 @Getter
 public class SnapshotRepoData_ES_7_10 {
     public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
         try {
             SnapshotRepoData_ES_7_10 data = mapper.readValue(
                 new File(filePath.toString()),
