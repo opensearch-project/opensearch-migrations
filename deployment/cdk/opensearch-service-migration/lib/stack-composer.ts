@@ -7,7 +7,6 @@ import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
-import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
 import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
@@ -192,8 +191,6 @@ export class StackComposer {
         const artifactBucketRemovalPolicy = this.getContextForType('artifactBucketRemovalPolicy', 'string', defaultValues, contextJSON)
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
-        const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const captureProxyESExtraArgs = this.getContextForType('captureProxyESExtraArgs', 'string', defaultValues, contextJSON)
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
         const migrationConsoleEnableOSI = this.getContextForType('migrationConsoleEnableOSI', 'boolean', defaultValues, contextJSON)
         const migrationAPIEnabled = this.getContextForType('migrationAPIEnabled', 'boolean', defaultValues, contextJSON)
@@ -317,7 +314,7 @@ export class StackComposer {
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
 
         let streamingSourceType
-        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
+        if (captureProxyServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
             streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
         } else {
             streamingSourceType = StreamingSourceType.DISABLED
@@ -340,8 +337,8 @@ export class StackComposer {
             trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ?? props.migrationsUserAgent
         }
 
-        if (sourceClusterDisabled && (sourceCluster || captureProxyESServiceEnabled || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
-            throw new Error("A source cluster must be specified by one of: [sourceCluster, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
+        if (sourceClusterDisabled && (sourceCluster || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
+            throw new Error("A source cluster must be specified by one of: [sourceCluster, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
         }
 
         const deployId = addOnMigrationDeployId ?? defaultDeployId
@@ -362,7 +359,6 @@ export class StackComposer {
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 albAcmCertArn: albAcmCertArn,
                 elasticsearchServiceEnabled,
-                captureProxyESServiceEnabled,
                 captureProxyServiceEnabled,
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
@@ -528,24 +524,6 @@ export class StackComposer {
             servicesYaml.backfill = reindexFromSnapshotStack.rfsBackfillYaml;
         }
 
-        let captureProxyESStack
-        if (captureProxyESServiceEnabled && networkStack && migrationStack) {
-            captureProxyESStack = new CaptureProxyESStack(scope, "capture-proxy-es", {
-                vpcDetails: networkStack.vpcDetails,
-                otelCollectorEnabled: otelCollectorEnabled,
-                streamingSourceType: streamingSourceType,
-                extraArgs: captureProxyESExtraArgs,
-                stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
-                description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                fargateCpuArch: fargateCpuArch,
-                targetGroups: [networkStack.albSourceProxyTG, networkStack.albSourceClusterTG],
-                env: props.env
-            })
-            this.addDependentStacks(captureProxyESStack, [migrationStack, kafkaBrokerStack])
-            this.stacks.push(captureProxyESStack)
-        }
 
         let trafficReplayerStack
         if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
@@ -657,7 +635,7 @@ export class StackComposer {
             })
             // To enable the Migration Console to make requests to other service endpoints with services,
             // it must be deployed after any connected services
-            this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
+            this.addDependentStacks(migrationConsoleStack, [captureProxyStack, elasticsearchStack,
                 openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack])
             this.stacks.push(migrationConsoleStack)
         }

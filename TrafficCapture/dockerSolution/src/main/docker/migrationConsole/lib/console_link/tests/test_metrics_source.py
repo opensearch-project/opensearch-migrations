@@ -19,6 +19,7 @@ from console_link.models.utils import AWSAPIError
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
 USER_AGENT_EXTRA = "test-agent-v1.0"
+STAGE = "test"
 
 mock_metrics_list = {'captureProxy': ['kafkaCommitCount', 'captureConnectionDuration'],
                      'replayer': ['kafkaCommitCount']}
@@ -56,7 +57,8 @@ def cw_ms():
     return CloudwatchMetricsSource(
         config={
             "cloudwatch": {
-                "aws_region": AWS_REGION
+                "aws_region": AWS_REGION,
+                "qualifier": STAGE
             }
         },
         client_options=ClientOptions(config={"user_agent_extra": USER_AGENT_EXTRA})
@@ -66,7 +68,8 @@ def cw_ms():
 def test_get_metrics_source():
     cw_config = {
         "cloudwatch": {
-            "aws_region": AWS_REGION
+            "aws_region": AWS_REGION,
+            "qualifier": STAGE
         }
     }
     cw_metrics_source = get_metrics_source(cw_config)
