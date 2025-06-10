@@ -250,7 +250,7 @@ public class HttpByteBufFormatter {
                                                    ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
             msgType == HttpMessageType.REQUEST ? new HttpRequestDecoder() : new HttpResponseDecoder(),
-            new HttpContentDecompressor()
+            new HttpContentDecompressor(0)
         );
         for (var h : handlers) {
             channel.pipeline().addLast(h);
