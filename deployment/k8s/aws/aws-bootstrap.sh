@@ -12,16 +12,15 @@
 #   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
 #   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
 # -----------------------------------------------------------------------------
-org_name="opensearch-project"
+org_name="lewijacn"
 repo_name="opensearch-migrations"
-bootstrap_chart_path="deployment/k8s/charts/components/bootstrapHelm"
-bootstrap_templates_path="${bootstrap_chart_path}/templates"
-local_chart_dir="./bootstrapChart"
+bootstrap_chart_dir="./opensearch-migrations/deployment/k8s/charts/components/bootstrapHelm"
+ma_chart_dir="./opensearch-migrations/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 skip_chart_pull=false
-branch="main"
+branch="edits-for-ma-chart-testing"
 namespace="ma"
 skip_image_build=false
-keep_job_alive=false
+keep_bootstrap_job_alive=false
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
@@ -80,7 +79,7 @@ get_cfn_export() {
 
 # Check required tools
 missing=0
-for cmd in kubectl jq; do
+for cmd in kubectl jq git; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
@@ -123,21 +122,9 @@ else
 fi
 
 if [[ "$skip_chart_pull" == "false" ]]; then
-  # Get list of files in the target directory from GitHub API
-  chart_file_list=$(curl -s "https://api.github.com/repos/${org_name}/${repo_name}/contents/${bootstrap_chart_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
-  template_file_list=$(curl -s "https://api.github.com/repos/${org_name}/${repo_name}/contents/${bootstrap_templates_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
-  mkdir -p $local_chart_dir/templates
-
-  # Download each file using raw.githubusercontent.com
-  echo "Downloading bootstrap chart..."
-  for file in $chart_file_list; do
-    raw_url="https://raw.githubusercontent.com/${org_name}/${repo_name}/${branch}/${bootstrap_chart_path}/${file}"
-    curl -s -o "${local_chart_dir}/${file}" "$raw_url"
-  done
-  for file in $template_file_list; do
-    raw_url="https://raw.githubusercontent.com/${org_name}/${repo_name}/${branch}/${bootstrap_templates_path}/${file}"
-    curl -s -o "${local_chart_dir}/templates/${file}" "$raw_url"
-  done
+  git init
+  git remote | grep "origin" || git remote add -f origin "https://github.com/${org_name}/${repo_name}.git"
+  git checkout "$branch"
 fi
 
 if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
@@ -150,38 +137,44 @@ if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
     exit 1
   fi
 fi
-helm install bootstrap-ma "${local_chart_dir}" \
+helm install bootstrap-ma "${bootstrap_chart_dir}" \
   --namespace "$namespace" \
   --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
   --set awsEKSEnabled=true \
   --set skipImageBuild="${skip_image_build}" \
-  --set keepJobAlive="${keep_job_alive}"
+  --set keepJobAlive="${keep_bootstrap_job_alive}" \
+  || echo "Installing bootstrap chart failed..." && exit 1
 
-if [[ "$skip_image_build" == "true" || "$keep_job_alive" == "true" ]]; then
-  echo "Either skipImageBuild or keepJobAlive was enabled, no pod monitoring needed"
+if [[ "$keep_bootstrap_job_alive" == "true" ]]; then
+  echo "The keep_bootstrap_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
   exit 0
 fi
 
-pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
-echo "Waiting for pod ${pod_name} to be ready..."
-kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
-sleep 5
-echo "Tailing logs for ${pod_name}..."
-echo "-------------------------------"
-kubectl -n "$namespace" logs -f "$pod_name"
-echo "-------------------------------"
-sleep 5
-final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
-echo "Pod ${pod_name} ended with status: ${final_status}"
-
-if [[ "$final_status" == "Succeeded" ]]; then
-  kubectl -n ma run migration-console --image="${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" --restart=Never
-  kubectl -n ma wait --for=condition=ready pod/migration-console --timeout=300s
+if [[ "$skip_image_build" == "false" ]]; then
+  pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
+  echo "Waiting for pod ${pod_name} to be ready..."
+  kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
   sleep 5
-  cmd="kubectl -n $namespace exec --stdin --tty migration-console -- /bin/bash"
-  echo "Accessing migration console with command: $cmd"
-  eval "$cmd"
-else
-  echo "Pod $pod_name did not end with 'Succeeded'. Exiting..."
-  exit 1
+  echo "Tailing logs for ${pod_name}..."
+  echo "-------------------------------"
+  kubectl -n "$namespace" logs -f "$pod_name"
+  echo "-------------------------------"
+  sleep 5
+  final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
+  echo "Pod ${pod_name} ended with status: ${final_status}"
+  if [[ "$final_status" != "Succeeded" ]]; then
+    echo "Bootstrap pod $pod_name did not end with 'Succeeded'. Exiting..."
+    exit 1
+  fi
 fi
+
+helm install ma "${ma_chart_dir}" \
+  --namespace $namespace \
+  --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.migrationConsole.tag=migrations_migration_console_latest --create-namespace \
+  || echo "Installing Migration Assistant chart failed..." && exit 1
+
+kubectl -n ma wait --for=condition=ready pod/migration-console-0 --timeout=300s
+cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
+echo "Accessing migration console with command: $cmd"
+eval "$cmd"
