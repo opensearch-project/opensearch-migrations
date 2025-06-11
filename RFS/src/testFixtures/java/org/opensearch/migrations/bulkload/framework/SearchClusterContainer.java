@@ -33,6 +33,26 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:8.17.5",
         Version.fromString("ES 8.17.5")
     );
+    public static final ContainerVersion ES_V7_9 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.9.3",
+            Version.fromString("ES 7.9.3")
+    );
+    public static final ContainerVersion ES_V7_8 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.8.1",
+            Version.fromString("ES 7.8.1")
+    );
+    public static final ContainerVersion ES_V7_7 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.7.1",
+            Version.fromString("ES 7.7.1")
+    );
+    public static final ContainerVersion ES_V7_4 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.4.2",
+            Version.fromString("ES 7.4.2")
+    );
+    public static final ContainerVersion ES_V7_1 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.1.1",
+            Version.fromString("ES 7.1.1")
+    );
     public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
         Version.fromString("ES 7.10.2")
@@ -40,6 +60,18 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion ES_V6_8_23 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
         Version.fromString("ES 6.8.23")
+    );
+    public static final ContainerVersion ES_V6_7 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.7.2",
+            Version.fromString("ES 6.7.2")
+    );
+    public static final ContainerVersion ES_V6_5 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.5.4",
+            Version.fromString("ES 6.5.4")
+    );
+    public static final ContainerVersion ES_V6_4 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.4.3",
+            Version.fromString("ES 6.4.3")
     );
 
     public static final ContainerVersion ES_V5_6_16 = new ElasticsearchVersion(

@@ -9,7 +9,11 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import lombok.experimental.UtilityClass;
 
 /**
- * Defines all supported clusters
+ * Defines all supported clusters.
+ *
+ * The 'sources()' list reflects officially supported source versions published in documentation.
+ * The 'extendedSources()' list includes additional versions that are known to work reliably
+ * without requiring --allow-loose-version-matching, but are not publicly advertised.
  */
 @UtilityClass
 public class SupportedClusters {
@@ -21,6 +25,19 @@ public class SupportedClusters {
             SearchClusterContainer.ES_V7_17,
             SearchClusterContainer.ES_V8_17,
             SearchClusterContainer.OS_V1_3_16
+        );
+    }
+
+    public static List<ContainerVersion> extendedSources() {
+        return List.of(
+                SearchClusterContainer.ES_V7_9,
+                SearchClusterContainer.ES_V7_8,
+                SearchClusterContainer.ES_V7_7,
+                SearchClusterContainer.ES_V7_4,
+                SearchClusterContainer.ES_V7_1,
+                SearchClusterContainer.ES_V6_7,
+                SearchClusterContainer.ES_V6_5,
+                SearchClusterContainer.ES_V6_4
         );
     }
 

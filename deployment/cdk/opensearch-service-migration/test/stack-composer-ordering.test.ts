@@ -1,6 +1,5 @@
 import {createStackComposer} from "./test-utils";
 import {Template} from "aws-cdk-lib/assertions";
-import {CaptureProxyESStack} from "../lib/service-stacks/capture-proxy-es-stack";
 import {CaptureProxyStack} from "../lib/service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "../lib/service-stacks/elasticsearch-stack";
 import {TrafficReplayerStack} from "../lib/service-stacks/traffic-replayer-stack";
@@ -33,7 +32,6 @@ describe('Stack Composer Ordering Tests', () => {
             "vpcEnabled": true,
             "migrationAssistanceEnabled": true,
             "migrationConsoleServiceEnabled": true,
-            "captureProxyESServiceEnabled": true,
             "trafficReplayerServiceEnabled": true,
             "captureProxyServiceEnabled": true,
             "elasticsearchServiceEnabled": true,
@@ -44,7 +42,7 @@ describe('Stack Composer Ordering Tests', () => {
 
         const stacks = createStackComposer(contextOptions)
 
-        const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
+        const services = [CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
             TrafficReplayerStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
         services.forEach((stackClass) => {
             const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
@@ -69,7 +67,6 @@ describe('Stack Composer Ordering Tests', () => {
             "vpcEnabled": true,
             "migrationAssistanceEnabled": true,
             "migrationConsoleServiceEnabled": true,
-            "captureProxyESServiceEnabled": true,
             "trafficReplayerServiceEnabled": true,
             "captureProxyServiceEnabled": true,
             "elasticsearchServiceEnabled": true,
@@ -81,7 +78,7 @@ describe('Stack Composer Ordering Tests', () => {
 
         const stacks = createStackComposer(contextOptions)
 
-        const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
+        const services = [CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
             TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
         services.forEach((stackClass) => {
             const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
@@ -106,7 +103,6 @@ describe('Stack Composer Ordering Tests', () => {
             "vpcEnabled": true,
             "migrationAssistanceEnabled": true,
             "migrationConsoleServiceEnabled": false,
-            "captureProxyESServiceEnabled": false,
             "trafficReplayerServiceEnabled": false,
             "captureProxyServiceEnabled": false,
             "elasticsearchServiceEnabled": false,
@@ -123,7 +119,7 @@ describe('Stack Composer Ordering Tests', () => {
 
         const stacks = createStackComposer(contextOptions)
 
-        const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
+        const services = [CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
             TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
         services.forEach( (stackClass) => {
             const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]

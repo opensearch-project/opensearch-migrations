@@ -58,9 +58,9 @@ include 'TrafficCapture:captureProtobufs'
 include 'TrafficCapture:dockerSolution'
 include 'TrafficCapture:nettyWireLogging'
 include 'TrafficCapture:trafficCaptureProxyServer'
-include 'TrafficCapture:trafficCaptureProxyServerTest'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
+include 'buildImages'
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())
 

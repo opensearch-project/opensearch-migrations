@@ -251,6 +251,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             if (servicesYaml.snapshot) {
                 servicesYaml.snapshot.otel_endpoint = otelSidecarEndpoint;
             }
+            if (servicesYaml.metrics_source?.cloudwatch !== undefined) {
+                servicesYaml.metrics_source.cloudwatch = {
+                    ...servicesYaml.metrics_source.cloudwatch,
+                    qualifier : props.stage };
+            }
         }
 
         const serviceTaskRole = new Role(this, 'MigrationServiceTaskRole', {

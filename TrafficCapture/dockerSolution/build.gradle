@@ -17,9 +17,8 @@ def dockerFilesForExternalServices = [
         "grafana": "grafana"
 ]
 dockerFilesForExternalServices.each { dockerImageName, projectName ->
-    def escapedProjectName = projectName;
     task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
-        if (escapedProjectName == "migrationConsole") {
+        if (projectName == "migrationConsole") {
             def libraries = [
                 project(":libraries:kafkaCommandLineFormatter")
             ]
@@ -28,11 +27,13 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
                 project(":CreateSnapshot"),
                 project(":MetadataMigration")
             ]
-            def syncTask = getMigrationConsoleSyncTask(project, dockerImageName, escapedProjectName, libraries, applications)
+            // Setup additional sync task which doesn't depend on the base image being built, for other projects to use
+            getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, false)
+            def syncTask = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, true)
             dependsOn syncTask
             inputDir = syncTask.destinationDir
         } else {
-            inputDir = project.file("src/main/docker/${escapedProjectName}")
+            inputDir = project.file("src/main/docker/${projectName}")
         }
         def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
         images.add("migrations/${dockerImageName}:${hashNonce}".toString())
@@ -40,10 +41,14 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
     }
 }
 
-static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String escapedProjectName, List<Project> libraries, List<Project> applications) {
+static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String projectName, List<Project> libraries, List<Project> applications, boolean dependOnBaseImage) {
      // Create a single sync task to copy the required files
-    def destDir = "build/docker/${dockerImageName}_${escapedProjectName}"
-    def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
+    def destDir = "build/docker/${dockerImageName}_${projectName}"
+    def taskName = "syncArtifact_${dockerImageName}_${projectName}"
+    if (!dependOnBaseImage) {
+        taskName= "${taskName}_noDockerBuild"
+    }
+    def syncTask = project.tasks.create(taskName, Sync) {
         into destDir
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
@@ -70,7 +75,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
             }
         }
 
-        from "src/main/docker/${escapedProjectName}"
+        from "src/main/docker/${projectName}"
     }
 
     // Collect assemble tasks from libraries and applications
@@ -78,8 +83,10 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
     // Ensure the sync task depends on the assemble tasks
     syncTask.dependsOn assembleTasks
 
-    // Migration Console base image is the test console
-    syncTask.dependsOn "buildDockerImage_elasticsearch_client_test_console"
+    if (dependOnBaseImage) {
+        // Migration Console base image is the test console
+        syncTask.dependsOn "buildDockerImage_elasticsearch_client_test_console"
+    }
 
     return syncTask
 }
@@ -99,9 +106,9 @@ javaContainerServices.each { dockerImageName, projectName ->
     CommonUtils.createDockerfile(project, artifactProject, baseImageOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
 }
 
-javaContainerServices.forEach { dockerImageName, projectName ->
-    def escapedProjectName = project(projectName).name;
-    def dockerBuildDir = "build/docker/${dockerImageName}_${escapedProjectName}"
+javaContainerServices.forEach { dockerImageName, gradleProjectName ->
+    def projectName = project(gradleProjectName).name;
+    def dockerBuildDir = "build/docker/${dockerImageName}_${projectName}"
     task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")

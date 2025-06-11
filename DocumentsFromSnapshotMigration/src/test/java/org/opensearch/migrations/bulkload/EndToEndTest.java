@@ -6,7 +6,6 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -53,6 +52,21 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
+    private static Stream<Arguments> extendedScenarios() {
+        return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
+    }
+    @ParameterizedTest(name = "Source {0} to Target OS 2.19")
+    @MethodSource(value = "extendedScenarios")
+    public void extendedMigrationDocuments(
+            final SearchClusterContainer.ContainerVersion sourceVersion) {
+        try (
+                final var sourceCluster = new SearchClusterContainer(sourceVersion);
+                final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
+        ) {
+            migrationDocumentsWithClusters(sourceCluster, targetCluster);
+        }
+    }
+
     @SneakyThrows
     private void migrationDocumentsWithClusters(
         final SearchClusterContainer sourceCluster,
@@ -73,14 +87,15 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
+            boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(sourceVersion);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
                 "    \"number_of_shards\": %d," +
                 "    \"number_of_replicas\": 0," +
-                (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)
-                        ? ""
-                        : "    \"index.soft_deletes.enabled\": true,") +
+                (supportsSoftDeletes
+                        ? "    \"index.soft_deletes.enabled\": true,"
+                        : "") +
                 "    \"refresh_interval\": -1" +
                 "  }" +
                 "}",

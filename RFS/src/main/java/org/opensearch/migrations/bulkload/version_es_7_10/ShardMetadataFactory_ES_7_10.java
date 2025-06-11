@@ -1,9 +1,9 @@
 package org.opensearch.migrations.bulkload.version_es_7_10;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
@@ -17,14 +17,12 @@ public class ShardMetadataFactory_ES_7_10 implements ShardMetadata.Factory {
 
     @Override
     public ShardMetadata fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
-        ObjectMapper objectMapper = new ObjectMapper();
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         SimpleModule module = new SimpleModule();
         module.addDeserializer(
             ShardMetadataData_ES_7_10.FileInfoRaw.class,
             new ShardMetadataData_ES_7_10.FileInfoRawDeserializer()
         );
-        objectMapper.registerModule(module);
+        ObjectMapper objectMapper = ObjectMapperFactory.createWithModules(module);
 
         try {
             ObjectNode objectNodeRoot = (ObjectNode) root;
