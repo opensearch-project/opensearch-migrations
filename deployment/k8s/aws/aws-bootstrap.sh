@@ -47,6 +47,37 @@ install_helm() {
   echo "Helm installed successfully."
 }
 
+get_cfn_export() {
+  prefix="MigrationsExportString"
+  matches=()
+
+  while read -r line; do
+    matches+=("$line")
+  done < <(aws cloudformation describe-stacks \
+    --query "Stacks[*].Outputs[?starts_with(OutputKey, \`${prefix}\`)].OutputValue" \
+    --output text)
+
+  if [ ${#matches[@]} -eq 0 ]; then
+    echo "Error: No stack outputs found starting with '$prefix'" >&2
+    return 1
+  elif [ ${#matches[@]} -eq 1 ]; then
+    output="${matches[0]}"
+  else
+    echo "Multiple matching export strings found:"
+    for i in "${!matches[@]}"; do
+      echo "[$i] ${matches[$i]}"
+    done
+    read -rp "Select a number (0-$((${#matches[@]} - 1))): " choice
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -ge "${#matches[@]}" ]; then
+      echo "Invalid choice." >&2
+      return 1
+    fi
+    output="${matches[$choice]}"
+  fi
+
+  echo "$output"
+}
+
 # Check required tools
 missing=0
 for cmd in kubectl jq; do
@@ -71,18 +102,7 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
-
-# Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
-# export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
-key="MigrationsExportString"
-output=$(aws cloudformation describe-stacks \
-  --query "Stacks[?Outputs[?OutputKey=='$key']].[Outputs[?OutputKey=='$key'].OutputValue | [0], CreationTime]" \
-  --output text | sort -k2 | tail -n1 | cut -f1)
-
-if [[ -z "$output" ]]; then
-  echo "Error: No stack output found for OutputKey: $key"
-  exit 1
-fi
+output=$(get_cfn_export)
 echo "Setting ENV variables: $output"
 eval "$output"
 
@@ -100,18 +120,6 @@ if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
     --set image.tag=v2.1.8
 else
   echo "aws-efs-csi-driver Helm release already exists. Skipping install."
-fi
-
-DEFAULT_SC=$(kubectl get storageclass gp3 --no-headers --ignore-not-found | awk '{print $1}')
-if [ -z "$DEFAULT_SC" ]; then
-  DEFAULT_SC=$(kubectl get storageclass gp2 --no-headers --ignore-not-found | awk '{print $1}')
-fi
-
-if [ -n "$DEFAULT_SC" ]; then
-  kubectl patch storageclass "$DEFAULT_SC" -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
-else
-  echo "Neither gp2 nor gp3 StorageClass found."
-  exit 1
 fi
 
 if [[ "$skip_chart_pull" == "false" ]]; then
