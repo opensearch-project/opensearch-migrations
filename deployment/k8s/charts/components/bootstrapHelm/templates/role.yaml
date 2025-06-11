@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccountName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: bootstrap-helm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: migration-role
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: bootstrap-helm
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: migration-role-rolebinding
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: bootstrap-helm
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccountName }}
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: Role
+  name: migration-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: migration-role-create-namespaces
+  labels:
+    app.kubernetes.io/component: bootstrap-helm
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: migration-role-create-namespaces-binding
+  labels:
+    app.kubernetes.io/component: bootstrap-helm
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccountName }}
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: migration-role-create-namespaces
+  apiGroup: rbac.authorization.k8s.io
