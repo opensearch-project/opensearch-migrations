@@ -12,17 +12,17 @@
 #   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
 #   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
 # -----------------------------------------------------------------------------
-org_name="lewijacn"
+org_name="opensearch-project"
 repo_name="opensearch-migrations"
-branch="edits-for-ma-chart-testing"
+branch="main"
 tag=""
-skip_git_pull=true
+skip_git_pull=false
 
-base_dir="/Volumes/workplace/opensearch/lewijacn-migrations/opensearch-migrations"
+base_dir="./opensearch-migrations"
 bootstrap_chart_dir="${base_dir}/deployment/k8s/charts/components/bootstrapHelm"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
-skip_image_build=true
+skip_image_build=false
 keep_bootstrap_job_alive=false
 
 TOOLS_ARCH=$(uname -m)
@@ -54,6 +54,8 @@ get_cfn_export() {
   names=()
   values=()
 
+  # Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
+  # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
   while read -r name value; do
     names+=("$name")
     values+=("$value")
