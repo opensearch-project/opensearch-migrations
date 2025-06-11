@@ -75,7 +75,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     );
     public static final ContainerVersion ES_V6_3 = new Elasticsearch6Version(
             "docker.elastic.co/elasticsearch/elasticsearch:6.3.2",
-            Version.fromString("ES 6.3")
+            Version.fromString("ES 6.3.2")
     );
     public static final ContainerVersion ES_V6_2 = new Elasticsearch6Version(
             "docker.elastic.co/elasticsearch/elasticsearch-oss:6.2.4",
@@ -194,7 +194,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
         builder.withEnv(version.getInitializationType().getEnvVariables())
             .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
-
 
         this.containerVersion = version;
     }
