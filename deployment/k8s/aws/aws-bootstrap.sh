@@ -14,18 +14,21 @@
 # -----------------------------------------------------------------------------
 org_name="lewijacn"
 repo_name="opensearch-migrations"
-bootstrap_chart_dir="./opensearch-migrations/deployment/k8s/charts/components/bootstrapHelm"
-ma_chart_dir="./opensearch-migrations/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
-skip_chart_pull=false
 branch="edits-for-ma-chart-testing"
+tag=""
+skip_git_pull=true
+
+base_dir="/Volumes/workplace/opensearch/lewijacn-migrations/opensearch-migrations"
+bootstrap_chart_dir="${base_dir}/deployment/k8s/charts/components/bootstrapHelm"
+ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
-skip_image_build=false
+skip_image_build=true
 keep_bootstrap_job_alive=false
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
-  x86_64) TOOLS_ARCH="amd64" ;;
-  aarch64) TOOLS_ARCH="arm64" ;;
+  x86_64 | amd64) TOOLS_ARCH="amd64" ;;
+  aarch64 | arm64) TOOLS_ARCH="arm64" ;;
   *) echo "Unsupported architecture: $TOOLS_ARCH"; exit 1 ;;
 esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -121,36 +124,51 @@ else
   echo "aws-efs-csi-driver Helm release already exists. Skipping install."
 fi
 
-if [[ "$skip_chart_pull" == "false" ]]; then
-  git init
-  git remote | grep "origin" || git remote add -f origin "https://github.com/${org_name}/${repo_name}.git"
-  git checkout "$branch"
-fi
-
-if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
-  read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
-  if [[ "$answer" == [Yy]* ]]; then
-    helm uninstall bootstrap-ma -n "$namespace"
-    sleep 2
+if [[ "$skip_git_pull" == "false" ]]; then
+  echo "Preparing opensearch-migrations repo..."
+  mkdir -p $base_dir
+  pushd "$base_dir" > /dev/null || exit
+  git init > /dev/null
+  git remote | grep -q "^origin$" || git remote add -f origin "https://github.com/${org_name}/${repo_name}.git"
+  git fetch > /dev/null
+  if [ -n "$branch" ]; then
+    git checkout $branch
+  elif [ -n "$tag" ]; then
+    git checkout tags/"$tag"
   else
-    echo "The 'bootstrap-ma' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
-    exit 1
+    latest_release_tag=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | jq -r ".tag_name")
+    git checkout tags/"$latest_release_tag"
   fi
-fi
-helm install bootstrap-ma "${bootstrap_chart_dir}" \
-  --namespace "$namespace" \
-  --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
-  --set awsEKSEnabled=true \
-  --set skipImageBuild="${skip_image_build}" \
-  --set keepJobAlive="${keep_bootstrap_job_alive}" \
-  || echo "Installing bootstrap chart failed..." && exit 1
-
-if [[ "$keep_bootstrap_job_alive" == "true" ]]; then
-  echo "The keep_bootstrap_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
-  exit 0
+  echo "Using opensearch-migrations repo at commit point:"
+  echo "-------------------------------"
+  git show -s --format="%H%n%an <%ae>%n%ad%n%s" HEAD
+  echo "-------------------------------"
+  popd > /dev/null || exit
 fi
 
 if [[ "$skip_image_build" == "false" ]]; then
+  if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
+    read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
+    if [[ "$answer" == [Yy]* ]]; then
+      helm uninstall bootstrap-ma -n "$namespace"
+      sleep 2
+    else
+      echo "The 'bootstrap-ma' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+      exit 1
+    fi
+  fi
+  helm install bootstrap-ma "${bootstrap_chart_dir}" \
+    --namespace "$namespace" \
+    --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
+    --set awsEKSEnabled=true \
+    --set skipImageBuild="${skip_image_build}" \
+    --set keepJobAlive="${keep_bootstrap_job_alive}" \
+    || { echo "Installing bootstrap chart failed..."; exit 1; }
+
+  if [[ "$keep_bootstrap_job_alive" == "true" ]]; then
+    echo "The keep_bootstrap_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
+    exit 0
+  fi
   pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
   echo "Waiting for pod ${pod_name} to be ready..."
   kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
@@ -165,14 +183,19 @@ if [[ "$skip_image_build" == "false" ]]; then
   if [[ "$final_status" != "Succeeded" ]]; then
     echo "Bootstrap pod $pod_name did not end with 'Succeeded'. Exiting..."
     exit 1
+  else
+    echo "Uninstalling bootstrap chart after successful setup"
+    helm uninstall bootstrap-ma -n "$namespace"
   fi
 fi
 
+echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install ma "${ma_chart_dir}" \
   --namespace $namespace \
   --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
-  --set images.migrationConsole.tag=migrations_migration_console_latest --create-namespace \
-  || echo "Installing Migration Assistant chart failed..." && exit 1
+  --set images.migrationConsole.tag=migrations_migration_console_latest \
+  --set aws.eksEnabled=true \
+  || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 kubectl -n ma wait --for=condition=ready pod/migration-console-0 --timeout=300s
 cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
