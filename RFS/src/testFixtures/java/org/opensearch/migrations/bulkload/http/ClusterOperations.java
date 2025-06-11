@@ -382,7 +382,7 @@ public class ClusterOperations {
     }
 
     private String defaultDocType() {
-        if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_2_X).or(VersionMatchers.isES_6_0_to_6_1).test(clusterVersion)) {
+        if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_2_X).or(VersionMatchers.equalOrBetween_ES_6_0_and_6_1).test(clusterVersion)) {
             return "doc";
         }
         return "_doc";
