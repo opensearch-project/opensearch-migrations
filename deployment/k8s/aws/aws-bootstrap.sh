@@ -21,7 +21,7 @@ skip_chart_pull=false
 branch="main"
 namespace="ma"
 skip_image_build=false
-keep_job_alive=true
+keep_job_alive=false
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
