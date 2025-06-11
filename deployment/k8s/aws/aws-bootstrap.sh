@@ -51,33 +51,33 @@ install_helm() {
 
 get_cfn_export() {
   prefix="MigrationsExportString"
-  matches=()
+  names=()
+  values=()
 
-  while read -r line; do
-    matches+=("$line")
-  done < <(aws cloudformation describe-stacks \
-    --query "Stacks[*].Outputs[?starts_with(OutputKey, \`${prefix}\`)].OutputValue" \
+  while read -r name value; do
+    names+=("$name")
+    values+=("$value")
+  done < <(aws cloudformation list-exports \
+    --query "Exports[?starts_with(Name, \`${prefix}\`)].[Name,Value]" \
     --output text)
 
-  if [ ${#matches[@]} -eq 0 ]; then
-    echo "Error: No stack outputs found starting with '$prefix'" >&2
+  if [ ${#names[@]} -eq 0 ]; then
+    echo "Error: No exports found starting with '$prefix'" >&2
     return 1
-  elif [ ${#matches[@]} -eq 1 ]; then
-    output="${matches[0]}"
+  elif [ ${#names[@]} -eq 1 ]; then
+    echo "${values[0]}"
   else
-    echo "Multiple matching export strings found:"
-    for i in "${!matches[@]}"; do
-      echo "[$i] ${matches[$i]}"
+    echo "Multiple Cloudformation stacks with migration exports found:" >&2
+    for i in "${!names[@]}"; do
+      echo "[$i] ${names[$i]}" >&2
     done
-    read -rp "Select a number (0-$((${#matches[@]} - 1))): " choice
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -ge "${#matches[@]}" ]; then
+    read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
+    if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
       echo "Invalid choice." >&2
       return 1
     fi
-    output="${matches[$choice]}"
+    echo "${values[$choice]}"
   fi
-
-  echo "$output"
 }
 
 # Check required tools
