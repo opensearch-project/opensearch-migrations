@@ -9,16 +9,16 @@
 # public images can be utilized
 #
 # Usage:
-#   Run directly: curl -s https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh | bash
-#   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/lewijacn/opensearch-migrations/build-images-in-k8s/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
+#   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
+#   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
 # -----------------------------------------------------------------------------
-org_name="lewijacn"
+org_name="opensearch-project"
 repo_name="opensearch-migrations"
 bootstrap_chart_path="deployment/k8s/charts/components/bootstrapHelm"
 bootstrap_templates_path="${bootstrap_chart_path}/templates"
 local_chart_dir="./bootstrapChart"
 skip_chart_pull=false
-branch="build-images-in-k8s"
+branch="main"
 namespace="ma"
 skip_image_build=false
 keep_job_alive=true

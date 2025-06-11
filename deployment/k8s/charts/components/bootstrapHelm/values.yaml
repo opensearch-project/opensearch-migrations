@@ -1,8 +1,8 @@
 serviceAccountName: "migrations-sa"
 namespace: "ma"
 registryEndpoint: "docker-registry:5000"
-repositoryUrl: "https://github.com/lewijacn/opensearch-migrations.git"
-repositoryBranch: "build-images-in-k8s"
+repositoryUrl: "https://github.com/opensearch-project/opensearch-migrations.git"
+repositoryBranch: "main"
 bootstrapJobBaseImage: "amazoncorretto:17-al2023"
 awsEKSEnabled: false
 keepJobAlive: false
