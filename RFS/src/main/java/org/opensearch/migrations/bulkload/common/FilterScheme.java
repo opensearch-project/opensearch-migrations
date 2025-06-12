@@ -1,21 +1,75 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Predicate;
 
 public class FilterScheme {
     private FilterScheme() {}
 
+    private static final List<String> EXCLUDED_PREFIXES = Arrays.asList(
+            ".",
+            "apm-",
+            "apm@",
+            "behavioral_analytics-",
+            "data-streams-",
+            "data-streams@",
+            "ecs@",
+            "elastic-connectors-",
+            "ilm-history-",
+            "profiling-",
+            "synthetics-"
+    );
+
+    private static final List<String> EXCLUDED_SUFFIXES = Arrays.asList(
+            "@ilm",
+            "@mappings",
+            "@settings",
+            "@template",
+            "@tsdb-settings"
+        );
+
+    private static final List<String> EXCLUDED_NAMES = Arrays.asList(
+            "elastic-connectors",
+            "ilm-history",
+            "logs",
+            "logs-mappings",
+            "logs-settings",
+            "logs-tsdb-settings",
+            "metrics",
+            "metrics-mappings",
+            "metrics-settings",
+            "metrics-tsdb-settings",
+            "profiling",
+            "search-acl-filter",
+            "synthetics",
+            "traces",
+            "traces-mappings",
+            "traces-settings",
+            "traces-tsdb-settings"
+    );
+
     public static Predicate<String> filterByAllowList(List<String> allowlist) {
         return item -> {
-            boolean accepted;
-            // By default allow all items except 'system' items that start with a period
             if (allowlist == null || allowlist.isEmpty()) {
-                accepted = !item.startsWith(".");
+                return !isExcluded(item);
             } else {
-                accepted = allowlist.contains(item);
+                return allowlist.contains(item);
             }
-            return accepted;
         };
+    }
+
+    private static boolean isExcluded(String item) {
+        for (String prefix : EXCLUDED_PREFIXES) {
+            if (item.startsWith(prefix)) {
+                return true;
+            }
+        }
+        for (String suffix : EXCLUDED_SUFFIXES) {
+            if (item.endsWith(suffix)) {
+                return true;
+            }
+        }
+        return EXCLUDED_NAMES.contains(item);
     }
 }

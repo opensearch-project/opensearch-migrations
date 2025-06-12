@@ -9,7 +9,6 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
@@ -182,17 +181,6 @@ class EndToEndTest extends BaseMigrationTest {
         }
 
         arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
-
-        // Set up data filters for ES 7.17 as we do not currently have transformations in place to support breaking
-        // changes from default templates and settings here: https://opensearch.atlassian.net/browse/MIGRATIONS-2447
-        if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceCluster.getContainerVersion().getVersion())) {
-            var dataFilterArgs = new DataFilterArgs();
-            dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
-                    Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
-            dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
-            dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
-            arguments.dataFilterArgs = dataFilterArgs;
-        }
 
         targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 
