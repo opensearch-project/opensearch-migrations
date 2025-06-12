@@ -3,7 +3,10 @@ package org.opensearch.migrations.bulkload.framework;
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
@@ -25,6 +28,18 @@ import org.testcontainers.utility.MountableFile;
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
+
+    private static Map<String, String> overrideAndRemoveEnv(
+            Map<String, String> base,
+            Map<String, String> overrides,
+            Set<String> keysToRemove
+    ) {
+        Map<String, String> merged = new HashMap<>(base);
+        keysToRemove.forEach(merged::remove);
+        merged.putAll(overrides);
+        return Collections.unmodifiableMap(merged);
+    }
+
     public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
@@ -121,55 +136,67 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     private enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
             "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "index.store.type", "mmapfs"
+            "index.store.type", "mmapfs",
+            "bootstrap.system_call_filter", "false",
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g"
         )),
         ELASTICSEARCH(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("xpack.security.enabled", "false")
-                .put("ES_JAVA_OPTS", "-Xms2g -Xmx2g")
-                .put("bootstrap.system_call_filter", "false")
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                    "xpack.security.enabled", "false"
+                ),
+                Set.of()  // No keys to remove from BASE
+            )),
         ELASTICSEARCH_OSS(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("bootstrap.system_call_filter", "false")
-                .put("ES_JAVA_OPTS", "-Xms2g -Xmx2g")
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(), // No additional keys apart from BASE
+                Set.of() // No keys to remove from BASE
+            )),
         ELASTICSEARCH_6(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("ES_JAVA_OPTS",
-                    "-Xms2g -Xmx2g -Des.bootstrap.system_call_filter=false")
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of("ES_JAVA_OPTS", "-Xms2g -Xmx2g -Des.bootstrap.system_call_filter=false"),
+                Set.of("bootstrap.system_call_filter", "ES_JAVA_OPTS") // don't set it for older ES 6x
+            )),
         ELASTICSEARCH_8(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("ES_JAVA_OPTS", "-Xms2g -Xmx2g")
-                .put("xpack.security.enabled", "false")
-                .put("xpack.security.enrollment.enabled", "false")
-                .put("xpack.security.http.ssl.enabled", "false")
-                .put("xpack.security.transport.ssl.enabled", "false")
-                .put("cluster.name", "docker-test-cluster")
-                .put("node.name", "test-node")
-                .put("xpack.ml.enabled", "false")
-                .put("xpack.watcher.enabled", "false")
-                .put("cluster.routing.allocation.disk.watermark.low", "95%")
-                .put("cluster.routing.allocation.disk.watermark.high", "98%")
-                .put("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.ofEntries(
+                    Map.entry("xpack.security.enabled", "false"),
+                    Map.entry("xpack.security.enrollment.enabled", "false"),
+                    Map.entry("xpack.security.http.ssl.enabled", "false"),
+                    Map.entry("xpack.security.transport.ssl.enabled", "false"),
+                    Map.entry("cluster.name", "docker-test-cluster"),
+                    Map.entry("node.name", "test-node"),
+                    Map.entry("xpack.ml.enabled", "false"),
+                    Map.entry("xpack.watcher.enabled", "false"),
+                    Map.entry("cluster.routing.allocation.disk.watermark.low", "95%"),
+                    Map.entry("cluster.routing.allocation.disk.watermark.high", "98%"),
+                    Map.entry("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
+                ),
+                Set.of("bootstrap.system_call_filter")  // don't set it for ES 8x
+            )),
         OPENSEARCH(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("ES_JAVA_OPTS", "-Xms2g -Xmx2g")
-                .put("plugins.security.disabled", "true")
-                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-                .put("bootstrap.system_call_filter", "false")
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                        "plugins.security.disabled", "true",
+                        "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^"
+                ),
+                Set.of()  // No keys to remove from BASE
+            )),
         OPENSEARCH_2_19_PLUS(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("ES_JAVA_OPTS", "-Xms2g -Xmx2g")
-                .put("plugins.security.disabled", "true")
-                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-                .put("search.insights.top_queries.exporter.type", "debug")
-                .put("bootstrap.system_call_filter", "false")
-                .build()
-        );
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                    "plugins.security.disabled", "true",
+                    "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
+                    "search.insights.top_queries.exporter.type", "debug"
+                ),
+                Set.of()  // No keys to remove from BASE
+            ));
 
         @Getter
         public final Map<String, String> envVariables;
