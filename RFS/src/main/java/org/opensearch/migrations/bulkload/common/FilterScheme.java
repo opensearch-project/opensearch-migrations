@@ -17,16 +17,15 @@ public class FilterScheme {
             "ecs@",
             "elastic-connectors-",
             "ilm-history-",
-            "logs-",
-            "metrics-",
             "profiling-",
-            "synthetics-",
-            "traces-"
+            "synthetics-"
     );
 
     private static final List<String> EXCLUDED_SUFFIXES = Arrays.asList(
-            "@settings",
+            "@ilm",
             "@mappings",
+            "@settings",
+            "@template",
             "@tsdb-settings"
         );
 
@@ -34,10 +33,20 @@ public class FilterScheme {
             "elastic-connectors",
             "ilm-history",
             "logs",
+            "logs-mappings",
+            "logs-settings",
+            "logs-tsdb-settings",
             "metrics",
+            "metrics-mappings",
+            "metrics-settings",
+            "metrics-tsdb-settings",
             "profiling",
             "search-acl-filter",
-            "synthetics"
+            "synthetics",
+            "traces",
+            "traces-mappings",
+            "traces-settings",
+            "traces-tsdb-settings"
     );
 
     public static Predicate<String> filterByAllowList(List<String> allowlist) {

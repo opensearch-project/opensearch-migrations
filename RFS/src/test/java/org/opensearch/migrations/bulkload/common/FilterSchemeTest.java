@@ -13,11 +13,13 @@ public class FilterSchemeTest {
         var filter = FilterScheme.filterByAllowList(null);
         
         // Should be excluded due to prefix
-        assertThat(filter.test("logs-test"), equalTo(false));
+        assertThat(filter.test("apm-test"), equalTo(false));
         assertThat(filter.test(".hidden"), equalTo(false));
         
         // Should not be excluded (no matching prefix)
         assertThat(filter.test("myindex"), equalTo(true));
+        assertThat(filter.test("logs-2024"), equalTo(true));
+        assertThat(filter.test("metrics-2024"), equalTo(true));
     }
     
     @Test
