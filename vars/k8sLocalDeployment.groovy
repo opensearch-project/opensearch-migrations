@@ -54,6 +54,7 @@ def call(Map config = [:]) {
                             if (status == "Running") {
                                 echo "✅ Minikube is running"
                             } else {
+                                def clear = sh(script: "minikube delete", returnStdout: true).trim()
                                 def start = sh(script: "minikube start", returnStdout: true).trim()
                                 def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
                                 if (status == "Running") {
