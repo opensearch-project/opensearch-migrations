@@ -1,0 +1,105 @@
+import org.opensearch.migrations.image.RegistryImageBuildUtils
+import org.opensearch.migrations.image.ImageRegistryFormatterFactory
+
+def registryEndpoint = rootProject.hasProperty('registryEndpoint') ? rootProject.property('registryEndpoint') : 'localhost:5000'
+rootProject.ext.registryEndpoint = registryEndpoint
+def buildKitRegistryEndpoint = registryEndpoint == "localhost:5000" ? 'docker-registry:5000' : registryEndpoint
+rootProject.ext.buildKitRegistryEndpoint = buildKitRegistryEndpoint
+def imageArch = rootProject.hasProperty('imageArch') ? rootProject.property('imageArch') : ''
+if (!imageArch) {
+    def arch = System.getProperty("os.arch")
+    if (arch == "aarch64") {
+        imageArch = "arm64"
+    } else if (arch == "x86_64" || arch == "amd64") {
+        imageArch= "amd64"
+    } else {
+        logger.warn("Unsupported architecture detected: ${arch}, defaulting to 'amd64'")
+        imageArch= "amd64"
+    }
+}
+rootProject.ext.imageArch = imageArch
+
+def jibProjects = [
+        "TrafficCapture:trafficReplayer": [
+                baseImageName : "amazoncorretto",
+                baseImageTag  : "17-al2023-headless",
+                imageName     : "traffic_replayer",
+                imageTag      : "latest",
+        ],
+        "TrafficCapture:trafficCaptureProxyServer": [
+                baseImageRegistryEndpoint: rootProject.ext.registryEndpoint,
+                baseImageGroup : "migrations",
+                baseImageName  : "capture_proxy_base",
+                baseImageTag   : "latest",
+                imageName      : "capture_proxy",
+                imageTag       : "latest",
+                requiredDependencies: ["buildKit_captureProxyBase"]
+        ]
+]
+
+def formatter = ImageRegistryFormatterFactory.getFormatter(rootProject.ext.buildKitRegistryEndpoint)
+def consoleBaseImage = formatter.getFullBaseImageIdentifier(rootProject.ext.buildKitRegistryEndpoint, "migrations", "elasticsearch_test_console", "latest")
+def buildKitProjects = [
+        [
+                serviceName: "elasticsearchTestConsole",
+                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
+                imageName:  "elasticsearch_test_console",
+                imageTag:   "latest"
+        ],
+        [
+                serviceName: "captureProxyBase",
+                contextDir: "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase",
+                imageName:  "capture_proxy_base",
+                imageTag:   "latest"
+        ],
+        [
+                serviceName: "reindexFromSnapshot",
+                contextDir: "DocumentsFromSnapshotMigration/docker",
+                imageName:  "reindex_from_snapshot",
+                imageTag:   "latest",
+                requiredDependencies: [
+                        ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars"
+                ]
+        ],
+        [
+                serviceName: "migrationConsole",
+                contextDir: "TrafficCapture/dockerSolution/build/docker/migration_console_migrationConsole",
+                imageName:  "migration_console",
+                imageTag:   "latest",
+                buildArgs: [
+                        BASE_IMAGE: consoleBaseImage
+                ],
+                requiredDependencies: [
+                        ":TrafficCapture:dockerSolution:syncArtifact_migration_console_migrationConsole_noDockerBuild",
+                        "buildKit_elasticsearchTestConsole"
+                ]
+        ]
+]
+
+
+gradle.projectsEvaluated {
+    def imageHelper = new RegistryImageBuildUtils()
+    imageHelper.registerLoginTask(rootProject)
+    imageHelper.applyJibConfigurations(rootProject, jibProjects)
+    imageHelper.applyBuildKitConfigurations(rootProject, buildKitProjects)
+}
+
+tasks.register("jibAll") {
+    group = "build"
+    description = "Build all Jib images in all subprojects"
+    dependsOn rootProject.subprojects.collect { proj ->
+        proj.tasks.matching { it.name == "jib" }
+    }.flatten()
+}
+
+tasks.register("buildKitAll") {
+    group = "build"
+    description = "Build all BuildKit images"
+    dependsOn rootProject.tasks.matching { it.name.startsWith("buildKit_") }
+}
+
+tasks.register("buildImagesToRegistry") {
+    println "Building images to registry: ${registryEndpoint} (${imageArch}) with buildKit container using registry: ${buildKitRegistryEndpoint}"
+    dependsOn("buildKitAll")
+    dependsOn("jibAll")
+}

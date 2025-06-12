@@ -1,0 +1,65 @@
+{{- if not .Values.skipImageBuild }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: buildkitd-config
+  namespace: {{ .Values.namespace }}
+data:
+  buildkitd.toml: |
+    [registry."docker-registry:5000"]
+    http = true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: buildkitd
+  ports:
+    - name: buildkit
+      protocol: TCP
+      port: 1234
+      targetPort: 1234
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: buildkitd
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: buildkitd
+spec:
+  serviceAccountName: {{ .Values.serviceAccountName }}
+  containers:
+    - name: buildkitd
+      image: moby/buildkit:v0.22.0
+      args: [
+        "--addr", "tcp://0.0.0.0:1234",
+        "--config", "/etc/buildkit/buildkitd.toml"
+      ]
+      ports:
+        - containerPort: 1234
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: buildkitd-config
+          mountPath: /etc/buildkit
+          readOnly: true
+      resources:
+        requests:
+          cpu: "1000m"
+          memory: "5Gi"
+          ephemeral-storage: "10Gi"
+        limits:
+          cpu: "6000m"
+          memory: "8Gi"
+          ephemeral-storage: "40Gi"
+  volumes:
+    - name: buildkitd-config
+      configMap:
+        name: buildkitd-config
+  restartPolicy: Never
+{{- end }}
