@@ -1,4 +1,4 @@
-serviceAccountName: "migrations-sa"
+serviceAccountName: "bootstrap-migrations-sa"
 namespace: "ma"
 registryEndpoint: "docker-registry:5000"
 repositoryUrl: "https://github.com/opensearch-project/opensearch-migrations.git"
@@ -6,5 +6,4 @@ repositoryBranch: "main"
 bootstrapJobBaseImage: "amazoncorretto:17-al2023"
 awsEKSEnabled: false
 keepJobAlive: false
-skipImageBuild: false
 localRepoMount: false

@@ -9,7 +9,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: migration-role
+  name: bootstrap-role
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/component: bootstrap-helm
@@ -30,7 +30,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: migration-role-rolebinding
+  name: bootstrap-role-rolebinding
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/component: bootstrap-helm
@@ -40,13 +40,13 @@ subjects:
     namespace: {{ .Values.namespace }}
 roleRef:
   kind: Role
-  name: migration-role
+  name: bootstrap-role
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: migration-role-create-namespaces
+  name: bootstrap-role-create-namespaces
   labels:
     app.kubernetes.io/component: bootstrap-helm
 rules:
@@ -57,7 +57,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: migration-role-create-namespaces-binding
+  name: bootstrap-role-create-namespaces-binding
   labels:
     app.kubernetes.io/component: bootstrap-helm
 subjects:
@@ -66,5 +66,5 @@ subjects:
     namespace: {{ .Values.namespace }}
 roleRef:
   kind: ClusterRole
-  name: migration-role-create-namespaces
+  name: bootstrap-role-create-namespaces
   apiGroup: rbac.authorization.k8s.io

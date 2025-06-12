@@ -1,4 +1,4 @@
-{{- if and (not .Values.skipImageBuild) .Values.localRepoMount }}
+{{- if .Values.localRepoMount }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
