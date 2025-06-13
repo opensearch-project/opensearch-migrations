@@ -42,8 +42,7 @@ class CustomTransformationTest extends BaseMigrationTest {
         return SupportedClusters.supportedSources(false)
                 .stream()
                 // The TypeMappingSanitizationTransformerProvider is not supported on 2.x source
-                .filter(source -> !VersionMatchers.isOS_2_X.test(source.getVersion())
-                    && !VersionMatchers.isES_8_X.test(source.getVersion()))
+                .filter(source -> !VersionMatchers.isOS_2_X.test(source.getVersion()))
                 .map(sourceCluster -> Arguments.of(sourceCluster, target));
     }
 

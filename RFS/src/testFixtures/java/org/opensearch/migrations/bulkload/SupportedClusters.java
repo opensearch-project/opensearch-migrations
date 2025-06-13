@@ -9,7 +9,11 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import lombok.experimental.UtilityClass;
 
 /**
- * Defines all supported clusters
+ * Defines all supported clusters.
+ *
+ * The 'sources()' list reflects officially supported source versions published in documentation.
+ * The 'extendedSources()' list includes additional versions that are known to work reliably
+ * without requiring --allow-loose-version-matching, but are not publicly advertised.
  */
 @UtilityClass
 public class SupportedClusters {
@@ -21,6 +25,24 @@ public class SupportedClusters {
             SearchClusterContainer.ES_V7_17,
             SearchClusterContainer.ES_V8_17,
             SearchClusterContainer.OS_V1_3_16
+        );
+    }
+
+    public static List<ContainerVersion> extendedSources() {
+        return List.of(
+                SearchClusterContainer.ES_V7_9,
+                SearchClusterContainer.ES_V7_8,
+                SearchClusterContainer.ES_V7_7,
+                SearchClusterContainer.ES_V7_4,
+                SearchClusterContainer.ES_V7_1,
+                SearchClusterContainer.ES_V6_7,
+                SearchClusterContainer.ES_V6_6,
+                SearchClusterContainer.ES_V6_5,
+                SearchClusterContainer.ES_V6_4,
+                SearchClusterContainer.ES_V6_3,
+                SearchClusterContainer.ES_V6_2,
+                SearchClusterContainer.ES_V6_1,
+                SearchClusterContainer.ES_V6_0
         );
     }
 
@@ -54,6 +76,7 @@ public class SupportedClusters {
 
         // Individual Pairs
         matrix.add(new MigrationPair(SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V2_19_1));
+        matrix.add(new MigrationPair(SearchClusterContainer.ES_V7_17, SearchClusterContainer.ES_V7_10_2));
 
         if (includeRFSOnly) {
             matrix.add(new MigrationPair(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V5_6_16));

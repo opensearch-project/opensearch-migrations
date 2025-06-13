@@ -10,13 +10,13 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.zip.GZIPInputStream;
 
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
+
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
-
-import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.buildKafkaProperties;
 
 @Slf4j
 public class KafkaLoader {
@@ -40,7 +40,8 @@ public class KafkaLoader {
     }
 
     public void loadRecordsToKafkaFromCompressedFile(String fileName, String topicName, int batchSize) throws Exception {
-        var kafkaProperties = buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
+        var kafkaProperties =
+            KafkaConfig.buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
         try (var kafkaProducer = new KafkaProducer<String, byte[]>(kafkaProperties)) {
             BufferedReader bufferedReader = createBufferedReaderFromFile(fileName);
             readLinesAndSendToKafka(bufferedReader, kafkaProducer, topicName, batchSize);

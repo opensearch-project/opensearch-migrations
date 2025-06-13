@@ -27,7 +27,8 @@ SNAPSHOT_SCHEMA = {
                 'schema': {
                     'repo_uri': {'type': 'string', 'required': True},
                     'aws_region': {'type': 'string', 'required': True},
-                    'role': {'type': 'string', 'required': False}
+                    'role': {'type': 'string', 'required': False},
+                    'endpoint': {'type': 'string', 'required': False}
                 }
             },
             'fs': {

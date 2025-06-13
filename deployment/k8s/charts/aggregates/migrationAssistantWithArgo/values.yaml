@@ -1,0 +1,420 @@
+conditionalPackageInstalls:
+  # Migration infrastructure components
+  etcd: true                    # used by our Argo workflows for workflow coordination. May be used by strimzi clusters too
+  cert-manager: true            # needed by the otel operator
+  kube-prometheus-stack: true   # will be needed for auto-scaling
+  argo-workflows: true          # orchestrates the steps of a migration
+  strimzi-kafka-operator: true  # Required by capture and replay
+  fluent-bit: true
+
+  # Simpler alternative to the opentelemetry-operator.
+  # ONLY set up the otel-collector and require manual instrumentation
+  # Mutually exclusive with otel-collector
+  otel-collector-daemonset: true
+  # EXPERIMENTAL!  Needed for auto-instrumenting and general observability.
+  # Mutually exclusive with otel-collector-daemonset
+  opentelemetry-operator: false
+
+  # Support packages - installed as direct dependencies to this chart as opposed to via the installer job
+  migration-console: true
+
+  # Packages for testing and local development
+  localstack: true
+  # Nice to haves that aren't fully supported yet
+  gatekeeper: false
+  grafana: false
+  jaeger: true
+
+
+snapshotBucketConfiguration:
+  create: true
+  bucketName: snapshot
+  region: us-east-2
+  useLocalStack: true
+  endpoint: localstack
+
+logs:
+  sharedLogsVolume:
+    enabled: true
+    name: logs-pvc
+    size: 10Gi
+    storageClass: ""
+  format: application # application or docker-json
+
+
+installer:
+  image:
+    repository: migrations/migration_console
+    tag: latest
+    pullPolicy: IfNotPresent
+  serviceAccount:
+    create: true
+    name: "helm-installer"
+  rbac:
+    create: true
+
+extraOtelConfiguration:
+  version: "0.124.0"
+  configs:
+    metrics:
+      - prometheus
+      - cloudwatch
+    traces:
+      - jaeger
+      - xray
+
+
+charts:
+
+  # Coordinate workflows, maybe RFS, maybe more
+  - name: etcd
+    version: "11.2.1"
+    repository: "https://charts.bitnami.com/bitnami"
+    values:
+      preUpgrade:
+        enabled: false
+      replicaCount: 1
+      auth:
+        rbac:
+          rootPassword: password
+      resources:
+        requests:
+          cpu: 1
+          memory: 2Gi
+        limits:
+          cpu: 2
+          memory: 4Gi
+      persistence:
+        enabled: false
+      #    storageClass: "standard"
+      #    size: 10Gi
+      service:
+        type: ClusterIP
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+      extraEnvVars:
+        - name: ETCD_AUTO_COMPACTION_RETENTION
+          value: "1"
+        - name: ETCD_QUOTA_BACKEND_BYTES
+          value: "8589934592" # 8GB
+        - name: ETCD_HEARTBEAT_INTERVAL
+          value: "100"
+        - name: ETCD_ELECTION_TIMEOUT
+          value: "1000"
+      startFromSnapshot:
+        enabled: false
+      serviceAccount:
+        create: true
+      podSecurityContext:
+        fsGroup: 1001
+        runAsUser: 1001
+
+  - name: cert-manager
+    version: 1.17.2
+    repository: https://charts.jetstack.io
+    values:
+      crds:
+        enabled: true
+
+  - name: opentelemetry-operator
+    version: "0.86.4"
+    repository: "https://open-telemetry.github.io/opentelemetry-helm-charts"
+    timeout: 300
+    dependsOn: cert-manager
+    values:
+      admissionWebhooks:
+        certManager:
+          enabled: true # default
+      crds:
+        create: true
+      manager:
+        verticalPodAutoscaler:
+          enabled: false # default
+        collectorImage:
+          repository: "public.ecr.aws/aws-observability/aws-otel-collector"
+          tag: "0.43.2"
+
+
+  - name: strimzi-kafka-operator
+    version: 0.45.0
+    repository: "https://strimzi.io/charts/"
+    values:
+      replicas: 1
+      storageType: ephemeral
+      storageSize: 100Gi
+      storageDeleteClaim: true
+      dedicatedController:
+        replicas: 1
+        storageSize: 10Gi
+
+      readinessProbe:
+        initialDelaySeconds: 5
+        periodSeconds: 2
+        timeoutSeconds: 3
+        failureThreshold: 1
+      livenessProbe:
+        initialDelaySeconds: 5
+        periodSeconds: 2
+        timeoutSeconds: 3
+        failureThreshold: 1
+
+      kafka:
+        template:
+          pod:
+            readinessProbe:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 1
+
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 2
+          timeoutSeconds: 3
+          failureThreshold: 1
+        livenessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 2
+          timeoutSeconds: 3
+          failureThreshold: 1
+
+  - name: argo-workflows
+    version: "0.45.11"
+    repository: "https://argoproj.github.io/argo-helm"
+    values:
+      fullnameOverride: "argo"
+      images:
+        pullPolicy: IfNotPresent
+      controller:
+        containerSecurityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+        clusterWorkflowTemplates:
+          enabled: false
+        metricsConfig:
+          enabled: true
+        resourceRateLimit: { "limit": 10.0, "burst": 25 }
+        workflowWorkers: 16
+      mainContainer:
+        env:
+          - name: RESOURCE_STATE_CHECK_INTERVAL
+            value: "1s"
+      executor:
+        env:
+          - name: RESOURCE_STATE_CHECK_INTERVAL
+            value: "1s"
+      server:
+        extraArgs:
+          - --auth-mode=server
+      serviceAccount:
+        create: true
+      singleNamespace: true
+      # Extra workflow configuration
+      workflow:
+        serviceAccount:
+          create: false
+          name: argo-workflow-executor
+
+  - name: fluent-bit
+    version: "0.49.0"
+    repository: "https://fluent.github.io/helm-charts"
+    values:
+      env:
+        - name: OUTPUT_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: log-aggregation-config
+              key: OUTPUT_FORMAT
+
+      extraVolumes:
+        - name: logs-pv
+          persistentVolumeClaim:
+            claimName: logs-pvc
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+
+      extraVolumeMounts:
+        - name: logs-pv
+          mountPath: /shared_logs
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true
+
+      config:
+        inputs: |
+          [INPUT]
+              Name             tail
+              Tag              kube.*
+              Path             /var/log/containers/*.log
+              multiline.parser docker, cri
+              Refresh_Interval 5
+              Mem_Buf_Limit    5MB
+              Skip_Long_Lines  Off
+              Skip_Empty_Lines On
+
+        filters: |
+          [FILTER]
+              Name             kubernetes
+              Match            kube.*
+              Kube_URL         https://kubernetes.default.svc:443
+              Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
+              Kube_Tag_Prefix  kube.var.log.containers.
+              Merge_Log        On
+              Merge_Log_Key    log_processed
+          
+          [FILTER]
+              Name          rewrite_tag
+              Match         kube.*
+              Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+              Emitter_Name  re_emitted
+          
+          [FILTER]
+              Name          lua
+              Match         *
+              script        /fluentbit/scripts/trim.lua
+              call          trim_log
+
+        outputs: |
+          [OUTPUT]
+              Name          file
+              Match         *
+              Path          /shared_logs
+              Format        ${OUTPUT_FORMAT}
+              Template      {log}
+
+
+  # Will likely be required for auto-scaling.
+  # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.
+  - name: kube-prometheus-stack
+    version: "72.0.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    values:
+      prometheus:
+        prometheusSpec:
+          serviceMonitorSelector: { }  # Select all ServiceMonitors
+          podMonitorSelector: { }      # Select all PodMonitors
+          serviceMonitorNamespaceSelector: { }
+          podMonitorNamespaceSelector: { }
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          retention: "15d"
+          retentionSize: "10GB"
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: standard
+                accessModes: [ "ReadWriteOnce" ]
+                resources:
+                  requests:
+                    storage: 50Gi
+          thanos:
+            enabled: false
+        service:
+          type: ClusterIP
+          port: 9090
+      alertmanager:
+        enabled: false
+      nodeExporter:
+        enabled: true  # If OpenTelemetry for is handling host metrics, this can be disabled
+      kubeStateMetrics:
+        enabled: true
+      defaultRules:
+        create: false
+        rules:
+          alertmanager: true
+          etcd: true
+          general: true
+          k8s: true
+          kubeApiserver: true
+          kubePrometheusNodeAlerting: true
+          kubePrometheusNodeRecording: true
+          kubernetesAbsent: true
+          kubernetesApps: true
+          kubernetesResources: true
+          kubernetesStorage: true
+          kubernetesSystem: true
+          kubeScheduler: true
+          network: true
+          node: true
+          prometheus: true
+          prometheusOperator: true
+      grafana:
+        additionalDataSources:
+          - name: Jaeger
+            type: jaeger
+            url: http://jaeger-query:16686
+            access: proxy
+            isDefault: false
+            editable: true
+
+# OPA Gatekeeper dependency to lock down what images we can spin up - not implemented yet
+#  - name: gatekeeper
+#    version: "3.13.0"
+#    repository: "https://open-policy-agent.github.io/gatekeeper/charts"
+#    values:
+#      auditInterval: 60
+#      constraintViolationsLimit: 20
+#      enableExternalData: true
+
+  - name: localstack
+    version: "0.6.23"  # Or whichever version you want to use
+    repository: "https://localstack.github.io/helm-charts"
+    values:
+      image:
+        repository: "localstack/localstack"
+        tag: "4.3.0"
+
+  - name: grafana
+    version: "8.15.0"
+    repository: "https://grafana.github.io/helm-charts"
+    values:
+      ## Grafana data sources configuration
+      datasources:
+        datasources.yaml:
+          apiVersion: 1
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              access: proxy
+              url: http://prometheus-server.prometheus.svc.cluster.local:9090
+              isDefault: true
+              editable: true
+            - name: Jaeger
+              type: jaeger
+              access: proxy
+              url: http://jaeger-query.jaeger.svc.cluster.local:16686
+              isDefault: false
+              editable: true
+#      ## Set up the sidecar to import the dashboard yaml included in this package
+#      sidecar:
+#        datasources:
+#          enabled: true
+#        dashboards:
+#          enabled: true
+#          label: grafana_dashboard
+
+  - name: jaeger
+    version: "3.2.0"
+    repository: "https://jaegertracing.github.io/helm-charts"
+    values:
+      provisionDataStore:
+        cassandra: false
+      allInOne:
+        enabled: true
+      storage:
+        type: memory
+      agent:
+        enabled: false
+      collector:
+        enabled: false
+      query:
+        enabled: false

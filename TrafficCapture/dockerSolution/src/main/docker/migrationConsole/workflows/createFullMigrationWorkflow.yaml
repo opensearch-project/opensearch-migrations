@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: full-migration-
+spec:
+  workflowTemplateRef:
+    name: full-migration
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: source-migration-configs
+        value: |
+          [
+              {
+                  "source": {
+                      "endpoint": "https://elasticsearch-master-headless:9200",
+                      "allow_insecure": true,
+                      "basic_auth": {
+                          "username": "admin",
+                          "password": "admin"
+                      }
+                  },
+                  "snapshot-and-migration-configs": [
+                      {
+                          "indices": [
+                              "index_3",
+                              "index_4"
+                          ],
+                          "migrations": [
+                              {
+                                  "metadata": {
+                                      "mappings": {
+                                          "properties": {}
+                                      },
+                                      "settings": {}
+                                  },
+                                  "documentBackfillConfigs": [
+                                      {
+                                          "indices": [
+                                              "index_3",
+                                              "index_4"
+                                          ]
+                                      }
+                                  ]
+                              }
+                          ]
+                      }
+                  ],
+                  "replayer-config": {
+                      "batchSize": 1000,
+                      "concurrency": 4
+                  }
+              }
+          ]
+      - name: targets
+        value: |
+          [
+              {
+                  "endpoint": "https://opensearch-cluster-master-headless:9200",
+                  "allow_insecure": true,
+                  "basic_auth": {
+                      "username": "admin",
+                      "password": "admin"
+                  }
+              }
+          ]

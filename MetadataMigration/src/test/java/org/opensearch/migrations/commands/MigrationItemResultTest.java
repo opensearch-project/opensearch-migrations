@@ -7,14 +7,17 @@ import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.withSettings;
 
 public class MigrationItemResultTest {
     @Test
     void testAsString_fullResults_withMessage() {
-        var clusters = mock(Clusters.class);
+        var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
         var items = mock(Items.class);
         var testObject = EvaluateResult.builder()
             .clusters(clusters)
@@ -28,13 +31,16 @@ public class MigrationItemResultTest {
         assertThat(result, containsString("Issues:"));
 
         verify(clusters).asCliOutput();
+        verify(clusters).getSource();
+        verify(clusters).getTarget();
         verify(items).asCliOutput();
+        verify(items, times(1)).getAllErrors();
         verifyNoMoreInteractions(items, clusters);
     }
 
     @Test
     void testAsString_fullResults_withNoMessage() {
-        var clusters = mock(Clusters.class);
+        var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
         var items = mock(Items.class);
         var testObject = EvaluateResult.builder()
             .clusters(clusters)
@@ -44,14 +50,14 @@ public class MigrationItemResultTest {
 
         var result = testObject.asCliOutput();
         assertThat(result, containsString("10 issue(s) detected"));
-        verify(clusters).asCliOutput();
         verify(items).asCliOutput();
-        verifyNoMoreInteractions(items, clusters);
+        verify(items, times(2)).getAllErrors();
+        verifyNoMoreInteractions(items);
     }
 
     @Test
     void testAsString_noItems() {
-        var clusters = mock(Clusters.class);
+        var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
         var testObject = EvaluateResult.builder()
             .clusters(clusters)
             .exitCode(0)
@@ -59,8 +65,6 @@ public class MigrationItemResultTest {
 
         var result = testObject.asCliOutput();
         assertThat(result, containsString("0 issue(s) detected"));
-        verify(clusters).asCliOutput();
-        verifyNoMoreInteractions(clusters);
     }
 
     @Test
@@ -70,6 +74,7 @@ public class MigrationItemResultTest {
             .build();
 
         var result = testObject.asCliOutput();
-        assertThat(result, containsString("0 issue(s) detected"));
+        assertThat(result, containsString(  "No source was defined"));
+        assertThat(result, containsString(  "No target was defined"));
     }
 }

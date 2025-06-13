@@ -34,6 +34,7 @@ import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
@@ -65,8 +66,6 @@ import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
-
-import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.buildKafkaProperties;
 
 @Slf4j
 public class CaptureProxy {
@@ -173,6 +172,11 @@ public class CaptureProxy {
                 "E.g. '(.* /ephemeral/*|GET /_cat/.*)' to ignore capturing all traffic for '/ephemeral' AND " +
                 "all GET requests to /_cat/.*")
         public String suppressMethodAndPath;
+        @Parameter(required = false,
+            names = { "--kafkaTopic" },
+            arity = 1,
+            description = "Name of the topic to write captured traffic to.")
+        public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         @ParametersDelegate
         public KafkaParameters kafkaParameters = new KafkaParameters();
     }
@@ -272,7 +276,8 @@ public class CaptureProxy {
             return new KafkaCaptureFactory(
                 rootContext,
                 nodeId,
-                new KafkaProducer<>(buildKafkaProperties(params.kafkaParameters)),
+                new KafkaProducer<>(KafkaConfig.buildKafkaProperties(params.kafkaParameters)),
+                params.kafakTopicName,
                 params.maximumTrafficStreamSize
             );
         } else if (params.noCapture) {

@@ -1,4 +1,6 @@
-FROM migrations/elasticsearch_client_test_console:latest AS migration-console-base
+ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
+
+FROM ${BASE_IMAGE} AS migration-console-base
 
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
     if [ "$ARCH" != "amd64" ] && [ "$ARCH" != "arm64" ]; then \
@@ -28,8 +30,17 @@ RUN ARCH=$(cat /arch.env) && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" | tar -xz && \
     mv linux-${ARCH}/helm /k8s/bin/
 
+# Install etcdctl
+RUN ARCH=$(cat /arch.env) && \
+    ETCD_VER=v3.5.21 && \
+    DOWNLOAD_URL=https://github.com/etcd-io/etcd/releases/download && \
+    mkdir -p /etcd/bin && \
+    curl -L ${DOWNLOAD_URL}/${ETCD_VER}/etcd-${ETCD_VER}-linux-${ARCH}.tar.gz | tar -xz && \
+    mv etcd-${ETCD_VER}-linux-${ARCH}/etcdctl /etcd/bin && \
+    rm -rf etcd-${ETCD_VER}-linux-amd64 etcd.tar.gz
 
-FROM migrations/elasticsearch_client_test_console:latest
+
+FROM ${BASE_IMAGE}
 
 # Define the virtual environment path
 ENV WORKON_HOME=/
@@ -39,6 +50,7 @@ ENV PIPENV_MAX_DEPTH=1
 
 COPY --from=migration-console-base /root/kafka-tools /root/kafka-tools
 COPY --from=migration-console-base /k8s/bin/ /usr/local/bin
+COPY --from=migration-console-base /etcd/bin/ /usr/local/bin
 
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
     helm completion bash > /etc/bash_completion.d/helm
@@ -93,6 +105,9 @@ RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console --config-file=/root/lib/console_link/services.yaml completion bash > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
+
+COPY workflows /root/workflows
+
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
 

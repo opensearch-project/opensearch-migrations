@@ -1,8 +1,9 @@
 import {
+    AwsLogDriverMode,
+    ContainerDependencyCondition,
+    LogDrivers,
     PortMapping,
     Protocol,
-    LogDrivers,
-    AwsLogDriverMode,
     TaskDefinition
 } from "aws-cdk-lib/aws-ecs";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
@@ -18,7 +19,7 @@ export class OtelCollectorSidecar {
         return "http://localhost:" + OtelCollectorSidecar.OTEL_CONTAINER_PORT;
     }
 
-    static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string) {
+    static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string, stage: string) {
         const otelCollectorPort: PortMapping = {
             name: "otel-collector-connect",
             hostPort: this.OTEL_CONTAINER_PORT,
@@ -48,6 +49,10 @@ export class OtelCollectorSidecar {
                 logGroup: serviceLogGroup,
                 mode: AwsLogDriverMode.BLOCKING,
             }),
+            environment: {
+                "QUALIFIER": stage,
+                "TRACE_SAMPLING_PERCENTAGE": "1"
+            },
             essential: true,
             healthCheck: {
                 command: ["CMD", "/healthcheck"],
@@ -58,6 +63,10 @@ export class OtelCollectorSidecar {
             }
         });
         taskDefinition.addToTaskRolePolicy(createAwsDistroForOtelPushInstrumentationPolicy());
+        taskDefinition.defaultContainer?.addContainerDependencies({
+            container: otelCollectorContainer,
+            condition: ContainerDependencyCondition.HEALTHY
+        });
 
         return otelCollectorContainer;
     }

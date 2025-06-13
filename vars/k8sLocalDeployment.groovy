@@ -48,13 +48,21 @@ def call(Map config = [:]) {
 
             stage('Check Minikube Status') {
                 steps {
-                    timeout(time: 1, unit: 'MINUTES') {
+                    timeout(time: 5, unit: 'MINUTES') {
                         script {
                             def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
                             if (status == "Running") {
                                 echo "✅ Minikube is running"
                             } else {
-                                error("❌ Minikube is NOT running")
+                                echo "Minikube is not running, status: " + status
+                                sh(script: "minikube delete", returnStdout: true)
+                                sh(script: "minikube start", returnStdout: true)
+                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+                                if (status2 == "Running") {
+                                    echo "✅ Minikube was started as is running"
+                                } else {
+                                    error("❌ Minikube failed to start")
+                                }
                             }
                         }
                     }

@@ -7,6 +7,10 @@
                 {
                     "Name": "OTelLib",
                     "Value": "captureProxy"
+                },
+                {
+                    "Name": "qualifier",
+                    "Value": "dev"
                 }
             ]
         },
@@ -17,6 +21,10 @@
                 {
                     "Name": "OTelLib",
                     "Value": "captureProxy"
+                },
+                {
+                    "Name": "qualifier",
+                    "Value": "dev"
                 }
             ]
         },
@@ -27,6 +35,10 @@
                 {
                     "Name": "OTelLib",
                     "Value": "replayer"
+                },
+                {
+                    "Name": "qualifier",
+                    "Value": "dev"
                 }
             ]
         }

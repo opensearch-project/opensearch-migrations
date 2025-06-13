@@ -146,7 +146,7 @@ public class RequestPipelineOrchestrator<R> {
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onPayloadBytesIn));
         // IN: Netty HttpRequest(1) + HttpJsonRequest(1) with headers + HttpContent(1) blocks (which may be compressed)
         // OUT: Netty HttpRequest(2) + HttpJsonRequest(1) with headers + HttpContent(2) uncompressed blocks
-        pipeline.addLast(new HttpContentDecompressor());
+        pipeline.addLast(new HttpContentDecompressor(0));
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onUncompressedBytesIn));
         if (transformer != null) {
             httpTransactionContext.onJsonPayloadParseRequired();

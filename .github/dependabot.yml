@@ -27,10 +27,15 @@ updates:
         patterns:
           - "*"
     ignore:
+      - dependency-name: "org.gradle.toolchains.foojay-resolver-convention"
       - dependency-name: "org.opensearch:*"
       - dependency-name: "org.opensearch.plugin:*"
       - dependency-name: "org.apache.lucene:*"
       - dependency-name: "io.opentelemetry.semconv:*"
+      - dependency-name: "io.netty:*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   - package-ecosystem: "github-actions"
     directory: "/"

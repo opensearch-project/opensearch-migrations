@@ -43,14 +43,14 @@ export default function AceEditorComponent({
   const { state } = usePlayground();
   const { updateTransformation } = usePlaygroundActions();
   const [content, setContent] = useState("");
-
-  // Use a ref instead of state for validation errors to prevent re-renders
+  // Use refs for validation errors to prevent re-renders
   const validationErrorsRef = useRef<IAnnotation[]>([]);
-
-  // Refs and dimension state used for resizing the AceEditor instance
   const editorRef = useRef<AceEditor>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 500, height: 300 });
+
+  // Track if content has been initialized
+  const contentInitializedRef = useRef<boolean>(false);
 
   // Find the transformation by ID
   const transformation = state.transformations.find((t) => t.id === itemId);
@@ -72,17 +72,23 @@ export default function AceEditorComponent({
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Initialize content from the transformation
+  // Reset initialization flag when itemId changes
   useEffect(() => {
-    if (transformation) {
-      setContent(transformation.content || defaultContent);
+    contentInitializedRef.current = false;
+  }, [itemId]);
+
+  // Initialize content from the transformation only once per itemId
+  useEffect(() => {
+    if (transformation && !contentInitializedRef.current) {
+      setContent(transformation.content ?? defaultContent);
       onSaveStatusChange({
         status: SaveStatus.SAVED,
         savedAt: new Date(Date.now()),
         errors: [],
       });
+      contentInitializedRef.current = true;
     }
-  }, [transformation, onSaveStatusChange]);
+  }, [itemId, transformation, onSaveStatusChange]);
 
   // Save the current content to local storage
   const saveContent = useCallback(() => {
@@ -93,11 +99,14 @@ export default function AceEditorComponent({
     if (!transformation || activeContent === transformation.content) return;
 
     // Check for validation errors
-    if (validationErrorsRef.current.length > 0) {
+    const blockingErrors = validationErrorsRef.current.filter(
+      (e) => e.type === "error",
+    );
+    if (blockingErrors.length > 0) {
       onSaveStatusChange({
         status: SaveStatus.BLOCKED,
         savedAt: null,
-        errors: validationErrorsRef.current,
+        errors: blockingErrors,
       });
       return;
     }
@@ -125,10 +134,10 @@ export default function AceEditorComponent({
         beautify.beautify(editorRef.current.editor.session);
       }
     } catch (error) {
-      console.error("Error formatting code:", error);
+      console.error(`Error formatting code for ${itemId}:`, error);
     }
     saveContent();
-  }, [content, saveContent]);
+  }, [content, saveContent, itemId]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -156,7 +165,6 @@ export default function AceEditorComponent({
     };
   }, [handleKeyDown]);
 
-  // Handle content change and save (debounce is handled internally by AceEditor)
   const handleChange = (newContent: string) => {
     if (newContent === content) return; // Skip if content is unchanged
     setContent(newContent);
@@ -167,11 +175,14 @@ export default function AceEditorComponent({
     }
 
     // Check for validation errors
-    if (validationErrorsRef.current.length > 0) {
+    const blockingErrors = validationErrorsRef.current.filter(
+      (e) => e.type === "error",
+    );
+    if (blockingErrors.length > 0) {
       onSaveStatusChange({
         status: SaveStatus.BLOCKED,
         savedAt: null,
-        errors: validationErrorsRef.current,
+        errors: blockingErrors,
       });
     } else {
       // Mark as unsaved if content is different from saved content
@@ -185,7 +196,6 @@ export default function AceEditorComponent({
       }
     }
 
-    // Auto-save after debounce period (handled by AceEditor)
     saveContent();
   };
 

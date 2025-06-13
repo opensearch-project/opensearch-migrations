@@ -180,7 +180,7 @@ function rewriteBulk(match, context) {
 }
 
 function includesTypeNames(inputMap) {
-    const flagMatch = inputMap.request.URI.match(new RegExp("[?&]include_type_name=([^&#]*)"));
+    const flagMatch = inputMap.request.URI.match(/[?&]include_type_name=([^&#]*)/);
     if (flagMatch) {
         return JSON.parse(flagMatch[1]);
     }
@@ -278,7 +278,7 @@ function rewriteCreateIndex(match, inputMap) {
         return inputMap.request;
     }
 
-    const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
+    const sourceIndex = match[1].replace(/[?].*/, ""); // remove the query string that could be after
     const types = [...mappings.keys()];
     const sourceTypeToTargetIndicesMap = new Map(types
         .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_mappings)])
@@ -473,7 +473,7 @@ function main(context) {
     console.log("Context: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));
 
     // Validate context, todo: include more validation
-    if (!context || !context?.source_properties?.version?.major) {
+    if (!context?.source_properties?.version?.major) {
         console.error("Context Missing source_properties: ", JSON.stringify(context, mapToPlainObjectReplacer, 2));
         throw new Error("No source_properties defined - required to transform correctly!");
     }

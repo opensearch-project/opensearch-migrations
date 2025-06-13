@@ -1,0 +1,79 @@
+# templates/create-argo-migration-templates
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-create-argo-migration-templates
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: create-argo-migration-workflows
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: migration-console-for-workflows
+          image: migrations/migration_console:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              set -x -e
+              cd workflows/templates
+              NAMESPACE="{{ .Release.Name }}"
+              APP_NAME="{{ .Release.Name }}"
+              OWNER="{{ .Release.Name }}"
+              VERSION="0.0.1"
+
+              . /etc/profile.d/venv.sh
+              source /.venv/bin/activate
+
+              for f in *.yaml; do
+                JSFILE="${f%.yaml}.json"
+                python3 -c 'import sys, yaml, json; json.dump(yaml.safe_load(sys.stdin), sys.stdout)' < "$f" > $JSFILE;
+                jq --arg app "$APP_NAME" \
+                    --arg version "$VERSION" \
+                    --arg managedBy "$OWNER" \
+                    '.metadata.labels.app = $app |
+                    .metadata.labels.version = $version |
+                    .metadata.labels."managed-by" = $managedBy' \
+                    "$JSFILE" > "$JSFILE.tmp"
+                kubectl apply -f $JSFILE.tmp -n $NAMESPACE
+              done
+---
+# templates/remove-argo-migration-templates
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-remove-argo-migration-templates
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: create-argo-migration-workflows
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: migration-console-for-workflows
+          image: migrations/migration_console:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              kubectl get workflowtemplates.argoproj.io -o yaml -l managed-by={{ .Release.Name }} -o name | \
+                xargs kubectl delete

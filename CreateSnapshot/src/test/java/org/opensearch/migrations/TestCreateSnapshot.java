@@ -110,7 +110,8 @@ public class TestCreateSnapshot {
                     .set("settings", objectMapper.createObjectNode()
                             .put("bucket", "new-bucket")
                             .put("region", "us-east-2")
-                            .put("base_path", "path-to-repo"));
+                            .put("base_path", "path-to-repo")
+                            .put("compress", false));
 
             Assertions.assertEquals(expectedRegisterRepoRequest, actualRegisterRepoRequest);
 

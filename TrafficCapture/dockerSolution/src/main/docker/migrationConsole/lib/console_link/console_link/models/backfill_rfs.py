@@ -57,6 +57,7 @@ RFS_BACKFILL_SCHEMA = {
             "k8s": K8S_RFS_SCHEMA,
             "snapshot_name": {"type": "string", "required": False},
             "snapshot_repo": {"type": "string", "required": False},
+            "session_name": {"type": "string", "required": False},
             "scale": {"type": "integer", "required": False, "min": 1}
         },
         "check_with": contains_one_of({'docker', 'ecs', 'k8s'}),
@@ -234,10 +235,17 @@ class ECSRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
 
-def get_detailed_status(target_cluster: Cluster) -> Optional[str]:
+def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Optional[str]:
+    values = get_detailed_status_dict(target_cluster, session_name)
+    return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
+
+
+def get_detailed_status_dict(target_cluster: Cluster, session_name: str = "") -> Optional[Dict]:
     # Check whether the working state index exists. If not, we can't run queries.
+    index_to_check = ".migrations_working_state" + ("_" + session_name if session_name else "")
+    logger.info("Checking status for index: " + index_to_check)
     try:
-        target_cluster.call_api("/.migrations_working_state")
+        target_cluster.call_api("/" + index_to_check)
     except requests.exceptions.RequestException:
         logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
         return None
@@ -269,7 +277,7 @@ def get_detailed_status(target_cluster: Cluster) -> Optional[str]:
         "in progress": in_progress_query,
         "unclaimed": unclaimed_query
     }
-    values = {key: parse_query_response(queries[key], target_cluster, key) for key in queries.keys()}
+    values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
     logger.info(f"Values: {values}")
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")
@@ -282,8 +290,12 @@ def get_detailed_status(target_cluster: Cluster) -> Optional[str]:
     if values["unclaimed"] + values["in progress"] != values["incomplete"]:
         logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
                        f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
+    return values
 
-    return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
+
+def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
+    d = get_detailed_status_dict(target_cluster, session_name)
+    return d['total'] == d['completed'] and d['incomplete'] == 0 and d['in progress'] == 0 and d['unclaimed'] == 0
 
 
 def perform_archive(target_cluster: Cluster,
@@ -353,9 +365,9 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
         outfile.write("\n]")  # Close the JSON array
 
 
-def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
+def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: str) -> Optional[int]:
     try:
-        response = cluster.call_api("/.migrations_working_state/_search", data=json.dumps(query),
+        response = cluster.call_api("/" + index_name + "/_search", data=json.dumps(query),
                                     headers={'Content-Type': 'application/json'})
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")

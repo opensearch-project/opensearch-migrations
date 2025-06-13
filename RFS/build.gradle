@@ -68,9 +68,8 @@ dependencies {
     implementation libs.jackson.dataformat.smile
     implementation libs.netty.codec.http
     implementation libs.httpclient5
-    implementation libs.log4j.api
-    implementation libs.log4j.core
-    implementation libs.log4j.slf4j2.impl
+
+    implementation libs.slf4j.api
 
     lucene6 libs.lucene.v6.core
     lucene6 libs.lucene.v6.backward.codecs

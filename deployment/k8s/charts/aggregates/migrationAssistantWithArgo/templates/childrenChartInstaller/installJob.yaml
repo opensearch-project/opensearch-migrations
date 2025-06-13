@@ -1,0 +1,170 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-helm-installer
+  labels:
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: Never
+      containers:
+        - name: helm-installer
+          image: {{ .Values.installer.image.repository }}:{{ .Values.installer.image.tag }}
+          imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              #!/bin/sh
+              set -e -x
+
+      {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
+                  (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}
+              echo "'otel-collector-daemonset' and 'opentelemetry-operator' are mutually exclusive. " \
+                   "At least one must be false."
+              exit 1
+      {{- end }}
+
+              mkdir -p /tmp/helm-notes
+              mkdir -p /tmp/helm-status
+              echo "Starting Helm installation sequence..."
+
+      {{- range .Values.charts }}
+        {{- if (index $.Values.conditionalPackageInstalls .name) }}
+              echo "Adding chart repository..."
+              helm repo add chart-repo-{{ .name }} {{ .repository }}
+        {{- end }}
+      {{- end }}
+
+      {{- if (not (empty .Values.charts)) }}
+              time helm repo update
+      {{- end }}
+
+              # Helper function.  Charts that define "dependsOn" will check a dependency with this.
+              check_dependency() {
+                local dependency=$1
+                local max_attempts=300
+                local attempt=0
+
+                while [ $attempt -lt $max_attempts ]; do
+                  if [ -f "/tmp/helm-status/$dependency.done" ]; then
+                    echo "Dependency $dependency is ready"
+                    return 0
+                  fi
+
+                  echo "Waiting for dependency $dependency to complete (attempt $attempt of $max_attempts)..."
+                  attempt=$((attempt + 1))
+                  sleep 1
+                done
+
+                echo "Error: Dependency $dependency not ready after maximum attempts"
+                return 1
+              }
+
+              # Install charts
+      {{- range .Values.charts }}
+        {{- if (not (index $.Values.conditionalPackageInstalls .name)) }}
+              echo "Skipping install for: {{ .name }} because conditionalPackageInstalls.{{ .name }} disabled it."
+        {{- else }}
+              echo "Preparing chart: {{ .name }}"
+
+          {{- if .values }}
+              VALUES_B64="{{ .values | toYaml | b64enc }}"
+              echo "$VALUES_B64" | base64 -d > /tmp/values-{{ .name }}.yaml
+              VALUE_PARAM="--values /tmp/values-{{ .name }}.yaml"
+          {{- else }}
+              VALUE_PARAM=""
+          {{- end }}
+
+              # Gather the chart installation's output for later aggregation
+              NOTES_FILE="/tmp/helm-notes/{{ .name }}.txt"
+              echo "==== NOTES for {{ .name }} ====" > $NOTES_FILE
+
+              # Launch installation in background with dependency check if needed
+              (
+          {{- if .dependsOn }}
+                echo "Chart {{ .name }} depends on {{ .dependsOn }} - checking dependency"
+                check_dependency "{{ .dependsOn }}"
+          {{- end }}
+
+                echo "Installing chart: {{ .name }}"
+                helm upgrade --install \
+                  {{ .name }} \
+                  chart-repo-{{ .name }}/{{ .name }} \
+          {{- if .version }}
+                  --version {{ .version }} \
+          {{- end }}
+          {{- if .namespace }}
+                  --namespace {{ .namespace }} \
+          {{- end }}
+                  --timeout {{ default "300" .timeout }}s \
+                  --set global.managedBy="{{ $.Release.Name }}" \
+                  $VALUE_PARAM \
+          {{- if .waitForInstallation }}
+                  --wait
+          {{- end }}
+
+                # Mark this chart as done
+                touch /tmp/helm-status/{{ .name }}.done
+
+                echo -e "\nFinished installing chart: {{ .name }}\n" >> $NOTES_FILE
+              ) >> $NOTES_FILE 2>&1 &
+        {{- end }}
+      {{- end }}
+
+              # Wait for all helm upgrades/installs to complete
+              time wait
+
+              # Combine all notes and create a ConfigMap to store them
+              echo "All charts installed successfully!"
+
+              cat > /tmp/all-notes.yaml << EOF
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: {{ $.Release.Name }}-installation-notes
+                namespace: {{ $.Release.Namespace }}
+                labels:
+                  app.kubernetes.io/managed-by: {{ $.Release.Service }}
+                  app.kubernetes.io/instance: {{ $.Release.Name }}
+              data:
+                all-notes.txt: |
+                  ============================================
+                  INSTALLATION NOTES FOR {{ $.Release.Name }}
+                  ============================================
+
+              EOF
+
+              # After all processes have completed, combine the notes with proper indentation
+              for notes_file in /tmp/helm-notes/*.txt; do
+                if [ -f "$notes_file" ]; then
+                  echo "  # Adding notes from $(basename $notes_file)"
+                  # The sed command adds 4 spaces of indentation for proper YAML formatting
+                  sed 's/^/    /' $notes_file >> /tmp/all-notes.yaml
+                  echo "    " >> /tmp/all-notes.yaml
+                  echo "    --------------------------------------" >> /tmp/all-notes.yaml
+                fi
+              done
+
+              cat /tmp/all-notes.yaml
+
+              # Apply the ConfigMap to store all notes
+              kubectl apply -f /tmp/all-notes.yaml
+
+              echo "Installation complete! View aggregated notes with:"
+              echo "kubectl get configmap {{ $.Release.Name }}-installation-notes -n {{ $.Release.Namespace }} -o jsonpath='{.data.all-notes\\.txt}'"

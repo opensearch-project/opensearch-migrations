@@ -223,38 +223,46 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
+        boolean useTypedMappings = !VersionMatchers.isES_8_X.test(clusterVersion);
+
         var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
             ? "\"template\":\"" + pattern + "\","
             : "\"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
             "  ],\r\n";
         final var templateJson = "{\r\n" + //
-            "  " + matchPatternClause + //
-            "  \"settings\": {\r\n" + //
-            "    \"number_of_shards\": 1\r\n" + //
-            "  },\r\n" + //
-            "  \"aliases\": {\r\n" + //
-            "    \"alias_legacy\": {}\r\n" + //
-            "  },\r\n" + //
-            "  \"mappings\": {\r\n" + //
-            "    \"" + defaultDocType() + "\": {\r\n" + //
-            "      \"_source\": {\r\n" + //
-            "        \"enabled\": true\r\n" + //
-            "      },\r\n" + //
-            "      \"properties\": {\r\n" + //
-            "        \"host_name\": {\r\n" + //
-            "          \"type\": \"keyword\"\r\n" + //
-            "        },\r\n" + //
-            "        \"created_at\": {\r\n" + //
-            "          \"type\": \"date\",\r\n" + //
-            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" + //
-            "        }\r\n" + //
-            "      }\r\n" + //
-            "    }\r\n" + //
-            "  }\r\n" + //
+            "  " + matchPatternClause +
+            "  \"settings\": {\r\n" +
+            "    \"number_of_shards\": 1\r\n" +
+            "  },\r\n" +
+            "  \"aliases\": {\r\n" +
+            "    \"alias_legacy\": {}\r\n" +
+            "  },\r\n" +
+            "  \"mappings\": " + (useTypedMappings ? "{\r\n" + //
+            "    \"" + defaultDocType() + "\": {\r\n" : "{\r\n") + //
+            "      \"_source\": {\r\n" +
+            "        \"enabled\": true\r\n" +
+            "      },\r\n" +
+            "      \"properties\": {\r\n" +
+            "        \"host_name\": {\r\n" +
+            "          \"type\": \"keyword\"\r\n" +
+            "        },\r\n" +
+            "        \"created_at\": {\r\n" +
+            "          \"type\": \"date\",\r\n" +
+            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" +
+            "        }\r\n" +
+            "      }\r\n" +
+            (useTypedMappings ? "    }\r\n" : "") +
+            "  }\r\n" +
             "}";
 
-        var extraParameters = VersionMatchers.isES_5_X.test(clusterVersion) ? "" : "?include_type_name=true";
+        var extraParameters = (
+                VersionMatchers.isES_5_X
+                        .or(VersionMatchers.isES_8_X)
+                        .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_6)
+            ).test(clusterVersion)
+                    ? ""
+                    : "?include_type_name=true";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
@@ -374,7 +382,10 @@ public class ClusterOperations {
     }
 
     private String defaultDocType() {
-        if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_2_X).test(clusterVersion)) {
+        if (VersionMatchers.isES_5_X
+            .or(VersionMatchers.isES_2_X)
+            .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_1)
+            .test(clusterVersion)) {
             return "doc";
         }
         return "_doc";
