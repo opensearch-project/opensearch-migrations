@@ -146,7 +146,7 @@ export class StackComposer {
         const defaultDeployId = 'default'
 
         const contextId = scope.node.tryGetContext("contextId")
-         if (!contextId) {
+        if (!contextId) {
             throw new Error("Required context field 'contextId' not provided")
         }
         const contextJSON = this.parseContextBlock(scope, contextId)

@@ -22,11 +22,9 @@ import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
 import {createDefaultECSTaskRole, makeLocalAssetContainerImage} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { WebsiteSidecar } from "./website-sidecar";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
-    readonly websiteEnabled?: boolean;
     readonly serviceName: string,
     readonly vpcDetails: VpcDetails,
     readonly securityGroups: ISecurityGroup[],
@@ -154,10 +152,6 @@ export class MigrationServiceCore extends Stack {
 
         if (props.otelCollectorEnabled) {
             OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName, props.stage);
-        }
-
-        if (props.websiteEnabled) {
-            WebsiteSidecar.addWebsiteContainer(serviceTaskDef, serviceLogGroup.logGroupName);
         }
 
         const fargateService = new FargateService(this, "ServiceFargateService", {

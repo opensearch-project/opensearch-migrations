@@ -48,7 +48,7 @@ npm install -g aws-cdk
 
 ```shell
 # Execute from the deployment/cdk/opensearch-service-migration directory
-cdk bootstrap --c contextId=default
+cdk bootstrap --c contextId=demo-deploy
 ```
 
 Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
