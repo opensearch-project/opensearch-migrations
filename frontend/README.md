@@ -20,11 +20,21 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser to see the application.
 
+### Container
+
+This site is distributed via a small foot-print container running nginx.  To build and website on local port 8080 use run the following script.
+
+```bash
+./gradlew :frontend:buildDockerImage && \
+    docker run -p 8080:80  migrations/website
+```
+
 ### Gradle Integration
 
 This Next.js project is integrated with Gradle through a custom plugin. You can use the following Gradle tasks:
 
 - `./gradlew :frontend:buildFrontend` - Build the Next.js application
+- `./gradlew :frontend:buildDockerImage` - Build the container that includes the website
 - `./gradlew :frontend:lintFrontend` - Run linters
 - `./gradlew :frontend:testFrontend` - Run test cases with coverage
 - `./gradlew :frontend:helpFrontend` - Show all of the scripts available for local development with npm
