@@ -9,8 +9,10 @@ public class VersionMatchers {
     public static final Predicate<Version> isES_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 2.4"));
     public static final Predicate<Version> isES_5_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 5.6"));
     public static final Predicate<Version> isES_6_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 6.8"));
-    public static final Predicate<Version> equalOrBetween_ES_6_0_and_6_5 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 6.0"))
-                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 6.5")));
+    public static final Predicate<Version> equalOrBetween_ES_6_0_and_6_1 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 6.0"))
+                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 6.1")));
+    public static final Predicate<Version> equalOrBetween_ES_6_0_and_6_6 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 6.0"))
+                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 6.6")));
     public static final Predicate<Version> equalOrGreaterThanES_6_5 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 6.5"));
     public static final Predicate<Version> isES_7_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 7.10"));
     public static final Predicate<Version> isES_7_10 = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.10.2"));
