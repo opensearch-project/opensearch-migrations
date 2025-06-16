@@ -56,6 +56,7 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
         this.numberOfFiles = numberOfFiles != null ? numberOfFiles : 0;
         this.totalSizeBytes = totalSize != null ? totalSize : 0L;
 
+        // Convert the raw file metadata to the FileMetadata class
         List<FileInfo> convertedFiles = new java.util.ArrayList<>();
         if (files != null) {
             for (FileInfoRaw fileMetadataRaw : files) {

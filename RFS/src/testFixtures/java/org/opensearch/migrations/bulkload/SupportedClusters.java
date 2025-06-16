@@ -19,7 +19,7 @@ import lombok.experimental.UtilityClass;
 public class SupportedClusters {
     private static List<ContainerVersion> sources() {
         return List.of(
-            SearchClusterContainer.ES_V5_6_16
+            SearchClusterContainer.ES_V5_6_16,
             SearchClusterContainer.ES_V6_8_23,
             SearchClusterContainer.ES_V7_10_2,
             SearchClusterContainer.ES_V7_17,
@@ -34,10 +34,7 @@ public class SupportedClusters {
                 SearchClusterContainer.ES_V7_8,
                 SearchClusterContainer.ES_V7_7,
                 SearchClusterContainer.ES_V7_4,
-                SearchClusterContainer.ES_V7_3,
-                SearchClusterContainer.ES_V7_2,
                 SearchClusterContainer.ES_V7_1,
-                SearchClusterContainer.ES_V7_0,
                 SearchClusterContainer.ES_V6_7,
                 SearchClusterContainer.ES_V6_6,
                 SearchClusterContainer.ES_V6_5,
