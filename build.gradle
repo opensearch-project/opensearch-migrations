@@ -1,3 +1,4 @@
+import com.google.cloud.tools.jib.gradle.JibTask
 import groovy.json.JsonOutput
 
 plugins {
@@ -9,6 +10,7 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.6' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.google.protobuf' version "0.9.5" apply false
+    id 'com.google.cloud.tools.jib' version '3.4.3' apply false
 
     // Used in top level build.gradle
     id 'jacoco' apply true
@@ -160,6 +162,12 @@ subprojects {
             leadingTabsToSpaces()
             endWithNewline()
             removeUnusedImports()
+        }
+    }
+
+    plugins.withId('com.google.cloud.tools.jib') {
+        tasks.withType(JibTask).configureEach {
+            notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
         }
     }
 

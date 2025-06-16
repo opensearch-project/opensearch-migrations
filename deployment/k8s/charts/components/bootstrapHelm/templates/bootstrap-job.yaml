@@ -1,0 +1,101 @@
+{{- if not .Values.skipImageBuild }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: bootstrap-helm
+  labels:
+    app.kubernetes.io/component: bootstrap-helm
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600  # keep for 1 hour
+  template:
+    spec:
+      serviceAccountName: {{ .Values.serviceAccountName }}
+      restartPolicy: Never
+      volumes:
+        {{- if .Values.localRepoMount }}
+        - name: local-mount
+          hostPath:
+            path: /opensearch-migrations
+            type: DirectoryOrCreate
+        {{- end }}
+      terminationGracePeriodSeconds: 0
+      {{- if .Values.awsEKSEnabled }}
+      nodeSelector:
+        eks.amazonaws.com/compute-type: auto
+      {{- end }}
+      containers:
+        - name: bootstrap-helm
+          image: {{ .Values.bootstrapJobBaseImage }}
+          env:
+            - name: GRADLE_OPTS
+              value: "-Xms512m -Xmx4g"
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              set +e
+              yum update -y && yum install -y git findutils tar unzip rsync docker vim && yum clean all
+
+              TOOLS_ARCH=$(uname -m)
+                case "$TOOLS_ARCH" in
+                aarch64)
+                  TOOLS_ARCH="arm64"
+                  AWS_CLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
+                  ;;
+                x86_64)
+                  TOOLS_ARCH="amd64"
+                  AWS_CLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+                  ;;
+                *)
+                  echo "Unsupported architecture: $TOOLS_ARCH"
+                  exit 1
+                ;;
+              esac
+
+              echo "Installing AWS cli"
+              curl -sSL "$AWS_CLI_URL" -o awscliv2.zip
+              unzip awscliv2.zip
+              ./aws/install
+              rm -rf aws awscliv2.zip
+              aws --version
+
+              rm -rf /workspace/*
+              rm -rf /workspace/.??*
+              {{- if not .Values.localRepoMount }}
+              echo "Cloning repo from {{ .Values.repositoryUrl }} (branch: {{ .Values.repositoryBranch }})..."
+              git clone --branch {{ .Values.repositoryBranch }} {{ .Values.repositoryUrl }} /workspace
+              {{- else }}
+              rsync -av --exclude=build --exclude=cdk.out --exclude=node_modules --exclude=.gradle --exclude=.idea --exclude=.git /local-workspace/ /workspace/
+              {{- end }}
+              cd /workspace
+
+              # This created builder uses the buildkitd-pod that this chart also deploys to build images
+              docker buildx create --name local-remote-builder --driver remote tcp://buildkitd:1234
+
+              GRADLE_CMD="./gradlew buildImagesToRegistry -PregistryEndpoint='{{ .Values.registryEndpoint }}'"
+              echo "Running Gradle build with:"
+              echo "$GRADLE_CMD"
+              eval "$GRADLE_CMD"
+
+              {{- if .Values.keepJobAlive }}
+              tail -f /dev/null
+              {{- end }}
+          resources:
+            requests:
+              memory: "3Gi"
+              cpu: "1000m"
+              ephemeral-storage: "5Gi"
+            limits:
+              memory: "6Gi"
+              cpu: "2000m"
+              ephemeral-storage: "10Gi"
+          volumeMounts:
+            {{- if .Values.localRepoMount }}
+            - name: local-mount
+              mountPath: /local-workspace
+              readOnly: true
+            {{- end }}
+{{- end }}
