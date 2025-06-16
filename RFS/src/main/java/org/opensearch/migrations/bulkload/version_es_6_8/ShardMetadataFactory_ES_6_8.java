@@ -26,9 +26,6 @@ public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
         objectMapper.registerModule(module);
 
         try {
-            if (root != null) {
-                System.out.println("RAW SHARD METADATA JSON: " + root.toPrettyString());
-            }
             ObjectNode objectNodeRoot = (ObjectNode) root;
             ShardMetadataData_ES_6_8.DataRaw shardMetadataRaw = objectMapper.treeToValue(
                 objectNodeRoot,
