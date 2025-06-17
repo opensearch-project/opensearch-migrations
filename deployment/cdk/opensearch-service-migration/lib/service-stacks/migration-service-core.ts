@@ -22,7 +22,7 @@ import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
 import {createDefaultECSTaskRole, makeLocalAssetContainerImage} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { MigrationWebsiteSidecar } from "./migration-website-sidecar";
+import { addWebsiteContainer } from "./migration-website-sidecar";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -157,7 +157,7 @@ export class MigrationServiceCore extends Stack {
         }
 
         if (props.websiteEnabled) {
-            MigrationWebsiteSidecar.addWebsiteContainer(serviceTaskDef, serviceLogGroup.logGroupName);
+            addWebsiteContainer(serviceTaskDef, serviceLogGroup.logGroupName);
         }
 
         const fargateService = new FargateService(this, "ServiceFargateService", {
