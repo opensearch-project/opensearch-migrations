@@ -17,6 +17,7 @@ import shadow.lucene9.org.apache.lucene.codecs.TermVectorsFormat;
  * Codec fallback for Elasticsearch 8.16+ segment formats.
  */
 public class Elasticsearch816CodecFallback extends Codec {
+    private static final String BASE_CODEC_NAME = "Lucene912";
 
     public Elasticsearch816CodecFallback() {
         super("Elasticsearch816");
@@ -24,56 +25,56 @@ public class Elasticsearch816CodecFallback extends Codec {
 
     @Override
     public PostingsFormat postingsFormat() {
-        return Codec.forName("Lucene912").postingsFormat();
+        return Codec.forName(BASE_CODEC_NAME).postingsFormat();
     }
 
     @Override
     public DocValuesFormat docValuesFormat() {
-        return Codec.forName("Lucene912").docValuesFormat();
+        return Codec.forName(BASE_CODEC_NAME).docValuesFormat();
     }
 
     @Override
     public StoredFieldsFormat storedFieldsFormat() {
-        return Codec.forName("Lucene912").storedFieldsFormat();
+        return Codec.forName(BASE_CODEC_NAME).storedFieldsFormat();
     }
 
     @Override
     public TermVectorsFormat termVectorsFormat() {
-        return Codec.forName("Lucene912").termVectorsFormat();
+        return Codec.forName(BASE_CODEC_NAME).termVectorsFormat();
     }
 
     @Override
     public FieldInfosFormat fieldInfosFormat() {
-        return Codec.forName("Lucene912").fieldInfosFormat();
+        return Codec.forName(BASE_CODEC_NAME).fieldInfosFormat();
     }
 
     @Override
     public SegmentInfoFormat segmentInfoFormat() {
-        return Codec.forName("Lucene912").segmentInfoFormat();
+        return Codec.forName(BASE_CODEC_NAME).segmentInfoFormat();
     }
 
     @Override
     public NormsFormat normsFormat() {
-        return Codec.forName("Lucene912").normsFormat();
+        return Codec.forName(BASE_CODEC_NAME).normsFormat();
     }
 
     @Override
     public LiveDocsFormat liveDocsFormat() {
-        return Codec.forName("Lucene912").liveDocsFormat();
+        return Codec.forName(BASE_CODEC_NAME).liveDocsFormat();
     }
 
     @Override
     public CompoundFormat compoundFormat() {
-        return Codec.forName("Lucene912").compoundFormat();
+        return Codec.forName(BASE_CODEC_NAME).compoundFormat();
     }
 
     @Override
     public PointsFormat pointsFormat() {
-        return Codec.forName("Lucene912").pointsFormat();
+        return Codec.forName(BASE_CODEC_NAME).pointsFormat();
     }
 
     @Override
     public KnnVectorsFormat knnVectorsFormat() {
-        return Codec.forName("Lucene912").knnVectorsFormat();
+        return Codec.forName(BASE_CODEC_NAME).knnVectorsFormat();
     }
 }
