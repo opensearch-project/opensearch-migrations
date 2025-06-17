@@ -603,7 +603,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       migrationAssistanceEnabled: true,
     };
 
-    expect(() => createStackComposer(contextOptions, undefined, 'us-gov-west-1')).toThrowError(
+    expect(() => createStackComposer(contextOptions, undefined, 'us-gov-west-1')).toThrow(
       /Your max shard size of 81 GiB is too large to migrate in GovCloud, the max supported is 80 GiB/
     );
   });
