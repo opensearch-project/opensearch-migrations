@@ -9,7 +9,7 @@ import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {makeLocalAssetContainerImage} from "../common-utilities";
 import {RemovalPolicy} from "aws-cdk-lib";
 
-export function C(taskDefinition: TaskDefinition, logGroupPrefix: string) {
+export function addWebsiteContainer(taskDefinition: TaskDefinition, logGroupPrefix: string) {
     const httpPortMapping: PortMapping = {
         name: "http",
         hostPort: 80,
