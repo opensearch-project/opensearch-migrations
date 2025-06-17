@@ -60,13 +60,33 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "docker.elastic.co/elasticsearch/elasticsearch-oss:7.7.1",
             Version.fromString("ES 7.7.1")
     );
+    public static final ContainerVersion ES_V7_6 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.6.2",
+            Version.fromString("ES 7.6.2")
+    );
+    public static final ContainerVersion ES_V7_5 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.5.2",
+            Version.fromString("ES 7.5.2")
+    );
     public static final ContainerVersion ES_V7_4 = new ElasticsearchOssVersion(
             "docker.elastic.co/elasticsearch/elasticsearch-oss:7.4.2",
             Version.fromString("ES 7.4.2")
     );
+    public static final ContainerVersion ES_V7_3 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.2",
+            Version.fromString("ES 7.3.2")
+    );
+    public static final ContainerVersion ES_V7_2 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.2.1",
+            Version.fromString("ES 7.2.1")
+    );
     public static final ContainerVersion ES_V7_1 = new ElasticsearchOssVersion(
             "docker.elastic.co/elasticsearch/elasticsearch-oss:7.1.1",
             Version.fromString("ES 7.1.1")
+    );
+        public static final ContainerVersion ES_V7_0 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.0.1",
+            Version.fromString("ES 7.0.1")
     );
     public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
