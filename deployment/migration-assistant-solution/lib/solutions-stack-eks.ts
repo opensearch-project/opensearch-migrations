@@ -157,7 +157,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         new CfnOutput(this, 'MigrationsExportString', {
             value: exportString,
             description: 'Export string for Migration resources created from this deployment',
-            exportName: 'MigrationsExportString',
+            exportName: `MigrationsExportString-${stackMarker}`,
         });
 
         const parameterGroups = [];
