@@ -81,4 +81,17 @@ public class FilterSchemeTest {
         assertThat(filter.test("test1"), equalTo(false));
         assertThat(filter.test(".test"), equalTo(true));
     }
+
+    @Test
+    void testExcludedXPackWatchIndices() {
+        var filter = FilterScheme.filterByAllowList(null);
+
+        // These should all be excluded as xpack creates them by default
+        assertThat(filter.test("triggered_watches"), equalTo(false));
+        assertThat(filter.test("watches"), equalTo(false));
+        assertThat(filter.test("watch_history_3"), equalTo(false));
+
+        // Similar index names to not exclude
+        assertThat(filter.test("watch_custom"), equalTo(true));
+    }
 }
