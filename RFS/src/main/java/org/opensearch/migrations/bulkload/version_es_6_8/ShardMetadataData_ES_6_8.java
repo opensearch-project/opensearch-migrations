@@ -4,10 +4,12 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
@@ -19,7 +21,7 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 @Getter
 public class ShardMetadataData_ES_6_8 implements ShardMetadata {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
 
     private final String snapshotName;
     private final String indexName;
@@ -37,27 +39,29 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
         String indexName,
         String indexId,
         int shardId,
-        int indexVersion,
-        long startTime,
-        long time,
-        int numberOfFiles,
-        long totalSize,
+        Integer indexVersion,
+        Long startTime,
+        Long time,
+        Integer numberOfFiles,
+        Long totalSize,
         List<FileInfoRaw> files
     ) {
         this.snapshotName = snapshotName;
         this.indexName = indexName;
         this.indexId = indexId;
         this.shardId = shardId;
-        this.indexVersion = indexVersion;
-        this.startTime = startTime;
-        this.time = time;
-        this.numberOfFiles = numberOfFiles;
-        this.totalSizeBytes = totalSize;
+        this.indexVersion = indexVersion != null ? indexVersion : -1;
+        this.startTime = startTime != null ? startTime : 0L;
+        this.time = time != null ? time : 0L;
+        this.numberOfFiles = numberOfFiles != null ? numberOfFiles : 0;
+        this.totalSizeBytes = totalSize != null ? totalSize : 0L;
 
         // Convert the raw file metadata to the FileMetadata class
         List<FileInfo> convertedFiles = new java.util.ArrayList<>();
-        for (FileInfoRaw fileMetadataRaw : files) {
-            convertedFiles.add(FileInfo.fromFileMetadataRaw(fileMetadataRaw));
+        if (files != null) {
+            for (FileInfoRaw fileMetadataRaw : files) {
+                convertedFiles.add(FileInfo.fromFileMetadataRaw(fileMetadataRaw));
+            }
         }
         this.files = Collections.unmodifiableList(convertedFiles);
     }
@@ -71,23 +75,24 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class DataRaw {
         public final String name;
-        public final int indexVersion;
-        public final long startTime;
-        public final long time;
-        public final int numberOfFiles;
-        public final long totalSize;
+        public final Integer indexVersion;
+        public final Long startTime;
+        public final Long time;
+        public final Integer numberOfFiles;
+        public final Long totalSize;
         public final List<FileInfoRaw> files;
 
         @JsonCreator
         public DataRaw(
             @JsonProperty("name") String name,
-            @JsonProperty("index_version") int indexVersion,
-            @JsonProperty("start_time") long startTime,
-            @JsonProperty("time") long time,
-            @JsonProperty("number_of_files") int numberOfFiles,
-            @JsonProperty("total_size") long totalSize,
+            @JsonProperty("index_version") Integer indexVersion,
+            @JsonProperty("start_time") Long startTime,
+            @JsonProperty("time") Long time,
+            @JsonProperty("number_of_files") Integer numberOfFiles,
+            @JsonProperty("total_size") Long totalSize,
             @JsonProperty("files") List<FileInfoRaw> files
         ) {
             this.name = name;
@@ -219,7 +224,7 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
             String physicalName = rootNode.get("physical_name").asText();
             long length = rootNode.get("length").asLong();
             String checksum = rootNode.get("checksum").asText();
-            long partSize = rootNode.get("part_size").asLong();
+            long partSize = rootNode.has("part_size") ? rootNode.get("part_size").asLong() : Long.MAX_VALUE;
             String writtenBy = rootNode.get("written_by").asText();
 
             BytesRef metaHash = null;
