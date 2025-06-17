@@ -60,13 +60,33 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "docker.elastic.co/elasticsearch/elasticsearch-oss:7.7.1",
             Version.fromString("ES 7.7.1")
     );
+    public static final ContainerVersion ES_V7_6 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.6.2",
+            Version.fromString("ES 7.6.2")
+    );
+    public static final ContainerVersion ES_V7_5 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.5.2",
+            Version.fromString("ES 7.5.2")
+    );
     public static final ContainerVersion ES_V7_4 = new ElasticsearchOssVersion(
             "docker.elastic.co/elasticsearch/elasticsearch-oss:7.4.2",
             Version.fromString("ES 7.4.2")
     );
+    public static final ContainerVersion ES_V7_3 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.2",
+            Version.fromString("ES 7.3.2")
+    );
+    public static final ContainerVersion ES_V7_2 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.2.1",
+            Version.fromString("ES 7.2.1")
+    );
     public static final ContainerVersion ES_V7_1 = new ElasticsearchOssVersion(
             "docker.elastic.co/elasticsearch/elasticsearch-oss:7.1.1",
             Version.fromString("ES 7.1.1")
+    );
+        public static final ContainerVersion ES_V7_0 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.0.1",
+            Version.fromString("ES 7.0.1")
     );
     public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
@@ -113,11 +133,15 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
         Version.fromString("ES 5.6.16")
     );
+    public static final ContainerVersion ES_V5_5 = new ElasticsearchVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch:5.5.2",
+        Version.fromString("ES 5.5.2")
+    );
 
     public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
         "elasticsearch:2.4.6",
         Version.fromString("ES 2.4.6"),
-        // This version of doesn't support path.repo based via env variables, passing this value via config 
+        // This version of doesn't support path.repo based via env variables, passing this value via config
         "/usr/share/elasticsearch/config/elasticsearch.yml",
         "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
     );
@@ -134,7 +158,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "opensearchproject/opensearch:3.0.0",
         Version.fromString("OS 3.0.0")
     );
-    
+
     public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     private enum INITIALIZATION_FLAVOR {
@@ -373,7 +397,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     /**
-     * Older versions of elasticsearch require modifications to the configuration on disk 
+     * Older versions of elasticsearch require modifications to the configuration on disk
      */
     @Getter
     public static class OlderElasticsearchVersion extends ElasticsearchVersion implements OverrideFile {

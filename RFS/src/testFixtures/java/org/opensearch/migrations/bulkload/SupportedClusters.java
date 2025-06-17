@@ -33,8 +33,13 @@ public class SupportedClusters {
                 SearchClusterContainer.ES_V7_9,
                 SearchClusterContainer.ES_V7_8,
                 SearchClusterContainer.ES_V7_7,
+                SearchClusterContainer.ES_V7_6,
+                SearchClusterContainer.ES_V7_5,
                 SearchClusterContainer.ES_V7_4,
+                SearchClusterContainer.ES_V7_3,
+                SearchClusterContainer.ES_V7_2,
                 SearchClusterContainer.ES_V7_1,
+                SearchClusterContainer.ES_V7_0,
                 SearchClusterContainer.ES_V6_7,
                 SearchClusterContainer.ES_V6_6,
                 SearchClusterContainer.ES_V6_5,
@@ -42,7 +47,8 @@ public class SupportedClusters {
                 SearchClusterContainer.ES_V6_3,
                 SearchClusterContainer.ES_V6_2,
                 SearchClusterContainer.ES_V6_1,
-                SearchClusterContainer.ES_V6_0
+                SearchClusterContainer.ES_V6_0,
+                SearchClusterContainer.ES_V5_5
         );
     }
 

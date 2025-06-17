@@ -46,7 +46,10 @@ public class FilterScheme {
             "traces",
             "traces-mappings",
             "traces-settings",
-            "traces-tsdb-settings"
+            "traces-tsdb-settings",
+            "triggered_watches",
+            "watches",
+            "watch_history_3"
     );
 
     public static Predicate<String> filterByAllowList(List<String> allowlist) {
