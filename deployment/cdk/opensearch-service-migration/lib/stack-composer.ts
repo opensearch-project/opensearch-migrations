@@ -314,15 +314,11 @@ export class StackComposer {
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
 
         let streamingSourceType
-        if (captureProxyServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
-            streamingSourceType = determineStreamingSourceType(
-                    captureProxyServiceEnabled,
-                    trafficReplayerServiceEnabled,
-                    kafkaBrokerServiceEnabled
-                );
-        } else {
-            streamingSourceType = StreamingSourceType.DISABLED
-        }
+        streamingSourceType = determineStreamingSourceType(
+            captureProxyServiceEnabled,
+            trafficReplayerServiceEnabled,
+            kafkaBrokerServiceEnabled
+        );
 
         const tlsSecurityPolicyName = this.getContextForType('tlsSecurityPolicy', 'string', defaultValues, contextJSON)
         const tlsSecurityPolicy: TLSSecurityPolicy|undefined = tlsSecurityPolicyName ? TLSSecurityPolicy[tlsSecurityPolicyName as keyof typeof TLSSecurityPolicy] : undefined
