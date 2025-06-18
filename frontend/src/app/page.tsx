@@ -3,7 +3,5 @@
 import { Box } from "@cloudscape-design/components";
 
 export default function DefaultPage() {
-  return (
-    <Box>Welcome to Migration Assistant</Box>
-  );
+  return <Box>Welcome to Migration Assistant</Box>;
 }
