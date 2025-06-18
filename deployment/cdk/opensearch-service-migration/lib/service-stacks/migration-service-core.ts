@@ -22,7 +22,6 @@ import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
 import {createDefaultECSTaskRole, makeLocalAssetContainerImage} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { addWebsiteContainer } from "./migration-website-sidecar";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -45,8 +44,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
     readonly targetGroups?: ELBTargetGroup[],
-    readonly ephemeralStorageGiB?: number,
-    readonly websiteEnabled?: boolean;
+    readonly ephemeralStorageGiB?: number
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
@@ -154,10 +152,6 @@ export class MigrationServiceCore extends Stack {
 
         if (props.otelCollectorEnabled) {
             OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName, props.stage);
-        }
-
-        if (props.websiteEnabled) {
-            addWebsiteContainer(serviceTaskDef, serviceLogGroup.logGroupName);
         }
 
         const fargateService = new FargateService(this, "ServiceFargateService", {
