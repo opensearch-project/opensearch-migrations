@@ -201,7 +201,9 @@ export class StackComposer {
         const trafficReplayerUserAgentSuffix = this.getContextForType('trafficReplayerUserAgentSuffix', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const captureProxyDesiredCount = this.getContextForType('captureProxyDesiredCount', 'number', defaultValues, contextJSON)
         const targetClusterProxyServiceEnabled = this.getContextForType('targetClusterProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const targetClusterProxyDesiredCount = this.getContextForType('targetClusterProxyDesiredCount', 'number', defaultValues, contextJSON)
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -581,6 +583,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albSourceProxyTG],
+                taskInstanceCount: captureProxyDesiredCount,
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
@@ -606,6 +609,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albTargetProxyTG],
+                taskInstanceCount: targetClusterProxyDesiredCount,
                 env: props.env,
             })
             this.addDependentStacks(targetClusterProxyStack, [migrationStack])
