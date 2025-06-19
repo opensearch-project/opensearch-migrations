@@ -313,8 +313,7 @@ export class StackComposer {
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
 
-        let streamingSourceType
-        streamingSourceType = determineStreamingSourceType(
+        const streamingSourceType = determineStreamingSourceType(
             captureProxyServiceEnabled,
             trafficReplayerServiceEnabled,
             kafkaBrokerServiceEnabled
