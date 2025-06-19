@@ -2,7 +2,7 @@ from enum import Enum
 import re
 
 import json
-from typing import Any, Dict, Generator, List, Self, Set, TextIO, Union
+from typing import Any, Dict, Generator, List, Self, Set, TextIO
 import base64
 from typing import Optional
 
@@ -108,14 +108,14 @@ Flag = Enum('Flag', ['Bulk_Request', 'Json'])
 class TupleComponent:
     def __init__(self, component_name: str, component: Dict, line_no: int, is_bulk_path: bool):
         body = get_element("body", component)
-        self.value: Union[bytes, str] = body
+        self.value: bytes | str = body
         
         self.flags = get_flags_for_component(component, is_bulk_path)
 
         self.line_no = line_no
         self.component_name = component_name
 
-        self.final_value: Union[Dict, List, str, bytes] = {}
+        self.final_value: dict | list | str | bytes = {}
         self.error = False
 
     def b64decode(self) -> Self:

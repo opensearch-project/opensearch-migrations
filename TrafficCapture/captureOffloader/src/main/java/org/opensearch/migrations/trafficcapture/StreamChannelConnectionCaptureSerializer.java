@@ -277,7 +277,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void writeByteStringToCurrentStream(int fieldNum, String str) throws IOException {
-        if (str.length() > 0) {
+        if (!str.isEmpty()) {
             getOrCreateCodedOutputStream().writeString(fieldNum, str);
         } else {
             getOrCreateCodedOutputStream().writeUInt32NoTag(0);
@@ -365,7 +365,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         throws IOException {
         int dataSize = 0;
         int lengthSize = 1;
-        if (str.length() > 0) {
+        if (!str.isEmpty()) {
             dataSize = CodedOutputStream.computeStringSize(dataFieldNumber, str);
             lengthSize = CodedOutputStream.computeInt32SizeNoTag(dataSize);
         }
