@@ -129,13 +129,7 @@ helm install tc -n ma charts/aggregates/testClusters
 Open a shell to the Migration Console pod
 
 ```shell
-kubectl -n ma exec --stdin --tty $(kubectl -n ma get pods -l app=ma-migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash
-```
-
-The `<id>` here can easily be replaced with autocomplete or retrieved from the pod name when executing:
-
-```shell
-kubectl -n ma get pods
+kubectl -n ma exec -it deploy/ma-migration-console -c console -- /bin/bash
 ```
 
 

@@ -87,6 +87,7 @@ class K8sService:
             console_pod_id,
             self.namespace,
             command=command_list,
+            container="console",
             stderr=True,
             stdin=False,
             stdout=True,
