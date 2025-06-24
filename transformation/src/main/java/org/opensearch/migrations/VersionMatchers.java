@@ -8,6 +8,8 @@ import lombok.experimental.UtilityClass;
 public class VersionMatchers {
     public static final Predicate<Version> isES_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 2.4"));
     public static final Predicate<Version> isES_5_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 5.6"));
+    public static final Predicate<Version> equalOrBetween_ES_5_0_and_5_3 = isBetweenInclusive(Version.fromString("ES 5.0"), Version.fromString("ES 5.3"));
+    public static final Predicate<Version> equalOrBetween_ES_5_4_and_5_6 = isBetweenInclusive(Version.fromString("ES 5.4"), Version.fromString("ES 5.6"));
     public static final Predicate<Version> isES_6_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 6.8"));
     public static final Predicate<Version> equalOrBetween_ES_6_0_and_6_1 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 6.0"))
                                                                 .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 6.1")));
@@ -67,5 +69,13 @@ public class VersionMatchers {
         return other -> matchesMajorVersion(version)
             .and(other2 -> version.getMinor() >= other2.getMinor())
             .test(other);
+    }
+
+    static Predicate<Version> isBetweenInclusive(Version lower, Version upper) {
+        return other ->
+                other.getFlavor().equals(lower.getFlavor())
+                        && other.getMajor() == lower.getMajor()
+                        && other.getMinor() >= lower.getMinor()
+                        && other.getMinor() <= upper.getMinor();
     }
 }

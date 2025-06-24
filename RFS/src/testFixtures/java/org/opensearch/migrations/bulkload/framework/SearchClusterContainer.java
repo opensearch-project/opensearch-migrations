@@ -214,7 +214,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         ELASTICSEARCH_5(
                 overrideAndRemoveEnv(
                         BASE.getEnvVariables(),
-                        Map.of("ES_JAVA_OPTS", "-Xms512m -Xmx512m"),
+                        Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
                         Set.of("discovery.type","ES_JAVA_OPTS")
                 )),
         ELASTICSEARCH_6(

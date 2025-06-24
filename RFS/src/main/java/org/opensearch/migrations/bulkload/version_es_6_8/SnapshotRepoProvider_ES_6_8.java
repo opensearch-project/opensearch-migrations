@@ -24,34 +24,25 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
         return getRepoData().getIndices().entrySet()
-            .stream()
-            .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-            .collect(Collectors.toList());
+                .stream()
+                .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+                .collect(Collectors.toList());
     }
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
         SnapshotRepoData_ES_6_8.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
-            .filter(snapshot -> snapshotName.equals(snapshot.getName()))
-            .findFirst()
-            .orElse(null);
+                .filter(snapshot -> snapshotName.equals(snapshot.getName()))
+                .findFirst()
+                .orElse(null);
 
         if (targetSnapshot != null) {
             getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                List<String> snapshotNames = rawIndex.getSnapshots();
-                if (snapshotNames == null || snapshotNames.isEmpty()) {
-                    System.err.printf("Skipping index [%s] — no snapshots listed%n", indexName);
-                } else if (!snapshotNames.contains(targetSnapshot.getName())) {
-                    System.err.printf("Skipping index [%s] — snapshot ID [%s] not found in %s%n",
-                            indexName, targetSnapshot.getId(), snapshotNames);
-                } else {
-                    System.err.printf("Matched index [%s] — snapshot ID [%s] found%n", indexName, targetSnapshot.getName());
+                if (rawIndex.getSnapshots().contains(targetSnapshot.getId())) {
                     matchedIndices.add(SnapshotRepoData_ES_6_8.Index.fromRawIndex(indexName, rawIndex));
                 }
             });
-        } else {
-            System.err.printf("No snapshot found with name [%s]%n", snapshotName);
         }
         return matchedIndices;
     }
