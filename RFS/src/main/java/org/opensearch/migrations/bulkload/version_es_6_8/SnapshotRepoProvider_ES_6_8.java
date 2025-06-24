@@ -39,10 +39,19 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
         if (targetSnapshot != null) {
             getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                if (rawIndex.getSnapshots().contains(targetSnapshot.getId())) {
+                List<String> snapshotNames = rawIndex.getSnapshots();
+                if (snapshotNames == null || snapshotNames.isEmpty()) {
+                    System.err.printf("Skipping index [%s] — no snapshots listed%n", indexName);
+                } else if (!snapshotNames.contains(targetSnapshot.getName())) {
+                    System.err.printf("Skipping index [%s] — snapshot ID [%s] not found in %s%n",
+                            indexName, targetSnapshot.getId(), snapshotNames);
+                } else {
+                    System.err.printf("Matched index [%s] — snapshot ID [%s] found%n", indexName, targetSnapshot.getName());
                     matchedIndices.add(SnapshotRepoData_ES_6_8.Index.fromRawIndex(indexName, rawIndex));
                 }
             });
+        } else {
+            System.err.printf("No snapshot found with name [%s]%n", snapshotName);
         }
         return matchedIndices;
     }
