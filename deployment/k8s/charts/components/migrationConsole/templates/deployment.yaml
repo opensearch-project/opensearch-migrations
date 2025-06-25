@@ -27,6 +27,11 @@ spec:
            "MountName" "merged-config"
            "include" .Template.Include) .) | nindent 8 }}
       containers:
+        - name: website
+          image: migrations/website:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
         - name: console
           image: migrations/migration_console:latest
           imagePullPolicy: IfNotPresent

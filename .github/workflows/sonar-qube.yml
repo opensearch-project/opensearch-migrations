@@ -92,7 +92,7 @@ jobs:
         done
 
         ISSUE_COUNT=$(jq '.issues | length' issues.json)
-        BASELINE_ISSUE_COUNT=20 # Baseline issue count
+        BASELINE_ISSUE_COUNT=8 # Baseline issue count
         if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
           echo "❌ Build failed: Found $ISSUE_COUNT issues, which is more than the baseline of $BASELINE_ISSUE_COUNT."
           exit 1

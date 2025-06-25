@@ -73,7 +73,7 @@ public class ConnectionContext {
         }
         else if (sigv4Enabled) {
             requestTransformer = new SigV4AuthTransformer(
-                DefaultCredentialsProvider.create(),
+                DefaultCredentialsProvider.builder().build(),
                 params.getAwsServiceSigningName(),
                 params.getAwsRegion(),
                 protocol.name(),

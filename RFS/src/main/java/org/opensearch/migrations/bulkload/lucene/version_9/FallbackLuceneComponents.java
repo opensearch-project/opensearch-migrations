@@ -11,13 +11,20 @@ import shadow.lucene9.org.apache.lucene.index.Terms;
  */
 public class FallbackLuceneComponents {
 
+    // Private constructor to prevent instantiation
+    private FallbackLuceneComponents() {
+        // Utility class
+    }
+
     public static final FieldsProducer EMPTY_FIELDS_PRODUCER = new FieldsProducer() {
         @Override
         public void close() {
+            // No resources to close in this fallback implementation
         }
 
         @Override
         public void checkIntegrity() {
+            // Integrity check is skipped in this fallback stub
         }
 
         @Override

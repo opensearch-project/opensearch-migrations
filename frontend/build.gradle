@@ -1,6 +1,10 @@
 plugins {
     id 'com.github.node-gradle.node' version '7.1.0'
+    id 'com.bmuschko.docker-remote-api'
 }
+
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import org.opensearch.migrations.common.CommonUtils
 
 node {
     version = '20.12.2'
@@ -26,8 +30,7 @@ def buildExclusions = [
 ]
 
 def buildOutputs = [
-    '.next',
-    'build/site'
+    'out'
 ]
 
 tasks.register('buildFrontend', NpmTask) {
@@ -45,6 +48,20 @@ tasks.register('lintFrontend', NpmTask) {
 
 tasks.register('cleanFrontend', Delete) {
     delete buildOutputs
+}
+
+tasks.register('buildDockerImage', DockerBuildImage) {
+    dependsOn 'buildFrontend'
+    inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
+    outputs.file(imageIdFile)
+
+    def name = "website"
+    def hash = CommonUtils.calculateDockerHash(project.fileTree("Dockerfile"))
+    inputDir = project.file('.')
+
+    images.add("migrations/${name}:${hash}".toString())
+    images.add("migrations/${name}:${version}".toString())
+    images.add("migrations/${name}:latest".toString())
 }
 
 tasks.register('helpFrontend', NpmTask) {
