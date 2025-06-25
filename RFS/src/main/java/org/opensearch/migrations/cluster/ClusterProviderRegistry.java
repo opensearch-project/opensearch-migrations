@@ -11,7 +11,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
-import org.opensearch.migrations.bulkload.version_es_5_3.SnapshotReader_ES_5_3;
+import org.opensearch.migrations.bulkload.version_es_5_4.SnapshotReader_ES_5_4;
 import org.opensearch.migrations.bulkload.version_es_6_8.RemoteWriter_ES_6_8;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
 import org.opensearch.migrations.bulkload.version_es_7_10.SnapshotReader_ES_7_10;
@@ -28,7 +28,7 @@ public class ClusterProviderRegistry {
     /** Ensure we are always getting fresh providers when searching for one */
     private List<VersionSpecificCluster> getProviders() {
         return List.of(
-            new SnapshotReader_ES_5_3(),
+            new SnapshotReader_ES_5_4(),
             new SnapshotReader_ES_6_8(),
             new SnapshotReader_ES_7_10(),
             new RemoteWriter_OS_2_11(),
@@ -45,8 +45,8 @@ public class ClusterProviderRegistry {
      */
     public ClusterSnapshotReader getSnapshotReader(Version version, SourceRepo repo, boolean looseMatch) {
         System.out.println("DEBUG: Version = " + version);
-        System.out.println("DEBUG: equalOrBetween_ES_5_0_and_5_3 = " + VersionMatchers.equalOrBetween_ES_5_0_and_5_3.test(version));
-        System.out.println("DEBUG: equalOrBetween_ES_5_4_and_5_6 = " + VersionMatchers.equalOrBetween_ES_5_0_and_5_3.test(version));
+        System.out.println("DEBUG: equalOrBetween_ES_5_0_and_5_4 = " + VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(version));
+        System.out.println("DEBUG: equalOrBetween_ES_5_5_and_5_6 = " + VersionMatchers.equalOrBetween_ES_5_5_and_5_6.test(version));
         System.out.println(">>> Matching Snapshot Readers for version: " + version);
         System.out.println(">>> Value of boolean flag looseMatch " + looseMatch);
         var snapshotProvider = getProviders()

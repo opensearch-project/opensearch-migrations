@@ -137,34 +137,67 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:5.5.2",
         Version.fromString("ES 5.5.2")
     );
+    public static final ContainerVersion ES_V5_4 = new ElasticsearchVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch:5.4.2",
+            Version.fromString("ES 5.4.2")
+    );
     public static final ContainerVersion ES_V5_3 = new Elasticsearch5Version(
-            "elasticsearch:5.3.2",
-            Version.fromString("ES 5.3.2"),
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            String.join("\n",
-                    "network.host: 0.0.0.0",
-                    "http.port: 9200",
-                    "transport.tcp.port: 9300",
-                    "bootstrap.system_call_filter: false",
-                    "discovery.zen.ping.unicast.hosts: []",
-                    "discovery.zen.minimum_master_nodes: 1",
-                    "path.repo: \"/tmp/snapshots\"",
-                    "node.max_local_storage_nodes: 2"
-            )
+        "elasticsearch:5.3.2",
+        Version.fromString("ES 5.3.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        String.join("\n",
+                "network.host: 0.0.0.0",
+                "http.port: 9200",
+                "transport.tcp.port: 9300",
+                "bootstrap.system_call_filter: false",
+                "discovery.zen.ping.unicast.hosts: []",
+                "discovery.zen.minimum_master_nodes: 1",
+                "path.repo: \"/tmp/snapshots\"",
+                "node.max_local_storage_nodes: 2"
+        )
+    );
+    public static final ContainerVersion ES_V5_2 = new Elasticsearch5Version(
+        "elasticsearch:5.2.2",
+        Version.fromString("ES 5.2.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        String.join("\n",
+                "network.host: 0.0.0.0",
+                "http.port: 9200",
+                "transport.tcp.port: 9300",
+                "discovery.zen.ping.unicast.hosts: []",
+                "discovery.zen.minimum_master_nodes: 1",
+                "path.repo: \"/tmp/snapshots\"",
+                "bootstrap.system_call_filter: false",
+                "node.max_local_storage_nodes: 2"
+        )
     );
     public static final ContainerVersion ES_V5_1 = new Elasticsearch5Version(
-            "elasticsearch:5.1.2",
-            Version.fromString("ES 5.1.2"),
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            String.join("\n",
-                    "network.host: 0.0.0.0",
-                    "http.port: 9200",
-                    "transport.tcp.port: 9300",
-                    "discovery.zen.ping.unicast.hosts: []",
-                    "discovery.zen.minimum_master_nodes: 1",
-                    "path.repo: \"/tmp/snapshots\"",
-                    "node.max_local_storage_nodes: 2"
-            )
+        "elasticsearch:5.1.2",
+        Version.fromString("ES 5.1.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        String.join("\n",
+                "network.host: 0.0.0.0",
+                "http.port: 9200",
+                "transport.tcp.port: 9300",
+                "discovery.zen.ping.unicast.hosts: []",
+                "discovery.zen.minimum_master_nodes: 1",
+                "path.repo: \"/tmp/snapshots\"",
+                "node.max_local_storage_nodes: 2"
+        )
+    );
+    public static final ContainerVersion ES_V5_0 = new Elasticsearch5Version(
+        "elasticsearch:5.0.2",
+        Version.fromString("ES 5.0.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        String.join("\n",
+                "network.host: 0.0.0.0",
+                "http.port: 9200",
+                "transport.tcp.port: 9300",
+                "discovery.zen.ping.unicast.hosts: []",
+                "discovery.zen.minimum_master_nodes: 1",
+                "path.repo: \"/tmp/snapshots\"",
+                "node.max_local_storage_nodes: 2"
+        )
     );
 
     public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(

@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.version_es_5_3;
+package org.opensearch.migrations.bulkload.version_es_5_4;
 
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
@@ -11,20 +11,20 @@ import org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataFactory_ES
 import org.opensearch.migrations.bulkload.version_es_6_8.ShardMetadataFactory_ES_6_8;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
-public class SnapshotReader_ES_5_3 implements ClusterSnapshotReader {
+public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     private Version version;
     private SourceRepo sourceRepo;
 
     @Override
     public boolean compatibleWith(Version version) {
-        return VersionMatchers.equalOrBetween_ES_5_0_and_5_3.test(version);
+        return VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(version);
     }
 
     @Override
     public boolean looseCompatibleWith(Version version) {
         return UnboundVersionMatchers.isBelowES_5_X
-            .or(VersionMatchers.equalOrBetween_ES_5_0_and_5_3)
+            .or(VersionMatchers.equalOrBetween_ES_5_0_and_5_4)
             .test(version);
     }
 
@@ -79,7 +79,7 @@ public class SnapshotReader_ES_5_3 implements ClusterSnapshotReader {
         if (sourceRepo == null) {
             throw new UnsupportedOperationException("initialize(...) must be called");
         }
-        return new SnapshotRepoProvider_ES_5_3(sourceRepo);
+        return new SnapshotRepoProvider_ES_5_4(sourceRepo);
     }
 
     @Override

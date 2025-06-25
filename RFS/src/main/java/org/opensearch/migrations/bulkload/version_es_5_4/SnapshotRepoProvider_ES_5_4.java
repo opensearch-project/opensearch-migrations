@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.version_es_5_3;
+package org.opensearch.migrations.bulkload.version_es_5_4;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,32 +7,32 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
-public class SnapshotRepoProvider_ES_5_3 implements SnapshotRepo.Provider {
+public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
-    private SnapshotRepoData_ES_5_3 repoData = null;
+    private SnapshotRepoData_ES_5_4 repoData = null;
 
-    public SnapshotRepoProvider_ES_5_3(SourceRepo repo) {
+    public SnapshotRepoProvider_ES_5_4(SourceRepo repo) {
         this.repo = repo;
     }
 
-    protected SnapshotRepoData_ES_5_3 getRepoData() {
+    protected SnapshotRepoData_ES_5_4 getRepoData() {
         if (repoData == null) {
-            this.repoData = SnapshotRepoData_ES_5_3.fromRepo(repo);
+            this.repoData = SnapshotRepoData_ES_5_4.fromRepo(repo);
         }
         return repoData;
     }
 
-    public List<SnapshotRepoData_ES_5_3.Index> getIndices() {
+    public List<SnapshotRepoData_ES_5_4.Index> getIndices() {
         return getRepoData().getIndices().entrySet()
                 .stream()
-                .map(entry -> SnapshotRepoData_ES_5_3.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+                .map(entry -> SnapshotRepoData_ES_5_4.Index.fromRawIndex(entry.getKey(), entry.getValue()))
                 .collect(Collectors.toList());
     }
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
-        SnapshotRepoData_ES_5_3.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
+        SnapshotRepoData_ES_5_4.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
                 .filter(snapshot -> snapshotName.equals(snapshot.getName()))
                 .findFirst()
                 .orElse(null);
@@ -47,7 +47,7 @@ public class SnapshotRepoProvider_ES_5_3 implements SnapshotRepo.Provider {
                             indexName, targetSnapshot.getId(), snapshotNames);
                 } else {
                     System.err.printf("Matched index [%s] — snapshot ID [%s] found%n", indexName, targetSnapshot.getName());
-                    matchedIndices.add(SnapshotRepoData_ES_5_3.Index.fromRawIndex(indexName, rawIndex));
+                    matchedIndices.add(SnapshotRepoData_ES_5_4.Index.fromRawIndex(indexName, rawIndex));
                 }
             });
         } else {
@@ -63,7 +63,7 @@ public class SnapshotRepoProvider_ES_5_3 implements SnapshotRepo.Provider {
 
     @Override
     public String getSnapshotId(String snapshotName) {
-        for (SnapshotRepoData_ES_5_3.Snapshot snapshot : getRepoData().getSnapshots()) {
+        for (SnapshotRepoData_ES_5_4.Snapshot snapshot : getRepoData().getSnapshots()) {
             if (snapshot.getName().equals(snapshotName)) {
                 return snapshot.getId();
             }

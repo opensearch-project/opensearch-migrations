@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.version_es_5_3;
+package org.opensearch.migrations.bulkload.version_es_5_4;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,14 +21,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
-public class SnapshotRepoData_ES_5_3 {
+public class SnapshotRepoData_ES_5_4 {
 
-    public static SnapshotRepoData_ES_5_3 fromRepoFile(Path filePath) {
+    public static SnapshotRepoData_ES_5_4 fromRepoFile(Path filePath) {
         ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
         try {
-            SnapshotRepoData_ES_5_3 data = mapper.readValue(
+            SnapshotRepoData_ES_5_4 data = mapper.readValue(
                     new File(filePath.toString()),
-                    SnapshotRepoData_ES_5_3.class
+                    SnapshotRepoData_ES_5_4.class
             );
             data.filePath = filePath;
             return data;
@@ -37,7 +37,7 @@ public class SnapshotRepoData_ES_5_3 {
         }
     }
 
-    public static SnapshotRepoData_ES_5_3 fromRepo(SourceRepo repo) {
+    public static SnapshotRepoData_ES_5_4 fromRepo(SourceRepo repo) {
         Path file = repo.getSnapshotRepoDataFilePath();
         if (file == null) {
             throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
