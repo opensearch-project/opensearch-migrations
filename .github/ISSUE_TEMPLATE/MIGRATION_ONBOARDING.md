@@ -30,8 +30,8 @@ _Please provide a detailed description of the problem or question. If you have a
 - **Do you have a maintenance window during which requests will not be serviced?** `<Yes | No>`  
   *Determines the migration strategy—zero downtime vs. planned outage—and helps prevent unexpected service disruptions. If no maintenance window is available, or if the window is insufficient for a full backfill, a live capture mechanism must be included.*
 
-- **Do you perform multiple updates or deletes to the same document within 1 second?** `<Yes | No>`  
-  *If updates occur faster than the refresh interval, additional mechanisms may be required to preserve update order and document consistency.*
+- **Do you perform multiple updates or deletes to the same document within 10 seconds?** `<Yes | No>`  
+  *If updates occur faster than 10 seconds, additional mechanisms may be required to preserve update order and document consistency.*
 
 - **Is a 30ms impact for indexing requests acceptable?** `<Yes | No>`  
   *Typically, there’s a 10–30 ms delay on source cluster index requests, and sub-second delays have been observed between source and target. If this additional latency is not acceptable, live capture cannot be performed.*
