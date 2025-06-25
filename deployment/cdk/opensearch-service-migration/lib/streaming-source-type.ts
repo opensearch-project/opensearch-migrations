@@ -4,6 +4,16 @@ export enum StreamingSourceType {
     DISABLED = 'DISABLED'
 }
 
-export function determineStreamingSourceType(kafkaBrokerServiceEnabled: boolean): StreamingSourceType {
-    return kafkaBrokerServiceEnabled ? StreamingSourceType.KAFKA_ECS : StreamingSourceType.AWS_MSK
+export function determineStreamingSourceType(
+    captureProxyServiceEnabled: boolean,
+    trafficReplayerServiceEnabled: boolean,
+    kafkaBrokerServiceEnabled: boolean
+): StreamingSourceType {
+    if (kafkaBrokerServiceEnabled) {
+        return StreamingSourceType.KAFKA_ECS;
+    }
+    if (captureProxyServiceEnabled || trafficReplayerServiceEnabled) {
+        return StreamingSourceType.AWS_MSK;
+    }
+    return StreamingSourceType.DISABLED;
 }

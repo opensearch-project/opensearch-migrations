@@ -30,6 +30,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  installer:
+    repository: migrations/migration_console
+    tag: latest
+    pullPolicy: IfNotPresent
 
 aws:
   eksEnabled: false

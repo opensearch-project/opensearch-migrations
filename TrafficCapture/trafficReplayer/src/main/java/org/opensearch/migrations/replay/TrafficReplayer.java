@@ -525,7 +525,7 @@ public class TrafficReplayer {
                 );
             }
             try (
-                var credentialsProvider = DefaultCredentialsProvider.create();
+                var credentialsProvider = DefaultCredentialsProvider.builder().build();
                 AWSAuthService awsAuthService = new AWSAuthService(credentialsProvider, Region.of(regionOp.get()))
             ) {
                 authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(
@@ -551,7 +551,7 @@ public class TrafficReplayer {
             String region = serviceAndRegion[1];
 
             return new SigV4AuthTransformerFactory(
-                DefaultCredentialsProvider.create(),
+                DefaultCredentialsProvider.builder().build(),
                 serviceName,
                 region,
                 "https",

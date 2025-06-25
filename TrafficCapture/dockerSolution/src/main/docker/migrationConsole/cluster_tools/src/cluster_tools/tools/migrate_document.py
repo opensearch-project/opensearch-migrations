@@ -82,7 +82,6 @@ def identify_fields_to_chunk(doc: Dict[str, Any], max_request_size: int) -> List
         raise ValueError("No string fields found in the document")
 
     fields_to_chunk = []
-    current_size = doc_size
     working_doc = doc.copy()
 
     # Remove largest fields one by one until we're under the size limit

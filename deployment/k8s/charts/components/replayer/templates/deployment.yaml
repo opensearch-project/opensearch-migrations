@@ -23,7 +23,7 @@ spec:
         - name: wait-for-kafka
           image: bitnami/kubectl:latest  # or any image with curl/kubectl
           command: [ 'sh', '-c',
-                     'until kubectl wait --for=condition=Ready kafka/captured-traffic -n {{.Release.Namespace }} --timeout=10s; do echo waiting for kafka cluster is ready; sleep 1; done' ]
+                     'until kubectl wait --for=condition=Ready kafka/captured-traffic -n {{ .Release.Namespace }} --timeout=10s; do echo waiting for kafka cluster is ready; sleep 1; done' ]
       containers:
         - name: replayer
           image: migrations/traffic_replayer:latest

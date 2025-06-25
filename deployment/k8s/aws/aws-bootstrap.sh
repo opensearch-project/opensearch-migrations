@@ -84,7 +84,7 @@ get_cfn_export() {
 
 # Check required tools
 missing=0
-for cmd in kubectl jq git; do
+for cmd in git jq kubectl; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
@@ -196,6 +196,8 @@ helm install ma "${ma_chart_dir}" \
   --namespace $namespace \
   --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
   --set images.migrationConsole.tag=migrations_migration_console_latest \
+  --set images.installer.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.installer.tag=migrations_migration_console_latest \
   --set aws.eksEnabled=true \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
