@@ -24,7 +24,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: helm-uninstaller
-          image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - /bin/sh
