@@ -24,18 +24,18 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
         return getRepoData().getIndices().entrySet()
-                .stream()
-                .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-                .collect(Collectors.toList());
+            .stream()
+            .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
     }
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
         SnapshotRepoData_ES_6_8.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
-                .filter(snapshot -> snapshotName.equals(snapshot.getName()))
-                .findFirst()
-                .orElse(null);
+            .filter(snapshot -> snapshotName.equals(snapshot.getName()))
+            .findFirst()
+            .orElse(null);
 
         if (targetSnapshot != null) {
             getRepoData().getIndices().forEach((indexName, rawIndex) -> {

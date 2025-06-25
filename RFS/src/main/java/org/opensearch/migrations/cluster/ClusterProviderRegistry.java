@@ -5,7 +5,6 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.VersionStrictness;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
@@ -44,11 +43,6 @@ public class ClusterProviderRegistry {
      * @return The snapshot resource provider
      */
     public ClusterSnapshotReader getSnapshotReader(Version version, SourceRepo repo, boolean looseMatch) {
-        System.out.println("DEBUG: Version = " + version);
-        System.out.println("DEBUG: equalOrBetween_ES_5_0_and_5_4 = " + VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(version));
-        System.out.println("DEBUG: equalOrBetween_ES_5_5_and_5_6 = " + VersionMatchers.equalOrBetween_ES_5_5_and_5_6.test(version));
-        System.out.println(">>> Matching Snapshot Readers for version: " + version);
-        System.out.println(">>> Value of boolean flag looseMatch " + looseMatch);
         var snapshotProvider = getProviders()
             .stream()
             .filter(p -> looseMatch ? p.looseCompatibleWith(version) : p.compatibleWith(version))
@@ -65,7 +59,7 @@ public class ClusterProviderRegistry {
             });
 
         snapshotProvider.initialize(repo);
-        log.info("Found snapshot resource reader for version: " + version);
+        log.info("Found snapshot resource reader {} for version: {}", snapshotProvider.getClass().getSimpleName(), version);
         return snapshotProvider;
     }
 
