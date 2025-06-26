@@ -92,24 +92,20 @@ public class SnapshotRepoData_ES_5_4 {
         @JsonIgnore
         public List<String> getSnapshots() {
             if (rawSnapshots == null) return List.of();
+
             return rawSnapshots.stream()
-                    .map(o -> {
-                        if (o instanceof String) {
-                            return (String) o;
-                        } else if (o instanceof RawSnapshot) {
-                            return ((RawSnapshot) o).getName();
-                        } else if (o instanceof Map) {
-                            Object name = ((Map<?, ?>) o).get("name");
-                            if (name != null) {
-                                return name.toString();
-                            } else {
-                                throw new IllegalStateException("Map snapshot entry missing 'name': " + o);
-                            }
-                        } else {
-                            throw new IllegalStateException("Unknown snapshot entry type: " + o.getClass());
-                        }
-                    })
-                    .collect(Collectors.toList());
+                .map(o -> {
+                    if (!(o instanceof Map)) {
+                        throw new IllegalStateException("Expected snapshot entry to be a Map, but found: " + o.getClass());
+                    }
+                    Object name = ((Map<?, ?>) o).get("name");
+                    if (name != null) {
+                        return name.toString();
+                    } else {
+                        throw new IllegalStateException("Map snapshot entry missing 'name': " + o);
+                    }
+                })
+                .collect(Collectors.toList());
         }
     }
 
