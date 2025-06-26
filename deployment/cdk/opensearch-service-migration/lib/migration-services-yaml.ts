@@ -4,10 +4,10 @@ import * as yaml from 'yaml';
 export class ClusterYaml {
     endpoint = '';
     version?: string;
-    allowInsecure?: string;
+    allowInsecure?: boolean;
     auth: ClusterAuth;
 
-    constructor({endpoint, auth, allowInsecure, version} : {endpoint: string, auth: ClusterAuth, allowInsecure?: string, version?: string}) {
+    constructor({endpoint, auth, allowInsecure, version} : {endpoint: string, auth: ClusterAuth, allowInsecure?: boolean, version?: string}) {
         this.endpoint = endpoint;
         this.auth = auth;
         this.allowInsecure = allowInsecure;
