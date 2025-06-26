@@ -58,8 +58,8 @@ spec:
       serviceAccountName: migration-console-access-role
       containers:
         - name: console
-          image: migrations/migration_console:latest
-          imagePullPolicy: IfNotPresent
+          image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
+          imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"
             - "-c"

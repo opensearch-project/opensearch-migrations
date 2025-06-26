@@ -13,8 +13,8 @@ import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
     MigrationSSMParameter,
-    createOpenSearchIAMAccessPolicy,
-    createOpenSearchServerlessIAMAccessPolicy,
+    createAllAccessOpenSearchIAMAccessPolicy,
+    createAllAccessOpenSearchServerlessIAMAccessPolicy,
     getSecretAccessPolicy,
     getMigrationStringParameterValue,
     ClusterAuth, parseArgsToDict, appendArgIfNotInExtraArgs, isStackInGovCloud
@@ -115,8 +115,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
 
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
+        const openSearchPolicy = createAllAccessOpenSearchIAMAccessPolicy();
+        const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy();
         const servicePolicies = [sharedLogFileSystem.asPolicyStatement(), s3AccessPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.password_from_secret_arn ?

@@ -78,5 +78,6 @@ COPY *.py /root/
 
 RUN chmod ug+x /root/*.sh
 RUN chmod ug+x /root/*.py
+RUN ln -s  `which vim` /usr/local/bin/vi
 
 CMD tail -f /dev/null

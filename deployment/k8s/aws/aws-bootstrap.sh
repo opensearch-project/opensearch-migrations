@@ -14,19 +14,21 @@
 # -----------------------------------------------------------------------------
 org_name="opensearch-project"
 repo_name="opensearch-migrations"
-bootstrap_chart_path="deployment/k8s/charts/components/bootstrapHelm"
-bootstrap_templates_path="${bootstrap_chart_path}/templates"
-local_chart_dir="./bootstrapChart"
-skip_chart_pull=false
 branch="main"
+tag=""
+skip_git_pull=false
+
+base_dir="./opensearch-migrations"
+bootstrap_chart_dir="${base_dir}/deployment/k8s/charts/components/bootstrapHelm"
+ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
 skip_image_build=false
-keep_job_alive=true
+keep_bootstrap_job_alive=false
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
-  x86_64) TOOLS_ARCH="amd64" ;;
-  aarch64) TOOLS_ARCH="arm64" ;;
+  x86_64 | amd64) TOOLS_ARCH="amd64" ;;
+  aarch64 | arm64) TOOLS_ARCH="arm64" ;;
   *) echo "Unsupported architecture: $TOOLS_ARCH"; exit 1 ;;
 esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -47,9 +49,42 @@ install_helm() {
   echo "Helm installed successfully."
 }
 
+get_cfn_export() {
+  prefix="MigrationsExportString"
+  names=()
+  values=()
+
+  # Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
+  # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
+  while read -r name value; do
+    names+=("$name")
+    values+=("$value")
+  done < <(aws cloudformation list-exports \
+    --query "Exports[?starts_with(Name, \`${prefix}\`)].[Name,Value]" \
+    --output text)
+
+  if [ ${#names[@]} -eq 0 ]; then
+    echo "Error: No exports found starting with '$prefix'" >&2
+    return 1
+  elif [ ${#names[@]} -eq 1 ]; then
+    echo "${values[0]}"
+  else
+    echo "Multiple Cloudformation stacks with migration exports found:" >&2
+    for i in "${!names[@]}"; do
+      echo "[$i] ${names[$i]}" >&2
+    done
+    read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
+    if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
+      echo "Invalid choice." >&2
+      return 1
+    fi
+    echo "${values[$choice]}"
+  fi
+}
+
 # Check required tools
 missing=0
-for cmd in kubectl jq; do
+for cmd in git jq kubectl; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
@@ -71,18 +106,7 @@ fi
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
 
-
-# Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
-# export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
-key="MigrationsExportString"
-output=$(aws cloudformation describe-stacks \
-  --query "Stacks[?Outputs[?OutputKey=='$key']].[Outputs[?OutputKey=='$key'].OutputValue | [0], CreationTime]" \
-  --output text | sort -k2 | tail -n1 | cut -f1)
-
-if [[ -z "$output" ]]; then
-  echo "Error: No stack output found for OutputKey: $key"
-  exit 1
-fi
+output=$(get_cfn_export)
 echo "Setting ENV variables: $output"
 eval "$output"
 
@@ -102,78 +126,82 @@ else
   echo "aws-efs-csi-driver Helm release already exists. Skipping install."
 fi
 
-DEFAULT_SC=$(kubectl get storageclass gp3 --no-headers --ignore-not-found | awk '{print $1}')
-if [ -z "$DEFAULT_SC" ]; then
-  DEFAULT_SC=$(kubectl get storageclass gp2 --no-headers --ignore-not-found | awk '{print $1}')
-fi
-
-if [ -n "$DEFAULT_SC" ]; then
-  kubectl patch storageclass "$DEFAULT_SC" -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
-else
-  echo "Neither gp2 nor gp3 StorageClass found."
-  exit 1
-fi
-
-if [[ "$skip_chart_pull" == "false" ]]; then
-  # Get list of files in the target directory from GitHub API
-  chart_file_list=$(curl -s "https://api.github.com/repos/${org_name}/${repo_name}/contents/${bootstrap_chart_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
-  template_file_list=$(curl -s "https://api.github.com/repos/${org_name}/${repo_name}/contents/${bootstrap_templates_path}?ref=${branch}" | jq -r '.[] | select(.type=="file") | .name')
-  mkdir -p $local_chart_dir/templates
-
-  # Download each file using raw.githubusercontent.com
-  echo "Downloading bootstrap chart..."
-  for file in $chart_file_list; do
-    raw_url="https://raw.githubusercontent.com/${org_name}/${repo_name}/${branch}/${bootstrap_chart_path}/${file}"
-    curl -s -o "${local_chart_dir}/${file}" "$raw_url"
-  done
-  for file in $template_file_list; do
-    raw_url="https://raw.githubusercontent.com/${org_name}/${repo_name}/${branch}/${bootstrap_templates_path}/${file}"
-    curl -s -o "${local_chart_dir}/templates/${file}" "$raw_url"
-  done
-fi
-
-if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
-  read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
-  if [[ "$answer" == [Yy]* ]]; then
-    helm uninstall bootstrap-ma -n "$namespace"
-    sleep 2
+if [[ "$skip_git_pull" == "false" ]]; then
+  echo "Preparing opensearch-migrations repo..."
+  mkdir -p $base_dir
+  pushd "$base_dir" > /dev/null || exit
+  git init > /dev/null
+  git remote | grep -q "^origin$" || git remote add -f origin "https://github.com/${org_name}/${repo_name}.git"
+  git fetch > /dev/null
+  if [ -n "$branch" ]; then
+    git checkout $branch
+  elif [ -n "$tag" ]; then
+    git checkout tags/"$tag"
   else
-    echo "The 'bootstrap-ma' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+    latest_release_tag=$(curl -s https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | jq -r ".tag_name")
+    git checkout tags/"$latest_release_tag"
+  fi
+  echo "Using opensearch-migrations repo at commit point:"
+  echo "-------------------------------"
+  git show -s --format="%H%n%an <%ae>%n%ad%n%s" HEAD
+  echo "-------------------------------"
+  popd > /dev/null || exit
+fi
+
+if [[ "$skip_image_build" == "false" ]]; then
+  if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
+    read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
+    if [[ "$answer" == [Yy]* ]]; then
+      helm uninstall bootstrap-ma -n "$namespace"
+      sleep 2
+    else
+      echo "The 'bootstrap-ma' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+      exit 1
+    fi
+  fi
+  helm install bootstrap-ma "${bootstrap_chart_dir}" \
+    --namespace "$namespace" \
+    --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
+    --set awsEKSEnabled=true \
+    --set skipImageBuild="${skip_image_build}" \
+    --set keepJobAlive="${keep_bootstrap_job_alive}" \
+    || { echo "Installing bootstrap chart failed..."; exit 1; }
+
+  if [[ "$keep_bootstrap_job_alive" == "true" ]]; then
+    echo "The keep_bootstrap_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
+    exit 0
+  fi
+  pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
+  echo "Waiting for pod ${pod_name} to be ready..."
+  kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
+  sleep 5
+  echo "Tailing logs for ${pod_name}..."
+  echo "-------------------------------"
+  kubectl -n "$namespace" logs -f "$pod_name"
+  echo "-------------------------------"
+  sleep 5
+  final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
+  echo "Pod ${pod_name} ended with status: ${final_status}"
+  if [[ "$final_status" != "Succeeded" ]]; then
+    echo "Bootstrap pod $pod_name did not end with 'Succeeded'. Exiting..."
     exit 1
+  else
+    echo "Uninstalling bootstrap chart after successful setup"
+    helm uninstall bootstrap-ma -n "$namespace"
   fi
 fi
-helm install bootstrap-ma "${local_chart_dir}" \
-  --namespace "$namespace" \
-  --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
-  --set awsEKSEnabled=true \
-  --set skipImageBuild="${skip_image_build}" \
-  --set keepJobAlive="${keep_job_alive}"
 
-if [[ "$skip_image_build" == "true" || "$keep_job_alive" == "true" ]]; then
-  echo "Either skipImageBuild or keepJobAlive was enabled, no pod monitoring needed"
-  exit 0
-fi
+echo "Installing Migration Assistant chart now, this can take a couple minutes..."
+helm install ma "${ma_chart_dir}" \
+  --namespace $namespace \
+  --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.migrationConsole.tag=migrations_migration_console_latest \
+  --set images.installer.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.installer.tag=migrations_migration_console_latest \
+  --set aws.eksEnabled=true \
+  || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
-pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
-echo "Waiting for pod ${pod_name} to be ready..."
-kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
-sleep 5
-echo "Tailing logs for ${pod_name}..."
-echo "-------------------------------"
-kubectl -n "$namespace" logs -f "$pod_name"
-echo "-------------------------------"
-sleep 5
-final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
-echo "Pod ${pod_name} ended with status: ${final_status}"
-
-if [[ "$final_status" == "Succeeded" ]]; then
-  kubectl -n ma run migration-console --image="${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" --restart=Never
-  kubectl -n ma wait --for=condition=ready pod/migration-console --timeout=300s
-  sleep 5
-  cmd="kubectl -n $namespace exec --stdin --tty migration-console -- /bin/bash"
-  echo "Accessing migration console with command: $cmd"
-  eval "$cmd"
-else
-  echo "Pod $pod_name did not end with 'Succeeded'. Exiting..."
-  exit 1
-fi
+kubectl -n ma wait --for=condition=ready pod/migration-console-0 --timeout=300s
+cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
+echo "Accessing migration console with command: $cmd"
+eval "$cmd"

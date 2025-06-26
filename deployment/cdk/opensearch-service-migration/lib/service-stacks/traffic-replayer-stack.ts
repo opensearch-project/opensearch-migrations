@@ -9,8 +9,8 @@ import {
     ClusterAuth,
     MigrationSSMParameter,
     createMSKConsumerIAMPolicies,
-    createOpenSearchIAMAccessPolicy,
-    createOpenSearchServerlessIAMAccessPolicy,
+    createAllAccessOpenSearchIAMAccessPolicy,
+    createAllAccessOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue, appendArgIfNotInExtraArgs, parseArgsToDict
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
@@ -65,8 +65,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "secretsmanager:DescribeSecret"
             ]
         })
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
+        const openSearchPolicy = createAllAccessOpenSearchIAMAccessPolicy()
+        const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy()
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId)
