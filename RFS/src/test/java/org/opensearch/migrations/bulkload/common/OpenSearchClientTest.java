@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +36,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.lessThan;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -290,6 +292,83 @@ class OpenSearchClientTest {
         Map<String, List<String>> capturedHeaders = headersCaptor.getValue();
         assertThat(capturedHeaders.get("accept-encoding"), equalTo(null));
         assertThat(capturedHeaders.get("content-encoding"), equalTo(null));
+    }
+
+    @Test
+    void testBulkRequest_warningLogContainsDetails_onError() {
+        try (var logs = new CloseableLogSetup(OpenSearchClient.class.getName())) {
+            var docId1 = "tt1979320";
+            var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
+
+            when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
+
+            var maxRetries = 1;
+            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
+            var bulkDoc = createBulkDoc(docId1);
+            var indexName = "alwaysFailingIndexName";
+
+            // Action
+            var responseMono = openSearchClient.sendBulkRequest(
+                    indexName,
+                    List.of(bulkDoc),
+                    mock(IRfsContexts.IRequestContext.class)
+            );
+            assertThrows(Exception.class, responseMono::block);
+
+            // Verify the logs
+            List<String> bulkErrorWarnLogs = logs.getLogEvents().stream()
+                    .filter(log -> log.contains("After bulk request attempt")).toList();
+            for (String bulkErrorWarnLog : bulkErrorWarnLogs) {
+                // Add buffer for additional log line characters
+                assertThat(bulkErrorWarnLog.length(), lessThan(OpenSearchClient.BULK_TRUNCATED_RESPONSE_MAX_LENGTH + 300));
+                assertThat(bulkErrorWarnLog, containsString("version conflict, document already exists"));
+            }
+        }
+    }
+
+    @Test
+    void testBulkRequest_truncatesLargeLog_onError() {
+        try (var logs = new CloseableLogSetup(OpenSearchClient.class.getName())) {
+            var docId1 = "tt1979320";
+            // Create dummy large response message
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"data\":\"");
+            int desiredStringLength = OpenSearchClient.BULK_TRUNCATED_RESPONSE_MAX_LENGTH + 2000;
+            while (sb.length() < desiredStringLength) {
+                sb.append("a");
+            }
+            sb.append("\"}");
+            String jsonString = sb.toString();
+            var largeResponse = BulkItemResponseEntry.builder().raw(jsonString).build();
+            var docFails = bulkItemResponse(true, List.of(largeResponse));
+
+            when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
+
+            var maxRetries = 1;
+            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
+            var bulkDoc = createBulkDoc(docId1);
+            var indexName = "alwaysFailingIndexName";
+
+            // Action
+            var responseMono = openSearchClient.sendBulkRequest(
+                    indexName,
+                    List.of(bulkDoc),
+                    mock(IRfsContexts.IRequestContext.class)
+            );
+            assertThrows(Exception.class, responseMono::block);
+
+            // Verify the logs
+            List<String> bulkErrorWarnLogs = logs.getLogEvents().stream()
+                    .filter(log -> log.contains("After bulk request attempt")).toList();
+            for (String bulkErrorWarnLog : bulkErrorWarnLogs) {
+                // Add buffer for additional log line characters
+                assertThat(bulkErrorWarnLog.length(), lessThan(OpenSearchClient.BULK_TRUNCATED_RESPONSE_MAX_LENGTH + 300));
+                assertThat(bulkErrorWarnLog, containsString("aaaaa... [truncated] ...aaaaa"));
+            }
+
+        }
     }
 
     @Test

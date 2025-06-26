@@ -24,7 +24,7 @@ dependencies {
     testImplementation libs.junit.jupiter.params
     testImplementation libs.slf4j.api
     testRuntimeOnly libs.junit.jupiter.engine
-    implementation project(path: ':transformation:standardJavascriptTransforms', configuration: 'jsResources')
+    compileOnly project(path: ':transformation:standardJavascriptTransforms', configuration: 'jsResources')
 }
 
 

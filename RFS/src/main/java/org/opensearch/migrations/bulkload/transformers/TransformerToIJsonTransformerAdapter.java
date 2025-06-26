@@ -113,15 +113,15 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
             .addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
 
         final List<LegacyTemplate> legacyTemplates = new ArrayList<>();
-        globalData.getTemplates().fields().forEachRemaining(
+        globalData.getTemplates().properties().forEach(
                 entry -> legacyTemplates.add(new LegacyTemplate(entry.getKey(), (ObjectNode) entry.getValue()))
         );
         final List<IndexTemplate> indexTemplates = new ArrayList<>();
-        globalData.getIndexTemplates().fields().forEachRemaining(
+        globalData.getIndexTemplates().properties().forEach(
                 entry -> indexTemplates.add(new IndexTemplate(entry.getKey(), (ObjectNode) entry.getValue()))
         );
         final List<ComponentTemplate> componentTemplates = new ArrayList<>();
-        globalData.getComponentTemplates().fields().forEachRemaining(
+        globalData.getComponentTemplates().properties().forEach(
                 entry -> componentTemplates.add(new ComponentTemplate(entry.getKey(), (ObjectNode) entry.getValue()))
         );
 

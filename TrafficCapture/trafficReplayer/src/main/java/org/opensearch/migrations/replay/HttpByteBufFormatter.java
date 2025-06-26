@@ -25,13 +25,13 @@ import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpResponse;
-import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -249,15 +249,27 @@ public class HttpByteBufFormatter {
                                                    Stream<ByteBuf> byteBufStream,
                                                    ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
-            msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
-            new HttpContentDecompressor()
+            msgType == HttpMessageType.REQUEST ? new HttpRequestDecoder() : new HttpResponseDecoder(),
+            new HttpContentDecompressor(0)
         );
         for (var h : handlers) {
             channel.pipeline().addLast(h);
         }
         try {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));
-            return channel.readInbound();
+            T output = channel.readInbound();
+            if (output == null && HttpMessageType.RESPONSE.equals(msgType)) {
+                log.atDebug().setMessage( () ->
+                        "HTTP response was not processed after decoding all bytes. " +
+                        "Manually writing empty last content to the channel to signal" +
+                        " end of stream to channel handlers." +
+                        "This will happen HEAD and CONNECT responses or if a server " +
+                        "sends a malformed or incomplete response.").log();
+                channel.writeInbound(LastHttpContent.EMPTY_LAST_CONTENT);
+                output = channel.readInbound();
+            }
+            channel.checkException();
+            return output;
         } finally {
             channel.finishAndReleaseAll();
         }

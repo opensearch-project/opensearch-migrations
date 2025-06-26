@@ -117,7 +117,7 @@ public class TestUtils {
         AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
         EmbeddedChannel unpackVerifier = new EmbeddedChannel(
             new HttpRequestDecoder(),
-            new HttpContentDecompressor(),
+            new HttpContentDecompressor(0),
             new HttpObjectAggregator(bytesCaptured.length * 2),
             new SimpleChannelInboundHandler<FullHttpRequest>() {
                 @Override

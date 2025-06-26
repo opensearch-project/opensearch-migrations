@@ -1,4 +1,4 @@
 service:
   pipelines:
     metrics:
-      exporters: [logging]
+      exporters: [debug]

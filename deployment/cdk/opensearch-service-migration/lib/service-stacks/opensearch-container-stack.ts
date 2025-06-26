@@ -25,6 +25,8 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: OpenSearchContainerProps) {
         super(scope, id, props)
 
+        const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId
+
         const securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {
                 ...props,

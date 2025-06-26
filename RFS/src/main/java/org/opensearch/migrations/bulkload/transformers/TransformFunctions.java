@@ -1,8 +1,5 @@
 package org.opensearch.migrations.bulkload.transformers;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.VersionMatchers;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -17,36 +14,13 @@ public class TransformFunctions {
 
     private TransformFunctions() {}
 
-    public static Transformer getTransformer(
-        Version sourceVersion,
-        Version targetVersion,
-        int awarenessAttributes,
-        MetadataTransformerParams metadataTransformerParams
-    ) {
-        if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
-            if (VersionMatchers.isES_5_X.test(sourceVersion)) {
-                return new Transformer_ES_5_6_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
-            }
-            if (VersionMatchers.isES_6_X.test(sourceVersion)) {
-                return new Transformer_ES_6_8_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
-            }
-            if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
-                return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
-            }
-            if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).test(sourceVersion)) {
-                return new Transformer_ES_7_10_OS_2_11(awarenessAttributes);
-            }
-        }
-        throw new IllegalArgumentException("Unsupported transformation requested for " + sourceVersion + " to " + targetVersion);
-    }
-
     /* Turn dotted index settings into a tree, will start like:
      * {"index.number_of_replicas":"1","index.number_of_shards":"5","index.version.created":"6082499"}
      */
     public static ObjectNode convertFlatSettingsToTree(ObjectNode flatSettings) {
         ObjectNode treeSettings = mapper.createObjectNode();
 
-        flatSettings.fields().forEachRemaining(entry -> {
+        flatSettings.properties().forEach(entry -> {
             String[] parts = entry.getKey().split("\\.");
             ObjectNode current = treeSettings;
 

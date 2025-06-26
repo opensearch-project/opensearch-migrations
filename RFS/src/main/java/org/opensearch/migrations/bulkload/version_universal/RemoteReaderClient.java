@@ -95,11 +95,11 @@ public class RemoteReaderClient extends OpenSearchClient {
     ObjectNode combineIndexDetails(List<ObjectNode> indexDetailsResponse) {
         var combinedDetails = objectMapper.createObjectNode();
         indexDetailsResponse.stream().forEach(detailsResponse ->
-            detailsResponse.fields().forEachRemaining(indexDetails -> {
+            detailsResponse.properties().forEach(indexDetails -> {
                 var indexName = indexDetails.getKey();
                 combinedDetails.putIfAbsent(indexName, objectMapper.createObjectNode());
                 var existingIndexDetails = (ObjectNode)combinedDetails.get(indexName);
-                indexDetails.getValue().fields().forEachRemaining(details ->
+                indexDetails.getValue().properties().forEach(details ->
                     existingIndexDetails.set(details.getKey(), details.getValue()));
             }));
         return combinedDetails;
@@ -125,7 +125,7 @@ public class RemoteReaderClient extends OpenSearchClient {
         try {
             var tree = (ObjectNode) objectMapper.readTree(resp.body);
 
-            if (tree.size() == 1 && tree.fields().next().getValue().isArray()) {
+            if (tree.size() == 1 && tree.properties().iterator().next().getValue().isArray()) {
                 return Mono.just(handleSingleItemArrayValueTree(tree));
             }
     

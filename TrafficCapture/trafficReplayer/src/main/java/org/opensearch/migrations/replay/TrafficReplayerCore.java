@@ -359,14 +359,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     throw ex.getCause();
                 }
             }
-            if (log.isInfoEnabled()) {
+            if (log.isDebugEnabled()) {
                 Optional.of(
                     trafficStreams.stream()
                         .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
                         .collect(Collectors.joining(";"))
                 )
                     .filter(s -> !s.isEmpty())
-                    .ifPresent(s -> log.atInfo().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
+                    .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
             }
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }

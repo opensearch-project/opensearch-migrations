@@ -5,6 +5,7 @@
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
+    id 'com.google.cloud.tools.jib'
 }
 
 configurations {

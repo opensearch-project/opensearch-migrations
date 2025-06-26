@@ -3,7 +3,10 @@ package org.opensearch.migrations.bulkload.framework;
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
@@ -25,9 +28,65 @@ import org.testcontainers.utility.MountableFile;
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
+
+    private static Map<String, String> overrideAndRemoveEnv(
+            Map<String, String> base,
+            Map<String, String> overrides,
+            Set<String> keysToRemove
+    ) {
+        Map<String, String> merged = new HashMap<>(base);
+        keysToRemove.forEach(merged::remove);
+        merged.putAll(overrides);
+        return Collections.unmodifiableMap(merged);
+    }
+
     public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
+    );
+    public static final ContainerVersion ES_V8_17 = new Elasticsearch8Version(
+        "docker.elastic.co/elasticsearch/elasticsearch:8.17.5",
+        Version.fromString("ES 8.17.5")
+    );
+    public static final ContainerVersion ES_V7_9 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.9.3",
+            Version.fromString("ES 7.9.3")
+    );
+    public static final ContainerVersion ES_V7_8 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.8.1",
+            Version.fromString("ES 7.8.1")
+    );
+    public static final ContainerVersion ES_V7_7 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.7.1",
+            Version.fromString("ES 7.7.1")
+    );
+    public static final ContainerVersion ES_V7_6 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.6.2",
+            Version.fromString("ES 7.6.2")
+    );
+    public static final ContainerVersion ES_V7_5 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.5.2",
+            Version.fromString("ES 7.5.2")
+    );
+    public static final ContainerVersion ES_V7_4 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.4.2",
+            Version.fromString("ES 7.4.2")
+    );
+    public static final ContainerVersion ES_V7_3 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.2",
+            Version.fromString("ES 7.3.2")
+    );
+    public static final ContainerVersion ES_V7_2 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.2.1",
+            Version.fromString("ES 7.2.1")
+    );
+    public static final ContainerVersion ES_V7_1 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.1.1",
+            Version.fromString("ES 7.1.1")
+    );
+        public static final ContainerVersion ES_V7_0 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.0.1",
+            Version.fromString("ES 7.0.1")
     );
     public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
@@ -37,16 +96,52 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
         Version.fromString("ES 6.8.23")
     );
+    public static final ContainerVersion ES_V6_7 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.7.2",
+            Version.fromString("ES 6.7.2")
+    );
+    public static final ContainerVersion ES_V6_6 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.6.2",
+            Version.fromString("ES 6.6.2")
+    );
+    public static final ContainerVersion ES_V6_5 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.5.4",
+            Version.fromString("ES 6.5.4")
+    );
+    public static final ContainerVersion ES_V6_4 = new ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.4.3",
+            Version.fromString("ES 6.4.3")
+    );
+    public static final ContainerVersion ES_V6_3 = new Elasticsearch6Version(
+            "docker.elastic.co/elasticsearch/elasticsearch:6.3.2",
+            Version.fromString("ES 6.3.2")
+    );
+    public static final ContainerVersion ES_V6_2 = new Elasticsearch6Version(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.2.4",
+            Version.fromString("ES 6.2.4")
+    );
+    public static final ContainerVersion ES_V6_1 = new Elasticsearch6Version(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.1.4",
+            Version.fromString("ES 6.1.4")
+    );
+    public static final ContainerVersion ES_V6_0 = new Elasticsearch6Version(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.0.1",
+            Version.fromString("ES 6.0.1")
+    );
 
     public static final ContainerVersion ES_V5_6_16 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
         Version.fromString("ES 5.6.16")
     );
+    public static final ContainerVersion ES_V5_5 = new ElasticsearchVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch:5.5.2",
+        Version.fromString("ES 5.5.2")
+    );
 
     public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
         "elasticsearch:2.4.6",
         Version.fromString("ES 2.4.6"),
-        // This version of doesn't support path.repo based via env variables, passing this value via config 
+        // This version of doesn't support path.repo based via env variables, passing this value via config
         "/usr/share/elasticsearch/config/elasticsearch.yml",
         "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
     );
@@ -59,34 +154,77 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "opensearchproject/opensearch:2.19.1",
         Version.fromString("OS 2.19.1")
     );
+    public static final ContainerVersion OS_V3_0_0 = new OpenSearchVersion(
+        "opensearchproject/opensearch:3.0.0",
+        Version.fromString("OS 3.0.0")
+    );
+
     public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     private enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
             "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
             "index.store.type", "mmapfs",
-            "bootstrap.system_call_filter", "false"
+            "bootstrap.system_call_filter", "false",
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g"
         )),
         ELASTICSEARCH(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("xpack.security.enabled", "false")
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                    "xpack.security.enabled", "false"
+                ),
+                Set.of()  // No keys to remove from BASE
+            )),
         ELASTICSEARCH_OSS(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .build()),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(), // No additional keys apart from BASE
+                Set.of() // No keys to remove from BASE
+            )),
+        ELASTICSEARCH_6(
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of("ES_JAVA_OPTS", "-Xms2g -Xmx2g -Des.bootstrap.system_call_filter=false"),
+                Set.of("bootstrap.system_call_filter", "ES_JAVA_OPTS") // don't set it for older ES 6x
+            )),
+        ELASTICSEARCH_8(
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.ofEntries(
+                    Map.entry("xpack.security.enabled", "false"),
+                    Map.entry("xpack.security.enrollment.enabled", "false"),
+                    Map.entry("xpack.security.http.ssl.enabled", "false"),
+                    Map.entry("xpack.security.transport.ssl.enabled", "false"),
+                    Map.entry("cluster.name", "docker-test-cluster"),
+                    Map.entry("node.name", "test-node"),
+                    Map.entry("xpack.ml.enabled", "false"),
+                    Map.entry("xpack.watcher.enabled", "false"),
+                    Map.entry("cluster.routing.allocation.disk.watermark.low", "95%"),
+                    Map.entry("cluster.routing.allocation.disk.watermark.high", "98%"),
+                    Map.entry("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
+                ),
+                Set.of("bootstrap.system_call_filter")  // don't set it for ES 8x
+            )),
         OPENSEARCH(
-            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("plugins.security.disabled", "true")
-                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-                .build()),
-        OPENSEARCH_2_19(
-        new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                .put("plugins.security.disabled", "true")
-                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-                .put("search.insights.top_queries.exporter.type", "debug")
-                .build()
-        );
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                        "plugins.security.disabled", "true",
+                        "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^"
+                ),
+                Set.of()  // No keys to remove from BASE
+            )),
+        OPENSEARCH_2_19_PLUS(
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                    "plugins.security.disabled", "true",
+                    "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
+                    "search.insights.top_queries.exporter.type", "debug"
+                ),
+                Set.of()  // No keys to remove from BASE
+            ));
 
         @Getter
         public final Map<String, String> envVariables;
@@ -240,14 +378,26 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         }
     }
 
+    public static class Elasticsearch8Version extends ContainerVersion {
+        public Elasticsearch8Version(String imageName, Version version) {
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
+        }
+    }
+
+    public static class Elasticsearch6Version extends ContainerVersion {
+        public Elasticsearch6Version(String imageName, Version version) {
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_6, "elasticsearch");
+        }
+    }
+
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
-            super(imageName, version, VersionMatchers.isOS_2_19.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19 : INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
+            super(imageName, version, VersionMatchers.isOS_2_19_OrGreater.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19_PLUS : INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
         }
     }
 
     /**
-     * Older versions of elasticsearch require modifications to the configuration on disk 
+     * Older versions of elasticsearch require modifications to the configuration on disk
      */
     @Getter
     public static class OlderElasticsearchVersion extends ElasticsearchVersion implements OverrideFile {

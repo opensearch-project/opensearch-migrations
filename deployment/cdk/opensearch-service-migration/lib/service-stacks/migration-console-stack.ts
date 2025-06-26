@@ -6,8 +6,8 @@ import {Construct} from "constructs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {
     createMigrationStringParameter,
-    createOpenSearchIAMAccessPolicy,
-    createOpenSearchServerlessIAMAccessPolicy,
+    createAllAccessOpenSearchIAMAccessPolicy,
+    createAllAccessOpenSearchServerlessIAMAccessPolicy,
     getSecretAccessPolicy,
     getMigrationStringParameterValue,
     hashStringSHA256,
@@ -86,7 +86,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             assumedBy: new ServicePrincipal('osis-pipelines.amazonaws.com'),
             description: 'OpenSearch Ingestion Pipeline role for OpenSearch Migrations'
         });
-        // Add policy to allow access to Opensearch domains
+        // Add policy to allow access to Opensearch domains in same account/region
         osiPipelineRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ["es:DescribeDomain", "es:ESHttp*"],
@@ -102,10 +102,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
     }
 
     createOpenSearchIngestionManagementPolicy(pipelineRoleArn: string): PolicyStatement[] {
-        const allMigrationPipelineArn = `arn:${this.partition}:osis:${this.region}:${this.account}:pipeline/*`
+        // Allow all access for pipelines in other accounts or regions
         const osiManagementPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [allMigrationPipelineArn],
+            resources: ["*"],
             actions: [
                 "osis:*"
             ]
@@ -252,12 +252,17 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             if (servicesYaml.snapshot) {
                 servicesYaml.snapshot.otel_endpoint = otelSidecarEndpoint;
             }
+            if (servicesYaml.metrics_source?.cloudwatch !== undefined) {
+                servicesYaml.metrics_source.cloudwatch = {
+                    ...servicesYaml.metrics_source.cloudwatch,
+                    qualifier : props.stage };
+            }
         }
 
         const serviceTaskRole = createECSTaskRole(this, serviceName, this.region, this.account)
 
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
+        const openSearchPolicy = createAllAccessOpenSearchIAMAccessPolicy()
+        const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy()
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             // only add secrets policies if they're non-null

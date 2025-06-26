@@ -11,7 +11,7 @@ interface DashboardBody {
 }
 
 export interface MigrationDashboardProps {
-    readonly dashboardName: string;
+    readonly dashboardQualifier: string;
     readonly stage: string;
     readonly account: string;
     readonly region: string;
@@ -19,12 +19,13 @@ export interface MigrationDashboardProps {
 }
 
 export class MigrationDashboard extends Construct {
-    constructor(scope: Construct, id: string, props: MigrationDashboardProps) {
-        super(scope, id);
+    constructor(scope: Construct, props: MigrationDashboardProps) {
+        const dashboardName = `MigrationAssistant_${props.dashboardQualifier}_${props.stage}_${props.region}`
+        super(scope, dashboardName);
 
         const dashboard = this.setDashboardVariables(props.dashboardJson, props);
-        new CfnDashboard(this, 'Dashboard', {
-            dashboardName: props.dashboardName,
+        new CfnDashboard(this, dashboardName, {
+            dashboardName: dashboardName,
             dashboardBody: JSON.stringify(dashboard)
         });
     }
@@ -35,7 +36,8 @@ export class MigrationDashboard extends Construct {
         const variableSetters = {
             'ACCOUNT_ID': props.account,
             'REGION': props.region,
-            'MA_STAGE': props.stage
+            'MA_STAGE': props.stage,
+            'MA_QUALIFIER': props.stage
         };
 
         Object.entries(variableSetters).forEach(([varName, value]) => {

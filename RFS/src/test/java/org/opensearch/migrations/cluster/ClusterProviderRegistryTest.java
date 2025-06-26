@@ -6,11 +6,13 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
 import org.opensearch.migrations.bulkload.version_os_2_11.RemoteWriter_OS_2_11;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry.UnsupportedVersionException;
 
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 
 public class ClusterProviderRegistryTest {
@@ -20,7 +22,27 @@ public class ClusterProviderRegistryTest {
         var connectionContext = mock(ConnectionContext.class);
         var dataFilterArgs = mock(DataFilterArgs.class);
 
-        var writer = ClusterProviderRegistry.getRemoteWriter(connectionContext, Version.fromString("OS 2.15"), dataFilterArgs);
+        var writer = ClusterProviderRegistry.getRemoteWriter(connectionContext, Version.fromString("OS 2.15"), dataFilterArgs, false);
+
+        assertThat(writer, instanceOf(RemoteWriter_OS_2_11.class));
+    }
+
+    @Test
+    void testGetRemoteWriter_matchStrictly_NotFound() {
+        var connectionContext = mock(ConnectionContext.class);
+        var dataFilterArgs = mock(DataFilterArgs.class);
+
+        assertThrows(UnsupportedVersionException.class,
+            () -> ClusterProviderRegistry.getRemoteWriter(connectionContext, Version.fromString("OS 9999"), dataFilterArgs, false));
+    }
+
+
+    @Test
+    void testGetRemoteWriter_matchLoosely() {
+        var connectionContext = mock(ConnectionContext.class);
+        var dataFilterArgs = mock(DataFilterArgs.class);
+
+        var writer = ClusterProviderRegistry.getRemoteWriter(connectionContext, Version.fromString("OS 9999"), dataFilterArgs, true);
 
         assertThat(writer, instanceOf(RemoteWriter_OS_2_11.class));
     }
@@ -29,7 +51,24 @@ public class ClusterProviderRegistryTest {
     void testGetSnapshotReader_ES_6_4() {
         var sourceRepo = mock(SourceRepo.class);
 
-        var reader = ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 6.4"), sourceRepo);
+        var reader = ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 6.4"), sourceRepo, false);
+
+        assertThat(reader, instanceOf(SnapshotReader_ES_6_8.class));
+    }
+
+    @Test
+    void testGetSnapshotReader_matchStrictly_NotFound() {
+        var sourceRepo = mock(SourceRepo.class);
+
+        assertThrows(UnsupportedVersionException.class,
+            () -> ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 0"), sourceRepo, false));
+    }
+
+    @Test
+    void testGetSnapshotReader_matchLoosely() {
+        var sourceRepo = mock(SourceRepo.class);
+
+        var reader = ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 0"), sourceRepo, true);
 
         assertThat(reader, instanceOf(SnapshotReader_ES_6_8.class));
     }

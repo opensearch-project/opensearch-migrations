@@ -1,14 +1,16 @@
+import com.google.cloud.tools.jib.gradle.JibTask
 import groovy.json.JsonOutput
 
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '7.0.2'
+    id "com.diffplug.spotless" version '7.0.4'
     id 'io.freefair.lombok' version '8.13.1' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.6' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
-    id 'com.google.protobuf' version "0.9.4" apply false
+    id 'com.google.protobuf' version "0.9.5" apply false
+    id 'com.google.cloud.tools.jib' version '3.4.5' apply false
 
     // Used in top level build.gradle
     id 'jacoco' apply true
@@ -72,6 +74,7 @@ allprojects {
 }
 
 task buildDockerImages() {
+    dependsOn(':frontend:buildDockerImage')
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
@@ -126,18 +129,18 @@ subprojects {
             force "io.netty:netty-codec-http:${libs.versions.netty.get()}"
             force "io.netty:netty-common:${libs.versions.netty.get()}"
             force "io.netty:netty-handler:${libs.versions.netty.get()}"
-            force 'org.apache.httpcomponents:httpclient:4.5.9'
+            force 'org.apache.httpcomponents:httpclient:4.5.14'
             force "org.bouncycastle:bcpkix-jdk18on:${libs.versions.bouncycastle.get()}"
             force "org.bouncycastle:bcprov-jdk18on:${libs.versions.bouncycastle.get()}"
             force 'com.jayway.jsonpath:json-path:2.9.0'
             force 'com.thoughtworks.xstream:xstream:1.4.21'
-            force "commons-io:commons-io:2.18.0"
+            force "commons-io:commons-io:2.19.0"
             force 'commons-net:commons-net:3.11.1'
             force 'dnsjava:dnsjava:3.6.3'
             force 'net.minidev:json-smart:2.5.2'
-            force 'org.apache.tika:tika-core:3.1.0'
+            force 'org.apache.tika:tika-core:3.2.0'
             force 'org.glassfish.jersey.core:jersey-common:3.1.10'
-            force 'org.jsoup:jsoup:1.19.1'
+            force 'org.jsoup:jsoup:1.20.1'
             force 'org.xerial.snappy:snappy-java:1.1.10.7'
             force 'xalan:xalan:2.7.3'
 
@@ -161,6 +164,16 @@ subprojects {
             endWithNewline()
             removeUnusedImports()
         }
+    }
+
+    plugins.withId('com.google.cloud.tools.jib') {
+        tasks.withType(JibTask).configureEach {
+            notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
+        }
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.addStringOption('Xdoclint:none', '-quiet')
     }
 
     plugins.withId('java') {
@@ -389,8 +402,7 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
     classDirectories.setFrom(
             files(javaProjects.collect { project ->
                 project.sourceSets.main.output.classesDirs.filter { dir ->
-                    !dir.path.contains('captureProtobufs') &&
-                            !dir.path.contains('trafficCaptureProxyServerTest')
+                    !dir.path.contains('captureProtobufs')
                 }
             })
     )
@@ -449,61 +461,70 @@ gradle.projectsEvaluated {
     }
 }
 
-task mergeJacocoReports {
-    def jacocoReportTasks = subprojects.collect { it.tasks.withType(JacocoReport).matching { it.name == "jacocoTestReport" } }.flatten()
-    dependsOn jacocoReportTasks
-
-    // Create a Sync task to collect all exec files
-    def syncJacocoExecFiles = tasks.create("syncJacocoExecFiles", Sync) {
-        from jacocoReportTasks.collect { it.executionData }
-        into "${buildDir}/jacocoMerged/"
-        duplicatesStrategy = DuplicatesStrategy.FAIL
-    }
-
-    // Make sure sync task runs after all report tasks
-    syncJacocoExecFiles.mustRunAfter jacocoReportTasks
-    dependsOn syncJacocoExecFiles
-
-    // Finalize with jacocoAggregateReport
-    finalizedBy jacocoAggregateReport
-}
-
-task listPublishedArtifacts {
-    doLast {
-        subprojects.each { proj ->
-            def publishingExtension = proj.extensions.findByType(PublishingExtension)
-            if (publishingExtension) {
-                publishingExtension.publications.each { publication ->
-                    if (publication instanceof MavenPublication) {
-                        println "${publication.groupId}.${publication.artifactId}"
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Define a provider for test tasks list
-def testTasksProvider = provider {
-    def testTasks = []
+def jacocoExecFilesProvider = provider {
+    def execFiles = []
     rootProject.subprojects.each { subproject ->
-        def projectPath = subproject.path
-
         subproject.tasks.withType(Test).configureEach { testTask ->
             def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            if (!(jacocoExtension?.enabled ?: false)) {
-                testTasks << "${projectPath}:${testTask.name}"
+            if (jacocoExtension?.enabled) {
+                execFiles << jacocoExtension.destinationFile
             }
         }
+    }
+    return execFiles
+}
 
-        if (subproject.tasks.withType(Test).any { testTask ->
+def jacocoTestTasksProvider = provider {
+    def testTasks = []
+    rootProject.subprojects.each { subproject ->
+        subproject.tasks.withType(Test).configureEach { testTask ->
             def jacocoExtension = testTask.extensions.findByType(JacocoTaskExtension)
-            jacocoExtension?.enabled ?: false
-        }) {
-            testTasks << "${projectPath}:jacocoTestReport"
+            if (jacocoExtension?.enabled) {
+                testTasks << testTask
+            }
+        }
+        // Add jacocoTestReport tasks if they exist
+        if (subproject.tasks.findByName('jacocoTestReport')) {
+            testTasks << subproject.tasks.jacocoTestReport
         }
     }
     return testTasks
+}
+
+def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    into layout.buildDirectory.dir("jacocoMerged")
+
+    from jacocoExecFilesProvider
+    dependsOn jacocoTestTasksProvider
+}
+
+tasks.register('mergeJacocoReports') {
+    dependsOn syncJacocoExecFiles
+    finalizedBy jacocoAggregateReport
+
+    doLast {
+        def execFiles = jacocoExecFilesProvider.get()
+        if (execFiles.isEmpty()) {
+            throw new GradleException("No Jacoco exec files found in subprojects.")
+        }
+        println "Merged ${execFiles.size()} Jacoco execution files"
+    }
+}
+
+def publishedArtifacts = []
+subprojects.each { proj ->
+    def publishingExtension = proj.extensions.findByType(PublishingExtension)
+    if (publishingExtension) {
+        publishingExtension.publications.withType(MavenPublication).all { publication ->
+            publishedArtifacts << "${publication.groupId}.${publication.artifactId}"
+        }
+    }
+}
+tasks.register('listPublishedArtifacts') {
+    doLast {
+        publishedArtifacts.each { println it }
+    }
 }
 
 tasks.register("listTestTasksAsJson") {

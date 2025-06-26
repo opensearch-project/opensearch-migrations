@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -16,7 +17,7 @@ public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
 
     @Override
     public ShardMetadata fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
         SimpleModule module = new SimpleModule();
         module.addDeserializer(
             ShardMetadataData_ES_6_8.FileInfoRaw.class,

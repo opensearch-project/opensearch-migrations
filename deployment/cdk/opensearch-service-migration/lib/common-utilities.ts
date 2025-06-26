@@ -75,20 +75,22 @@ export function parseArgsToDict(argString: string | undefined): Record<string, s
     return args;
 }
 
-export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
+export function createAllAccessOpenSearchIAMAccessPolicy(): PolicyStatement {
+    // Allow all access to opensearch domains in any account/region
     return new PolicyStatement({
         effect: Effect.ALLOW,
-        resources: [`arn:${partition}:es:${region}:${accountId}:domain/*`],
+        resources: ["*"],
         actions: [
             "es:ESHttp*"
         ]
     })
 }
 
-export function createOpenSearchServerlessIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
+export function createAllAccessOpenSearchServerlessIAMAccessPolicy(): PolicyStatement {
+    // Allow all access to collections in any account/region
     return new PolicyStatement({
         effect: Effect.ALLOW,
-        resources: [`arn:${partition}:aoss:${region}:${accountId}:collection/*`],
+        resources: ["*"],
         actions: [
             "aoss:APIAccessAll"
         ]

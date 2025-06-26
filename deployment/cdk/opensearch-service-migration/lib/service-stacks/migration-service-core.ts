@@ -62,14 +62,14 @@ export class MigrationServiceCore extends Stack {
         props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
-            ephemeralStorageGiB: Math.max(props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75, 21), // valid values 21 - 200
+            ephemeralStorageGiB: Math.max(props.ephemeralStorageGiB ?? 75, 21), // valid values 21 - 200
             runtimePlatform: {
                 operatingSystemFamily: OperatingSystemFamily.LINUX,
                 cpuArchitecture: props.cpuArchitecture
             },
             family: `migration-${props.stage}-${props.serviceName}`,
-            memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
-            cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
+            memoryLimitMiB: props.taskMemoryLimitMiB ?? 1024,
+            cpu: props.taskCpuUnits ?? 256,
             taskRole: this.serviceTaskRole
         });
         if (props.volumes) {
@@ -151,7 +151,7 @@ export class MigrationServiceCore extends Stack {
         }
 
         if (props.otelCollectorEnabled) {
-            OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName);
+            OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName, props.stage);
         }
 
         const fargateService = new FargateService(this, "ServiceFargateService", {

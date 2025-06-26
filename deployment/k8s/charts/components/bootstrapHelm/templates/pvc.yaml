@@ -1,0 +1,13 @@
+{{- if and (not .Values.skipImageBuild) .Values.localRepoMount }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bootstrap-helm-pvc
+  namespace: {{ .Values.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+{{- end }}

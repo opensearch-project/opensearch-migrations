@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -65,11 +66,11 @@ public class OpenSearchClientFactory {
     }
 
     private Class<? extends OpenSearchClient> getOpenSearchClientClass(Version version) {
-        if (VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
+        if (UnboundVersionMatchers.anyOS.or(UnboundVersionMatchers.isGreaterOrEqualES_7_X).test(version)) {
             return OpenSearchClient_OS_2_11.class;
         } else if (VersionMatchers.isES_6_X.test(version)) {
             return OpenSearchClient_ES_6_8.class;
-        } else if (VersionMatchers.isES_5_X.test(version)) {
+        } else if (UnboundVersionMatchers.isBelowES_6_X.test(version)) {
             return OpenSearchClient_ES_5_6.class;
         }
         throw new IllegalArgumentException("Unsupported version: " + version);
@@ -132,7 +133,7 @@ public class OpenSearchClientFactory {
             var versionNode = body.get("version");
 
             var versionNumberString = versionNode.get("number").asText();
-            var parts = versionNumberString.split("\\.");
+            var parts = versionNumberString.split("[.\\-]");
             var versionBuilder = Version.builder()
                     .major(Integer.parseInt(parts[0]))
                     .minor(Integer.parseInt(parts[1]))
@@ -185,7 +186,7 @@ public class OpenSearchClientFactory {
 
             var nodes = objectMapper.readTree(resp.body)
                     .get("nodes");
-            nodes.fields().forEachRemaining(node -> {
+            nodes.properties().forEach(node -> {
                 var versionNumber = node.getValue().get("version").asText();
                 var nodeVersion = Version.fromString(getLikelyOpenSearchFlavor() + " " + versionNumber);
                 foundVersions.add(nodeVersion);

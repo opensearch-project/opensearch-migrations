@@ -30,8 +30,14 @@ import {
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {CfnDocument} from "aws-cdk-lib/aws-ssm";
-import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import { InstanceProfile, ManagedPolicy, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+    addParameterLabel,
+    applyAppRegistry,
+    generateExportString,
+    getVpcEndpointForEFS,
+    ParameterLabel
+} from "./common-utils";
 
 export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly solutionId: string;
@@ -42,52 +48,6 @@ export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly stackNameSuffix?: string;
 }
 
-interface ParameterLabel {
-    default: string;
-}
-
-function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
-    const application = new Application(stack, "AppRegistry", {
-        applicationName: Fn.join("-", [
-            infraProps.solutionName,
-            Aws.REGION,
-            Aws.ACCOUNT_ID,
-            stage
-        ]),
-        description: `Service Catalog application to track and manage all your resources for the solution ${infraProps.solutionName}`,
-    });
-    application.associateApplicationWithStack(stack);
-    Tags.of(application).add("Solutions:SolutionID", infraProps.solutionId);
-    Tags.of(application).add("Solutions:SolutionName", infraProps.solutionName);
-    Tags.of(application).add("Solutions:SolutionVersion", infraProps.solutionVersion);
-    Tags.of(application).add("Solutions:ApplicationType", "AWS-Solutions");
-
-    const attributeGroup = new AttributeGroup(
-        stack,
-        "DefaultApplicationAttributes",
-        {
-            attributeGroupName: Fn.join("-", [
-                Aws.REGION,
-                stage,
-                "attributes"
-            ]),
-            description: "Attribute group for solution information",
-            attributes: {
-                applicationType: "AWS-Solutions",
-                version: infraProps.solutionVersion,
-                solutionID: infraProps.solutionId,
-                solutionName: infraProps.solutionName,
-            },
-        }
-    );
-    attributeGroup.associateWith(application)
-    return application.applicationArn
-}
-
-function addParameterLabel(labels: Record<string, ParameterLabel>, parameter: CfnParameter, labelName: string) {
-    labels[parameter.logicalId] = {"default": labelName}
-}
-
 function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZonesParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter): IVpc {
     const availabilityZones = availabilityZonesParameter.valueAsList
     const privateSubnetIds = privateSubnetIdsParameter.valueAsList
@@ -96,20 +56,6 @@ function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZones
         availabilityZones: [Fn.select(0, availabilityZones)],
         privateSubnetIds: [Fn.select(0, privateSubnetIds)]
     });
-}
-
-function generateExportString(exports:  Record<string, string>): string {
-    return Object.entries(exports)
-        .map(([key, value]) => `export ${key}=${value}`)
-        .join("; ");
-}
-
-function getVpcEndpointForEFS(stack: Stack): InterfaceVpcEndpointAwsService {
-    const isGovRegion = stack.region?.startsWith('us-gov-')
-    if (isGovRegion) {
-        return InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM_FIPS;
-    }
-    return InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM;
 }
 
 export class SolutionsInfrastructureStack extends Stack {

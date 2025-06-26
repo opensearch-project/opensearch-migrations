@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_universal;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -19,9 +20,16 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
     public boolean compatibleWith(Version version) {
         return VersionMatchers.isES_6_X
             .or(VersionMatchers.isES_7_X)
-            .or(VersionMatchers.isOS_1_X)
-            .or(VersionMatchers.isOS_2_X)
             .or(VersionMatchers.isES_5_X)
+            .or(VersionMatchers.isES_8_X)
+            .or(VersionMatchers.anyOS)
+            .test(version);
+    }
+
+    @Override
+    public boolean looseCompatibleWith(Version version) {
+        return UnboundVersionMatchers.anyES
+            .or(UnboundVersionMatchers.anyOS)
             .test(version);
     }
 
@@ -58,7 +66,7 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
 
     private RemoteReaderClient getClient() {
         if (client == null) {
-            if (VersionMatchers.isES_6_X.or(VersionMatchers.isES_5_X).test(getVersion())) {
+            if (UnboundVersionMatchers.isBelowES_7_X.test(getVersion())) {
                 client = new RemoteReaderClient_ES_6_8(getConnection());
             } else {
                 client = new RemoteReaderClient(getConnection());

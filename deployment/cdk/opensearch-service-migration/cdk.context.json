@@ -26,6 +26,9 @@
         "serviceSigningName": "es | aoss"
       }
     },
+    "MskEbsStorage":{
+      "maxCapacity": 16384
+    },
     "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
     "reindexFromSnapshotMaxShardSizeGiB": 80,
@@ -39,6 +42,8 @@
     "// help capture/target proxy pt. 1 of 2": "captureProxyService and targetClusterProxyService require networking access configured to successfully deploy,",
     "// help capture/target proxy pt. 2 of 2": "consider deploying without first and enabling after ensuring cluster networking access on the migration console",
     "captureProxyServiceEnabled": false,
-    "targetClusterProxyServiceEnabled": false
+    "captureProxyDesiredCount": 0,
+    "targetClusterProxyServiceEnabled": false,
+    "targetClusterProxyDesiredCount": 0
   }
 }
