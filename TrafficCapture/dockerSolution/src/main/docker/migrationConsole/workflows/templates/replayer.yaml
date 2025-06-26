@@ -14,7 +14,7 @@ spec:
 
             # required, but has defaults
             - name: image
-              value: "migrations/traffic_replayer:latest"
+              value: "{{workflow.parameters.traffic-replayer-image}}"
             - name: replicas
               value: "1"
 

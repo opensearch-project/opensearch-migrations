@@ -19,7 +19,7 @@ spec:
             valueFrom:
               path: /tmp/processors-per-target
       container:
-        image: migrations/migration_console:latest
+        image: "{{workflow.parameters.migration-console-image}}"
         imagePullPolicy: IfNotPresent
         command: [ sh, -c ]
         args:

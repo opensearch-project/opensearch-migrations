@@ -17,12 +17,15 @@ spec:
         value: "root"
       - name: etcd-password
         value: "password"
-      - name: etcd-image
-        value: "migrations/migration_console:latest"
       - name: demo-max-sleep-time
         value: "60"
       - name: s3-snapshot-configmap
         value: "s3-snapshot-config"
+      - name: etcd-image
+      - name: capture-proxy-image
+      - name: traffic-replayer-image
+      - name: reindex-from-snapshot-image
+      - name: migration-console-image
 
   templates:
     # Main workflow template

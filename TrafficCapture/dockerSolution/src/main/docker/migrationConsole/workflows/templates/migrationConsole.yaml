@@ -37,7 +37,7 @@ spec:
           - name: command
           - name: config-contents
       container:
-        image: migrations/migration_console:latest
+        image: "{{workflow.parameters.migration-console-image}}"
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
@@ -93,7 +93,7 @@ spec:
               spec:
                 containers:
                   - name: main
-                    image: migrations/migration_console:latest
+                    image: "{{workflow.parameters.migration-console-image}}"
                     imagePullPolicy: IfNotPresent
                     command:
                       - "/bin/sh"

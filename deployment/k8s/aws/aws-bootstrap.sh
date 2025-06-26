@@ -65,7 +65,7 @@ get_cfn_export() {
 
   if [ ${#names[@]} -eq 0 ]; then
     echo "Error: No exports found starting with '$prefix'" >&2
-    return 1
+    exit 1
   elif [ ${#names[@]} -eq 1 ]; then
     echo "${values[0]}"
   else
@@ -76,7 +76,7 @@ get_cfn_export() {
     read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
     if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
       echo "Invalid choice." >&2
-      return 1
+      exit 1
     fi
     echo "${values[$choice]}"
   fi
@@ -163,7 +163,6 @@ if [[ "$skip_image_build" == "false" ]]; then
     --namespace "$namespace" \
     --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
     --set awsEKSEnabled=true \
-    --set skipImageBuild="${skip_image_build}" \
     --set keepJobAlive="${keep_bootstrap_job_alive}" \
     || { echo "Installing bootstrap chart failed..."; exit 1; }
 
@@ -194,11 +193,20 @@ fi
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install ma "${ma_chart_dir}" \
   --namespace $namespace \
+  -f "${ma_chart_dir}/values.yaml" \
+  -f "${ma_chart_dir}/valuesEks.yaml" \
+  --set stageName="${STAGE}" \
+  --set aws.region="${AWS_CFN_REGION}" \
+  --set images.captureProxy.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.captureProxy.tag=migrations_capture_proxy_latest \
+  --set images.trafficReplayer.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+  --set images.reindexFromSnapshot.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
   --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
   --set images.migrationConsole.tag=migrations_migration_console_latest \
   --set images.installer.repository="${MIGRATIONS_ECR_REGISTRY}" \
   --set images.installer.tag=migrations_migration_console_latest \
-  --set aws.eksEnabled=true \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 kubectl -n ma wait --for=condition=ready pod/migration-console-0 --timeout=300s

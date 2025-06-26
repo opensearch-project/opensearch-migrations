@@ -44,14 +44,14 @@ spec:
               mkdir -p /tmp/helm-status
               echo "Starting Helm installation sequence..."
 
-      {{- range .Values.charts }}
-        {{- if (index $.Values.conditionalPackageInstalls .name) }}
+      {{- range $name, $chart := .Values.charts }}
+        {{- if (index $.Values.conditionalPackageInstalls $name) }}
               echo "Adding chart repository..."
-              helm repo add chart-repo-{{ .name }} {{ .repository }}
+              helm repo add chart-repo-{{ $name }} {{ $chart.repository }}
         {{- end }}
       {{- end }}
 
-      {{- if (not (empty .Values.charts)) }}
+      {{- if .Values.charts }}
               time helm repo update
       {{- end }}
 
@@ -77,52 +77,52 @@ spec:
               }
 
               # Install charts
-      {{- range .Values.charts }}
-        {{- if (not (index $.Values.conditionalPackageInstalls .name)) }}
-              echo "Skipping install for: {{ .name }} because conditionalPackageInstalls.{{ .name }} disabled it."
+      {{- range $name, $chart := .Values.charts }}
+        {{- if (not (index $.Values.conditionalPackageInstalls $name)) }}
+              echo "Skipping install for: {{ $name }} because conditionalPackageInstalls.{{ $name }} disabled it."
         {{- else }}
-              echo "Preparing chart: {{ .name }}"
+              echo "Preparing chart: {{ $name }}"
 
-          {{- if .values }}
-              VALUES_B64="{{ .values | toYaml | b64enc }}"
-              echo "$VALUES_B64" | base64 -d > /tmp/values-{{ .name }}.yaml
-              VALUE_PARAM="--values /tmp/values-{{ .name }}.yaml"
+          {{- if $chart.values }}
+              VALUES_B64="{{ $chart.values | toYaml | b64enc }}"
+              echo "$VALUES_B64" | base64 -d > /tmp/values-{{ $name }}.yaml
+              VALUE_PARAM="--values /tmp/values-{{ $name }}.yaml"
           {{- else }}
               VALUE_PARAM=""
           {{- end }}
 
               # Gather the chart installation's output for later aggregation
-              NOTES_FILE="/tmp/helm-notes/{{ .name }}.txt"
-              echo "==== NOTES for {{ .name }} ====" > $NOTES_FILE
+              NOTES_FILE="/tmp/helm-notes/{{ $name }}.txt"
+              echo "==== NOTES for {{ $name }} ====" > $NOTES_FILE
 
               # Launch installation in background with dependency check if needed
               (
-          {{- if .dependsOn }}
-                echo "Chart {{ .name }} depends on {{ .dependsOn }} - checking dependency"
-                check_dependency "{{ .dependsOn }}"
+          {{- if $chart.dependsOn }}
+                echo "Chart {{ $name }} depends on {{ $chart.dependsOn }} - checking dependency"
+                check_dependency "{{ $chart.dependsOn }}"
           {{- end }}
 
-                echo "Installing chart: {{ .name }}"
+                echo "Installing chart: {{ $name }}"
                 helm upgrade --install \
-                  {{ .name }} \
-                  chart-repo-{{ .name }}/{{ .name }} \
-          {{- if .version }}
-                  --version {{ .version }} \
+                  {{ $name }} \
+                  chart-repo-{{ $name }}/{{ $name }} \
+          {{- if $chart.version }}
+                  --version {{ $chart.version }} \
           {{- end }}
-          {{- if .namespace }}
-                  --namespace {{ .namespace }} \
+          {{- if $chart.namespace }}
+                  --namespace {{ $chart.namespace }} \
           {{- end }}
-                  --timeout {{ default "300" .timeout }}s \
+                  --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
                   $VALUE_PARAM \
-          {{- if .waitForInstallation }}
+          {{- if $chart.waitForInstallation }}
                   --wait
           {{- end }}
 
                 # Mark this chart as done
-                touch /tmp/helm-status/{{ .name }}.done
+                touch /tmp/helm-status/{{ $name }}.done
 
-                echo -e "\nFinished installing chart: {{ .name }}\n" >> $NOTES_FILE
+                echo -e "\nFinished installing chart: {{ $name }}\n" >> $NOTES_FILE
               ) >> $NOTES_FILE 2>&1 &
         {{- end }}
       {{- end }}
