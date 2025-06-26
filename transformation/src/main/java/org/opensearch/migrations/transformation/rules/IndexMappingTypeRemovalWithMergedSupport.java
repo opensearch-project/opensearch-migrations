@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 public class IndexMappingTypeRemovalWithMergedSupport extends IndexMappingTypeRemoval {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String COPY_TO = "copy_to";
 
     public IndexMappingTypeRemovalWithMergedSupport(MultiTypeResolutionBehavior behavior) {
         super(behavior);
@@ -25,67 +26,70 @@ public class IndexMappingTypeRemovalWithMergedSupport extends IndexMappingTypeRe
             var fieldName = propertyEntry.getKey();
             var incomingField = propertyEntry.getValue();
 
-            if (resolvedProperties.has(fieldName)) {
-                var existingField = resolvedProperties.get(fieldName);
-
-                // If both are objects with "type", try to merge
-                if (existingField.isObject() && incomingField.isObject()) {
-                    var existingType = existingField.get("type");
-                    var incomingType = incomingField.get("type");
-
-                    if (existingType != null && incomingType != null && existingType.equals(incomingType)) {
-                        // Merge optional keys like "copy_to" if needed
-                        var merged = (ObjectNode) existingField.deepCopy();
-
-                        // Merge "copy_to" lists
-                        Set<String> copyToMerged = new LinkedHashSet<>();
-                        JsonNode ctExisting = existingField.get("copy_to");
-                        JsonNode ctIncoming = incomingField.get("copy_to");
-
-                        if (ctExisting != null) {
-                            if (ctExisting.isArray()) {
-                                ctExisting.forEach(node -> copyToMerged.add(node.asText()));
-                            } else {
-                                copyToMerged.add(ctExisting.asText());
-                            }
-                        }
-
-                        if (ctIncoming != null) {
-                            if (ctIncoming.isArray()) {
-                                ctIncoming.forEach(node -> copyToMerged.add(node.asText()));
-                            } else {
-                                copyToMerged.add(ctIncoming.asText());
-                            }
-                        }
-
-                        if (!copyToMerged.isEmpty()) {
-                            var mergedArray = MAPPER.createArrayNode();
-                            copyToMerged.forEach(mergedArray::add);
-                            merged.set("copy_to", mergedArray);
-                        }
-
-                        resolvedProperties.set(fieldName, merged);
-                        return;
-                    }
-                }
-
-                log.atWarn().setMessage("Conflict during type union with index: {}\n" +
-                                "field: {}\n" +
-                                "existingFieldType: {}\n" +
-                                "type: {}\n" +
-                                "secondFieldType: {}")
-                        .addArgument(index.getName())
-                        .addArgument(fieldName)
-                        .addArgument(existingField)
-                        .addArgument(type)
-                        .addArgument(incomingField)
-                        .log();
-
-                throw new IllegalArgumentException("Conflicting definitions for property during union "
-                        + fieldName + " (" + existingField + " and " + incomingField + ")" );
-            } else {
+            if (!resolvedProperties.has(fieldName)) {
                 resolvedProperties.set(fieldName, incomingField);
+                return;
             }
+
+            var existingField = resolvedProperties.get(fieldName);
+
+            if (canMerge(existingField, incomingField)) {
+                resolvedProperties.set(fieldName, mergeFields(existingField, incomingField));
+                return;
+            }
+
+            logFieldConflict(index, fieldName, type, existingField, incomingField);
+            throw new IllegalArgumentException("Conflicting definitions for property during union "
+                    + fieldName + " (" + existingField + " and " + incomingField + ")");
         });
+    }
+
+    private boolean canMerge(JsonNode existingField, JsonNode incomingField) {
+        if (!existingField.isObject() || !incomingField.isObject()) return false;
+
+        var existingType = existingField.get("type");
+        var incomingType = incomingField.get("type");
+        return existingType != null && incomingType != null && existingType.equals(incomingType);
+    }
+
+    private ObjectNode mergeFields(JsonNode existingField, JsonNode incomingField) {
+        var merged = (ObjectNode) existingField.deepCopy();
+        Set<String> copyToMerged = new LinkedHashSet<>();
+
+        extractCopyTo(existingField, copyToMerged);
+        extractCopyTo(incomingField, copyToMerged);
+
+        if (!copyToMerged.isEmpty()) {
+            var mergedArray = MAPPER.createArrayNode();
+            copyToMerged.forEach(mergedArray::add);
+            merged.set(COPY_TO, mergedArray);
+        }
+
+        return merged;
+    }
+
+    private void extractCopyTo(JsonNode field, Set<String> result) {
+        JsonNode copyTo = field.get(COPY_TO);
+        if (copyTo == null) return;
+
+        if (copyTo.isArray()) {
+            copyTo.forEach(node -> result.add(node.asText()));
+        } else {
+            result.add(copyTo.asText());
+        }
+    }
+
+    private void logFieldConflict(Index index, String fieldName, String type, JsonNode existing, JsonNode incoming) {
+        log.atWarn().setMessage("Conflict during type union with index: {}\n" +
+                        "field: {}\n" +
+                        "existingFieldType: {}\n" +
+                        "type: {}\n" +
+                        "secondFieldType: {}")
+                .addArgument(index.getName())
+                .addArgument(fieldName)
+                .addArgument(existing)
+                .addArgument(type)
+                .addArgument(incoming)
+                .log();
     }
 }

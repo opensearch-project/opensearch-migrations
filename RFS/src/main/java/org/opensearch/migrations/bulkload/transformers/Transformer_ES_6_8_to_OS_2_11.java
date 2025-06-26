@@ -23,6 +23,8 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
 
     private final int awarenessAttributes;
 
+    // Note: `params` is unused here but retained to match subclass constructor signatures
+    @SuppressWarnings("unused")
     public Transformer_ES_6_8_to_OS_2_11(
             int awarenessAttributes,
             MetadataTransformerParams params,

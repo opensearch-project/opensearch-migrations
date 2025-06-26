@@ -8,8 +8,10 @@ import lombok.experimental.UtilityClass;
 public class VersionMatchers {
     public static final Predicate<Version> isES_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 2.4"));
     public static final Predicate<Version> isES_5_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 5.6"));
-    public static final Predicate<Version> equalOrBetween_ES_5_0_and_5_4 = isBetweenInclusive(Version.fromString("ES 5.0"), Version.fromString("ES 5.4"));
-    public static final Predicate<Version> equalOrBetween_ES_5_5_and_5_6 = isBetweenInclusive(Version.fromString("ES 5.5"), Version.fromString("ES 5.6"));
+    public static final Predicate<Version> equalOrBetween_ES_5_0_and_5_4 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 5.0.0"))
+                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 5.4.99")));
+    public static final Predicate<Version> equalOrBetween_ES_5_5_and_5_6 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 5.5.0"))
+                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 5.6.99")));
     public static final Predicate<Version> isES_6_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 6.8"));
     public static final Predicate<Version> equalOrBetween_ES_6_0_and_6_1 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 6.0"))
                                                                 .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 6.1")));
@@ -60,22 +62,20 @@ public class VersionMatchers {
     }
 
     static Predicate<Version> equalOrGreaterThanMinorVersion(final Version version) {
-        return other -> matchesMajorVersion(version)
-            .and(other2 -> version.getMinor() <= other2.getMinor())
-            .test(other);
+        return other -> {
+            if (other == null || version == null) return false;
+            if (!matchesFlavor(version).test(other)) return false;
+            return other.getMajor() == version.getMajor()
+                    && other.getMinor() >= version.getMinor();
+        };
     }
 
     static Predicate<Version> equalOrLessThanMinorVersion(final Version version) {
-        return other -> matchesMajorVersion(version)
-            .and(other2 -> version.getMinor() >= other2.getMinor())
-            .test(other);
-    }
-
-    static Predicate<Version> isBetweenInclusive(Version lower, Version upper) {
-        return other ->
-                other.getFlavor().equals(lower.getFlavor())
-                        && other.getMajor() == lower.getMajor()
-                        && other.getMinor() >= lower.getMinor()
-                        && other.getMinor() <= upper.getMinor();
+        return other -> {
+            if (other == null || version == null) return false;
+            if (!matchesFlavor(version).test(other)) return false;
+            return other.getMajor() == version.getMajor()
+                    && other.getMinor() <= version.getMinor();
+        };
     }
 }
