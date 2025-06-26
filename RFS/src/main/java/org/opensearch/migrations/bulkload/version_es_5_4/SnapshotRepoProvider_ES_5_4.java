@@ -7,9 +7,12 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
-    private SnapshotRepoData_ES_5_4 repoData = null;
+    private SnapshotRepoData_ES_5_4 repoData;
 
     public SnapshotRepoProvider_ES_5_4(SourceRepo repo) {
         this.repo = repo;
@@ -17,14 +20,13 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
 
     protected SnapshotRepoData_ES_5_4 getRepoData() {
         if (repoData == null) {
-            this.repoData = SnapshotRepoData_ES_5_4.fromRepo(repo);
+            repoData = SnapshotRepoData_ES_5_4.fromRepo(repo);
         }
         return repoData;
     }
 
     public List<SnapshotRepoData_ES_5_4.Index> getIndices() {
-        return getRepoData().getIndices().entrySet()
-                .stream()
+        return getRepoData().getIndices().entrySet().stream()
                 .map(entry -> SnapshotRepoData_ES_5_4.Index.fromRawIndex(entry.getKey(), entry.getValue()))
                 .collect(Collectors.toList());
     }
@@ -32,27 +34,32 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
-        SnapshotRepoData_ES_5_4.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
+
+        var targetSnapshot = getRepoData().getSnapshots().stream()
                 .filter(snapshot -> snapshotName.equals(snapshot.getName()))
                 .findFirst()
                 .orElse(null);
 
-        if (targetSnapshot != null) {
-            getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                List<String> snapshotNames = rawIndex.getSnapshots();
-                if (snapshotNames == null || snapshotNames.isEmpty()) {
-                    System.err.printf("Skipping index [%s] — no snapshots listed%n", indexName);
-                } else if (!snapshotNames.contains(targetSnapshot.getName())) {
-                    System.err.printf("Skipping index [%s] — snapshot ID [%s] not found in %s%n",
-                            indexName, targetSnapshot.getId(), snapshotNames);
-                } else {
-                    System.err.printf("Matched index [%s] — snapshot ID [%s] found%n", indexName, targetSnapshot.getName());
-                    matchedIndices.add(SnapshotRepoData_ES_5_4.Index.fromRawIndex(indexName, rawIndex));
-                }
-            });
-        } else {
-            System.err.printf("No snapshot found with name [%s]%n", snapshotName);
+        if (targetSnapshot == null) {
+            log.warn("No snapshot found with name [{}]", snapshotName);
+            return matchedIndices;
         }
+
+        getRepoData().getIndices().forEach((indexName, rawIndex) -> {
+            var snapshotNames = rawIndex.getSnapshots();
+
+            if (snapshotNames == null || snapshotNames.isEmpty()) {
+                log.warn("Skipping index [{}] — no snapshots listed", indexName);
+            } else if (!snapshotNames.contains(targetSnapshot.getName())) {
+                log.warn("Skipping index [{}] — snapshot ID [{}] not found in {}",
+                        indexName, targetSnapshot.getId(), snapshotNames);
+            } else {
+                log.info("Matched index [{}] — snapshot name [{}] found",
+                        indexName, targetSnapshot.getName());
+                matchedIndices.add(SnapshotRepoData_ES_5_4.Index.fromRawIndex(indexName, rawIndex));
+            }
+        });
+
         return matchedIndices;
     }
 
@@ -63,17 +70,17 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
 
     @Override
     public String getSnapshotId(String snapshotName) {
-        for (SnapshotRepoData_ES_5_4.Snapshot snapshot : getRepoData().getSnapshots()) {
-            if (snapshot.getName().equals(snapshotName)) {
-                return snapshot.getId();
-            }
-        }
-        return null;
+        return getRepoData().getSnapshots().stream()
+                .filter(snapshot -> snapshot.getName().equals(snapshotName))
+                .map(SnapshotRepoData_ES_5_4.Snapshot::getId)
+                .findFirst()
+                .orElse(null);
     }
 
     @Override
     public String getIndexId(String indexName) {
-        return getRepoData().getIndices().get(indexName).getId();
+        var rawIndex = getRepoData().getIndices().get(indexName);
+        return rawIndex != null ? rawIndex.getId() : null;
     }
 
     @Override
