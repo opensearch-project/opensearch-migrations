@@ -9,8 +9,8 @@ import {
     ClusterAuth,
     MigrationSSMParameter,
     createMSKConsumerIAMPolicies,
-    createOpenSearchIAMAccessPolicy,
-    createOpenSearchServerlessIAMAccessPolicy,
+    createAllAccessOpenSearchIAMAccessPolicy,
+    createAllAccessOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue, appendArgIfNotInExtraArgs, parseArgsToDict
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
@@ -26,6 +26,7 @@ import { MigrationDashboard } from '../constructs/migration-dashboard';
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
     readonly clusterAuthDetails: ClusterAuth,
+    readonly skipClusterCertCheck?: boolean,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly addOnMigrationId?: string,
@@ -65,8 +66,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "secretsmanager:DescribeSecret"
             ]
         })
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
+        const openSearchPolicy = createAllAccessOpenSearchIAMAccessPolicy()
+        const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy()
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId)
@@ -86,7 +87,9 @@ export class TrafficReplayerStack extends MigrationServiceCore {
 
         let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint}`
         const extraArgsDict = parseArgsToDict(props.extraArgs)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecure")
+        if (props.skipClusterCertCheck != false) { // when true or unspecified, add the flag
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecure")
+        }
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-brokers", brokerEndpoints)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-topic", "logging-traffic-topic")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-group-id", groupId)
