@@ -467,12 +467,13 @@ export function parseClusterDefinition(json: any): ClusterYaml {
         throw new Error('Missing required field in cluster definition: endpoint')
     }
     endpoint = validateAndReturnFormattedHttpURL(endpoint)
+    const allowInsecure = json.allow_insecure;
     const version = json.version;
     const auth = parseAuth(json.auth)
     if (!auth) {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }
-    return new ClusterYaml({endpoint, version, auth})
+    return new ClusterYaml({endpoint, version, allowInsecure, auth})
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -508,6 +508,7 @@ export class StackComposer {
                 vpcDetails: networkStack.vpcDetails,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
+                skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 sourceClusterVersion: sourceCluster?.version,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
@@ -531,6 +532,7 @@ export class StackComposer {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpcDetails: networkStack.vpcDetails,
                 clusterAuthDetails: servicesYaml.target_cluster.auth,
+                skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
                 userAgentSuffix: trafficReplayerCustomUserAgent,
@@ -569,12 +571,14 @@ export class StackComposer {
 
         let captureProxyStack
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
+            const sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpcDetails: networkStack.vpcDetails,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
                 },
                 otelCollectorEnabled: otelCollectorEnabled,
+                skipClusterCertCheck: sourceClusterDefinition?.allow_insecure,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
@@ -601,6 +605,7 @@ export class StackComposer {
                     securityGroupMigrationSSMParameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
                 },
                 otelCollectorEnabled: false,
+                skipClusterCertCheck: servicesYaml.source_cluster?.allowInsecure,
                 streamingSourceType: StreamingSourceType.DISABLED,
                 extraArgs: "--noCapture",
                 stackName: `OSMigrations-${stage}-${region}-TargetClusterProxy`,
