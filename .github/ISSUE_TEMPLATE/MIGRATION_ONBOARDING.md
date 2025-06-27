@@ -14,12 +14,14 @@ _Please provide a detailed description of the problem or question. If you have a
 - **Source version:** `<Elasticsearch version | OpenSearch version>`  
   *Please specify the full version (e.g., Elasticsearch 7.10.2).*
 
-- **Source platform:** `<AWS self-managed, Amazon OpenSearch Service, GCP, Elastic, Azure, On-prem, …>`
+- **Source environment:** `<source environment details>`
+  *Please specify details about your source environment, including whether it is self-managed or managed, and whether it is in the cloud or on-premises.*
 
 - **Target version:** `<Elasticsearch | OpenSearch>`  
   *Please specify the full version (e.g., OpenSearch 1.3).*
 
-- **Target platform:** `<AWS self-managed, Amazon OpenSearch Service>`
+- **Target environment:** `<target environment details>`
+  *Please specify details about your target environment, including whether it is self-managed or managed, and whether it is in the cloud or on-premises.*
 
 - **Migration Assistant Version:** `<Specify release version used>`
 
