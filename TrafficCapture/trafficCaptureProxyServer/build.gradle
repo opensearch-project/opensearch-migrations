@@ -157,7 +157,6 @@ class VerifyCompatibilityWithJDK11Task extends DefaultTask {
     @TaskAction
     void verify() {
         analyzeCompiledClasses()
-        analyzeDependencies(compileClasspath)
         analyzeDependencies(runtimeClasspath)
 
         if (!isCompatible) {

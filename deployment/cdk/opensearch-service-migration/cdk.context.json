@@ -3,6 +3,8 @@
     "stage": "<STAGE>",
     "targetCluster": {
       "endpoint": "<TARGET_CLUSTER_ENDPOINT>",
+      "// allow_insecure documentation": "Set this to true to ignore when the target cluster's HTTP certificate was not signed with a trusted CA Root Certificate.  Default: true",
+      "allow_insecure": true,
       "auth": {
         "type": "none | basic | sigv4",
         "// basic auth documentation": "The next two lines are relevant for basic auth only",
@@ -15,6 +17,8 @@
     },
     "sourceCluster": {
       "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+      "// allow_insecure documentation": "Set this to true to ignore when the source cluster's HTTP certificate was not signed with a trusted CA Root Certificate.  Default: true",
+      "allow_insecure": true,
       "version": "<SOURCE_CLUSTER_VERSION, ES_7.10 or OS_1.3>",
       "auth": {
         "type": "none | basic | sigv4",
