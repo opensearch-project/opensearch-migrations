@@ -4,6 +4,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.version_es_5_4.SnapshotReader_ES_5_4;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
 import org.opensearch.migrations.bulkload.version_os_2_11.RemoteWriter_OS_2_11;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry.UnsupportedVersionException;
@@ -70,6 +71,6 @@ public class ClusterProviderRegistryTest {
 
         var reader = ClusterProviderRegistry.getSnapshotReader(Version.fromString("ES 0"), sourceRepo, true);
 
-        assertThat(reader, instanceOf(SnapshotReader_ES_6_8.class));
+        assertThat(reader, instanceOf(SnapshotReader_ES_5_4.class));
     }
 }

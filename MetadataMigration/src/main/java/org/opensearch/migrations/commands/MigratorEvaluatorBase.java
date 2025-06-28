@@ -77,7 +77,10 @@ public abstract class MigratorEvaluatorBase {
         );
         var customTransformer = getCustomTransformer();
         var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
-        log.atInfo().setMessage("Selected transformer: {}").addArgument(compositeTransformer).log();
+        log.atInfo().setMessage("Selected transformer composite: custom = {}, version = {}")
+            .addArgument(customTransformer.getClass().getSimpleName())
+            .addArgument(versionTransformer.getClass().getSimpleName())
+            .log();
         return compositeTransformer;
     }
 

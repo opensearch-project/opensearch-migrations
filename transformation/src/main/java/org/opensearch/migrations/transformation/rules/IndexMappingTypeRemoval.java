@@ -111,7 +111,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             }
             index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         } else if (mappingsNode.isObject()) {
-            mergePropertiesFromMappings((ObjectNode)mappingsNode, index, resolvedProperties);
+            mergePropertiesFromMappings((ObjectNode) mappingsNode, index, resolvedProperties);
         }
         index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         return true;
@@ -137,7 +137,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         });
     }
 
-    private void mergePropertiesCheckingConflicts(final Index index, ObjectNode resolvedProperties, String type, JsonNode properties) {
+    protected void mergePropertiesCheckingConflicts(final Index index, ObjectNode resolvedProperties, String type, JsonNode properties) {
         properties.properties().forEach(propertyEntry -> {
             var fieldName = propertyEntry.getKey();
             var fieldType = propertyEntry.getValue();
@@ -157,7 +157,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
                             .addArgument(fieldType)
                             .log();
                     throw new IllegalArgumentException("Conflicting definitions for property during union "
-                    + fieldName + " (" + existingFieldType + " and " + fieldType + ")" );
+                        + fieldName + " (" + existingFieldType + " and " + fieldType + ")");
                 }
             } else {
                 resolvedProperties.set(fieldName, fieldType);
