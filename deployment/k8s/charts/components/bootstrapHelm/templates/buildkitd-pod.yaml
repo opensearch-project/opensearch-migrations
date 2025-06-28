@@ -1,4 +1,3 @@
-{{- if not .Values.skipImageBuild }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -62,4 +61,3 @@ spec:
       configMap:
         name: buildkitd-config
   restartPolicy: Never
-{{- end }}

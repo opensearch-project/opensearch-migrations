@@ -1,0 +1,62 @@
+{{- if eq (default false .Values.aws.eksEnabled) true }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentbit-eks-full-config
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush        1
+        Daemon       Off
+        Log_Level    info
+        Parsers_File parsers.conf
+        Plugins_File plugins.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+
+    [INPUT]
+        Name             tail
+        Tag              kube.*
+        Path             /var/log/containers/*.log
+        multiline.parser docker, cri
+        Refresh_Interval 5
+        Mem_Buf_Limit    5MB
+        Skip_Long_Lines  Off
+        Skip_Empty_Lines On
+
+    [FILTER]
+        Name             kubernetes
+        Match            kube.*
+        Kube_URL         https://kubernetes.default.svc:443
+        Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
+        Kube_Tag_Prefix  kube.var.log.containers.
+        Merge_Log        On
+        Merge_Log_Key    log_processed
+
+    [FILTER]
+        Name          rewrite_tag
+        Match         kube.*
+        Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+        Emitter_Name  re_emitted
+
+    [FILTER]
+        Name  modify
+        Match *
+        Copy  log message
+
+    [OUTPUT]
+        Name                cloudwatch_logs
+        Match               *
+        region              {{ .Values.aws.region }}
+        log_group_name      /migration-assistant-{{ .Values.stageName }}-{{ .Values.aws.region }}/logs
+        log_stream_prefix   from-fluentbit-
+        auto_create_group   true
+        log_key             message
+{{- end }}

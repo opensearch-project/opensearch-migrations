@@ -68,11 +68,11 @@ spec:
 
           # required, but has defaults
           - name: image
-            value: "migrations/capture_proxy:latest"
+            value: "{{workflow.parameters.capture-proxy-image}}"
           - name: replicas
             value: "1"
           - name: init-image
-            value: "migrations/migration-console:latest"
+            value: "{{workflow.parameters.migration-console-image}}"
 
           # optional
           - name: trace-directory
