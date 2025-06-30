@@ -14,7 +14,6 @@ public class Transformer_ES_5_4_to_OS_2_19 extends Transformer_ES_6_8_to_OS_2_11
     public Transformer_ES_5_4_to_OS_2_19(int awarenessAttributes, MetadataTransformerParams params) {
         super(
             awarenessAttributes,
-            params,
             List.of(
                 new IndexMappingTypeRemovalWithMergedSupport(params.getMultiTypeResolutionBehavior()),
                 new TemplateMatchClausePattern()
