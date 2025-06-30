@@ -26,7 +26,6 @@ describe('Migration Console Stack Tests', () => {
             migrationConsoleServiceEnabled: true,
             migrationAPIEnabled: true,
             migrationAPIAllowedHosts: "test-endpoint1",
-            migrationConsoleEnableOSI: true,
             sourceClusterEndpoint: "https://test-cluster",
             reindexFromSnapshotServiceEnabled: true,
             trafficReplayerServiceEnabled: true,

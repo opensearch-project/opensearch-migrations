@@ -27,7 +27,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
     readonly migrationAPIAllowedHosts?: string,
     readonly targetGroups?: ELBTargetGroup[],
@@ -312,21 +311,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
             const defaultAllowedHosts = 'localhost'
             environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
-        }
-
-        if (props.migrationConsoleEnableOSI) {
-            const pipelineRoleArn = this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
-            servicePolicies.push(...this.createOpenSearchIngestionManagementPolicy(pipelineRoleArn))
-            const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
-                retention: RetentionDays.ONE_MONTH,
-                removalPolicy: RemovalPolicy.DESTROY,
-                // Naming requirement from OSI
-                logGroupName: `/aws/vendedlogs/osi-${props.stage}-${props.defaultDeployId}`
-            });
-            createMigrationStringParameter(this, osiLogGroup.logGroupName, {
-                ...props,
-                parameter: MigrationSSMParameter.OSI_PIPELINE_LOG_GROUP_NAME,
-            });
         }
 
         this.createService({
