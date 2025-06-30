@@ -420,6 +420,26 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
         html.required = true
         html.destination file("${buildDir}/reports/jacoco/mergedReport/html")
     }
+
+    doLast {
+        File xmlFile = reports.xml.outputLocation.get().asFile
+        // Doctype's are not allowed by the XmlParser, so remove them
+        String xmlText = xmlFile.text.replaceAll(/(?m)<!DOCTYPE[^>]*>/, "")
+        def reportXml = new XmlParser().parseText(xmlText)
+
+        logger.lifecycle("=== Code Coverage Summary ===")
+        reportXml.counter.each { c ->
+        int missed  = c.@missed  as int
+        int covered = c.@covered as int
+        int total   = missed + covered
+        double percent  = total ? (covered / total * 100) : 0
+        // Looks like: "LINE       : 85.4% (123/144)"
+        logger.lifecycle(String.format(
+            "%-12s : %6.1f%% (%d/%d)",
+            c.@type, percent, covered, total
+        ))
+        }
+    }
 }
 
 gradle.projectsEvaluated {
@@ -497,6 +517,15 @@ def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
 
     from jacocoExecFilesProvider
     dependsOn jacocoTestTasksProvider
+}
+
+tasks.register('gatherJacocoExecForMerging', Copy) {
+    description = 'Local troubleshooting, gathers coverage all exec files in build/jacocoMerged/*.exec into to be consumed by jacocoAggregateReport'
+
+    from subprojects.collect { proj ->
+        fileTree(dir: proj.buildDir, include: 'jacoco/*.exec')
+    }
+    into "$buildDir/jacocoMerged"
 }
 
 tasks.register('mergeJacocoReports') {
