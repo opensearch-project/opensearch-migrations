@@ -15,8 +15,7 @@ import {
     createSnapshotOnAOSRole
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
-import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {Fn, RemovalPolicy} from "aws-cdk-lib";
+import {Fn} from "aws-cdk-lib";
 import {ClusterYaml, MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
