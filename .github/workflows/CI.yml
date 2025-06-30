@@ -238,6 +238,7 @@ jobs:
 
       - name: Upload Aggregate JaCoCo report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           if-no-files-found: error
           name: coverage-reports-gradle-tests-aggregate
