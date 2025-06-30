@@ -19,35 +19,35 @@ import lombok.experimental.UtilityClass;
 public class SupportedClusters {
     private static List<ContainerVersion> sources() {
         return List.of(
-            SearchClusterContainer.ES_V5_6_16,
-            SearchClusterContainer.ES_V6_8_23,
-            SearchClusterContainer.ES_V7_10_2,
-            SearchClusterContainer.ES_V7_17,
-            SearchClusterContainer.ES_V8_17,
-            SearchClusterContainer.OS_V1_3_16
+            SearchClusterContainer.ES_V5_6_16
+            // SearchClusterContainer.ES_V6_8_23,
+            // SearchClusterContainer.ES_V7_10_2,
+            // SearchClusterContainer.ES_V7_17,
+            // SearchClusterContainer.ES_V8_17,
+            // SearchClusterContainer.OS_V1_3_16
         );
     }
 
     public static List<ContainerVersion> extendedSources() {
         return List.of(
-                SearchClusterContainer.ES_V7_9,
-                SearchClusterContainer.ES_V7_8,
-                SearchClusterContainer.ES_V7_7,
-                SearchClusterContainer.ES_V7_6,
-                SearchClusterContainer.ES_V7_5,
-                SearchClusterContainer.ES_V7_4,
-                SearchClusterContainer.ES_V7_3,
-                SearchClusterContainer.ES_V7_2,
-                SearchClusterContainer.ES_V7_1,
-                SearchClusterContainer.ES_V7_0,
-                SearchClusterContainer.ES_V6_7,
-                SearchClusterContainer.ES_V6_6,
-                SearchClusterContainer.ES_V6_5,
-                SearchClusterContainer.ES_V6_4,
-                SearchClusterContainer.ES_V6_3,
-                SearchClusterContainer.ES_V6_2,
-                SearchClusterContainer.ES_V6_1,
-                SearchClusterContainer.ES_V6_0,
+                // SearchClusterContainer.ES_V7_9,
+                // SearchClusterContainer.ES_V7_8,
+                // SearchClusterContainer.ES_V7_7,
+                // SearchClusterContainer.ES_V7_6,
+                // SearchClusterContainer.ES_V7_5,
+                // SearchClusterContainer.ES_V7_4,
+                // SearchClusterContainer.ES_V7_3,
+                // SearchClusterContainer.ES_V7_2,
+                // SearchClusterContainer.ES_V7_1,
+                // SearchClusterContainer.ES_V7_0,
+                // SearchClusterContainer.ES_V6_7,
+                // SearchClusterContainer.ES_V6_6,
+                // SearchClusterContainer.ES_V6_5,
+                // SearchClusterContainer.ES_V6_4,
+                // SearchClusterContainer.ES_V6_3,
+                // SearchClusterContainer.ES_V6_2,
+                // SearchClusterContainer.ES_V6_1,
+                // SearchClusterContainer.ES_V6_0,
                 SearchClusterContainer.ES_V5_5,
                 SearchClusterContainer.ES_V5_4,
                 SearchClusterContainer.ES_V5_3,
@@ -59,9 +59,9 @@ public class SupportedClusters {
 
     private static List<ContainerVersion> targets() {
         return List.of(
-            SearchClusterContainer.OS_V1_3_16,
-            SearchClusterContainer.OS_V2_19_1,
-            SearchClusterContainer.OS_V3_0_0
+            // SearchClusterContainer.OS_V1_3_16,
+            SearchClusterContainer.OS_V2_19_1
+            // SearchClusterContainer.OS_V3_0_0
         );
     }
 
