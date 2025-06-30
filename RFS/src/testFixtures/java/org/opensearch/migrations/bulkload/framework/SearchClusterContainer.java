@@ -6,9 +6,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.List;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
