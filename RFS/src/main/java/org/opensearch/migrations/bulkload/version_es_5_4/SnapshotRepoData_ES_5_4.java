@@ -58,7 +58,6 @@ public class SnapshotRepoData_ES_5_4 {
     public static class Snapshot implements SnapshotRepo.Snapshot {
         private String name;
         private String uuid;
-        private int state;
 
         @Override
         public String getId() {
@@ -72,12 +71,6 @@ public class SnapshotRepoData_ES_5_4 {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RawSnapshot {
         private String name;
-
-        @JsonProperty("timestamp")
-        private Long timestamp;
-
-        @JsonProperty("state")
-        private String state;
     }
 
     @Getter
@@ -87,24 +80,13 @@ public class SnapshotRepoData_ES_5_4 {
         private String id;
 
         @JsonProperty("snapshots")
-        private List<Object> rawSnapshots;
+        private List<RawSnapshot> rawSnapshots;
 
         @JsonIgnore
         public List<String> getSnapshots() {
             if (rawSnapshots == null) return List.of();
-
             return rawSnapshots.stream()
-                .map(o -> {
-                    if (!(o instanceof Map)) {
-                        throw new IllegalStateException("Expected snapshot entry to be a Map, but found: " + o.getClass());
-                    }
-                    Object name = ((Map<?, ?>) o).get("name");
-                    if (name != null) {
-                        return name.toString();
-                    } else {
-                        throw new IllegalStateException("Map snapshot entry missing 'name': " + o);
-                    }
-                })
+                .map(RawSnapshot::getName)
                 .collect(Collectors.toList());
         }
     }

@@ -26,9 +26,10 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
     }
 
     public List<SnapshotRepoData_ES_5_4.Index> getIndices() {
-        return getRepoData().getIndices().entrySet().stream()
-                .map(entry -> SnapshotRepoData_ES_5_4.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-                .collect(Collectors.toList());
+        return getRepoData().getIndices().entrySet()
+            .stream()
+            .map(entry -> SnapshotRepoData_ES_5_4.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
     }
 
     @Override
