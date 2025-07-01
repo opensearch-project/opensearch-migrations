@@ -437,7 +437,7 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
             // Looks like: "LINE       : 85.4% (123/144)"
             summaryLines <<  String.format(
                 "%-12s : %6.1f%% (%d/%d)",
-                c.@type, percent, covered, total
+                c.@type, percent, covered, total452
             )
         }
 
@@ -449,12 +449,12 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
         // If running in a github action, print into that file
         def summaryPath = System.getenv('GITHUB_STEP_SUMMARY')
         if (summaryPath) {
-            def ghaSummary = file(summaryPath)
-            file(ghaPath).withWriterAppend { w ->
+            def ghaSummary = new File(summaryPath)
+            ghaSummary.parentFile?.mkdirs()
+            ghaSummary.withWriterAppend { w ->
                 summaryLines.each { w.println(it) }
             }
         }
-
     }
 }
 
