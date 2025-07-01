@@ -9,7 +9,6 @@ import requests_mock
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
-from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
                                               WorkingIndexDoesntExist)
 from console_link.models.ecs_service import ECSService
@@ -32,62 +31,6 @@ def ecs_rfs_backfill():
         }
     }
     return get_backfill(ecs_rfs_config, None, target_cluster=create_valid_cluster())
-
-
-def test_get_backfill_valid_osi():
-    osi_config = {
-        "opensearch_ingestion": {
-            "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
-            "vpc_subnet_ids": [
-                "subnet-024004957a02ce923"
-            ],
-            "security_group_ids": [
-                "sg-04536940716d101f6"
-            ],
-            "aws_region": "us-west-2",
-            "pipeline_name": "unit-test-pipeline",
-            "index_regex_selection": [
-                "index-.*"
-            ],
-            "log_group_name": "/aws/vendedlogs/osi-unit-test-default",
-            "tags": [
-                "migration_deployment=1.0.0"
-            ]
-        }
-    }
-    osi_backfill = get_backfill(osi_config, source_cluster=create_valid_cluster(),
-                                target_cluster=create_valid_cluster())
-    assert isinstance(osi_backfill, OpenSearchIngestionBackfill)
-    assert isinstance(osi_backfill, Backfill)
-
-
-def test_get_backfill_osi_missing_clusters():
-    osi_config = {
-        "opensearch_ingestion": {
-            "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
-            "vpc_subnet_ids": [
-                "subnet-024004957a02ce923"
-            ],
-            "security_group_ids": [
-                "sg-04536940716d101f6"
-            ],
-            "aws_region": "us-west-2",
-            "pipeline_name": "unit-test-pipeline",
-            "index_regex_selection": [
-                "index-.*"
-            ],
-            "log_group_name": "/aws/vendedlogs/osi-unit-test-default",
-            "tags": [
-                "migration_deployment=1.0.0"
-            ]
-        }
-    }
-    with pytest.raises(ValueError) as excinfo:
-        get_backfill(osi_config, None, create_valid_cluster())
-    assert "source_cluster" in str(excinfo.value.args[0])
-    with pytest.raises(ValueError) as excinfo:
-        get_backfill(osi_config, create_valid_cluster(), None)
-    assert "target_cluster" in str(excinfo.value.args[0])
 
 
 def test_get_backfill_valid_docker_rfs():

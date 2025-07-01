@@ -79,55 +79,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         return [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy]
     }
 
-    configureOpenSearchIngestionPipelineRole(stage: string, deployId: string) {
-        const osiPipelineRole = new Role(this, 'osisPipelineRole', {
-            assumedBy: new ServicePrincipal('osis-pipelines.amazonaws.com'),
-            description: 'OpenSearch Ingestion Pipeline role for OpenSearch Migrations'
-        });
-        // Add policy to allow access to Opensearch domains in same account/region
-        osiPipelineRole.addToPolicy(new PolicyStatement({
-            effect: Effect.ALLOW,
-            actions: ["es:DescribeDomain", "es:ESHttp*"],
-            resources: [`arn:${this.partition}:es:${this.region}:${this.account}:domain/*`]
-        }))
-
-        createMigrationStringParameter(this, osiPipelineRole.roleArn, {
-            parameter: MigrationSSMParameter.OSI_PIPELINE_ROLE_ARN,
-            stage,
-            defaultDeployId: deployId,
-        });
-        return osiPipelineRole.roleArn;
-    }
-
-    createOpenSearchIngestionManagementPolicy(pipelineRoleArn: string): PolicyStatement[] {
-        // Allow all access for pipelines in other accounts or regions
-        const osiManagementPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ["*"],
-            actions: [
-                "osis:*"
-            ]
-        })
-        const passPipelineRolePolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [pipelineRoleArn],
-            actions: [
-                "iam:PassRole"
-            ]
-        })
-        const configureLogGroupPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ["*"],
-            actions: [
-                "logs:CreateLogDelivery",
-                "logs:PutResourcePolicy",
-                "logs:DescribeResourcePolicies",
-                "logs:DescribeLogGroups"
-            ]
-        })
-        return [osiManagementPolicy, passPipelineRolePolicy, configureLogGroupPolicy]
-    }
-
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
 

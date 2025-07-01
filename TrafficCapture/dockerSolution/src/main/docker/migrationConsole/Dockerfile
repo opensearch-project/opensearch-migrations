@@ -112,6 +112,3 @@ COPY workflows /root/workflows
 ENV ENV=/root/.bashrc
 
 CMD ["/bin/bash", "-c", "/root/loadServicesFromParameterStore.sh && tail -f /dev/null"]
-
-# Experimental console API, uncomment to use in addition to uncomment port mapping in docker-compose.yml
-#CMD /root/loadServicesFromParameterStore.sh && pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt

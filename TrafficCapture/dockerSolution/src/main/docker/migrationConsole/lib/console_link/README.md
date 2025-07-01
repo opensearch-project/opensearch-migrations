@@ -6,7 +6,6 @@
     - [Metrics Source](#metrics-source)
     - [Backfill](#backfill)
       - [Reindex From Snapshot](#reindex-from-snapshot)
-      - [OpenSearch Ingestion](#opensearch-ingestion)
     - [Snapshot](#snapshot)
     - [Metadata Migration](#metadata-migration)
     - [Replay](#replay)
@@ -56,19 +55,14 @@ metrics_source:
     prometheus:
         endpoint: "http://prometheus:9090"
 backfill:
-    opensearch_ingestion:
-        pipeline_role_arn: "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--pipelineRole"
-        vpc_subnet_ids:
-            - "subnet-123456789"
-        security_group_ids:
-            - "sg-123456789"
-        aws_region: "us-west-2"
-        pipeline_name: "test-cli-pipeline"
-        index_regex_selection:
-            - "test-index*"
-        log_group_name: "/aws/vendedlogs/osi-aws-integ-default"
-        tags:
-            - "migration_deployment=1.0.6"
+    reindex_from_snapshot:
+        snapshot_repo: "abc"
+        snapshot_name: "def"
+        scale: 3
+        ecs:
+            cluster_name: migration-aws-integ-ecs-cluster
+            service_name: migration-aws-integ-reindex-from-snapshot
+            aws-region: us-east-1
 replay:
   ecs:
     cluster-name: "migrations-dev-cluster"
@@ -126,8 +120,7 @@ Exactly one of the following blocks must be present:
 
 ### Backfill
 
-Backfill can be performed via several mechansims. The primary two supported by the console library are Reindex From Snapshot (RFS) and
-OpenSearch Ingestion Pipeline (OSI).
+Backfill can be performed via several mechanisms. The method supported by the console library is  Reindex From Snapshot (RFS).
 
 #### Reindex From Snapshot
 
@@ -183,18 +176,6 @@ backfill:
       namespace: "ma"
       deployment_name: "ma-backfill"
 ```
-
-#### OpenSearch Ingestion
-
-- `opensearch_ingestion`
-    - `pipeline_role_arn`: required, IAM pipeline role containing permissions to read from source and read/write to target, more details [here](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/pipeline-security-overview.html#pipeline-security-sink)
-    - `vpc_subnet_ids`: required, VPC subnets to place the OSI pipeline in
-    - `security_group_ids`: required, security groups to apply to OSI pipeline for accessing source and target clusters
-    - `aws_region`: required, AWS region to look for pipeline role and secrets for cluster
-    - `pipeline_name`: optional, name of OSI pipeline
-    - `index_regex_selection`: optional, list of index inclusion regex strings for selecting indices to migrate
-    - `log_group_name`: optional, name of existing CloudWatch log group to use for OSI logs
-    - `tags`: optional, list of tags to apply to OSI pipeline
 
 ### Snapshot
 
