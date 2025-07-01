@@ -25,23 +25,40 @@ NO_AUTH_SCHEMA = {
     "nullable": True,
 }
 
+
+def validate_basic_auth_options(field, value, error):
+    username = value.get("username")
+    password = value.get("password")
+    user_secret_arn = value.get("user_secret_arn")
+
+    has_user_pass = username is not None and password is not None
+    has_user_secret = user_secret_arn is not None
+
+    if has_user_pass and has_user_secret:
+        error(field, "Cannot provide both (username + password) and user_secret_arn")
+    elif has_user_pass and (username == "" or password == ""):
+        error(field, "Both username and password must be non-empty")
+    elif not has_user_pass and not has_user_secret:
+        error(field, "Must provide either (username + password) or user_secret_arn")
+
+
 BASIC_AUTH_SCHEMA = {
     "type": "dict",
     "schema": {
         "username": {
             "type": "string",
-            "required": True,
+            "required": False,
         },
         "password": {
             "type": "string",
             "required": False,
         },
-        "password_from_secret_arn": {
+        "user_secret_arn": {
             "type": "string",
             "required": False,
         }
     },
-    "check_with": contains_one_of({"password", "password_from_secret_arn"})
+    "check_with": validate_basic_auth_options
 }
 
 SIGV4_SCHEMA = {
@@ -102,19 +119,31 @@ class Cluster:
             self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
         self.client_options = client_options
 
-    def get_basic_auth_password(self) -> str:
-        """This method will return the basic auth password, if basic auth is enabled.
-        It will pull a password from the secrets manager if necessary.
+    def get_basic_auth_details(self) -> tuple[str, str]:
+        """Return a tuple of (username, password) for basic auth. Will use username/password if provided in plaintext,
+        otherwise will pull both username/password as keys in the specified secrets manager secret.
         """
         assert self.auth_type == AuthMethod.BASIC_AUTH
         assert self.auth_details is not None  # for mypy's sake
-        if "password" in self.auth_details:
-            return self.auth_details["password"]
+        if "username" in self.auth_details and "password" in self.auth_details:
+            return (self.auth_details["username"], self.auth_details["password"])
         # Pull password from AWS Secrets Manager
-        assert "password_from_secret_arn" in self.auth_details  # for mypy's sake
+        assert "user_secret_arn" in self.auth_details  # for mypy's sake
         client = create_boto3_client(aws_service_name="secretsmanager", client_options=self.client_options)
-        password = client.get_secret_value(SecretId=self.auth_details["password_from_secret_arn"])
-        return password["SecretString"]
+        secret_response = client.get_secret_value(SecretId=self.auth_details["user_secret_arn"])
+        secret_dict = json.loads(secret_response["SecretString"])
+
+        if not isinstance(secret_dict, dict):
+            raise ValueError(f"Expected secret {self.auth_details['user_secret_arn']} to be a JSON object with username"
+                             f" and password fields")
+
+        missing_keys = [k for k in ("username", "password") if k not in secret_dict]
+        if missing_keys:
+            raise ValueError(
+                f"Secret is missing required key(s): {', '.join(missing_keys)}"
+            )
+
+        return (secret_dict["username"], secret_dict["password"])
 
     def _get_sigv4_details(self, force_region=False) -> tuple[str, Optional[str]]:
         """Return the service signing name and region name. If force_region is true,
@@ -130,11 +159,8 @@ class Cluster:
     def _generate_auth_object(self) -> requests.auth.AuthBase | None:
         if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
-            password = self.get_basic_auth_password()
-            return HTTPBasicAuth(
-                self.auth_details.get("username", None),
-                password
-            )
+            username, password = self.get_basic_auth_details()
+            return HTTPBasicAuth(username, password)
         elif self.auth_type == AuthMethod.SIGV4:
             service_name, region_name = self._get_sigv4_details(force_region=True)
             return SigV4AuthPlugin(service_name, region_name)
@@ -183,8 +209,8 @@ class Cluster:
             client_options += ",use_ssl:true"
         password_to_censor = ""
         if self.auth_type == AuthMethod.BASIC_AUTH:
-            password_to_censor = self.get_basic_auth_password()
-            client_options += (f",basic_auth_user:{self.auth_details['username']},"
+            username, password_to_censor = self.get_basic_auth_details()
+            client_options += (f",basic_auth_user:{username},"
                                f"basic_auth_password:{password_to_censor}")
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "

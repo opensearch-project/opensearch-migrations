@@ -1,26 +1,23 @@
 import {Construct} from "constructs";
 import {VpcDetails} from "./network-stack";
-import {
-  EbsDeviceVolumeType,
-  ISecurityGroup,
-  SecurityGroup,
-  SubnetSelection
-} from "aws-cdk-lib/aws-ec2";
+import {EbsDeviceVolumeType, ISecurityGroup, SecurityGroup, SubnetSelection} from "aws-cdk-lib/aws-ec2";
 import {Domain, EngineVersion, TLSSecurityPolicy, ZoneAwarenessConfig} from "aws-cdk-lib/aws-opensearchservice";
-import {RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {IKey, Key} from "aws-cdk-lib/aws-kms";
 import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
-import { ClusterYaml } from "./migration-services-yaml";
+import {ClusterYaml} from "./migration-services-yaml";
 import {
   ClusterAuth,
   ClusterBasicAuth,
   ClusterNoAuth,
-  MigrationSSMParameter,
+  ClusterType,
+  createBasicAuthSecret,
   createMigrationStringParameter,
-  getMigrationStringParameterValue
+  getMigrationStringParameterValue,
+  MigrationSSMParameter
 } from "./common-utilities";
 
 
@@ -110,7 +107,7 @@ export class OpenSearchDomainStack extends Stack {
   generateTargetClusterYaml(domain: Domain, adminUserSecret: ISecret|undefined, version: EngineVersion) {
     const clusterAuth = new ClusterAuth({});
     if (adminUserSecret) {
-      clusterAuth.basicAuth = new ClusterBasicAuth({ user_secret_arn: adminUserSecret.secretArn })
+      clusterAuth.basicAuth = new ClusterBasicAuth(adminUserSecret.secretArn)
     } else {
       clusterAuth.noAuth = new ClusterNoAuth();
     }
@@ -137,14 +134,7 @@ export class OpenSearchDomainStack extends Stack {
     let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretARN) : undefined
     if (props.enableDemoAdmin) { // Enable demo mode setting
-      adminUserSecret = new Secret(this, "demoUserSecret", {
-        secretName: `demo-user-secret-${props.stage}-${deployId}`,
-        secretObjectValue: {
-          username: SecretValue.unsafePlainText("admin"),
-          // This is unsafe and strictly for ease of use in a demo mode setup
-          password: SecretValue.unsafePlainText("myStrongPassword123!")
-        }
-      });
+      adminUserSecret = createBasicAuthSecret("admin", "myStrongPassword123!", ClusterType.TARGET, this, props.stage, deployId)
     }
     const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.vpcDetails?.azCount && props.vpcDetails.azCount > 1 ?
         {enabled: true, availabilityZoneCount: props.vpcDetails.azCount} : undefined;

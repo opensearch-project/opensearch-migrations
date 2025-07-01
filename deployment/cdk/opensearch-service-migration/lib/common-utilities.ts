@@ -1,19 +1,28 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
+import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {ContainerImage, CpuArchitecture} from "aws-cdk-lib/aws-ecs";
-import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
+import {RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
+import {IStringParameter, StringParameter} from "aws-cdk-lib/aws-ssm";
+import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import * as forge from 'node-forge';
 import {ClusterYaml, SnapshotYaml} from "./migration-services-yaml";
-import { CdkLogger } from "./cdk-logger";
-import { mkdtempSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
-import { execSync } from 'child_process';
+import {CdkLogger} from "./cdk-logger";
+import {mkdtempSync, writeFileSync} from 'fs';
+import {join} from 'path';
+import {tmpdir} from 'os';
+import {execSync} from 'child_process';
 
 export const MAX_IAM_ROLE_NAME_LENGTH = 64;
 export const MAX_STAGE_NAME_LENGTH = 15;
+export enum ClusterType {
+    SOURCE = 'SOURCE',
+    TARGET = 'TARGET',
+}
+export enum ContainerEnvVarNames {
+    TARGET_USERNAME = 'TARGET_USERNAME',
+    TARGET_PASSWORD = 'TARGET_PASSWORD',
+}
 
 export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({
@@ -352,31 +361,7 @@ export class ClusterSigV4Auth {
 }
 
 export class ClusterBasicAuth {
-    username?: string;
-    password?: string;
-    user_secret_arn?: string;
-
-    constructor({
-        username,
-        password,
-        user_secret_arn,
-    }: {
-        username?: string;
-        password?: string;
-        user_secret_arn?: string;
-    }) {
-        this.username = username;
-        this.password = password;
-        this.user_secret_arn = user_secret_arn;
-
-        if (user_secret_arn) {
-            if (username || password) {
-                throw new Error("Provide only user_secret_arn or username/password, not both.");
-            }
-        } else if (!username || !password) {
-            throw new Error("Both username and password must be provided if user_secret_arn is not given.");
-        }
-    }
+    constructor(public user_secret_arn: string) {}
 }
 
 export class ClusterAuth {
@@ -412,7 +397,7 @@ export class ClusterAuth {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getBasicClusterAuth(basicAuthObject: Record<any, any>): ClusterBasicAuth {
+export function getBasicClusterAuth(basicAuthObject: Record<any, any>, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterBasicAuth {
     const { username, password, userSecretArn } = basicAuthObject;
 
     for (const [key, value] of Object.entries({ username, password, userSecretArn })) {
@@ -423,11 +408,30 @@ function getBasicClusterAuth(basicAuthObject: Record<any, any>): ClusterBasicAut
         }
     }
 
-    return new ClusterBasicAuth({
-        username,
-        password,
-        user_secret_arn: userSecretArn,
-    });
+    let user_secret_arn = userSecretArn
+    if (userSecretArn) {
+        if (username || password) {
+            throw new Error("Provide only userSecretArn or username/password, not both.");
+        }
+    } else if (!username || !password) {
+        throw new Error("Both username and password must be provided if userSecretArn is not given.");
+    }
+
+    user_secret_arn ??= createBasicAuthSecret(username, password, clusterType, scope, stage, deployId).secretArn;
+
+    return new ClusterBasicAuth(user_secret_arn)
+}
+
+export function createBasicAuthSecret(username: string, password: string, clusterType: ClusterType, scope: Construct,
+                               stage: string, deployId: string): Secret {
+    CdkLogger.warn(`Password passed in plain text for ${clusterType.toLowerCase()} cluster, this is insecure and will leave your password exposed.`)
+    return new Secret(scope, `${clusterType.toLowerCase()}ClusterBasicAuthSecret`, {
+        secretName: `${clusterType.toLowerCase()}-cluster-basic-auth-secret-${stage}-${deployId}`,
+        secretObjectValue: {
+            username: SecretValue.unsafePlainText(username),
+            password: SecretValue.unsafePlainText(password)
+        }
+    })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -441,9 +445,9 @@ function getSigV4ClusterAuth(sigv4AuthObject: Record<string, any>): ClusterSigV4
 
 // Function to parse and validate auth object
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseAuth(json: any): ClusterAuth | null {
+function parseAuth(json: any, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterAuth | null {
     if (json.type === 'basic') {
-        return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
+        return new ClusterAuth({basicAuth: getBasicClusterAuth(json, clusterType, scope, stage, deployId)});
     } else if (json.type === 'sigv4' && typeof json.region === 'string' && typeof json.serviceSigningName === 'string') {
         return new ClusterAuth({sigv4: getSigV4ClusterAuth(json)});
     } else if (json.type === 'none') {
@@ -480,14 +484,17 @@ export function validateAndReturnFormattedHttpURL(urlString: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function parseClusterDefinition(json: any): ClusterYaml {
+export function parseClusterDefinition(json: any, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterYaml {
     let endpoint = json.endpoint
     if (!endpoint) {
         throw new Error('Missing required field in cluster definition: endpoint')
     }
-    endpoint = validateAndReturnFormattedHttpURL(endpoint)
     const version = json.version;
-    const auth = parseAuth(json.auth)
+    if (clusterType == ClusterType.SOURCE && !version) {
+        throw new Error("The `sourceCluster` object requires a `version` field.")
+    }
+    endpoint = validateAndReturnFormattedHttpURL(endpoint)
+    const auth = parseAuth(json.auth, clusterType, scope, stage, deployId)
     if (!auth) {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }

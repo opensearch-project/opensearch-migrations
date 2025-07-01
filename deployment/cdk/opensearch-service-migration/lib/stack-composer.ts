@@ -12,20 +12,17 @@ import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
 import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
-import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {
-    ClusterAuth,
-    ClusterNoAuth,
     MAX_STAGE_NAME_LENGTH,
     MigrationSSMParameter,
-    parseClusterDefinition,
-    parseRemovalPolicy, parseSnapshotDefinition,
+    parseRemovalPolicy,
+    parseSnapshotDefinition,
     validateFargateCpuArch
 } from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ClientOptions, ClusterYaml, ServicesYaml, SnapshotYaml} from "./migration-services-yaml";
-import { CdkLogger } from "./cdk-logger";
+import {ClientOptions, ServicesYaml, SnapshotYaml} from "./migration-services-yaml";
+import {CdkLogger} from "./cdk-logger";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -207,47 +204,37 @@ export class StackComposer {
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
         const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
         const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
-        let managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
+        const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
+        const deployId = addOnMigrationDeployId ?? defaultDeployId
         // We're in a transition state from an older model with limited, individually defined fields and heading towards objects
         // that fully define the source and target cluster configurations. For the time being, we're supporting both.
         const sourceClusterDisabledField = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
         const sourceClusterEndpointField = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         let sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
 
-        if (!sourceClusterDefinition && (sourceClusterEndpointField || sourceClusterDisabledField)) {
-            CdkLogger.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
+        if (!sourceClusterDefinition && sourceClusterEndpointField) {
+            CdkLogger.warn("The `sourceClusterEndpoint` option is being deprecated in favor of a `endpoint` field in the `sourceCluster` object.")
             CdkLogger.warn("Please update your CDK context block to use the `sourceCluster` object.")
             CdkLogger.warn("Defaulting to source cluster version: ES_7.10")
             sourceClusterDefinition = {
-                "disabled": sourceClusterDisabledField,
                 "endpoint": sourceClusterEndpointField,
                 "auth": {"type": "none"},
                 "version": "ES_7.10"
             }
         }
-        const sourceClusterDisabled = !!sourceClusterDefinition?.disabled
-        const sourceCluster = (sourceClusterDefinition && !sourceClusterDisabled) ? parseClusterDefinition(sourceClusterDefinition) : undefined
-        if (sourceCluster) {
-            if (!sourceCluster.version) {
-                throw new Error("The `sourceCluster` object requires a `version` field.")
+        const sourceClusterDisabled = (sourceClusterDefinition?.disabled ?? sourceClusterDisabledField)
+        if (sourceClusterDisabled) {
+            if (sourceClusterDisabledField) {
+                CdkLogger.warn("The `sourceClusterDisabled` field is being deprecated in favor of a `disabled: true` field in the `sourceCluster` object.")
             }
-        }
-        const sourceClusterEndpoint = sourceCluster?.endpoint
-
-        if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
-            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
-                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
-        } else if (sourceCluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
-            managedServiceSourceSnapshotEnabled = true;
-            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
+            sourceClusterDefinition = undefined
         }
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
@@ -268,10 +255,9 @@ export class StackComposer {
             }
             targetClusterDefinition = {"endpoint": targetClusterEndpointField, "auth": auth}
         }
-        const targetCluster = usePreexistingTargetCluster ? parseClusterDefinition(targetClusterDefinition) : undefined
 
         // Ensure that target cluster username and password are not defined in multiple places
-        if (targetCluster && fineGrainedManagerUserSecretARN) {
+        if (targetClusterDefinition && fineGrainedManagerUserSecretARN) {
             throw new Error("The `fineGrainedManagerUserSecretARN` option can only be used when a domain is being " +
                 "provisioned by this tooling, which is contraindicated by `targetCluster` being provided.")
         }
@@ -304,12 +290,6 @@ export class StackComposer {
             throw new Error(`Maximum allowed stage name length is ${MAX_STAGE_NAME_LENGTH} characters but received ${stage}`)
         }
         const clusterDomainName = domainName ?? `os-cluster-${stage}`
-        let preexistingOrContainerTargetEndpoint
-        if (targetCluster && osContainerServiceEnabled) {
-            throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetCluster, osContainerServiceEnabled]")
-        } else if (targetCluster || osContainerServiceEnabled) {
-            preexistingOrContainerTargetEndpoint = targetCluster?.endpoint ?? "https://opensearch:9200"
-        }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
 
@@ -336,11 +316,10 @@ export class StackComposer {
             trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ?? props.migrationsUserAgent
         }
 
-        if (sourceClusterDisabled && (sourceCluster || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
-            throw new Error("A source cluster must be specified by one of: [sourceCluster, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
+        if (!sourceClusterDisabled && (!sourceClusterDefinition && !elasticsearchServiceEnabled && !captureProxyServiceEnabled)) {
+            throw new Error("A source cluster must be specified by one of: [sourceCluster, elasticsearchServiceEnabled, captureProxyServiceEnabled] or disabled by " +
+                "specifying `disabled: true` in the `sourceCluster` object ");
         }
-
-        const deployId = addOnMigrationDeployId ?? defaultDeployId
 
         // If enabled re-use existing VPC and/or associated resources or create new
         let networkStack: NetworkStack|undefined
@@ -350,7 +329,6 @@ export class StackComposer {
                 vpcSubnetIds: vpcSubnetIds,
                 vpcAZCount: vpcAZCount,
                 streamingSourceType: streamingSourceType,
-                targetClusterEndpoint: preexistingOrContainerTargetEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
@@ -362,22 +340,26 @@ export class StackComposer {
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
                 sourceClusterDisabled,
-                sourceClusterEndpoint,
+                sourceClusterDefinition,
+                targetClusterDefinition,
+                managedServiceSourceSnapshotEnabled,
                 env: props.env,
             })
             this.stacks.push(networkStack)
         }
-        const servicesYaml = new ServicesYaml();
-
+        const servicesYaml = new ServicesYaml()
+        servicesYaml.source_cluster = networkStack?.sourceClusterYaml
+        if (networkStack?.targetClusterYaml) {
+            servicesYaml.target_cluster = networkStack.targetClusterYaml
+        }
         if (props.migrationsUserAgent) {
             servicesYaml.client_options = new ClientOptions()
             servicesYaml.client_options.user_agent_extra = props.migrationsUserAgent
         }
-
         const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
         let snapshotYaml
         if (existingSnapshotDefinition) {
-            if(!sourceCluster?.version) {
+            if(!servicesYaml.source_cluster?.version) {
                 throw new Error("The `sourceCluster` object must be provided with a `version` field when using an external snapshot to ensure proper parsing of " +
                     "the snapshot based on cluster version. See options.md for more details.")
             }
@@ -390,7 +372,7 @@ export class StackComposer {
         servicesYaml.snapshot = snapshotYaml
 
         let openSearchStack
-        if (!preexistingOrContainerTargetEndpoint) {
+        if (!targetClusterDefinition) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: engineVersionValue,
                 domainName: clusterDomainName,
@@ -430,8 +412,6 @@ export class StackComposer {
             this.addDependentStacks(openSearchStack, [networkStack])
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
-        } else if (targetCluster) {
-            servicesYaml.target_cluster = targetCluster
         }
 
         let migrationStack
@@ -460,27 +440,6 @@ export class StackComposer {
             }
         }
 
-        let osContainerStack
-        if (osContainerServiceEnabled && networkStack && migrationStack) {
-            osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
-                vpcDetails: networkStack.vpcDetails,
-                stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
-                description: "This stack contains resources for the OpenSearch Container ECS service",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                fargateCpuArch: fargateCpuArch,
-                addOnMigrationDeployId: addOnMigrationDeployId,
-                enableDemoAdmin: true,
-                env: props.env
-            })
-            this.addDependentStacks(osContainerStack, [migrationStack])
-            this.stacks.push(osContainerStack)
-            servicesYaml.target_cluster = new ClusterYaml({
-                endpoint: preexistingOrContainerTargetEndpoint ?? "",
-                auth: new ClusterAuth({noAuth: new ClusterNoAuth()})
-            })
-        }
-
         let kafkaBrokerStack
         if (kafkaBrokerServiceEnabled && networkStack && migrationStack) {
             kafkaBrokerStack = new KafkaStack(scope, "kafka", {
@@ -503,7 +462,7 @@ export class StackComposer {
                 vpcDetails: networkStack.vpcDetails,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
-                sourceClusterVersion: sourceCluster?.version,
+                sourceClusterVersion: servicesYaml.source_cluster?.version,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
@@ -515,7 +474,7 @@ export class StackComposer {
                 reindexFromSnapshotWorkerSize,
                 snapshotYaml: servicesYaml.snapshot
             })
-            this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
+            this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack])
             this.stacks.push(reindexFromSnapshotStack)
             servicesYaml.backfill = reindexFromSnapshotStack.rfsBackfillYaml;
         }
@@ -541,7 +500,7 @@ export class StackComposer {
                 env: props.env
             })
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack,kafkaBrokerStack,
-                openSearchStack, osContainerStack])
+                openSearchStack])
             this.stacks.push(trafficReplayerStack)
             servicesYaml.replayer = trafficReplayerStack.replayerYaml;
         }
@@ -621,20 +580,19 @@ export class StackComposer {
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
-                sourceCluster,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 otelCollectorEnabled,
-                managedServiceSourceSnapshotEnabled,
+                managedServiceSourceSnapshotEnabled: networkStack.useManagedServiceSourceSnapshotSettings,
                 env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with services,
             // it must be deployed after any connected services
             this.addDependentStacks(migrationConsoleStack, [captureProxyStack, elasticsearchStack,
-                openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack])
+                openSearchStack, migrationStack, kafkaBrokerStack])
             this.stacks.push(migrationConsoleStack)
         }
 

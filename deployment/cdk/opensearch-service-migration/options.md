@@ -48,7 +48,7 @@ In all other cases, the required components of each cluster object are:
 - `auth` -- what authorization strategy the cluster has. The supported options are:
     1. No auth: `{"type": "none"}`
     2. Sigv4 Signing: `{"type": "sigv4", "region": "us-east-1", "serviceSigningName": "es"}` The serviceSigningName is `es` for Elasticsearch and OpenSearch managed service domains, and `aoss` for Amazon OpenSearch Serverless
-    3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
+    3. Basic auth with plaintext password (not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
     4. Basic auth with secrets manager (recommended): `{"type": "basic", "userSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:opensearch-secret-123abc"}`. This secret should include two key/value pairs, one for `username` and one for `password`
 
 ### Snapshot Definition Options
@@ -149,11 +149,9 @@ A number of options are currently available but deprecated. While they function 
 
 ### Other Options
 
-| Name                         | Type    | Example                                                                | Description                                                                                                                                                                                                                                                               |
-| ---------------------------- | ------- | ---------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| elasticsearchServiceEnabled  | boolean | true                                                                   | Enable deploying the given service, via a new CloudFormation stack                                                                                                                                                                                                        |
-| osContainerServiceEnabled    | boolean | false                                                                  | Enable deploying the given service, via a new CloudFormation stack.                                                                                                                                                                                                       |
-
+| Name                        | Type    | Example | Description                                                        |
+|-----------------------------|---------|---------|:-------------------------------------------------------------------|
+| elasticsearchServiceEnabled | boolean | true    | Enable deploying the given service, via a new CloudFormation stack |
 <!-- Footnotes -->
 
 [^1]: Extra arguments can be added, overridden, or removed as follows:

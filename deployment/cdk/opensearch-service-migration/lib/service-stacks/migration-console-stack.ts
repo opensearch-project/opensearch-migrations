@@ -17,7 +17,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Fn, RemovalPolicy} from "aws-cdk-lib";
-import {ClusterYaml, MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
+import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
@@ -33,7 +33,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
-    readonly sourceCluster?: ClusterYaml,
     readonly managedServiceSourceSnapshotEnabled?: boolean
 }
 
@@ -233,17 +232,18 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getTargetSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.user_secret_arn ?
-            getSecretAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.user_secret_arn) : null;
-
-        const getSourceSecretsPolicy = props.sourceCluster?.auth.basicAuth?.user_secret_arn ?
-            getSecretAccessPolicy(props.sourceCluster?.auth.basicAuth?.user_secret_arn) : null;
+        const servicesYaml = props.servicesYaml
+        const secretPolicies = []
+        if (servicesYaml.target_cluster.auth.basicAuth?.user_secret_arn) {
+            secretPolicies.push(getSecretAccessPolicy(servicesYaml.target_cluster.auth.basicAuth.user_secret_arn))
+        }
+        if (servicesYaml.source_cluster?.auth.basicAuth?.user_secret_arn) {
+            secretPolicies.push(getSecretAccessPolicy(servicesYaml.source_cluster.auth.basicAuth.user_secret_arn))
+        }
 
         // Upload the services.yaml file to Parameter Store
-        const servicesYaml = props.servicesYaml
-        servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
-        servicesYaml.metadata_migration.source_cluster_version = props.sourceCluster?.version
+        servicesYaml.metadata_migration.source_cluster_version = props.servicesYaml.source_cluster?.version
         if (props.otelCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
             if (servicesYaml.metadata_migration) {
@@ -265,9 +265,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy()
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
-            // only add secrets policies if they're non-null
-            ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
-            ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
+            ...secretPolicies
         ]
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {

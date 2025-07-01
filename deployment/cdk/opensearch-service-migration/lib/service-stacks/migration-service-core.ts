@@ -14,7 +14,8 @@ import {
     Volume,
     AwsLogDriverMode,
     ContainerDependencyCondition,
-    ServiceManagedVolume
+    ServiceManagedVolume,
+    Secret as EcsSecret
 } from "aws-cdk-lib/aws-ecs";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
@@ -44,7 +45,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
     readonly targetGroups?: ELBTargetGroup[],
-    readonly ephemeralStorageGiB?: number
+    readonly ephemeralStorageGiB?: number,
+    readonly secrets?: Record<string, EcsSecret>
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
@@ -89,6 +91,7 @@ export class MigrationServiceCore extends Stack {
             containerName: props.serviceName,
             command: props.dockerImageCommand,
             environment: props.environment,
+            secrets: props.secrets,
             portMappings: props.portMappings,
             logging: LogDrivers.awsLogs({
                 streamPrefix: `${props.serviceName}-logs`,

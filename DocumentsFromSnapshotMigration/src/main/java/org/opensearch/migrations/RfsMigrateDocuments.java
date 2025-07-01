@@ -68,6 +68,8 @@ public class RfsMigrateDocuments {
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
+    public static final String TARGET_USERNAME_ENV_VAR = "TARGET_USERNAME";
+    public static final String TARGET_PASSWORD_ENV_VAR = "TARGET_PASSWORD";
 
     // Decrease successor nextAcquisitionLeaseExponent if shard setup takes less than 2.5% of total lease time
     // Increase successor nextAcquisitionLeaseExponent if shard setup takes more than 10% of lease total time
@@ -254,6 +256,22 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
+    public static class EnvParameters {
+
+        public static void injectFromEnv(Args args) {
+            List<String> addedEnvParams = new ArrayList<>();
+            if (args.targetArgs.username == null && System.getenv(TARGET_USERNAME_ENV_VAR) != null) {
+                args.targetArgs.username = System.getenv(TARGET_USERNAME_ENV_VAR);
+                addedEnvParams.add(TARGET_USERNAME_ENV_VAR);
+            }
+            if (args.targetArgs.password == null && System.getenv(TARGET_PASSWORD_ENV_VAR) != null) {
+                args.targetArgs.password = System.getenv(TARGET_PASSWORD_ENV_VAR);
+                addedEnvParams.add(TARGET_PASSWORD_ENV_VAR);
+            }
+            log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+        }
+    }
+
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
@@ -297,6 +315,7 @@ public class RfsMigrateDocuments {
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
+        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();

@@ -130,18 +130,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
         }
       },
       {
-        Name: 'RFS_TARGET_USER',
-        Value: 'test-user'
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD_ARN',
-        Value: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret'
-      },
-      {
         Name: 'SHARED_LOGS_DIR_PATH',
         Value: '/shared-logs-output/reindex-from-snapshot-default'
       }
@@ -197,18 +185,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
             ],
           ],
         }
-      },
-      {
-        Name: 'RFS_TARGET_USER',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD_ARN',
-        Value: ''
       },
       {
         Name: 'SHARED_LOGS_DIR_PATH',
@@ -272,18 +248,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
             ],
           ],
         }
-      },
-      {
-        Name: 'RFS_TARGET_USER',
-        Value: 'test-user'
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD_ARN',
-        Value: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret'
       },
       {
         Name: 'SHARED_LOGS_DIR_PATH',
@@ -360,18 +324,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
         }
       },
       {
-        Name: 'RFS_TARGET_USER',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD_ARN',
-        Value: ''
-      },
-      {
         Name: 'SHARED_LOGS_DIR_PATH',
         Value: '/shared-logs-output/reindex-from-snapshot-default'
       }
@@ -423,18 +375,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
             ],
           ],
         }
-      },
-      {
-        Name: 'RFS_TARGET_USER',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD_ARN',
-        Value: ''
       },
       {
         Name: 'SHARED_LOGS_DIR_PATH',
@@ -568,18 +508,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
             ],
           ],
         }
-      },
-      {
-        Name: 'RFS_TARGET_USER',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD',
-        Value: ''
-      },
-      {
-        Name: 'RFS_TARGET_PASSWORD_ARN',
-        Value: ''
       },
       {
         Name: 'SHARED_LOGS_DIR_PATH',

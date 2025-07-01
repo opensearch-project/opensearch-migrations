@@ -2,15 +2,18 @@ package org.opensearch.migrations.replay;
 
 import java.lang.ref.WeakReference;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
-import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -38,9 +41,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
-import software.amazon.awssdk.arns.Arn;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 
 @Slf4j
 public class TrafficReplayer {
@@ -49,8 +50,9 @@ public class TrafficReplayer {
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
-    public static final String AWS_AUTH_HEADER_SECRET_ARG = "--auth-header-secret";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
+    public static final String TARGET_USERNAME_ENV_VAR = "TARGET_USERNAME";
+    public static final String TARGET_PASSWORD_ENV_VAR = "TARGET_PASSWORD";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
@@ -102,7 +104,16 @@ public class TrafficReplayer {
             names = {"--insecure" },
             arity = 0, description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
-
+        @Parameter(
+                names = {"--target-username", "--targetUsername" },
+                description = "Username to use for basic auth with the target cluster/domain",
+                required = false)
+        public String targetUsername;
+        @Parameter(
+                names = {"--target-password", "--targetPassword" },
+                description = "Password to use for basic auth with the target cluster/domain",
+                required = false)
+        public String targetPassword;
         @Parameter(
             required = false,
             names = {REMOVE_AUTH_HEADER_VALUE_ARG, "--removeAuthHeader" },
@@ -115,14 +126,6 @@ public class TrafficReplayer {
             arity = 1, description = "Static value to use for the \"authorization\" header of each request "
                 + "(cannot be used with other auth arguments)")
         String authHeaderValue;
-        @Parameter(
-            required = false,
-            names = { AWS_AUTH_HEADER_SECRET_ARG, "--authHeaderSecret" },
-            arity = 1,
-            description = "The AWS Secrets Manager secret ARN which should contain two key/value pairs, one for 'username' "
-                + "and one for 'password' that will be used for the 'authorization' header value for each request. "
-                + "(cannot be used with other auth arguments)")
-        String awsAuthHeaderSecret;
         @Parameter(
             required = false,
             names = { SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG, "--sigv4AuthHeaderServiceRegion" },
@@ -312,13 +315,29 @@ public class TrafficReplayer {
         private String transformerConfigFile;
     }
 
+    public static class EnvParameters {
+
+        public static void injectFromEnv(Parameters params) {
+            List<String> addedEnvParams = new ArrayList<>();
+            if (params.targetUsername == null && System.getenv(TARGET_USERNAME_ENV_VAR) != null) {
+                params.targetUsername = System.getenv(TARGET_USERNAME_ENV_VAR);
+                addedEnvParams.add(TARGET_USERNAME_ENV_VAR);
+            }
+            if (params.targetPassword == null && System.getenv(TARGET_PASSWORD_ENV_VAR) != null) {
+                params.targetPassword = System.getenv(TARGET_PASSWORD_ENV_VAR);
+                addedEnvParams.add(TARGET_PASSWORD_ENV_VAR);
+            }
+            log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+        }
+    }
+
+
 
     private static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
-            return p;
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", args));
@@ -326,6 +345,8 @@ public class TrafficReplayer {
             System.exit(2);
             return null;
         }
+        EnvParameters.injectFromEnv(p);
+        return p;
     }
 
     public static void main(String[] args) throws Exception {
@@ -482,6 +503,17 @@ public class TrafficReplayer {
     }
 
     /**
+     * This method returns a username:password Base64 encoded basic auth header
+     * @param username The plaintext username
+     * @param password The plaintext password
+     * @return Basic Auth header string
+     */
+    public static String getBasicAuthHeader(String username, String password) {
+        String authHeaderString = username + ":" + password;
+        return "Basic " + Base64.getEncoder().encodeToString(authHeaderString.getBytes(Charset.defaultCharset()));
+    }
+
+    /**
      * Java doesn't have a notion of constexpr like C++ does, so this cannot be used within the
      * parameters' annotation descriptions, but it's still useful to break the documentation
      * aspect out from the core logic below.
@@ -491,39 +523,32 @@ public class TrafficReplayer {
             ", ",
             REMOVE_AUTH_HEADER_VALUE_ARG,
             AUTH_HEADER_VALUE_ARG,
-            AWS_AUTH_HEADER_SECRET_ARG,
-            SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG
+            SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG,
+            "--target-username and --target-password"
+
         );
     }
 
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
-        if (params.removeAuthHeader
-            && params.authHeaderValue != null
-            && params.useSigV4ServiceAndRegion != null
-            && params.awsAuthHeaderSecret != null) {
+        long authOptionsSpecified = Stream.of(
+            params.removeAuthHeader,
+            params.authHeaderValue != null,
+            params.useSigV4ServiceAndRegion != null,
+            params.targetUsername != null || params.targetPassword != null
+        ).filter(b -> b).count();
+
+        if (authOptionsSpecified > 1) {
             throw new IllegalArgumentException(
                 "Cannot specify more than one auth option: " + formatAuthArgFlagsAsString()
             );
         }
 
         var authHeaderValue = params.authHeaderValue;
-        if (params.awsAuthHeaderSecret != null) {
-            var regionOp = Arn.fromString(params.awsAuthHeaderSecret).region();
-            if (regionOp.isEmpty()) {
-                throw new ParameterException(
-                        AWS_AUTH_HEADER_SECRET_ARG
-                        + " the secret ARN provided must specify a region"
-                );
+        if (params.targetUsername != null || params.targetPassword != null) {
+            if (params.targetUsername == null || params.targetPassword == null) {
+                throw new ParameterException("Both target username and target password must be specified, when using this basic auth option");
             }
-            try (
-                var credentialsProvider = DefaultCredentialsProvider.builder().build();
-                AWSAuthService awsAuthService = new AWSAuthService(credentialsProvider, Region.of(regionOp.get()))
-            ) {
-                authHeaderValue = awsAuthService.getBasicAuthHeaderFromSecret(
-                    params.awsAuthHeaderUserAndSecret.get(0),
-                    secretArnStr
-                );
-            }
+            authHeaderValue = getBasicAuthHeader(params.targetUsername, params.targetPassword);
         }
 
         if (authHeaderValue != null) {

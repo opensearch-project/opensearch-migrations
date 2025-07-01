@@ -31,14 +31,17 @@ import {LoadBalancerTarget} from "aws-cdk-lib/aws-route53-targets";
 import {AcmCertificateImporter} from "./service-stacks/acm-cert-importer";
 import {Stack} from "aws-cdk-lib";
 import {
+    ClusterType,
     createMigrationStringParameter,
     getMigrationStringParameterName,
     isStackInGovCloud,
-    MigrationSSMParameter
+    MigrationSSMParameter,
+    parseClusterDefinition
 } from "./common-utilities";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CdkLogger} from "./cdk-logger";
 import {StreamingSourceType} from "./streaming-source-type";
+import {ClusterYaml} from "./migration-services-yaml";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -50,9 +53,10 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly targetClusterProxyServiceEnabled?: boolean;
     readonly migrationAPIEnabled?: boolean;
     readonly sourceClusterDisabled?: boolean;
-    readonly sourceClusterEndpoint?: string;
-    readonly targetClusterEndpoint?: string;
     readonly albAcmCertArn?: string;
+    readonly managedServiceSourceSnapshotEnabled: boolean;
+    readonly sourceClusterDefinition?: Record<string, unknown>;
+    readonly targetClusterDefinition?: Record<string, unknown>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readonly env?: Record<string, any>;
 }
@@ -146,6 +150,9 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
+    public readonly useManagedServiceSourceSnapshotSettings: boolean;
+    public readonly sourceClusterYaml?: ClusterYaml;
+    public readonly targetClusterYaml?: ClusterYaml;
     public readonly vpcDetails: VpcDetails;
 
     private createVpcEndpoints(vpc: IVpc) {
@@ -189,6 +196,22 @@ export class NetworkStack extends Stack {
         super(scope, id, props);
         let vpc: IVpc;
         const zoneCount = props.vpcAZCount ?? 2
+        const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
+        this.sourceClusterYaml = props.sourceClusterDefinition
+            ? parseClusterDefinition(props.sourceClusterDefinition, ClusterType.SOURCE, this, props.stage, deployId)
+            : undefined
+        this.targetClusterYaml = props.targetClusterDefinition
+            ? parseClusterDefinition(props.targetClusterDefinition, ClusterType.TARGET, this, props.stage, deployId)
+            : undefined
+        if (props.managedServiceSourceSnapshotEnabled && !this.sourceClusterYaml?.auth.sigv4) {
+            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
+                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        }
+        this.useManagedServiceSourceSnapshotSettings = props.managedServiceSourceSnapshotEnabled
+        if (this.sourceClusterYaml?.auth.sigv4 && props.managedServiceSourceSnapshotEnabled == null) {
+            this.useManagedServiceSourceSnapshotSettings = true;
+            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
+        }
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
@@ -255,7 +278,7 @@ export class NetworkStack extends Stack {
 
         this.vpcDetails = new VpcDetails(vpc, zoneCount, props.vpcSubnetIds);
 
-        if(needAlb) {
+        if (needAlb) {
             // Create the ALB with the strongest TLS 1.3 security policy
             const alb = new ApplicationLoadBalancer(this, 'ALB', {
                 vpc: vpc,
@@ -334,8 +357,8 @@ export class NetworkStack extends Stack {
         }
 
         // Create Source SSM Parameter
-        if (props.sourceClusterEndpoint) {
-            createMigrationStringParameter(this, props.sourceClusterEndpoint, {
+        if (this.sourceClusterYaml?.endpoint) {
+            createMigrationStringParameter(this, this.sourceClusterYaml.endpoint, {
                 ...props,
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
@@ -357,9 +380,8 @@ export class NetworkStack extends Stack {
                 parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID
             });
 
-            if (props.targetClusterEndpoint) {
-                const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
-                createMigrationStringParameter(this, props.targetClusterEndpoint, {
+            if (this.targetClusterYaml?.endpoint) {
+                createMigrationStringParameter(this, this.targetClusterYaml.endpoint, {
                     stage: props.stage,
                     defaultDeployId: deployId,
                     parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
