@@ -16,8 +16,8 @@ import {execSync} from 'child_process';
 export const MAX_IAM_ROLE_NAME_LENGTH = 64;
 export const MAX_STAGE_NAME_LENGTH = 15;
 export enum ClusterType {
-    SOURCE = 'SOURCE',
-    TARGET = 'TARGET',
+    SOURCE = 'source',
+    TARGET = 'target',
 }
 export enum ContainerEnvVarNames {
     TARGET_USERNAME = 'TARGET_USERNAME',
@@ -424,9 +424,9 @@ export function getBasicClusterAuth(basicAuthObject: Record<any, any>, clusterTy
 
 export function createBasicAuthSecret(username: string, password: string, clusterType: ClusterType, scope: Construct,
                                stage: string, deployId: string): Secret {
-    CdkLogger.warn(`Password passed in plain text for ${clusterType.toLowerCase()} cluster, this is insecure and will leave your password exposed.`)
-    return new Secret(scope, `${clusterType.toLowerCase()}ClusterBasicAuthSecret`, {
-        secretName: `${clusterType.toLowerCase()}-cluster-basic-auth-secret-${stage}-${deployId}`,
+    CdkLogger.warn(`Password passed in plain text for ${clusterType} cluster, this is insecure and will leave your password exposed.`)
+    return new Secret(scope, `${clusterType}ClusterBasicAuthSecret`, {
+        secretName: `${clusterType}-cluster-basic-auth-secret-${stage}-${deployId}`,
         secretObjectValue: {
             username: SecretValue.unsafePlainText(username),
             password: SecretValue.unsafePlainText(password)

@@ -173,7 +173,11 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"},
+                "auth": {
+                    "type": "basic",
+                    "username": "admin",
+                    "password": "myStrongPassword123!"
+                },
                 "version": "ES_7.10"
             },
             targetCluster: {
@@ -205,15 +209,25 @@ describe('Migration Services YAML Tests', () => {
         expect(value['Fn::Join'][1]).toBeInstanceOf(Array)
         // join the strings together to get the yaml file contents
         const yamlFileContents = value['Fn::Join'][1].join('')
-        expect(yamlFileContents).toContain('source_cluster')
-        expect(yamlFileContents).toContain('target_cluster')
-
-        expect(yamlFileContents).toContain('basic_auth')
-        expect(yamlFileContents).toMatch(/user_secret_arn:\s*.+/);
-        expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
-        expect(yamlFileContents).toContain('kafka')
-        // Validates that the file can be parsed as valid yaml and has the expected fields
         const parsedFromYaml = yaml.parse(yamlFileContents);
+
+        expect(parsedFromYaml.source_cluster).toBeDefined();
+        expect(parsedFromYaml.source_cluster.basic_auth).toBeDefined();
+        expect(parsedFromYaml.source_cluster.basic_auth.user_secret_arn).toBeDefined();
+        expect(parsedFromYaml.source_cluster.basic_auth.username).toBeUndefined();
+        expect(parsedFromYaml.source_cluster.basic_auth.password).toBeUndefined();
+
+        expect(parsedFromYaml.target_cluster).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth.user_secret_arn).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth.username).toBeUndefined();
+        expect(parsedFromYaml.target_cluster.basic_auth.password).toBeUndefined();
+
+        expect(parsedFromYaml.metrics_source).toBeDefined();
+        expect(parsedFromYaml.metrics_source.cloudwatch).toBeDefined();
+
+        expect(parsedFromYaml.kafka).toBeDefined();
+
         // Validates that the file has the expected fields
         const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay', 'kafka'];
         expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
@@ -227,7 +241,10 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"},
+                "auth": {
+                    "type": "basic",
+                    "userSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123cde",
+                },
                 "version": "ES_7.10"
             },
             targetCluster: {
@@ -258,15 +275,21 @@ describe('Migration Services YAML Tests', () => {
         expect(value['Fn::Join'][1]).toBeInstanceOf(Array)
         // join the strings together to get the yaml file contents
         const yamlFileContents = value['Fn::Join'][1].join('')
-        expect(yamlFileContents).toContain('source_cluster')
-        expect(yamlFileContents).toContain('target_cluster')
-
-        expect(yamlFileContents).toContain('basic_auth')
-        expect(yamlFileContents).toContain(`user_secret_arn: ${contextOptions.targetCluster.auth.userSecretArn}`)
-        expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
-        expect(yamlFileContents).toContain('kafka')
-        // Validates that the file can be parsed as valid yaml and has the expected fields
         const parsedFromYaml = yaml.parse(yamlFileContents);
+
+        expect(parsedFromYaml.source_cluster).toBeDefined();
+        expect(parsedFromYaml.source_cluster.basic_auth).toBeDefined();
+        expect(parsedFromYaml.source_cluster.basic_auth.user_secret_arn).toBe(contextOptions.sourceCluster.auth.userSecretArn);
+
+        expect(parsedFromYaml.target_cluster).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth).toBeDefined();
+        expect(parsedFromYaml.target_cluster.basic_auth.user_secret_arn).toBe(contextOptions.targetCluster.auth.userSecretArn);
+
+        expect(parsedFromYaml.metrics_source).toBeDefined();
+        expect(parsedFromYaml.metrics_source.cloudwatch).toBeDefined();
+
+        expect(parsedFromYaml.kafka).toBeDefined();
+
         // Validates that the file has the expected fields
         const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay', 'kafka'];
         expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)

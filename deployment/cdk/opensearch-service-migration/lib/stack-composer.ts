@@ -266,7 +266,7 @@ export class StackComposer {
         // a warning instead of an error.
         if (usePreexistingTargetCluster && engineVersion) {
             CdkLogger.warn("The `engineVersion` value will be ignored because it's only used when a domain is being provisioned by this tooling" +
-                "and in this case, `targetCluster` was provided to define an existing target cluster."
+                " and in this case, `targetCluster` was provided to define an existing target cluster."
             )
         }
 
