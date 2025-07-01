@@ -21,13 +21,6 @@ def describe(backfill: Backfill, as_json=False) -> Tuple[ExitCode, Dict]:
 handle_backfill_errors = partial(handle_errors, service_type="backfill")
 
 
-@handle_backfill_errors(on_success=lambda result: (ExitCode.SUCCESS,
-                                                   "Backfill created successfully." + "\n" + result))
-def create(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
-    logger.info(f"Creating backfill with {args=} and {kwargs=}")
-    return backfill.create(*args, **kwargs)
-
-
 @handle_errors("backfill",
                on_success=lambda result: (ExitCode.SUCCESS, "Backfill started successfully." + "\n" + result))
 def start(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:

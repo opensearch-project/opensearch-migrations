@@ -1,7 +1,7 @@
 import {StackPropsExt} from "../stack-composer";
 import {VpcDetails} from "../network-stack";
 import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {

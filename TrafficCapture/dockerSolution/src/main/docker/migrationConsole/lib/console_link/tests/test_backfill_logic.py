@@ -95,4 +95,3 @@ def test_backfill_describe_includes_salient_details_k8s_rfs(k8s_rfs_backfill: K8
     assert "docker" not in description
     assert "opensearch_ingestion" not in description
     assert "ecs" not in description
-
