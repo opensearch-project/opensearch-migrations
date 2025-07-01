@@ -437,7 +437,7 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
             // Looks like: "LINE       : 85.4% (123/144)"
             summaryLines <<  String.format(
                 "%-12s : %6.1f%% (%d/%d)",
-                c.@type, percent, covered, total452
+                c.@type, percent, covered, total
             )
         }
 
