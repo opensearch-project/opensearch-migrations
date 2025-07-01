@@ -428,7 +428,7 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
         def reportXml = new XmlParser().parseText(xmlText)
 
         List<String> summaryLines = []
-        summaryLines << "=== Code Coverage Summary ==="
+        summaryLines << "### Code Coverage Summary"
         reportXml.counter.each { c ->
             int missed  = c.@missed  as int
             int covered = c.@covered as int
