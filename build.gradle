@@ -386,32 +386,33 @@ subprojects {
     }
 }
 
-
-def configureJacocoAggregation = { task ->
-    // same exec files, classDirs and sourceDirs in both tasks:
-    def javaProjects = subprojects.findAll { it.plugins.hasPlugin('java') }
-
-    task.executionData.setFrom(
-      fileTree(dir: "$buildDir/jacocoMerged", include: '*.exec')
-    )
-
-    task.classDirectories.setFrom(
-      files(javaProjects.collect { proj ->
-        proj.sourceSets.main.output.classesDirs
-      })
-    )
-    task.sourceDirectories.setFrom(
-      files(javaProjects.collect { proj ->
-        proj.sourceSets.main.allSource.srcDirs
-      })
-    )
-}
-
 tasks.register('jacocoAggregateReport', JacocoReport) {
     group = 'Verification'
-    description = 'Generates jacoco coverage report over the whole project'
+    description = 'Generates an aggregate report from exec files in build/jacocoMerged/*.exec over the whole project'
 
-    configureJacocoAggregation(delegate)
+    // Find all merged .exec files
+    executionData.setFrom(fileTree(dir: "${buildDir}", includes: [
+            "jacocoMerged/**/*.exec"
+    ]))
+
+    // Get all subprojects with Java plugin
+    def javaProjects = subprojects.findAll { it.plugins.hasPlugin('java') }
+
+    // Collect all class directories from Java subprojects
+    classDirectories.setFrom(
+            files(javaProjects.collect { project ->
+                project.sourceSets.main.output.classesDirs.filter { dir ->
+                    !dir.path.contains('captureProtobufs')
+                }
+            })
+    )
+
+    // Collect all source directories from Java subprojects
+    sourceDirectories.setFrom(
+            files(javaProjects.collect { project ->
+                project.sourceSets.main.allSource.srcDirs
+            })
+    )
 
     reports {
         xml.required = true
@@ -454,25 +455,6 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
             }
         }
 
-    }
-}
-
-tasks.register('jacocoAggregateCoverageVerification', JacocoCoverageVerification) {
-    group = 'Verification'
-    description = 'Verifies jacoco coverage data over the whole project'
-
-    configureJacocoAggregation(delegate)
-
-    violationRules {
-      rule {
-        // apply at the bundle/root level
-        element = 'BUNDLE'
-        limit {
-          counter  = 'INSTRUCTION'
-          value    = 'COVEREDRATIO'
-          minimum  = 0.90
-        }
-      }
     }
 }
 

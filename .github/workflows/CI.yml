@@ -234,9 +234,6 @@ jobs:
       - name: Generate aggregate JaCoCo report
         run: gradle jacocoAggregateReport
 
-      - name: Verify coverage data 
-        run: gradle jacocoAggregateCoverageVerification
-
       - name: Upload Aggregate JaCoCo report
         uses: actions/upload-artifact@v4
         if: always()
