@@ -26,8 +26,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly migrationAPIEnabled?: boolean,
-    readonly migrationAPIAllowedHosts?: string,
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
@@ -245,22 +243,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
             "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
             "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
-        }
-
-
-        if (props.migrationAPIEnabled) {
-            servicePortMappings = [{
-                name: "migration-console-connect",
-                hostPort: 8000,
-                containerPort: 8000,
-                protocol: Protocol.TCP
-            }]
-            imageCommand = ['/bin/sh', '-c',
-                '/root/loadServicesFromParameterStore.sh && pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
-            ]
-
-            const defaultAllowedHosts = 'localhost'
-            environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
         }
 
         this.createService({

@@ -301,13 +301,11 @@ def describe_backfill_cmd(ctx):
 
 
 @backfill_group.command(name="create")
-@click.option('--pipeline-template-file', default='/root/osiPipelineTemplate.yaml', help='Path to config file')
 @click.option("--print-config-only", is_flag=True, show_default=True, default=False,
               help="Flag to only print populated pipeline config when executed")
 @click.pass_obj
-def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
+def create_backfill_cmd(ctx, print_config_only):
     exitcode, message = backfill_.create(ctx.env.backfill,
-                                         pipeline_template_path=pipeline_template_file,
                                          print_config_only=print_config_only)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)

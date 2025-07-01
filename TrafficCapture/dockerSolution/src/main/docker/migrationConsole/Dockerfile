@@ -65,7 +65,6 @@ ENV CLASSPATH=/root/kafka-tools/kafkaCommandLineFormatter.jar
 COPY staging/CreateSnapshot /root/createSnapshot
 COPY staging/MetadataMigration /root/metadataMigration
 
-COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 
@@ -80,10 +79,6 @@ COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
-RUN pipenv install --deploy
-
-COPY console_api /root/console_api
-WORKDIR /root/console_api
 RUN pipenv install --deploy
 
 COPY cluster_tools /root/cluster_tools

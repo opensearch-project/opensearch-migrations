@@ -192,8 +192,6 @@ export class StackComposer {
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const migrationAPIEnabled = this.getContextForType('migrationAPIEnabled', 'boolean', defaultValues, contextJSON)
-        const migrationAPIAllowedHosts = this.getContextForType('migrationAPIAllowedHosts', 'string', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerMaxUptime = this.getContextForType('trafficReplayerMaxUptime', 'string', defaultValues, contextJSON);
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
@@ -361,7 +359,6 @@ export class StackComposer {
                 elasticsearchServiceEnabled,
                 captureProxyServiceEnabled,
                 targetClusterProxyServiceEnabled,
-                migrationAPIEnabled,
                 sourceClusterDisabled,
                 sourceClusterEndpoint,
                 targetClusterUsername: targetCluster ? targetClusterAuth?.basicAuth?.username : fineGrainedManagerUserName,
@@ -626,7 +623,6 @@ export class StackComposer {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
                 vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
-                migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
                 sourceCluster,
