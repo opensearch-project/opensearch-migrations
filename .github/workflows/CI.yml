@@ -232,7 +232,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate aggregate JaCoCo report
-        run: gradle jacocoAggregateReport
+        run: gradle jacocoAggregateReport --stacktrace
 
       - name: Upload Aggregate JaCoCo report
         uses: actions/upload-artifact@v4
