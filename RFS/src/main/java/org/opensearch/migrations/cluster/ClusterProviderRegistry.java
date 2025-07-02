@@ -59,7 +59,11 @@ public class ClusterProviderRegistry {
             });
 
         snapshotProvider.initialize(repo);
-        log.info("Found snapshot resource reader {} for version: {}", snapshotProvider.getClass().getSimpleName(), version);
+        log.atInfo()
+            .setMessage("Found snapshot resource reader {} for version: {}")
+            .addArgument(snapshotProvider.getClass().getSimpleName())
+            .addArgument(version)
+            .log();
         return snapshotProvider;
     }
 
