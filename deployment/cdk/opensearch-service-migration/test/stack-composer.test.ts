@@ -407,8 +407,6 @@ describe('Stack Composer Tests', () => {
       sourceClusterEndpoint: "https://test-cluster",
       reindexFromSnapshotServiceEnabled: true,
       trafficReplayerServiceEnabled: true,
-      fineGrainedManagerUserName: "admin",
-      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
       nodeToNodeEncryptionEnabled: true, // required if FGAC is being used
       encryptionAtRestEnabled: true, // required if FGAC is being used
       enforceHTTPS: true // required if FGAC is being used

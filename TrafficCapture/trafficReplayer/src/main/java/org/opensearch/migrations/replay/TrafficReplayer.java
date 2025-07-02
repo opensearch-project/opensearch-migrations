@@ -317,6 +317,10 @@ public class TrafficReplayer {
 
     public static class EnvParameters {
 
+        private EnvParameters() {
+            throw new IllegalStateException("EnvParameters utility class should not instantiated");
+        }
+
         public static void injectFromEnv(Parameters params) {
             List<String> addedEnvParams = new ArrayList<>();
             if (params.targetUsername == null && System.getenv(TARGET_USERNAME_ENV_VAR) != null) {

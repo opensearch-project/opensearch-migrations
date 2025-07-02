@@ -90,8 +90,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
-      fineGrainedManagerUserName: "test-user",
-      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
       nodeToNodeEncryptionEnabled: true,
       encryptionAtRestEnabled: true,
       enforceHTTPS: true
@@ -210,8 +208,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
-      fineGrainedManagerUserName: "test-user",
-      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
       nodeToNodeEncryptionEnabled: true,
       encryptionAtRestEnabled: true,
       enforceHTTPS: true

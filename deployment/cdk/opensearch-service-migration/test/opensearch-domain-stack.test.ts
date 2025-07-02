@@ -248,8 +248,6 @@ describe('OpenSearch Domain Stack Tests', () => {
       accessPolicies: "",
       useUnsignedBasicAuth: "",
       fineGrainedManagerUserARN: "",
-      fineGrainedManagerUserName: "",
-      fineGrainedManagerUserSecretManagerKeyARN: "",
       enforceHTTPS: "",
       tlsSecurityPolicy: "",
       ebsEnabled: "",
