@@ -42,21 +42,30 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
                 .orElse(null);
 
         if (targetSnapshot == null) {
-            log.warn("No snapshot found with name [{}]", snapshotName);
-            return matchedIndices;
+            throw new IllegalArgumentException("Snapshot with name [" + snapshotName + "] not found in repository");
         }
 
         getRepoData().getIndices().forEach((indexName, rawIndex) -> {
             var snapshotNames = rawIndex.getSnapshots();
 
             if (snapshotNames == null || snapshotNames.isEmpty()) {
-                log.warn("Skipping index [{}] — no snapshots listed", indexName);
+                log.atWarn()
+                    .setMessage("Index [{}] skipped — no snapshots listed")
+                    .addArgument(indexName)
+                    .log();
             } else if (!snapshotNames.contains(targetSnapshot.getName())) {
-                log.warn("Skipping index [{}] — snapshot ID [{}] not found in {}",
-                        indexName, targetSnapshot.getId(), snapshotNames);
+                log.atWarn()
+                    .setMessage("Index [{}] skipped — snapshot ID [{}] not found among {}")
+                    .addArgument(indexName)
+                    .addArgument(targetSnapshot.getId())
+                    .addArgument(snapshotNames)
+                    .log();
             } else {
-                log.info("Matched index [{}] — snapshot name [{}] found",
-                        indexName, targetSnapshot.getName());
+                log.atInfo()
+                    .setMessage("Matched index [{}] with snapshot [{}]")
+                    .addArgument(indexName)
+                    .addArgument(targetSnapshot.getName())
+                    .log();
                 matchedIndices.add(SnapshotRepoData_ES_5_4.Index.fromRawIndex(indexName, rawIndex));
             }
         });

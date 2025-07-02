@@ -42,6 +42,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         return Collections.unmodifiableMap(merged);
     }
 
+    /**
+     * These settings must be injected via elasticsearch.yml for ES 5.0–5.4.
+     * Verified via test: removing these lines causes container startup or snapshot repo registration to fail.
+     */
     private static final List<String> ES_5_COMMON_CONFIG_LINES = List.of(
         "network.host: 0.0.0.0",
         "http.port: 9200",
