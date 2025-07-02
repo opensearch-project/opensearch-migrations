@@ -259,7 +259,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        const serviceTaskRole = createECSTaskRole(this, serviceName, this.region, this.account)
+        const serviceTaskRole = createECSTaskRole(this, serviceName, this.region, props.stage)
 
         const openSearchPolicy = createAllAccessOpenSearchIAMAccessPolicy()
         const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy()
