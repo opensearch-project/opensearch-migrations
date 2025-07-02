@@ -30,8 +30,14 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         this.awarenessAttributes = awarenessAttributes;
         this.indexTransformations = indexTransformations;
         this.indexTemplateTransformations = indexTemplateTransformations;
-        log.info("Transformer initialized with indexTransformations: {}", indexTransformations);
-        log.info("Transformer initialized with indexTemplateTransformations: {}", indexTemplateTransformations);
+        log.atInfo()
+            .setMessage("Transformer initialized with {} indexTransformations")
+            .addArgument(indexTransformations.size())
+            .log();
+        log.atInfo()
+            .setMessage("Transformer initialized with {} indexTemplateTransformations")
+            .addArgument(indexTemplateTransformations.size())
+            .log();
     }
 
     public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributes, MetadataTransformerParams params) {
