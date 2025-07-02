@@ -19,5 +19,4 @@ from .apps.healthcheck import views as healthcheck_views
 
 urlpatterns = [
     path("", healthcheck_views.healthcheck, name="healthcheck"),
-    path("orchestrator/", include("console_api.apps.orchestrator.urls")),
 ]
