@@ -3,8 +3,10 @@ package org.opensearch.migrations.bulkload.framework;
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -39,6 +41,35 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         merged.putAll(overrides);
         return Collections.unmodifiableMap(merged);
     }
+
+    /**
+     * These settings must be injected via elasticsearch.yml for ES 5.0–5.4.
+     * Verified via test: removing these lines causes container startup or snapshot repo registration to fail.
+     */
+    private static final List<String> ES_5_COMMON_CONFIG_LINES = List.of(
+        "network.host: 0.0.0.0",
+        "http.port: 9200",
+        "transport.tcp.port: 9300",
+        "discovery.zen.ping.unicast.hosts: []",
+        "discovery.zen.minimum_master_nodes: 1",
+        "node.max_local_storage_nodes: 2",
+        "path.repo: \"/tmp/snapshots\""
+    );
+
+    private static String buildEs5ConfigYml(List<String> baseLines, String... extraLines) {
+        List<String> allLines = new ArrayList<>(baseLines);
+        Collections.addAll(allLines, extraLines);
+        return String.join("\n", allLines);
+    }
+
+    private static final String ES_5_0_AND_5_1_CONFIG_YML = buildEs5ConfigYml(
+        ES_5_COMMON_CONFIG_LINES
+    );
+
+    private static final String ES_5_2_AND_5_3_CONFIG_YML = buildEs5ConfigYml(
+        ES_5_COMMON_CONFIG_LINES,
+        "bootstrap.system_call_filter: false"
+    );
 
     public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
@@ -137,6 +168,34 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:5.5.2",
         Version.fromString("ES 5.5.2")
     );
+    public static final ContainerVersion ES_V5_4 = new ElasticsearchVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch:5.4.2",
+            Version.fromString("ES 5.4.2")
+    );
+    public static final ContainerVersion ES_V5_3 = new Elasticsearch5Version(
+        "elasticsearch:5.3.2",
+        Version.fromString("ES 5.3.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        ES_5_2_AND_5_3_CONFIG_YML
+    );
+    public static final ContainerVersion ES_V5_2 = new Elasticsearch5Version(
+        "elasticsearch:5.2.2",
+        Version.fromString("ES 5.2.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        ES_5_2_AND_5_3_CONFIG_YML
+    );
+    public static final ContainerVersion ES_V5_1 = new Elasticsearch5Version(
+        "elasticsearch:5.1.2",
+        Version.fromString("ES 5.1.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        ES_5_0_AND_5_1_CONFIG_YML
+    );
+    public static final ContainerVersion ES_V5_0 = new Elasticsearch5Version(
+        "elasticsearch:5.0.2",
+        Version.fromString("ES 5.0.2"),
+        "/usr/share/elasticsearch/config/elasticsearch.yml",
+        ES_5_0_AND_5_1_CONFIG_YML
+    );
 
     public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
         "elasticsearch:2.4.6",
@@ -182,6 +241,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 Map.of(), // No additional keys apart from BASE
                 Set.of() // No keys to remove from BASE
             )),
+        ELASTICSEARCH_5(
+                overrideAndRemoveEnv(
+                        BASE.getEnvVariables(),
+                        Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
+                        Set.of("discovery.type","ES_JAVA_OPTS")
+                )),
         ELASTICSEARCH_6(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
@@ -387,6 +452,19 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static class Elasticsearch6Version extends ContainerVersion {
         public Elasticsearch6Version(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_6, "elasticsearch");
+        }
+    }
+
+    public static class Elasticsearch5Version extends OlderElasticsearchVersion {
+        public Elasticsearch5Version(String imageName,
+                                     Version version,
+                                     String filePath,
+                                     String contents) {
+            super(imageName, version, filePath, contents);
+        }
+        @Override
+        public INITIALIZATION_FLAVOR getInitializationType() {
+            return INITIALIZATION_FLAVOR.ELASTICSEARCH_5;
         }
     }
 
