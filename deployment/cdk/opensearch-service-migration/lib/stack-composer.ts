@@ -558,7 +558,7 @@ export class StackComposer {
                     securityGroupMigrationSSMParameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
                 },
                 otelCollectorEnabled: false,
-                skipClusterCertCheck: servicesYaml.source_cluster?.allowInsecure,
+                skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 streamingSourceType: StreamingSourceType.DISABLED,
                 extraArgs: "--noCapture",
                 stackName: `OSMigrations-${stage}-${region}-TargetClusterProxy`,
