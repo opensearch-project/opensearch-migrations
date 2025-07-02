@@ -27,7 +27,7 @@ def docker_rfs_backfill() -> DockerRFSBackfill:
             "docker": None
         }
     }
-    return get_backfill(docker_rfs_config, None, create_valid_cluster())
+    return get_backfill(docker_rfs_config, create_valid_cluster())
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def ecs_rfs_backfill() -> ECSRFSBackfill:
             }
         }
     }
-    return get_backfill(ecs_rfs_config, None, create_valid_cluster())
+    return get_backfill(ecs_rfs_config, create_valid_cluster())
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def k8s_rfs_backfill() -> ECSRFSBackfill:
             }
         }
     }
-    return get_backfill(k8s_rfs_config, None, create_valid_cluster())
+    return get_backfill(k8s_rfs_config, create_valid_cluster())
 
 
 def test_backfill_describe_includes_salient_details_docker_rfs(docker_rfs_backfill: DockerRFSBackfill):

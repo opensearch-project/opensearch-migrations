@@ -77,7 +77,7 @@ def get_kafka(config: Dict):
     raise UnsupportedKafkaError(', '.join(config.keys()))
 
 
-def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster],
+def get_backfill(config: Dict, target_cluster: Optional[Cluster],
                  client_options: Optional[ClientOptions] = None) -> Backfill:
     if BackfillType.reindex_from_snapshot.name in config:
         if target_cluster is None:
