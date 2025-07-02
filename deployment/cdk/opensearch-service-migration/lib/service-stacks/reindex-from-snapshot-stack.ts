@@ -32,7 +32,8 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
     readonly otelCollectorEnabled: boolean,
-    readonly clusterAuthDetails: ClusterAuth
+    readonly clusterAuthDetails: ClusterAuth,
+    readonly skipClusterCertCheck?: boolean,
     readonly sourceClusterVersion?: string,
     readonly maxShardSizeGiB?: number,
     readonly reindexFromSnapshotWorkerSize: "default" | "maximum",
@@ -79,6 +80,9 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const planningSizeBuffer = 1.10
         const maxShardSizeGiB = planningSize * planningSizeBuffer
         const maxShardSizeBytes = maxShardSizeGiB * (1024 ** 3)
+        if (props.skipClusterCertCheck != false) { // when true or unspecified, add the flag
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-insecure")
+        }
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${props.snapshotYaml.s3?.repo_uri}"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", props.snapshotYaml.s3?.aws_region)

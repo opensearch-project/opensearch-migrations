@@ -494,11 +494,12 @@ export function parseClusterDefinition(json: any, clusterType: ClusterType, scop
         throw new Error("The `sourceCluster` object requires a `version` field.")
     }
     endpoint = validateAndReturnFormattedHttpURL(endpoint)
+    const allowInsecure = json.allow_insecure;
     const auth = parseAuth(json.auth, clusterType, scope, stage, deployId)
     if (!auth) {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }
-    return new ClusterYaml({endpoint, version, auth})
+    return new ClusterYaml({endpoint, version, allowInsecure, auth})
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
