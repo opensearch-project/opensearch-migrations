@@ -18,7 +18,7 @@ export interface EKSInfraProps {
     ecrRepoName: string;
     stackName: string;
     namespace?: string;
-    bootstrapServiceAccountName?: string;
+    buildImagesServiceAccountName?: string;
     migrationsServiceAccountName?: string;
 }
 
@@ -30,7 +30,7 @@ export class EKSInfra extends Construct {
         super(scope, id);
 
         const namespace = props.namespace ?? 'ma';
-        const bootstrapServiceAccountName = props.bootstrapServiceAccountName ?? 'build-images-service-account';
+        const buildImagesServiceAccountName = props.buildImagesServiceAccountName ?? 'build-images-service-account';
         const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
 
         const migrationSecurityGroup = new SecurityGroup(this, 'MigrationsSecurityGroup', {
@@ -184,10 +184,10 @@ export class EKSInfra extends Construct {
                 resources: ['*'],
             }),
         );
-        const bootstrapPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BootstrapPodIdentityAssociation', {
+        const buildImagesPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BuildImagesPodIdentityAssociation', {
             clusterName: props.clusterName,
             namespace: namespace,
-            serviceAccount: bootstrapServiceAccountName,
+            serviceAccount: buildImagesServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
         const migrationsPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'MigrationsPodIdentityAssociation', {
@@ -196,7 +196,7 @@ export class EKSInfra extends Construct {
             serviceAccount: migrationsServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
-        bootstrapPodIdentityAssociation.node.addDependency(this.cluster)
+        buildImagesPodIdentityAssociation.node.addDependency(this.cluster)
         migrationsPodIdentityAssociation.node.addDependency(this.cluster)
     }
 }
