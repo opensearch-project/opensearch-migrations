@@ -48,6 +48,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.utils.ArgLogUtils;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
@@ -217,7 +218,7 @@ public class RfsMigrateDocuments {
                 throw new ParameterException("Incoming value '" + value + "'did not match regex pattern " + REGEX_PATTERN);
             }
         }
-    };
+    }
 
     @Getter
     public static class DocParams implements TransformerParams {
@@ -272,7 +273,9 @@ public class RfsMigrateDocuments {
                 args.targetArgs.password = System.getenv(TARGET_PASSWORD_ENV_VAR);
                 addedEnvParams.add(TARGET_PASSWORD_ENV_VAR);
             }
-            log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            if (!addedEnvParams.isEmpty()) {
+                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            }
         }
     }
 
@@ -308,9 +311,8 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
-        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
-        System.err.println("Starting program with: " + String.join(" ", args));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args)));
         // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
         // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
         System.setProperty("log4j2.shutdownHookEnabled", "false");

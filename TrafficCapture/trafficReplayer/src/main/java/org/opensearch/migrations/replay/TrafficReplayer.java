@@ -29,6 +29,7 @@ import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.utils.ArgLogUtils;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
 
@@ -331,7 +332,9 @@ public class TrafficReplayer {
                 params.targetPassword = System.getenv(TARGET_PASSWORD_ENV_VAR);
                 addedEnvParams.add(TARGET_PASSWORD_ENV_VAR);
             }
-            log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            if (!addedEnvParams.isEmpty()) {
+                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            }
         }
     }
 
@@ -344,7 +347,7 @@ public class TrafficReplayer {
             jCommander.parse(args);
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
-            System.err.println("Got args: " + String.join("; ", args));
+            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args)));
             jCommander.usage();
             System.exit(2);
             return null;
@@ -354,7 +357,7 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", args));
+        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args)));
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
