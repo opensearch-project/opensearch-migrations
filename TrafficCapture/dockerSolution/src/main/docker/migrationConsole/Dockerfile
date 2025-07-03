@@ -65,7 +65,6 @@ ENV CLASSPATH=/root/kafka-tools/kafkaCommandLineFormatter.jar
 COPY staging/CreateSnapshot /root/createSnapshot
 COPY staging/MetadataMigration /root/metadataMigration
 
-COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 
@@ -80,10 +79,6 @@ COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
-RUN pipenv install --deploy
-
-COPY console_api /root/console_api
-WORKDIR /root/console_api
 RUN pipenv install --deploy
 
 COPY cluster_tools /root/cluster_tools
@@ -112,6 +107,3 @@ COPY workflows /root/workflows
 ENV ENV=/root/.bashrc
 
 CMD ["/bin/bash", "-c", "/root/loadServicesFromParameterStore.sh && tail -f /dev/null"]
-
-# Experimental console API, uncomment to use in addition to uncomment port mapping in docker-compose.yml
-#CMD /root/loadServicesFromParameterStore.sh && pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt

@@ -23,14 +23,29 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
 
     private final int awarenessAttributes;
 
-    public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributes, MetadataTransformerParams params) {
+    protected Transformer_ES_6_8_to_OS_2_11(
+            int awarenessAttributes,
+            List<TransformationRule<Index>> indexTransformations,
+            List<TransformationRule<Index>> indexTemplateTransformations) {
         this.awarenessAttributes = awarenessAttributes;
-        this.indexTransformations = List.of(new IndexMappingTypeRemoval(
-                params.getMultiTypeResolutionBehavior()
-        ));
-        this.indexTemplateTransformations = List.of(new IndexMappingTypeRemoval(
-                params.getMultiTypeResolutionBehavior()
-        ));
+        this.indexTransformations = indexTransformations;
+        this.indexTemplateTransformations = indexTemplateTransformations;
+        log.atInfo()
+            .setMessage("Transformer initialized with {} indexTransformations")
+            .addArgument(indexTransformations.size())
+            .log();
+        log.atInfo()
+            .setMessage("Transformer initialized with {} indexTemplateTransformations")
+            .addArgument(indexTemplateTransformations.size())
+            .log();
+    }
+
+    public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributes, MetadataTransformerParams params) {
+        this(
+            awarenessAttributes,
+            List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior())),
+            List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()))
+        );
     }
 
     @Override

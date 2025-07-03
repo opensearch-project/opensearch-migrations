@@ -83,7 +83,6 @@ class Environment:
 
         if 'backfill' in self.config:
             self.backfill: Backfill = get_backfill(self.config["backfill"],
-                                                   source_cluster=self.source_cluster,
                                                    target_cluster=self.target_cluster,
                                                    client_options=self.client_options)
             logger.info(f"Backfill migration initialized: {self.backfill}")

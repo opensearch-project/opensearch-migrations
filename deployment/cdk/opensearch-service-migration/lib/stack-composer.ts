@@ -192,9 +192,6 @@ export class StackComposer {
         const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const migrationConsoleEnableOSI = this.getContextForType('migrationConsoleEnableOSI', 'boolean', defaultValues, contextJSON)
-        const migrationAPIEnabled = this.getContextForType('migrationAPIEnabled', 'boolean', defaultValues, contextJSON)
-        const migrationAPIAllowedHosts = this.getContextForType('migrationAPIAllowedHosts', 'string', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerMaxUptime = this.getContextForType('trafficReplayerMaxUptime', 'string', defaultValues, contextJSON);
         const trafficReplayerGroupId = this.getContextForType('trafficReplayerGroupId', 'string', defaultValues, contextJSON)
@@ -362,7 +359,6 @@ export class StackComposer {
                 elasticsearchServiceEnabled,
                 captureProxyServiceEnabled,
                 targetClusterProxyServiceEnabled,
-                migrationAPIEnabled,
                 sourceClusterDisabled,
                 sourceClusterEndpoint,
                 targetClusterUsername: targetCluster ? targetClusterAuth?.basicAuth?.username : fineGrainedManagerUserName,
@@ -508,6 +504,7 @@ export class StackComposer {
                 vpcDetails: networkStack.vpcDetails,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
+                skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 sourceClusterVersion: sourceCluster?.version,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
@@ -531,6 +528,7 @@ export class StackComposer {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpcDetails: networkStack.vpcDetails,
                 clusterAuthDetails: servicesYaml.target_cluster.auth,
+                skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
                 userAgentSuffix: trafficReplayerCustomUserAgent,
@@ -569,12 +567,14 @@ export class StackComposer {
 
         let captureProxyStack
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
+            const sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpcDetails: networkStack.vpcDetails,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
                 },
                 otelCollectorEnabled: otelCollectorEnabled,
+                skipClusterCertCheck: sourceClusterDefinition?.allow_insecure,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
@@ -601,6 +601,7 @@ export class StackComposer {
                     securityGroupMigrationSSMParameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
                 },
                 otelCollectorEnabled: false,
+                skipClusterCertCheck: servicesYaml.source_cluster?.allowInsecure,
                 streamingSourceType: StreamingSourceType.DISABLED,
                 extraArgs: "--noCapture",
                 stackName: `OSMigrations-${stage}-${region}-TargetClusterProxy`,
@@ -622,10 +623,7 @@ export class StackComposer {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
                 vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
-                migrationConsoleEnableOSI: migrationConsoleEnableOSI,
-                migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
-                migrationAPIAllowedHosts: migrationAPIAllowedHosts,
                 sourceCluster,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",

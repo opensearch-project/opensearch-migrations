@@ -17,7 +17,6 @@ public class MigrateResult implements MigrationItemResult {
     private final int exitCode;
 
     public int getExitCode() {
-        System.out.println("Hello!");
         return Math.max(exitCode, collectErrors().size());
     }
 }

@@ -48,7 +48,6 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly elasticsearchServiceEnabled?: boolean;
     readonly captureProxyServiceEnabled?: boolean;
     readonly targetClusterProxyServiceEnabled?: boolean;
-    readonly migrationAPIEnabled?: boolean;
     readonly sourceClusterDisabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
