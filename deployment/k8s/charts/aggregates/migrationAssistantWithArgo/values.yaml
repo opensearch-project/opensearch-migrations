@@ -26,6 +26,18 @@ conditionalPackageInstalls:
   jaeger: true
 
 images:
+  captureProxy:
+    repository: migrations/capture_proxy
+    tag: latest
+    pullPolicy: IfNotPresent
+  trafficReplayer:
+    repository: migrations/traffic_replayer
+    tag: latest
+    pullPolicy: IfNotPresent
+  reindexFromSnapshot:
+    repository: migrations/reindex_from_snapshot
+    tag: latest
+    pullPolicy: IfNotPresent
   migrationConsole:
     repository: migrations/migration_console
     tag: latest
@@ -34,9 +46,6 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
-
-aws:
-  eksEnabled: false
 
 snapshotBucketConfiguration:
   create: true
@@ -57,7 +66,7 @@ logs:
 installer:
   serviceAccount:
     create: true
-    name: "helm-installer"
+    name: "migrations-service-account"
   rbac:
     create: true
 
@@ -75,7 +84,7 @@ extraOtelConfiguration:
 charts:
 
   # Coordinate workflows, maybe RFS, maybe more
-  - name: etcd
+  etcd:
     version: "11.2.1"
     repository: "https://charts.bitnami.com/bitnami"
     values:
@@ -119,14 +128,14 @@ charts:
         fsGroup: 1001
         runAsUser: 1001
 
-  - name: cert-manager
+  cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
     values:
       crds:
         enabled: true
 
-  - name: opentelemetry-operator
+  opentelemetry-operator:
     version: "0.86.4"
     repository: "https://open-telemetry.github.io/opentelemetry-helm-charts"
     timeout: 300
@@ -145,7 +154,7 @@ charts:
           tag: "0.43.2"
 
 
-  - name: strimzi-kafka-operator
+  strimzi-kafka-operator:
     version: 0.45.0
     repository: "https://strimzi.io/charts/"
     values:
@@ -188,7 +197,7 @@ charts:
           timeoutSeconds: 3
           failureThreshold: 1
 
-  - name: argo-workflows
+  argo-workflows:
     version: "0.45.11"
     repository: "https://argoproj.github.io/argo-helm"
     values:
@@ -225,7 +234,7 @@ charts:
           create: false
           name: argo-workflow-executor
 
-  - name: fluent-bit
+  fluent-bit:
     version: "0.49.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
@@ -294,10 +303,13 @@ charts:
               Format        ${OUTPUT_FORMAT}
               Template      {log}
 
+      serviceAccount:
+        create: false
+        name: migrations-service-account
 
   # Will likely be required for auto-scaling.
   # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.
-  - name: kube-prometheus-stack
+  kube-prometheus-stack:
     version: "72.0.0"
     repository: "https://prometheus-community.github.io/helm-charts"
     values:
@@ -373,7 +385,7 @@ charts:
 #      constraintViolationsLimit: 20
 #      enableExternalData: true
 
-  - name: localstack
+  localstack:
     version: "0.6.23"  # Or whichever version you want to use
     repository: "https://localstack.github.io/helm-charts"
     values:
@@ -381,7 +393,7 @@ charts:
         repository: "localstack/localstack"
         tag: "4.3.0"
 
-  - name: grafana
+  grafana:
     version: "8.15.0"
     repository: "https://grafana.github.io/helm-charts"
     values:
@@ -410,7 +422,7 @@ charts:
 #          enabled: true
 #          label: grafana_dashboard
 
-  - name: jaeger
+  jaeger:
     version: "3.2.0"
     repository: "https://jaegertracing.github.io/helm-charts"
     values:

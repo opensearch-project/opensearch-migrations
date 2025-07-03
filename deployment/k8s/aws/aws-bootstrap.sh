@@ -3,7 +3,7 @@
 # Bootstrap EKS Environment for OpenSearch Migration Assistant
 #
 # This script prepares an existing EKS cluster to use the Migration Assistant tooling.
-# If desired it has the ability to kick-off a bootstrapHelm chart which will build required
+# If desired it has the ability to kick-off a buildImages chart which will build required
 # images for the Migration Assistant inside of an EKS pod and push these images to a
 # private ECR, otherwise this step can be skipped with the 'skip_image_build' flag and
 # public images can be utilized
@@ -19,11 +19,11 @@ tag=""
 skip_git_pull=false
 
 base_dir="./opensearch-migrations"
-bootstrap_chart_dir="${base_dir}/deployment/k8s/charts/components/bootstrapHelm"
+build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
 skip_image_build=false
-keep_bootstrap_job_alive=false
+keep_build_images_job_alive=false
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
@@ -65,7 +65,7 @@ get_cfn_export() {
 
   if [ ${#names[@]} -eq 0 ]; then
     echo "Error: No exports found starting with '$prefix'" >&2
-    return 1
+    exit 1
   elif [ ${#names[@]} -eq 1 ]; then
     echo "${values[0]}"
   else
@@ -76,7 +76,7 @@ get_cfn_export() {
     read -rp "Select the stack export name to use (0-$((${#names[@]} - 1))): " choice
     if [[ ! "$choice" =~ ^[0-9]+$ || "$choice" -ge ${#names[@]} ]]; then
       echo "Invalid choice." >&2
-      return 1
+      exit 1
     fi
     echo "${values[$choice]}"
   fi
@@ -149,29 +149,28 @@ if [[ "$skip_git_pull" == "false" ]]; then
 fi
 
 if [[ "$skip_image_build" == "false" ]]; then
-  if helm status bootstrap-ma -n "$namespace" >/dev/null 2>&1; then
-    read -rp "Helm release 'bootstrap-ma' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
+  if helm status build-images -n "$namespace" >/dev/null 2>&1; then
+    read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
     if [[ "$answer" == [Yy]* ]]; then
-      helm uninstall bootstrap-ma -n "$namespace"
+      helm uninstall build-images -n "$namespace"
       sleep 2
     else
-      echo "The 'bootstrap-ma' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall bootstrap-ma -n $namespace'"
+      echo "The 'build-images' release must be uninstalled before proceeding. This can be uninstalled with 'helm uninstall build-images -n $namespace'"
       exit 1
     fi
   fi
-  helm install bootstrap-ma "${bootstrap_chart_dir}" \
+  helm install build-images "${build_images_chart_dir}" \
     --namespace "$namespace" \
     --set registryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
     --set awsEKSEnabled=true \
-    --set skipImageBuild="${skip_image_build}" \
-    --set keepJobAlive="${keep_bootstrap_job_alive}" \
-    || { echo "Installing bootstrap chart failed..."; exit 1; }
+    --set keepJobAlive="${keep_build_images_job_alive}" \
+    || { echo "Installing buildImages chart failed..."; exit 1; }
 
-  if [[ "$keep_bootstrap_job_alive" == "true" ]]; then
-    echo "The keep_bootstrap_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
+  if [[ "$keep_build_images_job_alive" == "true" ]]; then
+    echo "The keep_build_images_job_alive setting was enabled, will not proceed with installing the Migration Assistant chart"
     exit 0
   fi
-  pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/bootstrap-helm' | cut -d/ -f2)
+  pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/build-images' | cut -d/ -f2)
   echo "Waiting for pod ${pod_name} to be ready..."
   kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
   sleep 5
@@ -183,22 +182,31 @@ if [[ "$skip_image_build" == "false" ]]; then
   final_status=$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.status.phase}')
   echo "Pod ${pod_name} ended with status: ${final_status}"
   if [[ "$final_status" != "Succeeded" ]]; then
-    echo "Bootstrap pod $pod_name did not end with 'Succeeded'. Exiting..."
+    echo "The $pod_name pod did not end with 'Succeeded'. Exiting..."
     exit 1
   else
-    echo "Uninstalling bootstrap chart after successful setup"
-    helm uninstall bootstrap-ma -n "$namespace"
+    echo "Uninstalling buildImages chart after successful setup"
+    helm uninstall build-images -n "$namespace"
   fi
 fi
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install ma "${ma_chart_dir}" \
   --namespace $namespace \
+  -f "${ma_chart_dir}/values.yaml" \
+  -f "${ma_chart_dir}/valuesEks.yaml" \
+  --set stageName="${STAGE}" \
+  --set aws.region="${AWS_CFN_REGION}" \
+  --set images.captureProxy.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.captureProxy.tag=migrations_capture_proxy_latest \
+  --set images.trafficReplayer.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+  --set images.reindexFromSnapshot.repository="${MIGRATIONS_ECR_REGISTRY}" \
+  --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
   --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
   --set images.migrationConsole.tag=migrations_migration_console_latest \
   --set images.installer.repository="${MIGRATIONS_ECR_REGISTRY}" \
   --set images.installer.tag=migrations_migration_console_latest \
-  --set aws.eksEnabled=true \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 kubectl -n ma wait --for=condition=ready pod/migration-console-0 --timeout=300s

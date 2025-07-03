@@ -1,0 +1,31 @@
+aws:
+  eksEnabled: true
+  region: ""
+
+stageName: dev
+
+charts:
+  fluent-bit:
+    values:
+      env: []
+
+      config:
+        # Disable any existing config
+        service: ""
+        inputs: ""
+        filters: ""
+        outputs: ""
+
+      args:
+        - -c
+        - /fluent-bit/etc/custom/fluent-bit.conf
+
+      extraVolumes:
+        - name: full-config
+          configMap:
+            name: fluentbit-eks-full-config
+
+      extraVolumeMounts:
+        - name: full-config
+          mountPath: /fluent-bit/etc/custom/fluent-bit.conf
+          subPath: fluent-bit.conf

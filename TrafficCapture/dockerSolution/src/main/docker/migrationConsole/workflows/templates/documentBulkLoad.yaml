@@ -77,7 +77,7 @@ spec:
             value: ""
             description: "Container image to use"
           - name: default-image
-            value: "migrations/reindex_from_snapshot:latest"
+            value: "{{workflow.parameters.reindex-from-snapshot-image}}"
             description: "Default container image"
 
           - name: documents-per-bulk-request
@@ -222,7 +222,7 @@ spec:
                   emptyDir: {}
                 initContainers:
                 - name: resolver
-                  image: migrations/migration_console:latest
+                  image: "{{workflow.parameters.migration-console-image}}"
                   imagePullPolicy: IfNotPresent
                   command:
                   - sh

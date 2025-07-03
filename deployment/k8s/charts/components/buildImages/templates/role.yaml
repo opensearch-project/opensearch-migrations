@@ -4,15 +4,15 @@ metadata:
   name: {{ .Values.serviceAccountName }}
   namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/component: bootstrap-helm
+    app.kubernetes.io/component: build-images
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: migration-role
+  name: build-images-role
   namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/component: bootstrap-helm
+    app.kubernetes.io/component: build-images
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -30,25 +30,25 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: migration-role-rolebinding
+  name: build-images-role-rolebinding
   namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/component: bootstrap-helm
+    app.kubernetes.io/component: build-images
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccountName }}
     namespace: {{ .Values.namespace }}
 roleRef:
   kind: Role
-  name: migration-role
+  name: build-images-role
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: migration-role-create-namespaces
+  name: build-images-role-create-namespaces
   labels:
-    app.kubernetes.io/component: bootstrap-helm
+    app.kubernetes.io/component: build-images
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -57,14 +57,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: migration-role-create-namespaces-binding
+  name: build-images-role-create-namespaces-binding
   labels:
-    app.kubernetes.io/component: bootstrap-helm
+    app.kubernetes.io/component: build-images
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccountName }}
     namespace: {{ .Values.namespace }}
 roleRef:
   kind: ClusterRole
-  name: migration-role-create-namespaces
+  name: build-images-role-create-namespaces
   apiGroup: rbac.authorization.k8s.io

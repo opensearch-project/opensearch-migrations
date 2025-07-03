@@ -75,5 +75,14 @@ spec:
             - "/bin/sh"
             - "-c"
             - |
-              kubectl get workflowtemplates.argoproj.io -o yaml -l managed-by={{ .Release.Name }} -o name | \
-                xargs kubectl delete
+              set -e
+              echo "Checking for Argo WorkflowTemplates managed by {{ .Release.Name }}..."
+              templates=$(kubectl get workflowtemplates.argoproj.io -l managed-by={{ .Release.Name }} -o name || true)
+
+              if [ -z "$templates" ]; then
+                echo "No matching WorkflowTemplates found. Nothing to delete."
+              else
+                echo "Deleting WorkflowTemplates:"
+                echo "$templates"
+                echo "$templates" | xargs kubectl delete
+              fi
