@@ -30,8 +30,8 @@ export class EKSInfra extends Construct {
         super(scope, id);
 
         const namespace = props.namespace ?? 'ma';
-        const bootstrapServiceAccountName = props.bootstrapServiceAccountName ?? 'bootstrap-migrations-sa';
-        const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-sa';
+        const bootstrapServiceAccountName = props.bootstrapServiceAccountName ?? 'build-images-service-account';
+        const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
 
         const migrationSecurityGroup = new SecurityGroup(this, 'MigrationsSecurityGroup', {
             vpc: props.vpc,

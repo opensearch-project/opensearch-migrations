@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: bootstrap-helm-pvc
+  name: build-images-pvc
   namespace: {{ .Values.namespace }}
 spec:
   accessModes:

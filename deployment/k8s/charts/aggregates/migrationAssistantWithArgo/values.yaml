@@ -66,7 +66,7 @@ logs:
 installer:
   serviceAccount:
     create: true
-    name: "migrations-sa"
+    name: "migrations-service-account"
   rbac:
     create: true
 
@@ -305,7 +305,7 @@ charts:
 
       serviceAccount:
         create: false
-        name: migrations-sa
+        name: migrations-service-account
 
   # Will likely be required for auto-scaling.
   # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.
