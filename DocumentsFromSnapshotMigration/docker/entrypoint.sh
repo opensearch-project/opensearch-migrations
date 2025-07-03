@@ -38,6 +38,12 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 # Print our ENV variables
 echo "RFS_COMMAND: $RFS_COMMAND"
 
+SAFE_PRINT_COMMAND="$RFS_COMMAND"
+if [[ "$RFS_COMMAND" == *"--target-password"* || "$RFS_COMMAND" == *"--targetPassword"* ]]; then
+    SAFE_PRINT_COMMAND=$(echo "$RFS_COMMAND" | sed -E 's/--target(-)?[Pp]assword[ =][^[:space:]]*/--target-password=******/g')
+fi
+echo "Executing: $SAFE_PRINT_COMMAND"
+
 if [ -n "$TARGET_USERNAME" ]; then
   echo "TARGET_USERNAME is set by the environment."
 fi
@@ -82,7 +88,7 @@ cleanup_directories() {
 [ -z "$RFS_COMMAND" ] && \
 { echo "Warning: RFS_COMMAND is empty! Exiting."; exit 1; } || \
 while true; do
-    echo "Running command $RFS_COMMAND"
+    echo "Running command $SAFE_PRINT_COMMAND"
     # Run command in background and get its PID
     eval "$RFS_COMMAND" &
     COMMAND_PID=$!
