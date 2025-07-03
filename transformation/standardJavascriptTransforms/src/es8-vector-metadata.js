@@ -43,7 +43,11 @@ function main(context) {
                 if (val && typeof val === 'object') {
                     if (val.type === 'dense_vector') {
                         const knn = buildKnn(val);
-                        node instanceof Map ? node.set(key, knn) : (node[key] = knn);
+                        if (node instanceof Map) {
+                            node.set(key, knn)
+                        } else {
+                            node[key] = knn
+                        }
                         changed = true;
                     } else {
                         recurse(val);
