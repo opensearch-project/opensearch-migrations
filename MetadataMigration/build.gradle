@@ -12,11 +12,11 @@ dependencies {
     implementation libs.jcommander
     implementation libs.slf4j.api
     implementation libs.log4j.slf4j2.impl
+    implementation libs.log4j.core
 
     testImplementation testFixtures(project(':RFS'))
     testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation project(":CreateSnapshot")
-    testImplementation libs.log4j.core
     testImplementation libs.log4j.slf4j2.impl
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params

@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
 import org.opensearch.migrations.commands.Configure;
@@ -17,6 +18,9 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.FileAppender;
 
 @Slf4j
 public class MetadataMigration {
@@ -78,6 +82,9 @@ public class MetadataMigration {
                 break;
         }
         log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
+
+        reportLogPath();
+
         System.exit(result.getExitCode());
     }
 
@@ -114,5 +121,19 @@ public class MetadataMigration {
         var sb = new StringBuilder();
         jCommander.getUsageFormatter().usage(jCommander.getParsedCommand(), sb);
         log.info(sb.toString());
+    }
+
+    private static void reportLogPath() {
+        var loggingContext = (LoggerContext) LogManager.getContext(false);
+        var loggingConfig = loggingContext.getConfiguration();
+        // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
+        var metadataLogAppender = (FileAppender) loggingConfig.getAppender("MetadataRun");
+        if (metadataLogAppender != null) {
+            var logFilePath = Path.of(metadataLogAppender.getFileName());
+            log.atInfo()
+                .setMessage("Consult {} to see detailed logs for this run")
+                .addArgument(logFilePath.toAbsolutePath())
+                .log();
+        }
     }
 }

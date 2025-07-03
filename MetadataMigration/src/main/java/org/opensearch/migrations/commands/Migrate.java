@@ -37,7 +37,7 @@ public class Migrate extends MigratorEvaluatorBase {
             log.atError().setCause(e).setMessage("Unexpected failure").log();
             migrateResult
                 .exitCode(UNEXPECTED_FAILURE_CODE)
-                .errorMessage("Unexpected failure: " + e.getMessage())
+                .errorMessage(createUnexpectedErrorMessage(e))
                 .build();
         }
 

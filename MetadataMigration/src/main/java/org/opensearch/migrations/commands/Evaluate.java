@@ -1,6 +1,5 @@
 package org.opensearch.migrations.commands;
 
-import java.util.Optional;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
@@ -38,10 +37,9 @@ public class Evaluate extends MigratorEvaluatorBase {
                 .build();
         } catch (Throwable e) {
             log.atError().setCause(e).setMessage("Unexpected failure").log();
-            var causeMessage = Optional.of(e).map(Throwable::getCause).map(Throwable::getMessage).orElse(null);
             evaluateResult
                 .exitCode(UNEXPECTED_FAILURE_CODE)
-                .errorMessage("Unexpected failure: " + e.getMessage() + (causeMessage == null ? "" : ", inner cause: " + causeMessage))
+                .errorMessage(createUnexpectedErrorMessage(e))
                 .build();
         }
 
