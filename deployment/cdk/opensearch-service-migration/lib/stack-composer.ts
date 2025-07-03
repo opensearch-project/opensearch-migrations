@@ -207,7 +207,7 @@ export class StackComposer {
         const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
         const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
-        const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
+        let managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
         const deployId = addOnMigrationDeployId ?? defaultDeployId
         // We're in a transition state from an older model with limited, individually defined fields and heading towards objects
@@ -343,6 +343,7 @@ export class StackComposer {
             })
             this.stacks.push(networkStack)
         }
+
         const servicesYaml = new ServicesYaml()
         servicesYaml.source_cluster = networkStack?.sourceClusterYaml
         if (networkStack?.targetClusterYaml) {
@@ -366,6 +367,11 @@ export class StackComposer {
             snapshotYaml.snapshot_repo_name = "migration_assistant_repo"
         }
         servicesYaml.snapshot = snapshotYaml
+
+        if (servicesYaml.source_cluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
+            managedServiceSourceSnapshotEnabled = true;
+            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
+        }
 
         let openSearchStack
         if (!targetClusterDefinition) {
@@ -583,7 +589,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 otelCollectorEnabled,
-                managedServiceSourceSnapshotEnabled: networkStack.useManagedServiceSourceSnapshotSettings,
+                managedServiceSourceSnapshotEnabled,
                 env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with services,

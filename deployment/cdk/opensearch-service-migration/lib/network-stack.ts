@@ -149,7 +149,6 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
-    public readonly useManagedServiceSourceSnapshotSettings: boolean;
     public readonly sourceClusterYaml?: ClusterYaml;
     public readonly targetClusterYaml?: ClusterYaml;
     public readonly vpcDetails: VpcDetails;
@@ -196,21 +195,6 @@ export class NetworkStack extends Stack {
         let vpc: IVpc;
         const zoneCount = props.vpcAZCount ?? 2
         const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
-        this.sourceClusterYaml = props.sourceClusterDefinition
-            ? parseClusterDefinition(props.sourceClusterDefinition, ClusterType.SOURCE, this, props.stage, deployId)
-            : undefined
-        this.targetClusterYaml = props.targetClusterDefinition
-            ? parseClusterDefinition(props.targetClusterDefinition, ClusterType.TARGET, this, props.stage, deployId)
-            : undefined
-        if (props.managedServiceSourceSnapshotEnabled && !this.sourceClusterYaml?.auth.sigv4) {
-            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
-                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
-        }
-        this.useManagedServiceSourceSnapshotSettings = props.managedServiceSourceSnapshotEnabled
-        if (this.sourceClusterYaml?.auth.sigv4 && props.managedServiceSourceSnapshotEnabled == null) {
-            this.useManagedServiceSourceSnapshotSettings = true;
-            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
-        }
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
@@ -276,6 +260,17 @@ export class NetworkStack extends Stack {
         }
 
         this.vpcDetails = new VpcDetails(vpc, zoneCount, props.vpcSubnetIds);
+
+        this.sourceClusterYaml = props.sourceClusterDefinition
+            ? parseClusterDefinition(props.sourceClusterDefinition, ClusterType.SOURCE, this, props.stage, deployId)
+            : undefined
+        this.targetClusterYaml = props.targetClusterDefinition
+            ? parseClusterDefinition(props.targetClusterDefinition, ClusterType.TARGET, this, props.stage, deployId)
+            : undefined
+        if (props.managedServiceSourceSnapshotEnabled && !this.sourceClusterYaml?.auth.sigv4) {
+            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
+                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        }
 
         if (needAlb) {
             // Create the ALB with the strongest TLS 1.3 security policy
