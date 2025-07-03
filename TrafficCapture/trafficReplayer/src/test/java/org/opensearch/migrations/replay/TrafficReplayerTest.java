@@ -352,6 +352,16 @@ class TrafficReplayerTest extends InstrumentationTest {
         }
     }
 
+    @Test
+    public void testBasicAuthHeaderFromUsernameAndPassword() {
+        String testUsername = "testAdmin";
+        String testPassword = "adminPass";
+        String expectedResult = "Basic dGVzdEFkbWluOmFkbWluUGFzcw==";
+
+        String header = TrafficReplayer.getBasicAuthHeader(testUsername, testPassword);
+        Assertions.assertEquals(expectedResult, header);
+    }
+
     private static String collectBytesToUtf8String(List<byte[]> bytesList) {
         return bytesList.stream().map(ba -> new String(ba, StandardCharsets.UTF_8)).collect(Collectors.joining());
     }

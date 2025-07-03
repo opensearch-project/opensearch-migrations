@@ -42,18 +42,6 @@ describe('NetworkStack Tests', () => {
         jest.restoreAllMocks();
     });
 
-    test('Test vpcEnabled setting that is disabled does not create stack', () => {
-        const contextOptions = {
-            vpcEnabled: false
-        }
-
-        const openSearchStacks = createStackComposer(contextOptions)
-
-        openSearchStacks.stacks.forEach(function(stack) {
-            expect(!(stack instanceof NetworkStack))
-        })
-    });
-
     test('Test vpcEnabled setting that is enabled without existing resources creates default VPC resources', () => {
         const contextOptions = {
             vpcEnabled: true,

@@ -39,8 +39,6 @@ spec:
               value: ""
             - name: auth-header-value
               value: ""
-            - name: auth-header-user-and-secret
-              value: ""
             - name: remove-auth-header
               value: ""
             - name: sigv4-auth-header-service-region
@@ -120,8 +118,6 @@ spec:
                     # Optional authentication parameters
                     - name: AUTH_HEADER_VALUE
                       value: "{{inputs.parameters.auth-header-value}}"
-                    - name: AUTH_HEADER_USER_AND_SECRET
-                      value: "{{inputs.parameters.auth-header-user-and-secret}}"
                     - name: REMOVE_AUTH_HEADER
                       value: "{{inputs.parameters.remove-auth-header}}"
                     - name: SIGV4_AUTH_HEADER_SERVICE_REGION
@@ -194,7 +190,6 @@ spec:
 
                       # Miscellaneous (but maybe critical) parameters
                       [ -n "$AUTH_HEADER_VALUE" ] && ARGS+=("--authHeaderValue" "$AUTH_HEADER_VALUE")
-                      [ -n "$AUTH_HEADER_USER_AND_SECRET" ] && ARGS+=("--authHeaderUserAndSecret" "$AUTH_HEADER_USER_AND_SECRET")
                       [ -n "$SIGV4_AUTH_HEADER_SERVICE_REGION" ] && ARGS+=("--sigv4AuthHeaderServiceRegion" "$SIGV4_AUTH_HEADER_SERVICE_REGION")
                       [ -n "$USER_AGENT" ] && ARGS+=("--userAgent" "$USER_AGENT")
                       [ -n "$OTEL_COLLECTOR_ENDPOINT" ] && ARGS+=("--otelCollectorEndpoint" "$OTEL_COLLECTOR_ENDPOINT")

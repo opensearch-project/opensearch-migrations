@@ -92,8 +92,7 @@ def test_valid_cluster_with_secrets_auth_created():
         "endpoint": "https://opensearchtarget:9200",
         "allow_insecure": True,
         "basic_auth": {
-            "username": "admin",
-            "password_from_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+            "user_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
         },
     }
     cluster = Cluster(valid_with_secrets)
@@ -107,14 +106,14 @@ def test_invalid_cluster_with_two_passwords_refused():
         "basic_auth": {
             "username": "XXXXX",
             "password": "XXXXXXXXXXXXXX",
-            "password_from_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+            "user_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
         },
     }
     with pytest.raises(ValueError) as excinfo:
         Cluster(two_passwords)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]["cluster"][0]['basic_auth'] == [
-        "More than one value is present: ['password', 'password_from_secret_arn']"
+        "Cannot provide both (username + password) and user_secret_arn"
     ]
 
 
@@ -130,7 +129,7 @@ def test_invalid_cluster_with_zero_passwords_refused():
         Cluster(two_passwords)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]["cluster"][0]['basic_auth'] == [
-        "No values are present from set: ['password', 'password_from_secret_arn']"
+        "Must provide either (username + password) or user_secret_arn"
     ]
 
 
@@ -304,13 +303,13 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
         "endpoint": "https://opensearchtarget:9200",
         "allow_insecure": True,
         "basic_auth": {
-            "username": "admin",
-            "password_from_secret_arn": None  # Will be set later
+            "user_secret_arn": None  # Will be set later
         },
     }
-    secret_value = "myfakepassword"
-    username = valid_with_secrets["basic_auth"]["username"]
-    b64encoded_token = b64encode(f"{username}:{secret_value}".encode('utf-8')).decode("ascii")
+    username = 'unit_test_user'
+    password = 'unit_test_pass'
+    secret_value = f"{{\"username\": \"{username}\", \"password\": \"{password}\"}}"
+    b64encoded_token = b64encode(f"{username}:{password}".encode('utf-8')).decode("ascii")
     auth_header_should_be = f"Basic {b64encoded_token}"
 
     requests_mock.get(f"{valid_with_secrets['endpoint']}/test_api", json={'test': True})
@@ -321,7 +320,7 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
             Name="test-cluster-password",
             SecretString=secret_value,
         )
-        valid_with_secrets["basic_auth"]["password_from_secret_arn"] = secret['ARN']
+        valid_with_secrets["basic_auth"]["user_secret_arn"] = secret['ARN']
         cluster = Cluster(valid_with_secrets)
         assert isinstance(cluster, Cluster)
 
