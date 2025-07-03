@@ -142,7 +142,6 @@ public abstract class MigratorEvaluatorBase {
 
     protected String createUnexpectedErrorMessage(Throwable e) {
         var causeMessage = Optional.of(e).map(Throwable::getCause).map(Throwable::getMessage).orElse(null);
-        var errorMessage = "Unexpected failure: " + e.getMessage() + (causeMessage == null ? "" : ", inner cause: " + causeMessage);
-        return errorMessage;
+        return "Unexpected failure: " + e.getMessage() + (causeMessage == null ? "" : ", inner cause: " + causeMessage);
     }
 }
