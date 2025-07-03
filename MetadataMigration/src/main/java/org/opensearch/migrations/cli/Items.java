@@ -72,7 +72,7 @@ public class Items {
             sb.append(Format.indentToLevel(2))
                 .append(NONE_FOUND_MARKER)
                 .append(System.lineSeparator());
-          } else {
+        } else {
             appendItems(sb, items);
             appendFailures(sb, items);
         }
@@ -83,12 +83,16 @@ public class Items {
         var successfulItems = items.stream()
             .filter(r -> r.wasSuccessful())
             .map(r -> r.getName())
+            .sorted()
             .collect(Collectors.toList());
 
         if (!successfulItems.isEmpty()) {
-            sb.append(Format.indentToLevel(2))
-                .append(getPrintableList(successfulItems))
+            successfulItems.forEach(item -> {
+                sb.append(Format.indentToLevel(2))
+                .append("- ")
+                .append(item)
                 .append(System.lineSeparator());
+            });
         }
     }
 

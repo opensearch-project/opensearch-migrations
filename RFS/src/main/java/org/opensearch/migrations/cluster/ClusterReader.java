@@ -11,4 +11,6 @@ public interface ClusterReader extends VersionSpecificCluster {
 
     /** Reads the index metadata of the cluster */
     IndexMetadata.Factory getIndexMetadata();
+
+    String getTypeName();
 }

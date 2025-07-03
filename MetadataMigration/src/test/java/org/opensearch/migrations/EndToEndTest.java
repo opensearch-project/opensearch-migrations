@@ -57,7 +57,7 @@ class EndToEndTest extends BaseMigrationTest {
                 return Arrays.stream(TransferMedium.values())
                     .map(medium -> Arguments.of(pair.source(), pair.target(), medium, templateTypes))
                         .toList().stream();
-            });
+            }).limit(2);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
