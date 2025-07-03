@@ -516,15 +516,6 @@ def test_cli_backfill_when_not_defined(runner, source_cluster_only_yaml_path):
     assert "Backfill migration is not set" in result.output
 
 
-def test_cli_backfill_create_rfs(runner, mocker):
-    mock = mocker.patch.object(ECSRFSBackfill, 'create', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
-                                 'backfill', 'create'],
-                           catch_exceptions=True)
-    mock.assert_called_once()
-    assert result.exit_code == 0
-
-
 def test_cli_backfill_start(runner, mocker):
     mock = mocker.patch.object(ECSRFSBackfill, 'start', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),

@@ -6,7 +6,6 @@ from console_link.models.replayer_docker import DockerReplayer
 from console_link.models.replayer_k8s import K8sReplayer
 from console_link.models.metrics_source import CloudwatchMetricsSource, PrometheusMetricsSource
 from console_link.models.backfill_base import Backfill
-from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
 from console_link.models.cluster import Cluster
 from console_link.models.kafka import MSK, StandardKafka
@@ -78,19 +77,9 @@ def get_kafka(config: Dict):
     raise UnsupportedKafkaError(', '.join(config.keys()))
 
 
-def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster],
+def get_backfill(config: Dict, target_cluster: Optional[Cluster],
                  client_options: Optional[ClientOptions] = None) -> Backfill:
-    if BackfillType.opensearch_ingestion.name in config:
-        if source_cluster is None:
-            raise ValueError("source_cluster must be provided for OpenSearch Ingestion backfill")
-        if target_cluster is None:
-            raise ValueError("target_cluster must be provided for OpenSearch Ingestion backfill")
-        logger.debug("Creating OpenSearch Ingestion backfill instance")
-        return OpenSearchIngestionBackfill(config=config,
-                                           source_cluster=source_cluster,
-                                           target_cluster=target_cluster,
-                                           client_options=client_options)
-    elif BackfillType.reindex_from_snapshot.name in config:
+    if BackfillType.reindex_from_snapshot.name in config:
         if target_cluster is None:
             raise ValueError("target_cluster must be provided for RFS backfill")
 

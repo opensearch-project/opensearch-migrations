@@ -4,7 +4,6 @@ import pathlib
 import pytest
 
 from console_link.middleware.backfill import describe
-from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
 from console_link.models.factories import get_backfill
 from tests.utils import create_valid_cluster
@@ -28,7 +27,7 @@ def docker_rfs_backfill() -> DockerRFSBackfill:
             "docker": None
         }
     }
-    return get_backfill(docker_rfs_config, None, create_valid_cluster())
+    return get_backfill(docker_rfs_config, create_valid_cluster())
 
 
 @pytest.fixture
@@ -41,7 +40,7 @@ def ecs_rfs_backfill() -> ECSRFSBackfill:
             }
         }
     }
-    return get_backfill(ecs_rfs_config, None, create_valid_cluster())
+    return get_backfill(ecs_rfs_config, create_valid_cluster())
 
 
 @pytest.fixture
@@ -54,32 +53,7 @@ def k8s_rfs_backfill() -> ECSRFSBackfill:
             }
         }
     }
-    return get_backfill(k8s_rfs_config, None, create_valid_cluster())
-
-
-@pytest.fixture
-def osi_backfill() -> OpenSearchIngestionBackfill:
-    osi_config = {
-        "opensearch_ingestion": {
-            "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
-            "vpc_subnet_ids": [
-                "subnet-024004957a02ce923"
-            ],
-            "security_group_ids": [
-                "sg-04536940716d101f6"
-            ],
-            "aws_region": "us-west-2",
-            "pipeline_name": "unit-test-pipeline",
-            "index_regex_selection": [
-                "index-.*"
-            ],
-            "log_group_name": "/aws/vendedlogs/osi-unit-test-default",
-            "tags": [
-                "migration_deployment=1.0.0"
-            ]
-        }
-    }
-    return get_backfill(osi_config, create_valid_cluster(), create_valid_cluster())
+    return get_backfill(k8s_rfs_config, create_valid_cluster())
 
 
 def test_backfill_describe_includes_salient_details_docker_rfs(docker_rfs_backfill: DockerRFSBackfill):
@@ -121,19 +95,3 @@ def test_backfill_describe_includes_salient_details_k8s_rfs(k8s_rfs_backfill: K8
     assert "docker" not in description
     assert "opensearch_ingestion" not in description
     assert "ecs" not in description
-
-
-def test_backfill_describe_includes_salient_details_osi(osi_backfill: OpenSearchIngestionBackfill):
-    # I'm trying to be quite non-prescriptive about what should be included in describe
-    # but at a minimum, the backfill strategy and deployment type need to be present.
-    result = describe(osi_backfill)
-    description = result[1]
-    assert "opensearch_ingestion" in description
-    assert "unit-test-pipeline" in description
-    assert "us-west-2" in description
-    assert "migration_deployment=1.0.0" in description
-
-    assert "docker" not in description
-    assert "ecs" not in description
-    assert "reindex_from_snapshot" not in description
-    assert "k8s" not in description
