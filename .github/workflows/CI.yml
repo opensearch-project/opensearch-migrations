@@ -232,17 +232,16 @@ jobs:
           merge-multiple: true
 
       - name: Generate aggregate JaCoCo report
-        run: gradle jacocoAggregateReport -x spotlessCheck --info --stacktrace
-        env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        run: gradle jacocoAggregateReport --stacktrace
 
       - name: Upload Aggregate JaCoCo report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           if-no-files-found: error
           name: coverage-reports-gradle-tests-aggregate
           path: |
-            **/jacocoMergedReport.xml
+            build/reports/jacoco/mergedReport/*
 
   python-e2e-tests:
     needs: [ generate-cache-key ]
