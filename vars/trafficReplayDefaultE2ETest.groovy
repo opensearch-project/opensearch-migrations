@@ -59,8 +59,6 @@ def call(Map config = [:]) {
         "trafficReplayerExtraArgs": "--speedup-factor 10.0 --transformer-config-encoded $transformersConfigArg",
         "reindexFromSnapshotServiceEnabled": true,
         "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
-        "migrationConsoleEnableOSI": true,
-        "migrationAPIEnabled": true,
         "tlsSecurityPolicy": "TLS_1_2",
         "enforceHTTPS": true,
         "nodeToNodeEncryptionEnabled": true,

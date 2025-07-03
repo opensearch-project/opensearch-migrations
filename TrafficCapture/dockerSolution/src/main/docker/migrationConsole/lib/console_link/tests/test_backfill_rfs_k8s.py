@@ -38,7 +38,7 @@ def k8s_rfs_backfill():
             }
         }
     }
-    return get_backfill(k8s_rfs_config, None, target_cluster=create_valid_cluster())
+    return get_backfill(k8s_rfs_config, target_cluster=create_valid_cluster())
 
 
 def test_get_backfill_valid_k8s_rfs(k8s_rfs_backfill):

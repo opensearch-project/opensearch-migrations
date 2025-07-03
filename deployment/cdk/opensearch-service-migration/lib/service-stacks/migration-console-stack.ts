@@ -1,9 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {VpcDetails} from "../network-stack";
 import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
     createMigrationStringParameter,
     createAllAccessOpenSearchIAMAccessPolicy,
@@ -15,8 +15,7 @@ import {
     createSnapshotOnAOSRole, createECSTaskRole
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
-import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {Fn, RemovalPolicy} from "aws-cdk-lib";
+import {Fn} from "aws-cdk-lib";
 import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
@@ -27,9 +26,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly migrationConsoleEnableOSI: boolean,
-    readonly migrationAPIEnabled?: boolean,
-    readonly migrationAPIAllowedHosts?: string,
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
@@ -80,55 +76,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         return [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy]
     }
 
-    configureOpenSearchIngestionPipelineRole(stage: string, deployId: string) {
-        const osiPipelineRole = new Role(this, 'osisPipelineRole', {
-            assumedBy: new ServicePrincipal('osis-pipelines.amazonaws.com'),
-            description: 'OpenSearch Ingestion Pipeline role for OpenSearch Migrations'
-        });
-        // Add policy to allow access to Opensearch domains in same account/region
-        osiPipelineRole.addToPolicy(new PolicyStatement({
-            effect: Effect.ALLOW,
-            actions: ["es:DescribeDomain", "es:ESHttp*"],
-            resources: [`arn:${this.partition}:es:${this.region}:${this.account}:domain/*`]
-        }))
-
-        createMigrationStringParameter(this, osiPipelineRole.roleArn, {
-            parameter: MigrationSSMParameter.OSI_PIPELINE_ROLE_ARN,
-            stage,
-            defaultDeployId: deployId,
-        });
-        return osiPipelineRole.roleArn;
-    }
-
-    createOpenSearchIngestionManagementPolicy(pipelineRoleArn: string): PolicyStatement[] {
-        // Allow all access for pipelines in other accounts or regions
-        const osiManagementPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ["*"],
-            actions: [
-                "osis:*"
-            ]
-        })
-        const passPipelineRolePolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [pipelineRoleArn],
-            actions: [
-                "iam:PassRole"
-            ]
-        })
-        const configureLogGroupPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ["*"],
-            actions: [
-                "logs:CreateLogDelivery",
-                "logs:PutResourcePolicy",
-                "logs:DescribeResourcePolicies",
-                "logs:DescribeLogGroups"
-            ]
-        })
-        return [osiManagementPolicy, passPipelineRolePolicy, configureLogGroupPolicy]
-    }
-
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
 
@@ -144,8 +91,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }))
         );
 
-        let servicePortMappings: PortMapping[]|undefined
-        let imageCommand: string[]|undefined
         const serviceName = "migration-console"
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
@@ -294,43 +239,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
         }
 
-
-        if (props.migrationAPIEnabled) {
-            servicePortMappings = [{
-                name: "migration-console-connect",
-                hostPort: 8000,
-                containerPort: 8000,
-                protocol: Protocol.TCP
-            }]
-            imageCommand = ['/bin/sh', '-c',
-                '/root/loadServicesFromParameterStore.sh && pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
-            ]
-
-            const defaultAllowedHosts = 'localhost'
-            environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
-        }
-
-        if (props.migrationConsoleEnableOSI) {
-            const pipelineRoleArn = this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
-            servicePolicies.push(...this.createOpenSearchIngestionManagementPolicy(pipelineRoleArn))
-            const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
-                retention: RetentionDays.ONE_MONTH,
-                removalPolicy: RemovalPolicy.DESTROY,
-                // Naming requirement from OSI
-                logGroupName: `/aws/vendedlogs/osi-${props.stage}-${props.defaultDeployId}`
-            });
-            createMigrationStringParameter(this, osiLogGroup.logGroupName, {
-                ...props,
-                parameter: MigrationSSMParameter.OSI_PIPELINE_LOG_GROUP_NAME,
-            });
-        }
-
         this.createService({
             serviceName: serviceName,
             dockerImageName: "migrations/migration_console:latest",
             securityGroups: securityGroups,
-            portMappings: servicePortMappings,
-            dockerImageCommand: imageCommand,
             volumes: [sharedLogFileSystem.asVolume()],
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             environment: environment,

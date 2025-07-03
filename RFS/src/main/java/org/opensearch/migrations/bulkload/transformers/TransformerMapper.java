@@ -19,6 +19,7 @@ public class TransformerMapper {
         MetadataTransformerParams metadataTransformerParams,
         boolean allowLooseMatches
     ) {
+        Transformer transformer;
         if (allowLooseMatches) {
             log.atInfo()
                 .setMessage("Allowing loose version matching, attempting to find matching transformer from {} to {}")
@@ -26,15 +27,24 @@ public class TransformerMapper {
                 .addArgument(targetVersion)
                 .log();
 
-            return looseTransformerMapping(awarenessAttributes, metadataTransformerParams);
+            transformer = looseTransformerMapping(awarenessAttributes, metadataTransformerParams);
+        } else {
+            transformer = strictTransformerMapping(awarenessAttributes, metadataTransformerParams);
         }
 
-        return strictTransformerMapping(awarenessAttributes, metadataTransformerParams);
+        log.atInfo()
+            .setMessage("Version-mapped transformer class selected: {}")
+            .addArgument(transformer.getClass().getSimpleName()).log();
+
+        return transformer;
     }
 
     private Transformer strictTransformerMapping(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
         if (VersionMatchers.anyOS.test(targetVersion)) {
-            if (VersionMatchers.isES_5_X.test(sourceVersion)) {
+            if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
+                return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+            }
+            if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)) {
                 return new Transformer_ES_5_6_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
             }
             if (VersionMatchers.isES_6_X.test(sourceVersion)) {
@@ -58,7 +68,13 @@ public class TransformerMapper {
 
     private Transformer looseTransformerMapping(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
         if (UnboundVersionMatchers.anyOS.or(UnboundVersionMatchers.isGreaterOrEqualES_6_X).test(targetVersion)) {
-            if (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)) {
+            if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)) {
+                return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+            }
+            if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
+                return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+            }
+            if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)) {
                 return new Transformer_ES_5_6_to_OS_2_11(awarenessAttributes, metadataTransformerParams);
             }
             if (VersionMatchers.isES_6_X.test(sourceVersion)) {
