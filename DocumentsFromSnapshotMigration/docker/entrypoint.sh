@@ -41,14 +41,6 @@ if [[ "$RFS_COMMAND" == *"--target-password"* || "$RFS_COMMAND" == *"--targetPas
 fi
 echo "Executing RFS_COMMAND: $SAFE_PRINT_COMMAND"
 
-if [ -n "$TARGET_USERNAME" ]; then
-  echo "TARGET_USERNAME is set by the environment."
-fi
-
-if [ -n "$TARGET_PASSWORD" ]; then
-  echo "TARGET_PASSWORD is set by the environment."
-fi
-
 # Extract the value passed after --s3-local-dir or --s3LocalDir
 S3_LOCAL_DIR=$(echo "$RFS_COMMAND" | sed -n 's/.*--\(s3-local-dir\|s3LocalDir\)\s\+\("[^"]\+"\|[^ ]\+\).*/\2/p' | tr -d '"')
 # Extract the value passed after --lucene-dir or --luceneDir

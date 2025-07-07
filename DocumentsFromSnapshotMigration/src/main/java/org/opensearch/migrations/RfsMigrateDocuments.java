@@ -15,6 +15,8 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -48,7 +50,6 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.utils.ArgLogUtils;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
@@ -69,8 +70,6 @@ public class RfsMigrateDocuments {
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
-    public static final String TARGET_USERNAME_ENV_VAR = "TARGET_USERNAME";
-    public static final String TARGET_PASSWORD_ENV_VAR = "TARGET_PASSWORD";
 
     // Decrease successor nextAcquisitionLeaseExponent if shard setup takes less than 2.5% of total lease time
     // Increase successor nextAcquisitionLeaseExponent if shard setup takes more than 10% of lease total time
@@ -265,13 +264,13 @@ public class RfsMigrateDocuments {
 
         public static void injectFromEnv(Args args) {
             List<String> addedEnvParams = new ArrayList<>();
-            if (args.targetArgs.username == null && System.getenv(TARGET_USERNAME_ENV_VAR) != null) {
-                args.targetArgs.username = System.getenv(TARGET_USERNAME_ENV_VAR);
-                addedEnvParams.add(TARGET_USERNAME_ENV_VAR);
+            if (args.targetArgs.username == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
+                args.targetArgs.username = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
             }
-            if (args.targetArgs.password == null && System.getenv(TARGET_PASSWORD_ENV_VAR) != null) {
-                args.targetArgs.password = System.getenv(TARGET_PASSWORD_ENV_VAR);
-                addedEnvParams.add(TARGET_PASSWORD_ENV_VAR);
+            if (args.targetArgs.password == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
+                args.targetArgs.password = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
             }
             if (!addedEnvParams.isEmpty()) {
                 log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
@@ -312,7 +311,7 @@ public class RfsMigrateDocuments {
 
     public static void main(String[] args) throws Exception {
         var workerId = ProcessHelpers.getNodeInstanceName();
-        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args)));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
         // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
         // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
         System.setProperty("log4j2.shutdownHookEnabled", "false");

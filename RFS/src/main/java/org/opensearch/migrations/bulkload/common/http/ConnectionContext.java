@@ -5,6 +5,8 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.time.Clock;
 
+import org.opensearch.migrations.arguments.ArgNameConstants;
+
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import com.beust.jcommander.converters.PathConverter;
@@ -137,13 +139,13 @@ public class ConnectionContext {
         public String host;
 
         @Parameter(
-            names = {"--target-username", "--targetUsername" },
+            names = {ArgNameConstants.TARGET_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.TARGET_USERNAME_ARG_KEBAB_CASE },
             description = "Optional.  The target username; if not provided, will assume no auth on target",
             required = false)
         public String username = null;
 
         @Parameter(
-            names = {"--target-password", "--targetPassword" },
+            names = {ArgNameConstants.TARGET_PASSWORD_ARG_CAMEL_CASE, ArgNameConstants.TARGET_PASSWORD_ARG_KEBAB_CASE },
             description = "Optional.  The target password; if not provided, will assume no auth on target",
             required = false)
         public String password = null;
@@ -215,13 +217,13 @@ public class ConnectionContext {
         public String host = null;
 
         @Parameter(
-            names = {"--source-username", "--sourceUsername" },
+            names = {ArgNameConstants.SOURCE_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.SOURCE_USERNAME_ARG_KEBAB_CASE },
             description = "The source username; if not provided, will assume no auth on source",
             required = false)
         public String username = null;
 
         @Parameter(
-            names = {"--source-password", "--sourcePassword" },
+            names = {ArgNameConstants.SOURCE_PASSWORD_ARG_CAMEL_CASE, ArgNameConstants.SOURCE_PASSWORD_ARG_KEBAB_CASE },
             description = "The source password; if not provided, will assume no auth on source",
             required = false)
         public String password = null;

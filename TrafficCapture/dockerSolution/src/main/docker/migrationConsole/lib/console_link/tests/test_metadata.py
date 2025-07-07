@@ -319,7 +319,7 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
     mocker.patch("sys.stderr.write")
     metadata.migrate()
 
-    username, password = target.get_basic_auth_details()
+    auth_details = target.get_basic_auth_details()
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
         "migrate",
@@ -329,8 +329,8 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
         "--s3-local-dir", config["from_snapshot"]["local_dir"],
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
-        "--target-username", username,
-        "--target-password", password,
+        "--target-username", auth_details.username,
+        "--target-password", auth_details.password,
         "--target-insecure",
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )

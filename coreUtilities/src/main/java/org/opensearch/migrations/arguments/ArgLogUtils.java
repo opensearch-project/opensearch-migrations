@@ -1,4 +1,4 @@
-package org.opensearch.migrations.utils;
+package org.opensearch.migrations.arguments;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,7 +11,7 @@ public class ArgLogUtils {
 
     public static final String CENSORED_VALUE = "******";
 
-    public static List<String> getRedactedArgs(String[] args) {
+    public static List<String> getRedactedArgs(String[] args, List<String> censoredArgs) {
         List<String> redactedArgs = new ArrayList<>();
         boolean shouldCensorNext = false;
 
@@ -19,7 +19,7 @@ public class ArgLogUtils {
             if (shouldCensorNext) {
                 redactedArgs.add(CENSORED_VALUE);
                 shouldCensorNext = false;
-            } else if (arg.equals("--target-password") || arg.equals("--targetPassword")) {
+            } else if (censoredArgs.contains(arg)) {
                 redactedArgs.add(arg);
                 shouldCensorNext = true;
             } else {

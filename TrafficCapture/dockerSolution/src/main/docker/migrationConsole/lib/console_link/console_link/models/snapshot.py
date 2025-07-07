@@ -91,10 +91,10 @@ class Snapshot(ABC):
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
-                username, password = self.source_cluster.get_basic_auth_details()
+                auth_details = self.source_cluster.get_basic_auth_details()
                 command_args.update({
-                    "--source-username": username,
-                    "--source-password": password
+                    "--source-username": auth_details.username,
+                    "--source-password": auth_details.password
                 })
                 logger.info("Using basic auth for source cluster")
             except KeyError as e:

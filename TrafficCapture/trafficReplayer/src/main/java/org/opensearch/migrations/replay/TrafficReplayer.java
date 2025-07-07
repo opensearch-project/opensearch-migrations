@@ -14,6 +14,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -29,7 +31,6 @@ import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.utils.ArgLogUtils;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
 
@@ -52,8 +53,6 @@ public class TrafficReplayer {
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
-    public static final String TARGET_USERNAME_ENV_VAR = "TARGET_USERNAME";
-    public static final String TARGET_PASSWORD_ENV_VAR = "TARGET_PASSWORD";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
@@ -106,12 +105,12 @@ public class TrafficReplayer {
             arity = 0, description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
         @Parameter(
-                names = {"--target-username", "--targetUsername" },
+                names = {ArgNameConstants.TARGET_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.TARGET_USERNAME_ARG_KEBAB_CASE },
                 description = "Username to use for basic auth with the target cluster/domain",
                 required = false)
         public String targetUsername;
         @Parameter(
-                names = {"--target-password", "--targetPassword" },
+                names = {ArgNameConstants.TARGET_PASSWORD_ARG_CAMEL_CASE, ArgNameConstants.TARGET_PASSWORD_ARG_KEBAB_CASE },
                 description = "Password to use for basic auth with the target cluster/domain",
                 required = false)
         public String targetPassword;
@@ -324,13 +323,13 @@ public class TrafficReplayer {
 
         public static void injectFromEnv(Parameters params) {
             List<String> addedEnvParams = new ArrayList<>();
-            if (params.targetUsername == null && System.getenv(TARGET_USERNAME_ENV_VAR) != null) {
-                params.targetUsername = System.getenv(TARGET_USERNAME_ENV_VAR);
-                addedEnvParams.add(TARGET_USERNAME_ENV_VAR);
+            if (params.targetUsername == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
+                params.targetUsername = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
             }
-            if (params.targetPassword == null && System.getenv(TARGET_PASSWORD_ENV_VAR) != null) {
-                params.targetPassword = System.getenv(TARGET_PASSWORD_ENV_VAR);
-                addedEnvParams.add(TARGET_PASSWORD_ENV_VAR);
+            if (params.targetPassword == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
+                params.targetPassword = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
             }
             if (!addedEnvParams.isEmpty()) {
                 log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
@@ -347,7 +346,7 @@ public class TrafficReplayer {
             jCommander.parse(args);
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
-            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args)));
+            System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
             jCommander.usage();
             System.exit(2);
             return null;
@@ -357,7 +356,7 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args)));
+        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
@@ -531,7 +530,7 @@ public class TrafficReplayer {
             REMOVE_AUTH_HEADER_VALUE_ARG,
             AUTH_HEADER_VALUE_ARG,
             SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG,
-            "--target-username and --target-password"
+            ArgNameConstants.TARGET_USERNAME_ARG_KEBAB_CASE + " and " + ArgNameConstants.TARGET_PASSWORD_ARG_KEBAB_CASE
 
         );
     }
