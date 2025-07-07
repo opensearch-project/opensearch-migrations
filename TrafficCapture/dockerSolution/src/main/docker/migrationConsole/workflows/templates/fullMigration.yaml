@@ -21,6 +21,9 @@ spec:
         value: "60"
       - name: s3-snapshot-configmap
         value: "s3-snapshot-config"
+      # Figure out how to use this
+      - name: migration-image-configmap
+        value: "migration-image-config"
       - name: etcd-image
       - name: capture-proxy-image
       - name: traffic-replayer-image

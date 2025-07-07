@@ -28,4 +28,3 @@ charts:
       extraVolumeMounts:
         - name: full-config
           mountPath: /fluent-bit/etc/custom/fluent-bit.conf
-          subPath: fluent-bit.conf

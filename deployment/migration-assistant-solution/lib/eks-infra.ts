@@ -183,6 +183,17 @@ export class EKSInfra extends Construct {
                 ],
                 resources: ['*'],
             }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    "logs:PutLogEvents",
+                    "logs:DescribeLogStreams",
+                    "logs:DescribeLogGroups",
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream"
+                ],
+                resources: ['*'],
+            }),
         );
         const buildImagesPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BuildImagesPodIdentityAssociation', {
             clusterName: props.clusterName,

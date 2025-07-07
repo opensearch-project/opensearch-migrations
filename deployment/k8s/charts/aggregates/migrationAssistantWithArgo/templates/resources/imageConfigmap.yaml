@@ -8,6 +8,10 @@ metadata:
 
 data:
   captureProxyImage: "{{ .Values.images.captureProxy.repository }}:{{ .Values.images.captureProxy.tag }}"
+  captureProxyPullPolicy: "{{ .Values.images.captureProxy.pullPolicy }}"
   trafficReplayerImage: "{{ .Values.images.trafficReplayer.repository }}:{{ .Values.images.trafficReplayer.tag }}"
+  trafficReplayerPullPolicy: "{{ .Values.images.trafficReplayer.pullPolicy }}"
   reindexFromSnapshotImage: "{{ .Values.images.reindexFromSnapshot.repository }}:{{ .Values.images.reindexFromSnapshot.tag }}"
+  reindexFromSnapshotPullPolicy: "{{ .Values.images.reindexFromSnapshot.pullPolicy }}"
   migrationConsoleImage: "{{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}"
+  migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
