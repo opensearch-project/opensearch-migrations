@@ -64,28 +64,3 @@ spec:
                   }
               }
           ]
-      - name: capture-proxy-image
-        valueFrom:
-          configMapKeyRef:
-            name: migration-image-config
-            key: captureProxyImage
-      - name: traffic-replayer-image
-        valueFrom:
-          configMapKeyRef:
-            name: migration-image-config
-            key: trafficReplayerImage
-      - name: reindex-from-snapshot-image
-        valueFrom:
-          configMapKeyRef:
-            name: migration-image-config
-            key: reindexFromSnapshotImage
-      - name: migration-console-image
-        valueFrom:
-          configMapKeyRef:
-            name: migration-image-config
-            key: migrationConsoleImage
-      - name: etcd-image
-        valueFrom:
-          configMapKeyRef:
-            name: migration-image-config
-            key: migrationConsoleImage
