@@ -9,6 +9,8 @@ spec:
     - name: snapshot-workflow
       inputs:
         parameters:
+          - name: migration-console-image
+          - name: migration-console-pull-policy
           - name: snapshot-name
             value: "migration-assistant-snapshot"
           - name: source-config
@@ -50,6 +52,10 @@ spec:
                     set -x && 
                     console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk ;
                     console --config-file=/config/migration_services.yaml -v snapshot create
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"
 
         - - name: check-snapshot-status
             template: check-snapshot-status
@@ -57,17 +63,23 @@ spec:
               parameters:
                 - name: config-contents
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"
 
     - name: check-snapshot-status
       inputs:
         parameters:
           - name: config-contents
+          - name: migration-console-image
+          - name: migration-console-pull-policy
       retryStrategy:
         limit: "200"
         retryPolicy: "Always"
         backoff:
           duration: "5"
-          factor: 2
+          factor: "2"
           maxDuration: "300"
       steps:
         - - name: check-snapshot-completion
@@ -82,3 +94,7 @@ spec:
                   value: |
                     set -x && 
                     [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ] && exit 0 || exit 1
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"

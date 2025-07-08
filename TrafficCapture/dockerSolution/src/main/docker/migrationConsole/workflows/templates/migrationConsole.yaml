@@ -133,7 +133,7 @@ spec:
             value: ""
           - name: kafka-info
             value: ""
-        steps:
+      steps:
         - - name: get-console-config
             template: get-console-config
             arguments:

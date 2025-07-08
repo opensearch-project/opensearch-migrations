@@ -308,6 +308,8 @@ spec:
                   value: "{{inputs.parameters.snapshot-and-migration-config}}"
                 - name: s3-config
                   value: "{{inputs.parameters.s3-config}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
         - - name: pipeline-snapshot-to-target
             template: pipeline-snapshot-to-target
             withParam: "{{inputs.parameters.targets}}"
@@ -323,6 +325,8 @@ spec:
                   value: "{{item}}"
                 - name: latch-coordination-prefix
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
 
     - name: pipeline-snapshot-to-target
       inputs:
@@ -332,6 +336,7 @@ spec:
           - name: migration-configs
           - name: target-config
           - name: latch-coordination-prefix
+          - name: image-config
       steps:
         - - name: pipeline-migrate-from-snapshot
             template: pipeline-migrate-from-snapshot
@@ -348,6 +353,8 @@ spec:
                   value: "{{inputs.parameters.target-config}}"
                 - name: latch-coordination-prefix
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
 
     - name: pipeline-migrate-from-snapshot
       inputs:
@@ -357,6 +364,7 @@ spec:
           - name: migration-config
           - name: target-config
           - name: latch-coordination-prefix
+          - name: image-config
       steps:
         - - name: id-generator
             template: do-nothing
@@ -388,6 +396,8 @@ spec:
                   value: "{{inputs.parameters.target-config}}"
                 - name: session-name
                   value: "{{steps.id-generator.id}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
         # Check target readiness after processing and bump it to the next phase if ready
         - - name: target-backfill-complete-check
             templateRef:
@@ -401,6 +411,10 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
                 - name: prefix
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
+                - name: etcd-utils-image
+                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+                - name: etcd-utils-pull-policy
+                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
         - - name: run-replayer-for-target
             template: run-replayer-for-target
             when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
@@ -408,6 +422,8 @@ spec:
               parameters:
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
 
 
     - name: migrate-metadata
@@ -424,9 +440,10 @@ spec:
       inputs:
         parameters:
           - name: target-config
+          - name: image-config
       container:
-        image: "{{workflow.parameters.etcd-image}}"
-        imagePullPolicy: Never
+        image: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+        imagePullPolicy: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
         command: [sh, -c] # dummy implementation that preserves some stats about the work that was done
         args:
           - |
