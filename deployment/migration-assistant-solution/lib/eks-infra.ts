@@ -18,7 +18,8 @@ export interface EKSInfraProps {
     ecrRepoName: string;
     stackName: string;
     namespace?: string;
-    serviceAccountName?: string;
+    buildImagesServiceAccountName?: string;
+    migrationsServiceAccountName?: string;
 }
 
 export class EKSInfra extends Construct {
@@ -29,7 +30,8 @@ export class EKSInfra extends Construct {
         super(scope, id);
 
         const namespace = props.namespace ?? 'ma';
-        const serviceAccountName = props.serviceAccountName ?? 'migrations-sa';
+        const buildImagesServiceAccountName = props.buildImagesServiceAccountName ?? 'build-images-service-account';
+        const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
 
         const migrationSecurityGroup = new SecurityGroup(this, 'MigrationsSecurityGroup', {
             vpc: props.vpc,
@@ -181,14 +183,31 @@ export class EKSInfra extends Construct {
                 ],
                 resources: ['*'],
             }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    "logs:PutLogEvents",
+                    "logs:DescribeLogStreams",
+                    "logs:DescribeLogGroups",
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream"
+                ],
+                resources: ['*'],
+            }),
         );
-        const podIdentityAssociation = new CfnPodIdentityAssociation(this, 'MigrationsPodIdentityAssociation', {
+        const buildImagesPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BuildImagesPodIdentityAssociation', {
             clusterName: props.clusterName,
             namespace: namespace,
-            serviceAccount: serviceAccountName,
+            serviceAccount: buildImagesServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
-        podIdentityAssociation.node.addDependency(this.cluster)
-
+        const migrationsPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'MigrationsPodIdentityAssociation', {
+            clusterName: props.clusterName,
+            namespace: namespace,
+            serviceAccount: migrationsServiceAccountName,
+            roleArn: podIdentityRole.roleArn,
+        });
+        buildImagesPodIdentityAssociation.node.addDependency(this.cluster)
+        migrationsPodIdentityAssociation.node.addDependency(this.cluster)
     }
 }

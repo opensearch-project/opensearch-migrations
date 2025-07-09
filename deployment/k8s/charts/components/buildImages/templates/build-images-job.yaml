@@ -1,11 +1,10 @@
-{{- if not .Values.skipImageBuild }}
 apiVersion: batch/v1
 kind: Job
 metadata:
   namespace: {{ .Values.namespace }}
-  name: bootstrap-helm
+  name: build-images
   labels:
-    app.kubernetes.io/component: bootstrap-helm
+    app.kubernetes.io/component: build-images
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 3600  # keep for 1 hour
@@ -26,8 +25,8 @@ spec:
         eks.amazonaws.com/compute-type: auto
       {{- end }}
       containers:
-        - name: bootstrap-helm
-          image: {{ .Values.bootstrapJobBaseImage }}
+        - name: build-images
+          image: {{ .Values.buildImagesBaseImage }}
           env:
             - name: GRADLE_OPTS
               value: "-Xms512m -Xmx4g"
@@ -98,4 +97,3 @@ spec:
               mountPath: /local-workspace
               readOnly: true
             {{- end }}
-{{- end }}

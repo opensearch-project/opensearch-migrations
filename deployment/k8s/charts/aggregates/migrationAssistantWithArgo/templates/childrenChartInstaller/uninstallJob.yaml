@@ -25,7 +25,7 @@ spec:
       containers:
         - name: helm-uninstaller
           image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
-          imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh
             - -c

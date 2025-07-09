@@ -1,4 +1,4 @@
-{{- if .Values.aws.eksEnabled }}
+{{- if eq (default false .Values.aws.eksEnabled) true }}
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:

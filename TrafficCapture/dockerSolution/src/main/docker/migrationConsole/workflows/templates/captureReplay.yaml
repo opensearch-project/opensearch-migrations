@@ -30,6 +30,7 @@ spec:
           - name: proxy-listen-port
             # Replayer setup
           - name: replayer-target-config
+          - name: image-config
       dag:
         tasks:
           - name: id-generator
@@ -97,6 +98,10 @@ spec:
                   value: "{{tasks.get-brokers-list.outputs.parameters.bootstrap-servers}}"
                 - name: kafka-topic
                   value: "{{tasks.kafka-topic-setup.outputs.parameters.topic-name}}"
+                - name: capture-proxy-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['capture-proxy']['image']}}"
+                - name: capture-proxy-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['capture-proxy']['pull-policy']}}"
 
           - name: proxy-service
             templateRef:
@@ -133,6 +138,10 @@ spec:
                   value: "{{tasks.id-generator.id}}"
                 - name: replicas
                   value: "1"
+                - name: traffic-replayer-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['traffic-replayer']['image']}}"
+                - name: traffic-replayer-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['traffic-replayer']['pull-policy']}}"
 
           - name: run-migration-console
             templateRef:
@@ -155,6 +164,10 @@ spec:
                     }
                 - name: command
                   value: tail -f /dev/null
+                - name: migration-console-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
+                - name: migration-console-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
 
           - name: get-user-satisfied-confirmation
             template: get-user-satisfied-confirmation

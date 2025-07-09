@@ -36,9 +36,11 @@ spec:
         parameters:
           - name: command
           - name: config-contents
+          - name: migration-console-image
+          - name: migration-console-pull-policy
       container:
-        image: migrations/migration_console:latest
-        imagePullPolicy: IfNotPresent
+        image: "{{inputs.parameters.migration-console-image}}"
+        imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -67,6 +69,8 @@ spec:
           - name: command
           - name: config-contents
           - name: name
+          - name: migration-console-image
+          - name: migration-console-pull-policy
       outputs:
         parameters:
           - name: deployment-name
@@ -93,8 +97,8 @@ spec:
               spec:
                 containers:
                   - name: main
-                    image: migrations/migration_console:latest
-                    imagePullPolicy: IfNotPresent
+                    image: "{{inputs.parameters.migration-console-image}}"
+                    imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
                     command:
                       - "/bin/sh"
                       - "-c"
@@ -119,6 +123,8 @@ spec:
       inputs:
         parameters:
           - name: command
+          - name: migration-console-image
+          - name: migration-console-pull-policy
           - name: source-cluster
             value: ""
           - name: target-cluster
@@ -127,7 +133,7 @@ spec:
             value: ""
           - name: kafka-info
             value: ""
-        steps:
+      steps:
         - - name: get-console-config
             template: get-console-config
             arguments:
@@ -148,11 +154,17 @@ spec:
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command
                   value: "{{inputs.parameters.command}}"
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"
 
     - name: deploy-console
       inputs:
         parameters:
           - name: command
+          - name: migration-console-image
+          - name: migration-console-pull-policy
           - name: kafka-info
             value: ""
           - name: name
@@ -191,3 +203,7 @@ spec:
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command
                   value: "{{inputs.parameters.command}}"
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"

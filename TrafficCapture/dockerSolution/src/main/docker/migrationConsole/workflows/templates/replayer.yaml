@@ -11,10 +11,10 @@ spec:
         parameters:
             # required
             - name: target-url
+            - name: traffic-replayer-image
+            - name: traffic-replayer-pull-policy
 
             # required, but has defaults
-            - name: image
-              value: "migrations/traffic_replayer:latest"
             - name: replicas
               value: "1"
 
@@ -94,8 +94,8 @@ spec:
               spec:
                 containers:
                 - name: replayer
-                  image: {{inputs.parameters.image}}
-                  imagePullPolicy: IfNotPresent
+                  image: {{inputs.parameters.traffic-replayer-image}}
+                  imagePullPolicy: {{inputs.parameters.traffic-replayer-pull-policy}}
                   env:
                     # Required parameters
                     - name: TARGET_URL

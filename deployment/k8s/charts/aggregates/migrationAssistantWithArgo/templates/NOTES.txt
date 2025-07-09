@@ -4,11 +4,11 @@ INSTALLATION SUMMARY FOR {{ .Release.Name }}
 
 Your meta-installer has successfully deployed the following charts:
 
-{{- range $chart := .Values.charts }}
-{{- if (index $.Values.conditionalPackageInstalls $chart.name) }}
-* {{ $chart.name }} (version: {{ $chart.version }})
+{{- range $name, $chart := .Values.charts }}
+  {{- if (get $.Values.conditionalPackageInstalls $name) }}
+* {{ $name }} (version: {{ $chart.version }})
   - Namespace: {{ $chart.namespace }}
-{{- end }}
+  {{- end }}
 {{- end }}
 
 AGGREGATED INSTALLATION NOTES:

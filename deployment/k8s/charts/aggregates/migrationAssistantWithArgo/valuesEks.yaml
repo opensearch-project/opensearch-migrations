@@ -1,0 +1,58 @@
+aws:
+  eksEnabled: true
+  region: ""
+
+stageName: dev
+
+charts:
+  fluent-bit:
+    values:
+      env:
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: aws-metadata
+              key: AWS_REGION
+        - name: STAGE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: aws-metadata
+              key: STAGE_NAME
+
+      config:
+        # Remove lua processing from default chart
+        filters: |
+          [FILTER]
+              Name             kubernetes
+              Match            kube.*
+              Kube_URL         https://kubernetes.default.svc:443
+              Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
+              Kube_Tag_Prefix  kube.var.log.containers.
+              Merge_Log        On
+              Merge_Log_Key    log_processed
+
+          [FILTER]
+              Name          rewrite_tag
+              Match         kube.*
+              Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+              Emitter_Name  re_emitted
+          
+          [FILTER]
+              Name  modify
+              Match *
+              Copy  log message
+        # Change output destination to be CloudWatch
+        outputs: |
+          [OUTPUT]
+              Name                cloudwatch_logs
+              Match               *
+              region              ${AWS_REGION}
+              log_group_name      /migration-assistant-${STAGE_NAME}-${AWS_REGION}/logs
+              log_stream_prefix   from-fluentbit-
+              auto_create_group   true
+              log_key             message
+
+      # Remove unnecessary mounts for EKS deployment
+      extraVolumes: []
+      extraVolumeMounts: []
