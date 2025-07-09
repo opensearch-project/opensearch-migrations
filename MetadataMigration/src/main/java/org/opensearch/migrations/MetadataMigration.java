@@ -124,16 +124,20 @@ public class MetadataMigration {
     }
 
     private static void reportLogPath() {
-        var loggingContext = (LoggerContext) LogManager.getContext(false);
-        var loggingConfig = loggingContext.getConfiguration();
-        // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
-        var metadataLogAppender = (FileAppender) loggingConfig.getAppender("MetadataRun");
-        if (metadataLogAppender != null) {
-            var logFilePath = Path.of(metadataLogAppender.getFileName());
-            log.atInfo()
-                .setMessage("Consult {} to see detailed logs for this run")
-                .addArgument(logFilePath.toAbsolutePath())
-                .log();
+        try {
+            var loggingContext = (LoggerContext) LogManager.getContext(false);
+            var loggingConfig = loggingContext.getConfiguration();
+            // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
+            var metadataLogAppender = (FileAppender) loggingConfig.getAppender("MetadataRun");
+            if (metadataLogAppender != null) {
+                var logFilePath = Path.of(metadataLogAppender.getFileName());
+                log.atInfo()
+                    .setMessage("Consult {} to see detailed logs for this run")
+                    .addArgument(logFilePath.toAbsolutePath())
+                    .log();
+            }
+        } catch (Exception e) {
+            // Ignore any exceptions if we are unable to get the log configuration
         }
     }
 }
