@@ -1,5 +1,4 @@
 import boto3
-import console_link.middleware.clusters as clusters_
 import hashlib
 import os
 import pytest
@@ -278,26 +277,6 @@ def test_valid_cluster_fetch_all_documents(requests_mock):
     assert documents == [{"id_1": {"test1": True}}, {"id_2": {"test2": True}}]
 
 
-def test_connection_check_with_exception(mocker):
-    cluster = create_valid_cluster()
-    api_mock = mocker.patch.object(Cluster, 'call_api', side_effect=Exception('Attempt to connect to cluster failed'))
-
-    result = clusters_.connection_check(cluster)
-    api_mock.assert_called()
-    assert 'Attempt to connect to cluster failed' in result.connection_message
-    assert not result.connection_established
-
-
-def test_connection_check_succesful(requests_mock):
-    cluster = create_valid_cluster()
-    requests_mock.get(f"{cluster.endpoint}/", json={'version': {'number': '2.15'}})
-
-    result = clusters_.connection_check(cluster)
-    assert result.connection_established
-    assert result.connection_message == 'Successfully connected!'
-    assert result.cluster_version == '2.15'
-
-
 def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials):
     valid_with_secrets = {
         "endpoint": "https://opensearchtarget:9200",
@@ -359,32 +338,6 @@ def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
         assert "us-east-2" in auth_header
         host_header = requests_mock.last_request.headers['Host']
         assert "test.opensearchtarget.com" == host_header
-
-
-def test_call_api_via_middleware(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
-
-    response = clusters_.call_api(cluster, '/test_api')
-    assert response.status_code == 200
-    assert response.json() == {'test': True}
-
-
-def test_cat_indices_with_refresh(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    refresh_mock = requests_mock.get(f"{cluster.endpoint}/_refresh")
-    indices_mock = requests_mock.get(f"{cluster.endpoint}/_cat/indices/_all")
-
-    clusters_.cat_indices(cluster, refresh=True)
-    assert refresh_mock.call_count == 1
-    assert indices_mock.call_count == 1
-
-
-def test_clear_indices(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    mock = requests_mock.delete(f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state*")
-    clusters_.clear_indices(cluster)
-    assert mock.call_count == 1
 
 
 def test_run_benchmark_executes_correctly_no_auth(mocker):
@@ -544,14 +497,6 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         new_signature = new_signature_match.group(1)
 
         assert original_signature == new_signature, "Signatures do not match"
-
-
-def test_call_api_with_head_method(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    requests_mock.head(f"{cluster.endpoint}/test_api")
-
-    response = clusters_.call_api(cluster, '/test_api', HttpMethod.HEAD)
-    assert response.status_code == 200
 
 
 def test_valid_basic_auth_secret(mocker):

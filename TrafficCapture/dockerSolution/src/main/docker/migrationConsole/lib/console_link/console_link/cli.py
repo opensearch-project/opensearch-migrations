@@ -192,10 +192,15 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     if path[0] != '/':
         path = '/' + path
 
-    response = clusters_.call_api(cluster, path, method=HttpMethod[request], headers=headers, data=data)
-    if not response.ok:
-        click.echo(f"Error: {response.status_code}")
-    click.echo(response.text)
+    result: clusters_.CallAPIResult = clusters_.call_api(cluster, path, method=HttpMethod[request],
+                                                         headers=headers, data=data)
+    if result.error_message:
+        click.echo(result.error_message)
+    else:
+        response = result.http_response
+        if not response.ok:
+            click.echo(f"Error: {response.status_code}")
+        click.echo(response.text)
 
 
 # ##################### SNAPSHOT ###################
