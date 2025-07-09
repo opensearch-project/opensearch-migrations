@@ -39,7 +39,7 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
     for _ in range(1, max_attempts + 1):
         try:
             result: CallAPIResult = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers,
-                                             timeout=timeout,session=session, raise_error=False)
+                                             timeout=timeout, session=session, raise_error=False)
             response = result.http_response
             last_response = response
             if response.status_code == expected_status_code:
