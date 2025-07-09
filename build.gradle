@@ -7,7 +7,7 @@ plugins {
     id "com.diffplug.spotless" version '7.0.4'
     id 'io.freefair.lombok' version '8.14' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
-    id 'com.gradleup.shadow' version '8.3.7' apply false
+    id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.google.protobuf' version "0.9.5" apply false
     id 'com.google.cloud.tools.jib' version '3.4.5' apply false
@@ -420,6 +420,42 @@ tasks.register('jacocoAggregateReport', JacocoReport) {
         html.required = true
         html.destination file("${buildDir}/reports/jacoco/mergedReport/html")
     }
+
+    doLast {
+        File xmlFile = reports.xml.outputLocation.get().asFile
+        // Doctype's are not allowed by the XmlParser, so remove them
+        String xmlText = xmlFile.text.replaceAll(/(?m)<!DOCTYPE[^>]*>/, "")
+        def reportXml = new XmlParser().parseText(xmlText)
+
+        List<String> summaryLines = []
+        summaryLines << "### Code Coverage Summary"
+        reportXml.counter.each { c ->
+            int missed  = c.@missed  as int
+            int covered = c.@covered as int
+            int total   = missed + covered
+            double percent  = total ? (covered / total * 100) : 0
+            // Looks like: "LINE       : 85.4% (123/144)"
+            summaryLines <<  String.format(
+                "%-12s : %6.1f%% (%d/%d)",
+                c.@type, percent, covered, total
+            )
+        }
+
+        // Print to the console logger
+        summaryLines.each { line ->
+            logger.lifecycle(line)
+        }
+
+        // If running in a github action, print into that file
+        def summaryPath = System.getenv('GITHUB_STEP_SUMMARY')
+        if (summaryPath) {
+            def ghaSummary = new File(summaryPath)
+            ghaSummary.parentFile?.mkdirs()
+            ghaSummary.withWriterAppend { w ->
+                summaryLines.each { w.println(it) }
+            }
+        }
+    }
 }
 
 gradle.projectsEvaluated {
@@ -497,6 +533,15 @@ def syncJacocoExecFiles = tasks.register("syncJacocoExecFiles", Sync) {
 
     from jacocoExecFilesProvider
     dependsOn jacocoTestTasksProvider
+}
+
+tasks.register('gatherJacocoExecForMerging', Copy) {
+    description = 'Local troubleshooting, gathers coverage all exec files in build/jacocoMerged/*.exec into to be consumed by jacocoAggregateReport'
+
+    from subprojects.collect { proj ->
+        fileTree(dir: proj.buildDir, include: 'jacoco/*.exec')
+    }
+    into "$buildDir/jacocoMerged"
 }
 
 tasks.register('mergeJacocoReports') {
