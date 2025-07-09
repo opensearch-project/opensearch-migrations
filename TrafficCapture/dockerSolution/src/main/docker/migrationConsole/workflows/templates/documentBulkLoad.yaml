@@ -142,13 +142,13 @@ spec:
                 - name: index-allowlist
                   value: "{{inputs.parameters.index-allowlist}}"
                 - name: reindex-from-snapshot-image
-                  value: "{{=fromJson(inputs.parameters['image-config'])['reindex-from-snapshot']['image']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['reindex-from-snapshot']['image']}}"
                 - name: reindex-from-snapshot-pull-policy
-                  value: "{{=fromJson(inputs.parameters['image-config'])['reindex-from-snapshot']['pull-policy']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['reindex-from-snapshot']['pull-policy']}}"
                 - name: migration-console-image
-                  value: "{{=fromJson(inputs.parameters['image-config'])['migration-console']['image']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
                 - name: migration-console-pull-policy
-                  value: "{{=fromJson(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
 
         - - name: setup-wait-for-completion
             templateRef:
@@ -175,9 +175,9 @@ spec:
                 - name: config-contents
                   value: "{{steps.setup-wait-for-completion.outputs.parameters.config-contents}}"
                 - name: migration-console-image
-                  value: "{{=fromJson(inputs.parameters['image-config'])['migration-console']['image']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
                 - name: migration-console-pull-policy
-                  value: "{{=fromJson(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
 
         - - name: cleanup-rfs-replicaset
             template: delete-rs

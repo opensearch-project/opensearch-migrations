@@ -169,29 +169,29 @@ spec:
         parameters:
           - name: image-config
             valueFrom:
-              expression: >
-                {
-                  "capture-proxy": {
-                    "image": "{{inputs.parameters.capture-proxy-image}}",
-                    "pull-policy": "{{inputs.parameters.capture-proxy-pull-policy}}"
-                  },
-                  "traffic-replayer": {
-                    "image": "{{inputs.parameters.traffic-replayer-image}}",
-                    "pull-policy": "{{inputs.parameters.traffic-replayer-pull-policy}}"
-                  },
-                  "reindex-from-snapshot": {
-                    "image": "{{inputs.parameters.reindex-from-snapshot-image}}",
-                    "pull-policy": "{{inputs.parameters.reindex-from-snapshot-pull-policy}}"
-                  },
-                  "migration-console": {
-                    "image": "{{inputs.parameters.migration-console-image}}",
-                    "pull-policy": "{{inputs.parameters.migration-console-pull-policy}}"
-                  },
-                  "etcd-utils": {
-                    "image": "{{inputs.parameters.etcd-utils-image}}",
-                    "pull-policy": "{{inputs.parameters.etcd-utils-pull-policy}}"
-                  }
-                }
+              expression: >-
+                '{' +
+                  '"capture-proxy": {' +
+                    '"image": "' + inputs.parameters['capture-proxy-image'] + '", ' +
+                    '"pull-policy": "' + inputs.parameters['capture-proxy-pull-policy'] + '"' +
+                  '}, ' +
+                  '"traffic-replayer": {' +
+                    '"image": "' + inputs.parameters['traffic-replayer-image'] + '", ' +
+                    '"pull-policy": "' + inputs.parameters['traffic-replayer-pull-policy'] + '"' +
+                  '}, ' +
+                  '"reindex-from-snapshot": {' +
+                    '"image": "' + inputs.parameters['reindex-from-snapshot-image'] + '", ' +
+                    '"pull-policy": "' + inputs.parameters['reindex-from-snapshot-pull-policy'] + '"' +
+                  '}, ' +
+                  '"migration-console": {' +
+                    '"image": "' + inputs.parameters['migration-console-image'] + '", ' +
+                    '"pull-policy": "' + inputs.parameters['migration-console-pull-policy'] + '"' +
+                  '}, ' +
+                  '"etcd-utils": {' +
+                    '"image": "' + inputs.parameters['etcd-utils-image'] + '", ' +
+                    '"pull-policy": "' + inputs.parameters['etcd-utils-pull-policy'] + '"' +
+                  '}' +
+                '}'
       steps: [[]]  # no-op
 
 
@@ -219,9 +219,9 @@ spec:
                 - name: prefix
                   value: "workflow-{{workflow.uid}}"
                 - name: etcd-utils-image
-                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
                 - name: etcd-utils-pull-policy
-                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
 
         - - name: pipeline-source-migration
             template: pipeline-source-migration
@@ -248,9 +248,9 @@ spec:
                 - name: prefix
                   value: "{{steps.init.outputs.parameters.prefix}}"
                 - name: etcd-utils-image
-                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
                 - name: etcd-utils-pull-policy
-                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
 
 
     # Unroll snapshotting and their dependent steps ('source-migration-configs')
@@ -412,9 +412,9 @@ spec:
                 - name: prefix
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: etcd-utils-image
-                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
                 - name: etcd-utils-pull-policy
-                  value: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
         - - name: run-replayer-for-target
             template: run-replayer-for-target
             when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
@@ -442,8 +442,8 @@ spec:
           - name: target-config
           - name: image-config
       container:
-        image: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['image']}}"
-        imagePullPolicy: "{{=fromJson(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
+        image: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+        imagePullPolicy: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
         command: [sh, -c] # dummy implementation that preserves some stats about the work that was done
         args:
           - |

@@ -37,6 +37,11 @@ charts:
               Match         kube.*
               Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
               Emitter_Name  re_emitted
+          
+          [FILTER]
+              Name  modify
+              Match *
+              Copy  log message
         # Change output destination to be CloudWatch
         outputs: |
           [OUTPUT]
