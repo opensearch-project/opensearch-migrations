@@ -130,7 +130,7 @@ public class MetadataMigration {
             // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
             var metadataLogAppender = (FileAppender) loggingConfig.getAppender("MetadataRun");
             if (metadataLogAppender != null) {
-                var logFilePath = Path.of(metadataLogAppender.getFileName());
+                var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
                 log.atInfo()
                     .setMessage("Consult {} to see detailed logs for this run")
                     .addArgument(logFilePath.toAbsolutePath())
