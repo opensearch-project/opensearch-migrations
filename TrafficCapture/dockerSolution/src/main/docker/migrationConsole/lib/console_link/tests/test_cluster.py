@@ -552,3 +552,73 @@ def test_call_api_with_head_method(requests_mock):
 
     response = clusters_.call_api(cluster, '/test_api', HttpMethod.HEAD)
     assert response.status_code == 200
+
+
+def test_valid_basic_auth_secret(mocker):
+    mock_client = mocker.Mock()
+    mock_client.get_secret_value.return_value = {
+        "SecretString": '{"username": "admin", "password": "pass123!"}'
+    }
+    mocker.patch("console_link.models.cluster.create_boto3_client", return_value=mock_client)
+    secret_arn = "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+
+    cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "basic_auth": {
+            "user_secret_arn": secret_arn
+        },
+    }
+    cluster = Cluster(cluster_config)
+    auth_details = cluster.get_basic_auth_details()
+    mock_client.get_secret_value.assert_called_once_with(
+        SecretId=secret_arn
+    )
+    assert mock_client.get_secret_value.call_count == 1
+    assert auth_details.username == "admin"
+    assert auth_details.password == "pass123!"
+
+
+def test_invalid_basic_auth_secret_no_json(mocker):
+    mock_client = mocker.Mock()
+    mock_client.get_secret_value.return_value = {
+        "SecretString": "pass123!"
+    }
+    mocker.patch("console_link.models.cluster.create_boto3_client", return_value=mock_client)
+    secret_arn = "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+
+    cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "basic_auth": {
+            "user_secret_arn": secret_arn
+        },
+    }
+    cluster = Cluster(cluster_config)
+    with pytest.raises(ValueError) as exc_info:
+        cluster.get_basic_auth_details()
+    assert str(exc_info.value) == (f"Expected secret {secret_arn} to be a JSON object with username "
+                                   f"and password fields")
+    mock_client.get_secret_value.assert_called_once_with(SecretId=secret_arn)
+
+
+def test_invalid_basic_auth_secret_improper_fields(mocker):
+    mock_client = mocker.Mock()
+    mock_client.get_secret_value.return_value = {
+        "SecretString": '{"user": "admin", "pass": "pass123!"}'
+    }
+    mocker.patch("console_link.models.cluster.create_boto3_client", return_value=mock_client)
+    secret_arn = "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+
+    cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "basic_auth": {
+            "user_secret_arn": secret_arn
+        },
+    }
+    cluster = Cluster(cluster_config)
+    with pytest.raises(ValueError) as exc_info:
+        cluster.get_basic_auth_details()
+    assert str(exc_info.value) == (f"Secret {secret_arn} is missing required key(s): username, password")
+    mock_client.get_secret_value.assert_called_once_with(SecretId=secret_arn)

@@ -136,16 +136,16 @@ class Cluster:
         assert "user_secret_arn" in self.auth_details  # for mypy's sake
         client = create_boto3_client(aws_service_name="secretsmanager", client_options=self.client_options)
         secret_response = client.get_secret_value(SecretId=self.auth_details["user_secret_arn"])
-        secret_dict = json.loads(secret_response["SecretString"])
-
-        if not isinstance(secret_dict, dict):
+        try:
+            secret_dict = json.loads(secret_response["SecretString"])
+        except json.JSONDecodeError:
             raise ValueError(f"Expected secret {self.auth_details['user_secret_arn']} to be a JSON object with username"
                              f" and password fields")
 
         missing_keys = [k for k in ("username", "password") if k not in secret_dict]
         if missing_keys:
             raise ValueError(
-                f"Secret is missing required key(s): {', '.join(missing_keys)}"
+                f"Secret {self.auth_details['user_secret_arn']} is missing required key(s): {', '.join(missing_keys)}"
             )
 
         return AuthDetails(username=secret_dict["username"], password=secret_dict["password"])
