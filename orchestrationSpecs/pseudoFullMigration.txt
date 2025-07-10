@@ -1,0 +1,79 @@
+
+K8sTemplate {
+  serviceAccountName: "workflow-service-account",
+  name: "fullMigration",
+  workflowParameters: {
+	etcdEndpoints:       { defaultValue: "http://etcd.ma.svc.cluster.local:2379" },
+	etcdUser:            { defaultValue: "root" },
+	etcdPassword:        { defaultValue: "password" },
+	etcdImage:           { defaultValue: "migrations/migration_console:latest" },
+	s3SnapshotConfigMap: { defaultValue: "s3-snapshot-config" }
+  }
+  templates: {
+    main: Workflow.Steps(
+      inputs: {
+        sourceMigrationConfigs: InputParameterDefinition<list<SOURCE_MIGRATION_CONFIG>> {
+          description: "List of server configurations to direct migrated traffic toward"
+        },
+        targets: InputParameterDefinition<list<CLUSTER_CONFIG>> {
+          description: "List of server configurations to direct migrated traffic toward",
+          type: CLUSTER_CONFIG // THIS OR the template instantiation should be sufficient
+        },
+        s3Params: Bundle( // inlined as separate parameters, but we can pass these around in aggregate?
+          s3AwsRegion: { // type InputParameterDefinition and its parameter T are inferred
+            defaultValue: ValueFromConfigMap(map: workflowParameters.s3SnapshotConfigMap, key: "AWS_REGION", type: string),
+          },
+          s3Endpoint: InputParameterDefinition<string> {
+            defaultValue: // type of the configmap is inferred
+              ValueFromConfigMap(map: workflowParameters.s3SnapshotConfigMap, key: "ENDPOINT")
+          },
+          s3RepoUri: InputParameterDefinition<string> {
+            defaultValue: ValueFromConfigMap(map: workflowParameters.s3SnapshotConfigMap, key: "repo_uri")
+          }
+        )
+      }
+      steps: [
+        invoke<AllTemplates.TargetLatchHelpers.Init>(init,
+              // getting intellisense on the parameters list would be critical to any of these approaches
+              configurations: templateRef.inputs.configurations,
+              targets:        templateRef.inputs.targets,
+              prefix:         WorkflowGlobals.uid,
+          )
+          // lift all other optional parameters as setter methods on the builder-ish thing that invoke returns
+          //.when(...) // if necessary
+        },
+        { sourceMigration: {
+            templateRef: templates.sourceMigration,
+            loop:        inputs.parameters.sourceMigrationConfigs,
+            argumentMappings: {
+              sourceMigrationConfig: loop.item, // notice that there is a different loop type for reading
+              // TODO figure out a better way to filter that still has referential integrity
+              //{ for k,v in inputs.parameters.filter(p->p.name!=inputs.parameters.sourceMigrationConfigs.name) { k: v} }
+              targets: inputs.parameters.targets,
+              s3Config: inputs.parameters.s3Params
+            }
+          }
+        },
+        { cleanup: {
+            templateRef: AllTemplates.TargetLatchHelpers.Cleanup,
+            argumentMappings: {
+              prefix: steps.init.outputs.prefix
+            }
+          }
+        }
+      ]
+    ),
+    sourceMigration: Workflow.Steps(
+      inputs: {
+        sourceMigrationConfig: struct<SNAPSHOT_MIGRATION_CONFIG>
+        targets:               list<CLUSTER_CONFIG>,
+        s3Config:              struct<>
+        latchCoordinationPrefix: string
+        sampleOptionalArg?:    { type: boolean }
+      },
+      steps: [
+
+      ]
+    )
+  }
+}
