@@ -105,13 +105,13 @@ public class MetadataMigration {
         sb.append("Usage: [options] [command] [commandOptions]");
         sb.append("Options:");
         for (var parameter : commander.getParameters()) {
-            sb.append("  " + parameter.getNames());
-            sb.append("    " + parameter.getDescription());
+            sb.append("  ").append(parameter.getNames());
+            sb.append("    ").append(parameter.getDescription());
         }
 
         sb.append("Commands:");
         for (var command : commander.getCommands().entrySet()) {
-            sb.append("  " + command.getKey());
+            sb.append("  ").append(command.getKey());
         }
         sb.append("\nUse --help with a specific command for more information.");
         log.info(sb.toString());
