@@ -38,7 +38,7 @@ class EvaluateTest {
         var results = meta.evaluate(args).execute(context);
 
         assertThat(results.getExitCode(), equalTo(Evaluate.UNEXPECTED_FAILURE_CODE));
-        assertThat(results.getErrorMessage(), equalTo("Unexpected failure: host is null"));
+        assertThat(results.getErrorMessage(), equalTo("Unexpected failure: No host was found"));
     }
 
     @Test
