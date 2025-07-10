@@ -167,7 +167,7 @@ export class MigrationServiceCore extends Stack {
 
         // Add any ServiceManagedVolumes to the service, if they exist
         if (props.volumes) {
-            props.volumes.filter(vol => vol instanceof ServiceManagedVolume).forEach(vol => fargateService.addVolume(vol as ServiceManagedVolume));
+            props.volumes.filter(vol => vol instanceof ServiceManagedVolume).forEach(vol => fargateService.addVolume(vol));
         }
 
         if (props.targetGroups) {
