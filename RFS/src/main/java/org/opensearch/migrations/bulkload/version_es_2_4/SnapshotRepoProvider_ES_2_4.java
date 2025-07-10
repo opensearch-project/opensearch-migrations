@@ -132,6 +132,11 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
         return repo;
     }
 
+    @Override
+    public SnapshotRepo.Provider getDelegateRepo() {
+        return this;
+    }
+
     public static class SimpleSnapshot implements SnapshotRepo.Snapshot {
         private final String name;
 

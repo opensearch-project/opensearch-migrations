@@ -135,9 +135,15 @@ public class IndexTemplateData_ES_2_4 extends IndexTemplate {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode root = mapper.createObjectNode();
 
-        root.put("name", name);
+        // Opensearch fails to recognize "name" or "template" as top-level string, hence they have been dropped.
         root.put("order", order);
-        root.put("template", template);
+
+        // Convert "template" string into "index_patterns" array
+        if (template != null) {
+            ArrayNode indexPatternsNode = mapper.createArrayNode();
+            indexPatternsNode.add(template);
+            root.set("index_patterns", indexPatternsNode);
+        }
 
         // Settings
         root.set("settings", settings.deepCopy());
@@ -150,22 +156,21 @@ public class IndexTemplateData_ES_2_4 extends IndexTemplate {
         root.set("mappings", mappingsNode);
 
         // Aliases
-        ArrayNode aliasesArray = mapper.createArrayNode();
+        ObjectNode aliasesNode = mapper.createObjectNode();
         for (AliasMetadata alias : aliases) {
-            ObjectNode obj = mapper.createObjectNode();
-            obj.put("alias", alias.getAlias());
-            if (alias.getIndexRouting() != null) obj.put("indexRouting", alias.getIndexRouting());
-            if (alias.getSearchRouting() != null) obj.put("searchRouting", alias.getSearchRouting());
-            if (alias.getWriteIndex() != null) obj.put("writeIndex", alias.getWriteIndex());
-            if (alias.getFilter() != null) obj.put("filter", alias.getFilter());
+            ObjectNode aliasObj = mapper.createObjectNode();
+            if (alias.getIndexRouting() != null) aliasObj.put("indexRouting", alias.getIndexRouting());
+            if (alias.getSearchRouting() != null) aliasObj.put("searchRouting", alias.getSearchRouting());
+            if (alias.getWriteIndex() != null) aliasObj.put("writeIndex", alias.getWriteIndex());
+            if (alias.getFilter() != null) aliasObj.put("filter", alias.getFilter());
 
             ObjectNode settingsObj = mapper.createObjectNode();
             alias.getSettings().forEach(settingsObj::put);
-            obj.set("settings", settingsObj);
+            aliasObj.set("settings", settingsObj);
 
-            aliasesArray.add(obj);
+            aliasesNode.set(alias.getAlias(), aliasObj);
         }
-        root.set("aliases", aliasesArray);
+        root.set("aliases", aliasesNode);
 
         return root;
     }

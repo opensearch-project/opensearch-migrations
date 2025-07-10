@@ -11,4 +11,5 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 public interface SnapshotRepo_ES_2_4 extends SnapshotRepo.Provider {
     List<String> listIndices();
     byte[] getIndexMetadataFile(String indexName);
+    SnapshotRepo.Provider getDelegateRepo();
 }
