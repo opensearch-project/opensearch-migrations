@@ -215,7 +215,7 @@ public class RfsMigrateDocuments {
                 throw new ParameterException("Incoming value '" + value + "'did not match regex pattern " + REGEX_PATTERN);
             }
         }
-    };
+    }
 
     @Getter
     public static class DocParams implements TransformerParams {

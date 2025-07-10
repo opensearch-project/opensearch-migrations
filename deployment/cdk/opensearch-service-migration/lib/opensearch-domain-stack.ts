@@ -125,7 +125,7 @@ export class OpenSearchDomainStack extends Stack {
     } else {
       clusterAuth.noAuth = new ClusterNoAuth();
     }
-     this.targetClusterYaml = new ClusterYaml({endpoint: `https://${domain.domainEndpoint}:443`, auth: clusterAuth, version: version.toString()})
+     this.targetClusterYaml = new ClusterYaml({endpoint: `https://${domain.domainEndpoint}:443`, auth: clusterAuth, version: version.version})
 
   }
 
