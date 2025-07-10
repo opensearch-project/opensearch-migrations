@@ -225,12 +225,15 @@ public class ClusterOperations {
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
         boolean useTypedMappings = !VersionMatchers.isES_8_X.test(clusterVersion);
 
-        var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
+        var matchPatternClause = (VersionMatchers.isES_2_X
+            .or(VersionMatchers.isES_5_X))
+            .test(clusterVersion)
             ? "\"template\":\"" + pattern + "\","
             : "\"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
             "  ],\r\n";
-        final var templateJson = "{\r\n" + //
+        
+        final var templateJson = "{\r\n" +
             "  " + matchPatternClause +
             "  \"settings\": {\r\n" +
             "    \"number_of_shards\": 1\r\n" +
@@ -244,12 +247,11 @@ public class ClusterOperations {
             "        \"enabled\": true\r\n" +
             "      },\r\n" +
             "      \"properties\": {\r\n" +
-            "        \"host_name\": {\r\n" +
-            "          \"type\": \"keyword\"\r\n" +
+            "        \"age\": {\r\n" +
+            "          \"type\": \"integer\"\r\n" +
             "        },\r\n" +
-            "        \"created_at\": {\r\n" +
-            "          \"type\": \"date\",\r\n" +
-            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" +
+            "        \"is_active\": {\r\n" +
+            "          \"type\": \"boolean\"\r\n" +
             "        }\r\n" +
             "      }\r\n" +
             (useTypedMappings ? "    }\r\n" : "") +
@@ -257,7 +259,8 @@ public class ClusterOperations {
             "}";
 
         var extraParameters = (
-                VersionMatchers.isES_5_X
+                VersionMatchers.isES_2_X
+                        .or(VersionMatchers.isES_5_X)
                         .or(VersionMatchers.isES_8_X)
                         .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_6)
             ).test(clusterVersion)
