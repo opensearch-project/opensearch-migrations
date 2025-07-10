@@ -134,7 +134,7 @@ export class VpcDetails {
                 throw new Error(`Not enough AZs (${azCount} unique AZs detected) used for private subnets to meet the ${azCount} AZ requirement. Alternatively subnets can be manually specified with the 'vpcSubnetIds' option and the AZ requirement set with the 'vpcAZCount' option`)
             }
             const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds
-                .toSorted((a, b) => a.localeCompare(b))
+                .sort((a, b) => a.localeCompare(b))
                 .slice(0, azCount);
             this.subnetSelection = vpc.selectSubnets({
                 subnetFilters: [
