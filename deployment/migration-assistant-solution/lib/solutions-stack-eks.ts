@@ -37,9 +37,6 @@ export interface SolutionsInfrastructureStackEKSProps extends StackProps {
 }
 
 function importVPC(stack: Stack, vpdIdParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter): IVpc {
-    // TODO add support for import VPC scenario with VPC validations
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const privateSubnetIds = privateSubnetIdsParameter.valueAsList
     return Vpc.fromLookup(stack, 'ImportedVPC', {
         vpcId: vpdIdParameter.valueAsString,
     });
