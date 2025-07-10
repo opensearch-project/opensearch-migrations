@@ -35,7 +35,9 @@ public class ConnectionContext {
     private TlsCredentialsProvider tlsCredentialsProvider;
 
     private ConnectionContext(IParams params) {
-        assert params.getHost() != null : "host is null";
+        if (params.getHost() == null) {
+            throw new IllegalArgumentException("No host was found");
+        }
 
         this.insecure = params.isInsecure();
 
