@@ -51,8 +51,7 @@ public class GlobalMetadataData_ES_2_4 implements GlobalMetadata {
         ObjectNode templatesNode = mapper.createObjectNode();
         if (templates != null) {
             for (IndexTemplate tmpl : templates) {
-                IndexTemplateData_ES_2_4 typed = (IndexTemplateData_ES_2_4) tmpl;
-                templatesNode.set(typed.getName(), typed.toObjectNode());
+                templatesNode.set(tmpl.name, tmpl.body);
             }
         }
         return templatesNode;
@@ -93,8 +92,7 @@ public class GlobalMetadataData_ES_2_4 implements GlobalMetadata {
         ObjectNode templatesNode = mapper.createObjectNode();
         if (templates != null) {
             for (IndexTemplate tmpl : templates) {
-                IndexTemplateData_ES_2_4 typed = (IndexTemplateData_ES_2_4) tmpl;
-                templatesNode.set(typed.getName(), typed.toObjectNode());
+                templatesNode.set(tmpl.name, tmpl.body);
             }
         }
         root.set("templates", templatesNode);

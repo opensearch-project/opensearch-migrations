@@ -129,7 +129,6 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
     @Override
     public IndexMetadata deepCopy() {
-        ObjectMapper mapper = new ObjectMapper();
         return new IndexMetadataData_ES_2_4(
             index,
             version,
