@@ -25,7 +25,7 @@ def collect_snippet_dependencies(key, original_dict,
 
 
 def construct_command(selected_keys, deps):
-    dependency_depth_dict = dict()
+    dependency_depth_dict = {}
     for key in selected_keys:
         found_key = collect_snippet_dependencies(key, deps, 0, deps, set(), dependency_depth_dict)
         assert found_key, f"key={key}"
