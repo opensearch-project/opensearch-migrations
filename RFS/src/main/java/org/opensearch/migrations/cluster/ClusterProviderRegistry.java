@@ -10,6 +10,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.version_es_2_4.SnapshotReader_ES_2_4;
 import org.opensearch.migrations.bulkload.version_es_5_4.SnapshotReader_ES_5_4;
 import org.opensearch.migrations.bulkload.version_es_6_8.RemoteWriter_ES_6_8;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
@@ -27,6 +28,7 @@ public class ClusterProviderRegistry {
     /** Ensure we are always getting fresh providers when searching for one */
     private List<VersionSpecificCluster> getProviders() {
         return List.of(
+            new SnapshotReader_ES_2_4(),    
             new SnapshotReader_ES_5_4(),
             new SnapshotReader_ES_6_8(),
             new SnapshotReader_ES_7_10(),
