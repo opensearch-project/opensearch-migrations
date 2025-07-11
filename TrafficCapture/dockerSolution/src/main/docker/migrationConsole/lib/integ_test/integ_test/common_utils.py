@@ -1,7 +1,7 @@
 import time
 import logging
 from requests.exceptions import ConnectionError, SSLError
-from console_link.middleware.clusters import call_api
+from console_link.middleware.clusters import call_api, CallAPIResult
 from console_link.models.cluster import HttpMethod, Cluster
 
 logger = logging.getLogger(__name__)
@@ -38,8 +38,11 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
     last_response = None
     for _ in range(1, max_attempts + 1):
         try:
-            response = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers, timeout=timeout,
-                                session=session, raise_error=False)
+            result: CallAPIResult = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers,
+                                             timeout=timeout, session=session, raise_error=False)
+            if result.error_message:
+                logger.info("Exception occurred when using call_api on cluster: ", exc_info=True)
+            response = result.http_response
             last_response = response
             if response.status_code == expected_status_code:
                 break

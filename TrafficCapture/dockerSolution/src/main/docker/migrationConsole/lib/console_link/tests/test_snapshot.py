@@ -360,12 +360,13 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
     mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create()
+    auth_details = snapshot.source_cluster.get_basic_auth_details()
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", snapshot.source_cluster.endpoint,
-                                  "--source-username", snapshot.source_cluster.auth_details.get("username"),
-                                  "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-username", auth_details.username,
+                                  "--source-password", auth_details.password,
                                   "--source-insecure",
                                   "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
@@ -388,12 +389,13 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
     mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
     snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
+    auth_details = snapshot.source_cluster.get_basic_auth_details()
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", snapshot.source_cluster.endpoint,
-                                  "--source-username", snapshot.source_cluster.auth_details.get("username"),
-                                  "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-username", auth_details.username,
+                                  "--source-password", auth_details.password,
                                   "--source-insecure",
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),

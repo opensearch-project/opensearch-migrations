@@ -1,12 +1,13 @@
 import {StackPropsExt} from "../stack-composer";
 import {VpcDetails} from "../network-stack";
 import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, Secret as EcsSecret} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
     ClusterAuth,
+    ContainerEnvVarNames,
     MigrationSSMParameter,
     createMSKConsumerIAMPolicies,
     createAllAccessOpenSearchIAMAccessPolicy,
@@ -14,12 +15,11 @@ import {
     getMigrationStringParameterValue, appendArgIfNotInExtraArgs, parseArgsToDict
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
-import {Duration, SecretValue} from "aws-cdk-lib";
+import {Duration} from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ECSReplayerYaml } from "../migration-services-yaml";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
-import {Secret} from "aws-cdk-lib/aws-secretsmanager";
-import { CdkLogger } from "../cdk-logger";
+import {Secret as SecretsManagerSecret} from "aws-cdk-lib/aws-secretsmanager";
 import * as CaptureReplayDashboard from '../components/capture-replay-dashboard.json';
 import { MigrationDashboard } from '../constructs/migration-dashboard';
 
@@ -94,24 +94,11 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-topic", "logging-traffic-topic")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-group-id", groupId)
 
+        const secrets: Record<string, EcsSecret> = {}
         if (props.clusterAuthDetails.basicAuth) {
-            let secret;
-            if (props.clusterAuthDetails.basicAuth.password) {
-                CdkLogger.warn("Password passed in plain text, this is insecure and will leave" +
-                    "your password exposed.")
-                secret = new Secret(this,"ReplayerClusterPasswordSecret", {
-                    secretName: `replayer-user-secret-${props.stage}-${deployId}`,
-                    secretStringValue: SecretValue.unsafePlainText(props.clusterAuthDetails.basicAuth.password)
-                })
-            } else if (props.clusterAuthDetails.basicAuth.password_from_secret_arn) {
-                secret = Secret.fromSecretCompleteArn(this, "ReplayerClusterPasswordSecretImport",
-                props.clusterAuthDetails.basicAuth.password_from_secret_arn)
-            } else {
-                throw new Error("Replayer secret or password must be provided if using basic auth.")
-            }
-
-            const bashSafeUserAndSecret = `"${props.clusterAuthDetails.basicAuth.username}" "${secret.secretArn}"`
-            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--auth-header-user-and-secret", bashSafeUserAndSecret)
+            const secret = SecretsManagerSecret.fromSecretCompleteArn(this, "ReplayerTargetSecretImport", props.clusterAuthDetails.basicAuth.user_secret_arn)
+            secrets[ContainerEnvVarNames.TARGET_USERNAME] = EcsSecret.fromSecretsManager(secret, "username")
+            secrets[ContainerEnvVarNames.TARGET_PASSWORD] = EcsSecret.fromSecretsManager(secret, "password")
         }
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
@@ -141,6 +128,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             environment: {
                 "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`
             },
+            secrets: secrets,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,

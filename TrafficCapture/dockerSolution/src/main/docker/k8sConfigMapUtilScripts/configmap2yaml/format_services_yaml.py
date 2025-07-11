@@ -76,7 +76,7 @@ def generate_formatted_cluster_dict(default_dict, override_dict):
         formatted_dict[auth_type] = auth_dict
         add_to_dict(auth_dict, "username", cluster_dict, "basicAuthUsername")
         add_to_dict(auth_dict, "password", cluster_dict, "basicAuthPassword")
-        add_to_dict(auth_dict, "password_from_secret_arn", cluster_dict, "basicAuthPasswordFromSecretArn")
+        add_to_dict(auth_dict, "user_secret_arn", cluster_dict, "basicAuthUserSecretArn")
         add_to_dict(auth_dict, "region", cluster_dict, "region")
         add_to_dict(auth_dict, "service", cluster_dict, "service")
         formatted_dict[auth_type] = None if not auth_dict else auth_dict
