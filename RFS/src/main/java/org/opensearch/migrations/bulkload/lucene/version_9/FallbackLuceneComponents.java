@@ -30,10 +30,12 @@ public class FallbackLuceneComponents {
 
         @Override
         public void close() {
+            // No resources to close in this fallback implementation
         }
 
         @Override
         public void checkIntegrity() {
+            // Integrity check is skipped in this fallback stub
         }
 
         @Override
