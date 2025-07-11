@@ -23,22 +23,18 @@ uninstall_charts() {
         # Extract the release name from the secret
         RELEASE_NAME=$(echo $SECRET | sed -E 's/sh\.helm\.release\.v1\.([^\.]+).*$/\1/')
 
-        # If specific targets were passed, check for match
+        # Skip if in skip list
         if [ "${#RELEASES_TO_SKIP[@]}" -gt 0 ]; then
-          MATCHED=false
           for CANDIDATE in "${RELEASES_TO_SKIP[@]}"; do
             if [ "$RELEASE_NAME" = "$CANDIDATE" ]; then
-              MATCHED=true
-              break
+              echo "Skipping release $RELEASE_NAME (explicitly excluded)"
+              continue 2  # skip outer loop (not just inner)
             fi
           done
-          if [ "$MATCHED" = "true" ]; then
-            continue
-          fi
         fi
 
         # Remove fluent-bit logging chart skipped in main uninstall job
-        if [ -n "$RELEASE_NAME" ] && [ "$RELEASE_NAME" == "fluent-bit" ]; then
+        if [ -n "$RELEASE_NAME" ]; then
           echo "Found Helm release: $RELEASE_NAME in namespace: $NAMESPACE"
 
           # Get the chart values and check for our ownership label
