@@ -10,6 +10,8 @@ import lombok.Data;
 @Data
 @AllArgsConstructor
 public class AliasMetadata {
+    private static final String FIELD_SETTINGS = "settings";
+
     private String alias;
     private String indexRouting;
     private String searchRouting;
@@ -24,12 +26,10 @@ public class AliasMetadata {
         String filter = node.hasNonNull("filter") ? node.get("filter").asText() : null;
 
         Map<String, String> settings = new HashMap<>();
-        if (node.has("settings") && node.get("settings").isObject()) {
-            var it = node.get("settings").fields();
-            while (it.hasNext()) {
-                var entry = it.next();
-                settings.put(entry.getKey(), entry.getValue().asText());
-            }
+        if (node.has(FIELD_SETTINGS) && node.get(FIELD_SETTINGS).isObject()) {
+            node.get(FIELD_SETTINGS).fieldNames().forEachRemaining(fieldName -> {
+                settings.put(fieldName, node.get(FIELD_SETTINGS).get(fieldName).asText());
+            });
         }
 
         return new AliasMetadata(name, indexRouting, searchRouting, writeIndex, filter, settings);

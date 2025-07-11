@@ -14,7 +14,9 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
+public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
+
+    private static final String INDICES_DIR_NAME = "indices";
 
     private final SourceRepo repo;
     private SnapshotRepoData_ES_2_4 repoData;
@@ -33,7 +35,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
     @Override
     public List<String> listIndices() {
         List<String> indexNames = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve("indices");
+        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
 
         File[] children = indicesRoot.toFile().listFiles();
         if (children != null) {
@@ -49,17 +51,16 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
 
     @Override
     public byte[] getIndexMetadataFile(String indexName) {
-        // ES 2.4 snapshot has exactly ONE snapshot
         String snapshotName = getSnapshots().get(0).getName();
         Path metaFile = repo.getRepoRootDir()
-            .resolve("indices")
+            .resolve(INDICES_DIR_NAME)
             .resolve(indexName)
             .resolve("meta-" + snapshotName + ".dat");
 
         try {
             return Files.readAllBytes(metaFile);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read meta file for index: " + indexName, e);
+            throw new IllegalStateException("Failed to read meta file for index: " + indexName, e);
         }
     }
 
@@ -75,7 +76,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve("indices");
+        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
 
         File[] indexDirs = indicesRoot.toFile().listFiles();
         if (indexDirs == null) {
@@ -88,21 +89,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
                 continue;
             }
 
-            // Look for meta-<snapshotName>.dat inside this index dir
-            File[] files = indexDir.listFiles();
-            if (files == null) {
-                continue;
-            }
-
-            boolean foundMeta = false;
-            for (File f : files) {
-                if (f.getName().equals("meta-" + snapshotName + ".dat")) {
-                    foundMeta = true;
-                    break;
-                }
-            }
-
-            if (foundMeta) {
+            if (containsMetaFile(indexDir, snapshotName)) {
                 log.info("Index [{}] contains snapshot [{}]", indexDir.getName(), snapshotName);
                 result.add(new SimpleIndex(indexDir.getName(), snapshotName));
             }
@@ -110,6 +97,19 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
 
         log.info("getIndicesInSnapshot for snapshot [{}] found indices: {}", snapshotName, result);
         return result;
+    }
+
+    private boolean containsMetaFile(File dir, String snapshotName) {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return false;
+        }
+        for (File f : files) {
+            if (f.getName().equals("meta-" + snapshotName + ".dat")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -151,7 +151,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
 
         @Override
         public String getId() {
-            return name;
+            return getName();
         }
     }
 
@@ -171,7 +171,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo_ES_2_4 {
 
         @Override
         public String getId() {
-            return name;
+            return getName();
         }
 
         @Override

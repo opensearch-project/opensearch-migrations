@@ -14,14 +14,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class IndexMetadataFactory_ES_2_4 implements IndexMetadata.Factory {
 
-    private final SnapshotRepo_ES_2_4 repoProvider;
+    private final SnapshotRepoES24 repoProvider;
 
-    public IndexMetadataFactory_ES_2_4(SnapshotRepo_ES_2_4 repoProvider) {
+    public IndexMetadataFactory_ES_2_4(SnapshotRepoES24 repoProvider) {
         this.repoProvider = repoProvider;
     }
 
     @Override
-    public SnapshotRepo_ES_2_4 getRepoDataProvider() {
+    public SnapshotRepoES24 getRepoDataProvider() {
         return repoProvider;
     }
 
@@ -36,7 +36,7 @@ public class IndexMetadataFactory_ES_2_4 implements IndexMetadata.Factory {
             return readWithES68Factory(snapshotName, indexName);
 
         } catch (Exception e) {
-            throw new RuntimeException("Error reading index metadata for: " + indexName, e);
+            throw new IllegalStateException("Error reading index metadata for: " + indexName, e);
         }
     }
 

@@ -16,6 +16,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import static org.opensearch.migrations.bulkload.version_es_2_4.ElasticsearchConstants_ES_2_4.*;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -36,18 +38,24 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
         this.routingNumShards = json.get("routing_num_shards").asInt();
         this.state = (byte) json.get("state").asInt();
 
-        ObjectMapper mapper = new ObjectMapper();
+        parseSettings(json);
+        parsePrimaryTerms(json);
+        parseMappings(json);
+        parseAliases(json);
+    }
 
-        // Settings
-        if (json.has("settings") && json.get("settings").isObject()) {
-            this.settings = (ObjectNode) json.get("settings").deepCopy();
+    private void parseSettings(JsonNode json) {
+        ObjectMapper mapper = new ObjectMapper();
+        if (json.has(FIELD_SETTINGS) && json.get(FIELD_SETTINGS).isObject()) {
+            this.settings = (ObjectNode) json.get(FIELD_SETTINGS).deepCopy();
         } else {
             this.settings = mapper.createObjectNode();
         }
+    }
 
-        // Primary terms
-        if (json.has("primary_terms") && json.get("primary_terms").isArray()) {
-            var array = json.get("primary_terms");
+    private void parsePrimaryTerms(JsonNode json) {
+        if (json.has(FIELD_PRIMARY_TERMS) && json.get(FIELD_PRIMARY_TERMS).isArray()) {
+            var array = json.get(FIELD_PRIMARY_TERMS);
             this.primaryTerms = new long[array.size()];
             for (int i = 0; i < array.size(); i++) {
                 this.primaryTerms[i] = array.get(i).asLong();
@@ -55,28 +63,30 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
         } else {
             this.primaryTerms = new long[0];
         }
+    }
 
-        // Mappings
+    private void parseMappings(JsonNode json) {
         this.mappings = new ArrayList<>();
-        if (json.has("mappings") && json.get("mappings").isArray()) {
-            for (var m : json.get("mappings")) {
+        if (json.has(FIELD_MAPPINGS) && json.get(FIELD_MAPPINGS).isArray()) {
+            for (var m : json.get(FIELD_MAPPINGS)) {
                 this.mappings.add(new CompressedMapping(
                         m.get("type").asText(),
-                        Base64.getDecoder().decode(m.get("compressed").asText())
+                        Base64.getDecoder().decode(m.get(FIELD_COMPRESSED).asText())
                 ));
             }
         }
+    }
 
-        // Aliases
+    private void parseAliases(JsonNode json) {
         this.aliases = new ArrayList<>();
-        if (json.has("aliases") && json.get("aliases").isObject()) {
-            var it = json.get("aliases").fields();
-            while (it.hasNext()) {
-                var entry = it.next();
-                this.aliases.add(AliasMetadata.fromJsonWithName(entry.getKey(), entry.getValue()));
-            }
+        if (json.has(FIELD_ALIASES) && json.get(FIELD_ALIASES).isObject()) {
+            json.get(FIELD_ALIASES).fieldNames().forEachRemaining(aliasName -> {
+                JsonNode aliasNode = json.get(FIELD_ALIASES).get(aliasName);
+                this.aliases.add(AliasMetadata.fromJsonWithName(aliasName, aliasNode));
+            });
         }
     }
+
 
     @Override
     public JsonNode getAliases() {
@@ -92,7 +102,7 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
             ObjectNode settingsNode = mapper.createObjectNode();
             alias.getSettings().forEach(settingsNode::put);
-            obj.set("settings", settingsNode);
+            obj.set(FIELD_SETTINGS, settingsNode);
 
             array.add(obj);
         }
@@ -101,6 +111,11 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
     @Override
     public String getId() {
+        return getName();
+    }
+
+    @Override
+    public String getName() {
         return index;
     }
 
@@ -111,7 +126,7 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
         for (var m : mappings) {
             ObjectNode obj = mapper.createObjectNode();
             obj.put("type", m.getType());
-            obj.put("compressed", Base64.getEncoder().encodeToString(m.getSource()));
+            obj.put(FIELD_COMPRESSED, Base64.getEncoder().encodeToString(m.getSource()));
             array.add(obj);
         }
         return array;
@@ -146,11 +161,6 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
         return toObjectNode();
     }
 
-    @Override
-    public String getName() {
-        return index;
-    }
-
     public ObjectNode toObjectNode() {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode obj = mapper.createObjectNode();
@@ -159,24 +169,24 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
         obj.put("routing_num_shards", routingNumShards);
         obj.put("state", state);
 
-        obj.set("settings", settings.deepCopy());
+        obj.set(FIELD_SETTINGS, settings.deepCopy());
 
         // Primary terms
         ArrayNode primaryTermsArray = mapper.createArrayNode();
         for (long term : primaryTerms) {
             primaryTermsArray.add(term);
         }
-        obj.set("primary_terms", primaryTermsArray);
+        obj.set(FIELD_PRIMARY_TERMS, primaryTermsArray);
 
         // Mappings
         ArrayNode mappingsArray = mapper.createArrayNode();
         for (CompressedMapping m : mappings) {
             ObjectNode mappingObj = mapper.createObjectNode();
             mappingObj.put("type", m.getType());
-            mappingObj.put("compressed", Base64.getEncoder().encodeToString(m.getSource()));
+            mappingObj.put(FIELD_COMPRESSED, Base64.getEncoder().encodeToString(m.getSource()));
             mappingsArray.add(mappingObj);
         }
-        obj.set("mappings", mappingsArray);
+        obj.set(FIELD_MAPPINGS, mappingsArray);
 
         // Aliases
         ObjectNode aliasesNode = mapper.createObjectNode();
@@ -190,11 +200,11 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
             ObjectNode aliasSettings = mapper.createObjectNode();
             alias.getSettings().forEach(aliasSettings::put);
-            aliasObj.set("settings", aliasSettings);
+            aliasObj.set(FIELD_SETTINGS, aliasSettings);
 
             aliasesNode.set(alias.getAlias(), aliasObj);
         }
-        obj.set("aliases", aliasesNode);
+        obj.set(FIELD_ALIASES, aliasesNode);
 
         return obj;
     }

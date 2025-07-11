@@ -58,7 +58,9 @@ public class GlobalMetadataFactory_ES_2_4 implements GlobalMetadata.Factory {
     private static Map<String, String> readSettingsFromJson(JsonNode settingsNode) {
         Map<String, String> map = new HashMap<>();
         if (settingsNode != null && settingsNode.isObject()) {
-            settingsNode.fields().forEachRemaining(entry -> map.put(entry.getKey(), entry.getValue().asText()));
+            settingsNode.fieldNames().forEachRemaining(fieldName -> {
+                map.put(fieldName, settingsNode.get(fieldName).asText());
+            });
         }
         return map;
     }
@@ -66,9 +68,8 @@ public class GlobalMetadataFactory_ES_2_4 implements GlobalMetadata.Factory {
     private static List<IndexMetadata> readIndicesFromJson(JsonNode indicesNode) {
         List<IndexMetadata> list = new ArrayList<>();
         if (indicesNode != null && indicesNode.isObject()) {
-            indicesNode.fields().forEachRemaining(entry -> {
-                String indexName = entry.getKey();
-                JsonNode meta = entry.getValue();
+            indicesNode.fieldNames().forEachRemaining(indexName -> {
+                JsonNode meta = indicesNode.get(indexName);
                 list.add(new IndexMetadataData_ES_2_4(indexName, meta));
             });
         }
@@ -78,9 +79,8 @@ public class GlobalMetadataFactory_ES_2_4 implements GlobalMetadata.Factory {
     private static List<IndexTemplate> readTemplatesFromJson(JsonNode templatesNode) {
         List<IndexTemplate> list = new ArrayList<>();
         if (templatesNode != null && templatesNode.isObject()) {
-            templatesNode.fields().forEachRemaining(entry -> {
-                String templateName = entry.getKey();
-                JsonNode templateNode = entry.getValue();
+            templatesNode.fieldNames().forEachRemaining(templateName -> {
+                JsonNode templateNode = templatesNode.get(templateName);
                 list.add(new IndexTemplate(templateName, (ObjectNode) templateNode));
             });
         }
@@ -90,7 +90,9 @@ public class GlobalMetadataFactory_ES_2_4 implements GlobalMetadata.Factory {
     private static Map<String, Object> readCustomsFromJson(JsonNode customsNode) {
         Map<String, Object> customs = new HashMap<>();
         if (customsNode != null && customsNode.isObject()) {
-            customsNode.properties().forEach(entry -> customs.put(entry.getKey(), entry.getValue()));
+            customsNode.fieldNames().forEachRemaining(fieldName -> {
+                customs.put(fieldName, customsNode.get(fieldName));
+            });
         }
         return customs;
     }
