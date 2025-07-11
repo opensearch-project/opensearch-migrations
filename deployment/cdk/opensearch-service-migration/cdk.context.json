@@ -34,6 +34,9 @@
       "maxCapacity": 16384
     },
     "vpcId": "<VPC_ID>",
+    "// help vpcAZCount": "AZ Count should match upstream service/NLB AZ count or cross-zone load balancing should be enabled",
+    "vpcAZCount": 2,
+
     "reindexFromSnapshotServiceEnabled": true,
     "reindexFromSnapshotMaxShardSizeGiB": 80,
 
