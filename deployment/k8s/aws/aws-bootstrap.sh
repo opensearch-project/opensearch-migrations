@@ -197,6 +197,7 @@ helm install ma "${ma_chart_dir}" \
   -f "${ma_chart_dir}/valuesEks.yaml" \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
+  --set aws.account="${AWS_ACCOUNT}" \
   --set images.captureProxy.repository="${MIGRATIONS_ECR_REGISTRY}" \
   --set images.captureProxy.tag=migrations_capture_proxy_latest \
   --set images.trafficReplayer.repository="${MIGRATIONS_ECR_REGISTRY}" \

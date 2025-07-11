@@ -8,6 +8,7 @@ metadata:
   name: {{ .Values.logs.sharedLogsVolume.name }}
   annotations:
     "helm.sh/resource-policy": keep
+    "helm.sh/hook-weight": "-1" # Make accessible earlier for charts that mount
 spec:
   accessModes:
     - ReadWriteOnce

@@ -3,14 +3,14 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: s3-snapshot-config
+  name: migrations-default-s3-config
   labels:
     workflows.argoproj.io/configmap-type: Parameter
 data:
-  AWS_REGION: {{ .Values.snapshotBucketConfiguration.region }}
-  {{- if .Values.snapshotBucketConfiguration.useLocalStack }}
-  ENDPOINT: "http://{{ .Values.snapshotBucketConfiguration.endpoint }}:4566"
+  AWS_REGION: {{ .Values.aws.region }}
+  {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+  ENDPOINT: "http://{{ .Values.defaultBucketConfiguration.endpoint }}:4566"
   {{- else }}
-  ENDPOINT: "http://s3.{{ required "A valid .Values.snapshotBucketConfiguration.region is required" .Values.snapshotBucketConfiguration.region }}.amazonaws.com"
+  ENDPOINT: ""
   {{- end }}
-  repo_uri: {{ .Values.snapshotBucketConfiguration.bucketName }}
+  BUCKET_NAME: {{ printf "\"migrations-default-%s-%s-%s\"" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}

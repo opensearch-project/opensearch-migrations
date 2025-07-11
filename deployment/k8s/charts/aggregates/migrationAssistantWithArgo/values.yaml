@@ -47,12 +47,23 @@ images:
     tag: latest
     pullPolicy: IfNotPresent
 
-snapshotBucketConfiguration:
-  create: true
-  bucketName: snapshot
+# Default AWS values are dummy values for LocalStack usage
+aws:
+  eksEnabled: false
   region: us-east-2
+  account: "123456789012"
+
+stageName: dev
+
+defaultBucketConfiguration:
+  create: true
+  deleteOnUninstall: true
+  emptyBeforeDelete: true
   useLocalStack: true
   endpoint: localstack
+  serviceAccountName: "migrations-service-account"
+  bucketOperationImage: "amazon/aws-cli:2.25.11"
+  bucketOperationImagePullPolicy: "IfNotPresent"
 
 logs:
   sharedLogsVolume:

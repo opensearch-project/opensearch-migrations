@@ -10,4 +10,5 @@ metadata:
 data:
   STAGE_NAME: "{{ .Values.stageName }}"
   AWS_REGION: "{{ .Values.aws.region }}"
+  ACCOUNT: "{{ (toString .Values.aws.account) }}"
 {{- end }}
