@@ -47,7 +47,6 @@ spec:
             - /bin/sh
             - -c
             - |
-              set -x
               {{ include "migration.s3Functions" . | nindent 12 }}
 
               # Setting up variables

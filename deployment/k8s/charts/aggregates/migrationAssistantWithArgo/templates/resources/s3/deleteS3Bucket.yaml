@@ -5,18 +5,18 @@ metadata:
   name: delete-s3-bucket-{{ .Release.Name }}
   annotations:
     "helm.sh/hook": pre-delete
-    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-weight": "-20" # Delete before charts are uninstalled
     "helm.sh/hook-delete-policy": hook-succeeded
 spec:
   ttlSecondsAfterFinished: 600
-  backoffLimit: 1
+  backoffLimit: 0
   template:
     metadata:
       labels:
         app: s3-bucket-delete
     spec:
       serviceAccountName: {{ .Values.defaultBucketConfiguration.serviceAccountName }}
-      restartPolicy: OnFailure
+      restartPolicy: Never
       containers:
         - name: aws-cli
           image: {{ .Values.defaultBucketConfiguration.bucketOperationImage }}
@@ -47,7 +47,6 @@ spec:
             - /bin/sh
             - -c
             - |
-              set -x
               {{ include "migration.s3Functions" . | nindent 12 }}
 
               # Setting up variables
@@ -100,6 +99,7 @@ spec:
                       echo "Tip: Set defaultBucketConfiguration.emptyBeforeDelete=true to force-delete all objects before bucket deletion."
                     fi
                   fi
+                  exit 1
                 fi
               else
                 echo "Bucket $BUCKET_NAME does not exist. Skipping deletion."
