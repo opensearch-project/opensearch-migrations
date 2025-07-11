@@ -36,12 +36,6 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     }
 
     @Override
-    public ClusterSnapshotReader initialize(Version version) {
-        this.version = version;
-        return this;
-    }
-
-    @Override
     public GlobalMetadata.Factory getGlobalMetadata() {
         return new GlobalMetadataFactory_ES_2_4(getSnapshotRepo());
     }
@@ -59,13 +53,18 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     }
 
     @Override
+    public int getBufferSizeInBytes() {
+        return ElasticsearchConstants_ES_2_4.BUFFER_SIZE_IN_BYTES;
+    }
+
+    @Override
     public boolean getSoftDeletesPossible() {
-        return false;
+        return ElasticsearchConstants_ES_2_4.SOFT_DELETES_POSSIBLE;
     }
 
     @Override
     public String getSoftDeletesFieldData() {
-        return null;
+        return ElasticsearchConstants_ES_2_4.SOFT_DELETES_FIELD;
     }
 
     @Override
@@ -74,8 +73,15 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     }
 
     @Override
-    public int getBufferSizeInBytes() {
-        return 102400;
+    public ClusterSnapshotReader initialize(Version version) {
+        this.version = version;
+        return this;
+    }
+
+    @Override
+    public String toString() {
+        // These values could be null, don't want to crash during toString
+        return String.format("Snapshot: %s %s", version, sourceRepo);
     }
 
     private SnapshotRepo.Provider getSnapshotRepo() {
@@ -83,10 +89,5 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
             throw new UnsupportedOperationException("initialize(...) must be called before using getSnapshotRepo()");
         }
         return new SnapshotRepoProvider_ES_2_4(sourceRepo);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("SnapshotReader_ES_2_4 [version=%s, sourceRepo=%s]", version, sourceRepo);
     }
 }

@@ -52,9 +52,9 @@ public class SnapshotRepoData_ES_2_4 {
      * Sets the filePath field for traceability.
      */
     public static SnapshotRepoData_ES_2_4 fromRepoFile(Path filePath) {
-        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
         try {
             log.debug("Reading ES 2.4 repo 'index' file: {}", filePath);
+            ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
             SnapshotRepoData_ES_2_4 data = mapper.readValue(filePath.toFile(), SnapshotRepoData_ES_2_4.class);
             data.filePath = filePath;
 

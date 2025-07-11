@@ -25,16 +25,6 @@ public class GlobalMetadataFactory_ES_2_4 implements GlobalMetadata.Factory {
     }
 
     @Override
-    public SmileFactory getSmileFactory() {
-        return new SmileFactory();
-    }
-
-    @Override
-    public SnapshotRepo.Provider getRepoDataProvider() {
-        return repoDataProvider;
-    }
-
-    @Override
     public GlobalMetadata fromJsonNode(JsonNode root) {
         log.debug("[ES 2.4] Parsed root JSON = {}", root.toPrettyString());
 
@@ -53,6 +43,16 @@ public class GlobalMetadataFactory_ES_2_4 implements GlobalMetadata.Factory {
         parsed.setCustoms(readCustomsFromJson(metadataRoot.get("customs")));
 
         return parsed;
+    }
+
+    @Override
+    public SmileFactory getSmileFactory() {
+        return new SmileFactory();
+    }
+
+    @Override
+    public SnapshotRepo.Provider getRepoDataProvider() {
+        return repoDataProvider;
     }
 
     private static Map<String, String> readSettingsFromJson(JsonNode settingsNode) {
