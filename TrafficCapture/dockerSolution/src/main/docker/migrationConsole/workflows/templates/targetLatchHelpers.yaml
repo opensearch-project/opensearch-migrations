@@ -10,6 +10,8 @@ spec:
           - name: configurations
           - name: targets
           - name: prefix
+          - name: etcd-utils-image
+          - name: etcd-utils-pull-policy
       outputs:
         parameters:
           - name: prefix
@@ -19,8 +21,8 @@ spec:
             valueFrom:
               path: /tmp/processors-per-target
       container:
-        image: migrations/migration_console:latest
-        imagePullPolicy: IfNotPresent
+        image: "{{inputs.parameters.etcd-utils-image}}"
+        imagePullPolicy: "{{inputs.parameters.etcd-utils-pull-policy}}"
         command: [ sh, -c ]
         args:
           - |
@@ -122,14 +124,16 @@ spec:
           - name: processor
           - name: target
           - name: prefix
+          - name: etcd-utils-image
+          - name: etcd-utils-pull-policy
       outputs:
         parameters:
           - name: should-finalize
             valueFrom:
               path: /tmp/should-finalize
       script:
-        image: "{{workflow.parameters.etcd-image}}"
-        imagePullPolicy: Never
+        image: "{{inputs.parameters.etcd-utils-image}}"
+        imagePullPolicy: "{{inputs.parameters.etcd-utils-pull-policy}}"
         command: [sh]
         source: |
           set -x -e
@@ -209,9 +213,11 @@ spec:
       inputs:
         parameters:
           - name: prefix
+          - name: etcd-utils-image
+          - name: etcd-utils-pull-policy
       container:
-        image: "{{workflow.parameters.etcd-image}}"
-        imagePullPolicy: Never
+        image: "{{inputs.parameters.etcd-utils-image}}"
+        imagePullPolicy: "{{inputs.parameters.etcd-utils-pull-policy}}"
         command: [ sh, -c ]
         args:
           - |

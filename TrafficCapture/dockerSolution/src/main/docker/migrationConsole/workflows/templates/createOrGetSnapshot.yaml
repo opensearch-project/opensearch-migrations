@@ -12,6 +12,7 @@ spec:
           - name: source-config
           - name: snapshot-and-migration-config
           - name: s3-config
+          - name: image-config
       steps:
         - - name: get-existing-snapshot
             template: get-existing-snapshot
@@ -36,6 +37,10 @@ spec:
                   value: "{{inputs.parameters.s3-config}}"
                 - name: indices
                   value: "{{=let sc=inputs.parameters['snapshot-and-migration-config']; hasKey(fromJSON(sc), 'indices') ? join(fromJSON(sc).indices, ',') : ''}}"
+                - name: migration-console-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
+                - name: migration-console-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
 
         - - name: collect-output
             template: collect-output

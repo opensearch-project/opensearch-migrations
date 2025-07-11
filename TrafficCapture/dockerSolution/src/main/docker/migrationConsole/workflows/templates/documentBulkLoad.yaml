@@ -21,6 +21,8 @@ spec:
           - name: optional-configs
             description: "JSON Key-Value form of all of the optional parameters to run-bulk-load"
             value: ""
+          - name: image-config
+            description: "Map of MA images and settings (e.g. pull policy)"
       steps:
         - - name: run-bulk-load
             template: run-bulk-load
@@ -44,6 +46,8 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['snapshot-config'])['s3']['endpoint'] ?? ''}}"
                 - name: session-name
                   value: "{{inputs.parameters.session-name}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
                   # TODO - parse the other stuff out and into the args.
 
     - name: run-bulk-load
@@ -64,7 +68,10 @@ spec:
           - name: s3-endpoint
             description: "Endpoint exposing the S3 service (empty to indicate no override for AWS)"
             value: ""
-
+            
+          - name: image-config
+            description: "Map of MA images and settings (e.g. pull policy)"
+            
           # Parameters with defaults - split into input and default pairs
           - name: replicas
             value: ""
@@ -72,13 +79,6 @@ spec:
           - name: default-replicas
             value: "1"
             description: "Default number of replicas"
-
-          - name: image
-            value: ""
-            description: "Container image to use"
-          - name: default-image
-            value: "migrations/reindex_from_snapshot:latest"
-            description: "Default container image"
 
           - name: documents-per-bulk-request
             value: ""
@@ -127,8 +127,6 @@ spec:
                   value: "{{inputs.parameters.s3-endpoint}}"
                 - name: replicas
                   value: "{{=inputs.parameters.replicas == '' ? inputs.parameters['default-replicas'] : inputs.parameters.replicas}}"
-                - name: image
-                  value: "{{=inputs.parameters.image == '' ? inputs.parameters['default-image'] : inputs.parameters.image}}"
                 - name: documents-per-bulk-request
                   value: "{{inputs.parameters.documents-per-bulk-request}}"
                 - name: lease-duration
@@ -143,6 +141,14 @@ spec:
                   value: "{{inputs.parameters.doc-transformer-base64}}"
                 - name: index-allowlist
                   value: "{{inputs.parameters.index-allowlist}}"
+                - name: reindex-from-snapshot-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['reindex-from-snapshot']['image']}}"
+                - name: reindex-from-snapshot-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['reindex-from-snapshot']['pull-policy']}}"
+                - name: migration-console-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
+                - name: migration-console-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
 
         - - name: setup-wait-for-completion
             templateRef:
@@ -168,6 +174,10 @@ spec:
                   value: "{{inputs.parameters.session-name}}"
                 - name: config-contents
                   value: "{{steps.setup-wait-for-completion.outputs.parameters.config-contents}}"
+                - name: migration-console-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
+                - name: migration-console-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
 
         - - name: cleanup-rfs-replicaset
             template: delete-rs
@@ -189,7 +199,6 @@ spec:
           - name: s3-region
           - name: s3-endpoint
           - name: replicas
-          - name: image
           - name: documents-per-bulk-request
           - name: lease-duration
           - name: target-insecure
@@ -199,6 +208,10 @@ spec:
           - name: index-allowlist
           - name: otel-collector-endpoint
             value: "http://otel-collector:4317"
+          - name: reindex-from-snapshot-image
+          - name: reindex-from-snapshot-pull-policy
+          - name: migration-console-image
+          - name: migration-console-pull-policy
       resource:
         action: create
         setOwnerReference: true
@@ -222,8 +235,8 @@ spec:
                   emptyDir: {}
                 initContainers:
                 - name: resolver
-                  image: migrations/migration_console:latest
-                  imagePullPolicy: IfNotPresent
+                  image: "{{inputs.parameters.migration-console-image}}"
+                  imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
                   command:
                   - sh
                   - -c
@@ -264,8 +277,8 @@ spec:
                     mountPath: /shared-data
                 containers:
                 - name: bulk-loader
-                  image: {{inputs.parameters.image}}
-                  imagePullPolicy: IfNotPresent
+                  image: "{{inputs.parameters.reindex-from-snapshot-image}}"
+                  imagePullPolicy: "{{inputs.parameters.reindex-from-snapshot-pull-policy}}"
                   env:
                     - name: TARGET_HOST
                       value: "{{inputs.parameters.target-host}}"
@@ -362,12 +375,14 @@ spec:
         parameters:
           - name: config-contents
           - name: session-name
+          - name: migration-console-image
+          - name: migration-console-pull-policy
       retryStrategy:
         limit: "200"
         retryPolicy: "Always"
         backoff:
           duration: "5"
-          factor: 2
+          factor: "2"
           maxDuration: "300"
       steps:
         - - name: check-rfs-completion
@@ -378,6 +393,10 @@ spec:
               parameters:
                 - name: config-contents
                   value: "{{inputs.parameters.config-contents}}"
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"
                 - name: command
                   value: |
                     set -x && 

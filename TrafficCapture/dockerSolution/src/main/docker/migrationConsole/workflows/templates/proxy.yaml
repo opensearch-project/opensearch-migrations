@@ -65,14 +65,12 @@ spec:
           # required
           - name: backside-uri-string
           - name: frontside-port
+          - name: capture-proxy-image
+          - name: capture-proxy-pull-policy
 
           # required, but has defaults
-          - name: image
-            value: "migrations/capture_proxy:latest"
           - name: replicas
             value: "1"
-          - name: init-image
-            value: "migrations/migration-console:latest"
 
           # optional
           - name: trace-directory
@@ -129,8 +127,8 @@ spec:
               spec:
                 containers:
                 - name: proxy
-                  image: {{inputs.parameters.image}}
-                  imagePullPolicy: IfNotPresent
+                  image: {{inputs.parameters.capture-proxy-image}}
+                  imagePullPolicy: {{inputs.parameters.capture-proxy-pull-policy}}
                   env:
                     # Required parameters
                     - name: BACKSIDE_URI_STRING
