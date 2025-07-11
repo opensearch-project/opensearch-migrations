@@ -150,6 +150,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             "MIGRATIONS_USER_AGENT": solutionsUserAgent,
             "MIGRATIONS_EKS_CLUSTER_NAME": eksClusterName,
             "MIGRATIONS_ECR_REGISTRY": `${eksInfra.ecrRepo.registryUri}/${eksInfra.ecrRepo.repositoryName}`,
+            "AWS_ACCOUNT": this.account,
             "AWS_CFN_REGION": this.region,
             "VPC_ID": vpc.vpcId,
             "STAGE": stageParameter.valueAsString

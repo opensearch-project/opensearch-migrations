@@ -1,8 +1,16 @@
+conditionalPackageInstalls:
+  localstack: false
+
 aws:
   eksEnabled: true
   region: ""
+  account: ""
 
-stageName: dev
+defaultBucketConfiguration:
+  useLocalStack: false
+  deleteOnUninstall: true
+  emptyBeforeDelete: true
+  endpoint: ""
 
 charts:
   fluent-bit:
