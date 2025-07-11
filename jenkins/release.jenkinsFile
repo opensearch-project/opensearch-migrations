@@ -80,7 +80,7 @@ pipeline {
                         publishToMaven(
                             signingArtifactsPath: "$WORKSPACE/repository/",
                             mavenArtifactsPath: "$WORKSPACE/repository/",
-                            autoPublish: true
+                            autoPublish: false
                         )
 
                         def sourceRegistry = "opensearchstaging"
