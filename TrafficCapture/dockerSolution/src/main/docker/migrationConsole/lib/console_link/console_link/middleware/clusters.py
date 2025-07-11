@@ -26,6 +26,7 @@ def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, head
                              raise_error=raise_error)
         return CallAPIResult(http_response=r, error_message=None)
     except Exception as e:
+        logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
         return CallAPIResult(http_response=None, error_message=f"Error: Unable to perform cluster command "
                                                                f"with message: {e}")
 
@@ -39,6 +40,7 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
         r = cluster.call_api(cat_indices_path)
         return r.json() if as_json else r.content
     except Exception as e:
+        logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
         return f"Error: Unable to perform cat-indices command with message: {e}"
 
 
