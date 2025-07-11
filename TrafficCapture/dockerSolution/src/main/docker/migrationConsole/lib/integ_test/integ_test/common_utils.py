@@ -41,7 +41,7 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
             result: CallAPIResult = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers,
                                              timeout=timeout, session=session, raise_error=False)
             if result.error_message:
-                logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
+                logger.info("Exception occurred when using call_api on cluster: ", exc_info=True)
             response = result.http_response
             last_response = response
             if response.status_code == expected_status_code:
