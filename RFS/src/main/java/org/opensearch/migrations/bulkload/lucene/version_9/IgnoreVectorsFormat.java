@@ -12,7 +12,7 @@ import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 public class IgnoreVectorsFormat extends KnnVectorsFormat {
 
     public IgnoreVectorsFormat() {
-        super("ES814HnswScalarQuantizedVesctorsFormat");
+        super("ES814HnswScalarQuantizedVectorsFormat");
     }
 
     @Override
