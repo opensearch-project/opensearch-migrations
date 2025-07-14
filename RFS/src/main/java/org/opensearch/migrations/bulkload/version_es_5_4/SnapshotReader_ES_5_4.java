@@ -57,12 +57,12 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     @Override
     public boolean getSoftDeletesPossible() {
-        return false;
+        return ElasticsearchConstants_ES_5_4.SOFT_DELETES_POSSIBLE;
     }
 
     @Override
     public String getSoftDeletesFieldData() {
-        return null;
+        return ElasticsearchConstants_ES_5_4.SOFT_DELETES_FIELD;
     }
 
     @Override
@@ -72,7 +72,7 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     @Override
     public int getBufferSizeInBytes() {
-        return 102400;
+        return ElasticsearchConstants_ES_5_4.BUFFER_SIZE_IN_BYTES;
     }
 
     private SnapshotRepo.Provider getSnapshotRepo() {

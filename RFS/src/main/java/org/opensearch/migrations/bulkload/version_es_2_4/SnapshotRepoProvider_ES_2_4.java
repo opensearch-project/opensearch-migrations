@@ -11,9 +11,6 @@ import java.util.List;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
 
     private static final String INDICES_DIR_NAME = "indices";
@@ -45,7 +42,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
                 }
             }
         }
-        log.info("listIndices found: {}", indexNames);
         return indexNames;
     }
 
@@ -80,7 +76,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
 
         File[] indexDirs = indicesRoot.toFile().listFiles();
         if (indexDirs == null) {
-            log.warn("No indices directory found in repo: {}", indicesRoot);
             return Collections.emptyList();
         }
 
@@ -90,12 +85,9 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
             }
 
             if (containsMetaFile(indexDir, snapshotName)) {
-                log.info("Index [{}] contains snapshot [{}]", indexDir.getName(), snapshotName);
                 result.add(new SimpleIndex(indexDir.getName(), snapshotName));
             }
         }
-
-        log.info("getIndicesInSnapshot for snapshot [{}] found indices: {}", snapshotName, result);
         return result;
     }
 

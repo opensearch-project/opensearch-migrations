@@ -48,7 +48,7 @@ public class TransformerMapper {
 
     private Transformer mapStrictSourceVersion(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
         if (VersionMatchers.isES_2_X.test(sourceVersion)) {
-            return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+            return new Transformer_ES_2_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
         }
         if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
             return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
@@ -77,7 +77,7 @@ public class TransformerMapper {
     private Transformer looseTransformerMapping(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
         if (UnboundVersionMatchers.anyOS.or(UnboundVersionMatchers.isGreaterOrEqualES_6_X).test(targetVersion)) {
             if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)) {
-                return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
+                return new Transformer_ES_2_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
             }
             if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
                 return new Transformer_ES_5_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
