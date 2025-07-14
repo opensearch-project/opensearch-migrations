@@ -4,6 +4,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
@@ -92,6 +94,18 @@ public class ConnectionContext {
                 params.getClientCert(),
                 params.getClientCertKey());
         }
+    }
+
+    // Used for presentation to user facing output
+    public Map<String, String> toUserFacingData() {
+        var dataBuilder = new LinkedHashMap<String, String>();
+        dataBuilder.put("Uri", getUri().toString());
+        dataBuilder.put("Protocol", getProtocol().toString());
+        dataBuilder.put("TLS Verification", isInsecure() ? "Enabled" : "Disabled");
+        if (awsSpecificAuthentication) {
+            dataBuilder.put("AWS Auth", "Enabled");
+        }
+        return dataBuilder;
     }
 
     /**

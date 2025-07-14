@@ -29,7 +29,7 @@ public interface ClusterSnapshotReader extends ClusterReader {
     SourceRepo getSourceRepo();
 
     @Override
-    default String getTypeName() {
+    default String getFriendlyTypeName() {
         return "Snapshot";
     }
 }

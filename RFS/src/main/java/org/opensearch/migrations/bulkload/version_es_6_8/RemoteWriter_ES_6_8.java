@@ -108,7 +108,7 @@ public class RemoteWriter_ES_6_8 implements RemoteCluster, ClusterWriter {
     }
 
     @Override
-    public String getTypeName() {
+    public String getFriendlyTypeName() {
         return "Remote Cluster";
     }
 

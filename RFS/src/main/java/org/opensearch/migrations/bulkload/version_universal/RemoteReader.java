@@ -83,7 +83,7 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
     }
 
     @Override
-    public String getTypeName() {
+    public String getFriendlyTypeName() {
         return "Remote Cluster";
     }
 

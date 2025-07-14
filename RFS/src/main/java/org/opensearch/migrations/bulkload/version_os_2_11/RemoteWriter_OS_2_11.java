@@ -110,7 +110,7 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
         return dataFilterArgs;
     }
 
-    public String getTypeName() {
+    public String getFriendlyTypeName() {
         return "Remote Cluster";
     }
 }
