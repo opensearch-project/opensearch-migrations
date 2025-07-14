@@ -4,7 +4,7 @@ import groovy.json.JsonOutput
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '7.0.4'
+    id "com.diffplug.spotless" version '7.1.0'
     id 'io.freefair.lombok' version '8.14' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
@@ -138,7 +138,7 @@ subprojects {
             force 'commons-net:commons-net:3.11.1'
             force 'dnsjava:dnsjava:3.6.3'
             force 'net.minidev:json-smart:2.5.2'
-            force 'org.apache.tika:tika-core:3.2.0'
+            force 'org.apache.tika:tika-core:3.2.1'
             force 'org.glassfish.jersey.core:jersey-common:3.1.10'
             force 'org.jsoup:jsoup:1.21.1'
             force 'org.xerial.snappy:snappy-java:1.1.10.7'
