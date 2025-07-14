@@ -34,7 +34,7 @@
       "maxCapacity": 16384
     },
     "vpcId": "<VPC_ID>",
-    "// help vpcAZCount": "AZ Count should match upstream service/NLB AZ count or cross-zone load balancing should be enabled",
+    "// help vpcAZCount": "For deployments using the capture-proxy, this AZ count should match the source cluster AZ count.",
     "vpcAZCount": 2,
 
     "reindexFromSnapshotServiceEnabled": true,
