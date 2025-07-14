@@ -9,6 +9,7 @@ import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.opensearch.migrations.matchers.ContainsStringCount.containsStringCount;
@@ -57,17 +58,13 @@ public class ItemsTest {
 
         assertThat(result, containsString("Migrated Items:"));
         assertThat(result, containsString("Index Templates:"));
-        assertThat(result, containsString("it1"));
-        assertThat(result, containsString("it2"));
+        assertThat(result, stringContainsInOrder("it1", "it2"));
         assertThat(result, containsString("Component Templates:"));
-        assertThat(result, containsString("ct1"));
-        assertThat(result, containsString("ct2"));
+        assertThat(result, stringContainsInOrder("ct1", "ct2"));
         assertThat(result, containsString("Indexes:"));
-        assertThat(result, containsString("i1"));
-        assertThat(result, containsString("i2"));
+        assertThat(result, stringContainsInOrder("i1", "i2"));
         assertThat(result, containsString("Aliases:"));
-        assertThat(result, containsString("a1"));
-        assertThat(result, containsString("a2"));
+        assertThat(result, stringContainsInOrder("a1", "a2"));
         assertThat(result, containsStringCount(Items.NONE_FOUND_MARKER, 0));
         assertThat(result, hasLineCount(16));
     }
@@ -110,11 +107,7 @@ public class ItemsTest {
 
         assertThat(result, containsString("Migrated Items:"));
         assertThat(result, containsString("Index Templates:"));
-        assertThat(result, containsString("- i1\n"));
-        assertThat(result, containsString("- i2"));
-        assertThat(result, containsString("- i3"));
-        assertThat(result, containsString("- i4"));
-        assertThat(result, containsString("- i5"));
+        assertThat(result, stringContainsInOrder("i1", "i2", "i3", "i4","i5"));
         assertThat(result, containsString("Component Templates:"));
         assertThat(result, containsString("Indexes:"));
         assertThat(result, containsString("Aliases:"));
@@ -136,12 +129,9 @@ public class ItemsTest {
             .build();
 
         var result = items.asCliOutput();
-        assertThat(result, containsString("i1"));
-        assertThat(result, containsString("i2"));
-        assertThat(result, containsString("i3"));
+        assertThat(result, stringContainsInOrder("i1", "i2", "i3"));
         assertThat("Results with no errors do not print exception info", result, not(containsString("exception-without-failure-type")));
-        assertThat(result, containsString("i4 failed on target cluster"));
-        assertThat(result, containsString("i5 failed on target cluster: re1"));        
+        assertThat(result, stringContainsInOrder("i4 failed on target cluster", "i5 failed on target cluster: re1"));
         assertThat("Expect an exception's toString() if there was no message in the exception", result, containsString("i6 failed on target cluster: java.lang.RuntimeException"));
         assertThat(result, hasLineCount(18));
     }
