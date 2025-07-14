@@ -9,9 +9,9 @@ import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 import static org.opensearch.migrations.matchers.ContainsStringCount.containsStringCount;
 import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
 import static org.opensearch.migrations.metadata.CreationResult.CreationFailureType.TARGET_CLUSTER_FAILURE;
