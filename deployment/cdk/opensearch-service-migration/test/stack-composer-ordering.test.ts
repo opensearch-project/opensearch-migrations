@@ -6,7 +6,6 @@ import {TrafficReplayerStack} from "../lib/service-stacks/traffic-replayer-stack
 import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-stack";
 import {KafkaStack} from "../lib/service-stacks/kafka-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
-import {OpenSearchContainerStack} from "../lib/service-stacks/opensearch-container-stack";
 import {ReindexFromSnapshotStack} from "../lib/service-stacks/reindex-from-snapshot-stack";
 import {describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
 
@@ -36,14 +35,13 @@ describe('Stack Composer Ordering Tests', () => {
             "captureProxyServiceEnabled": true,
             "elasticsearchServiceEnabled": true,
             "otelCollectorEnabled": true,
-            "osContainerServiceEnabled": true,
             "reindexFromSnapshotServiceEnabled": true
         }
 
         const stacks = createStackComposer(contextOptions)
 
         const services = [CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-            TrafficReplayerStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
+            TrafficReplayerStack, ReindexFromSnapshotStack]
         services.forEach((stackClass) => {
             const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
             const template = Template.fromStack(stack)
@@ -72,14 +70,13 @@ describe('Stack Composer Ordering Tests', () => {
             "elasticsearchServiceEnabled": true,
             "kafkaBrokerServiceEnabled": true,
             "otelCollectorEnabled": true,
-            "osContainerServiceEnabled": true,
             "reindexFromSnapshotServiceEnabled": true
         }
 
         const stacks = createStackComposer(contextOptions)
 
         const services = [CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-            TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
+            TrafficReplayerStack, KafkaStack, ReindexFromSnapshotStack]
         services.forEach((stackClass) => {
             const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
             const template = Template.fromStack(stack)
@@ -108,7 +105,6 @@ describe('Stack Composer Ordering Tests', () => {
             "elasticsearchServiceEnabled": false,
             "kafkaBrokerServiceEnabled": false,
             "otelCollectorEnabled": false,
-            "osContainerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": false,
             "sourceCluster": {
                 "endpoint": "https://test-cluster",
@@ -120,7 +116,7 @@ describe('Stack Composer Ordering Tests', () => {
         const stacks = createStackComposer(contextOptions)
 
         const services = [CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-            TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
+            TrafficReplayerStack, KafkaStack, ReindexFromSnapshotStack]
         services.forEach( (stackClass) => {
             const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
             expect(stack).toBeUndefined()

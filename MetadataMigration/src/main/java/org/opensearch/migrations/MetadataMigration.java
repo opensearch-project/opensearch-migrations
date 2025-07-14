@@ -3,12 +3,9 @@ package org.opensearch.migrations;
 import java.nio.file.Path;
 import java.util.Optional;
 
-import org.opensearch.migrations.commands.Configure;
-import org.opensearch.migrations.commands.Evaluate;
-import org.opensearch.migrations.commands.EvaluateArgs;
-import org.opensearch.migrations.commands.Migrate;
-import org.opensearch.migrations.commands.MigrateArgs;
-import org.opensearch.migrations.commands.Result;
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.commands.*;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -26,6 +23,10 @@ import org.apache.logging.log4j.core.appender.FileAppender;
 public class MetadataMigration {
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(
+                args,
+                ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
+        )));
         var metadataArgs = new MetadataArgs();
         var migrateArgs = new MigrateArgs();
         var evaluateArgs = new EvaluateArgs();
@@ -35,6 +36,8 @@ public class MetadataMigration {
             .addCommand(evaluateArgs)
             .build();
         jCommander.parse(args);
+        EnvArgs.injectFromEnv(migrateArgs);
+        EnvArgs.injectFromEnv(evaluateArgs);
 
         var context = new RootMetadataMigrationContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(metadataArgs.otelCollectorEndpoint, "metadata",
@@ -43,8 +46,6 @@ public class MetadataMigration {
         );
 
         var meta = new MetadataMigration();
-
-        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
 
         if (metadataArgs.help || jCommander.getParsedCommand() == null) {
             printTopLevelHelp(jCommander);

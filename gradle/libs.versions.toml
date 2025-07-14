@@ -50,7 +50,6 @@ aws-msk-iam-auth = { module = "software.amazon.msk:aws-msk-iam-auth", version.re
 aws-s3 = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
 aws-s3-transfer-manager = { module = "software.amazon.awssdk:s3-transfer-manager", version.ref = "aws-sdk" }
 aws-sdk-core = { module = "software.amazon.awssdk:sdk-core", version.ref = "aws-sdk" }
-aws-secretsmanager = { module = "software.amazon.awssdk:secretsmanager", version.ref = "aws-sdk" }
 
 bouncycastle-certs = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
