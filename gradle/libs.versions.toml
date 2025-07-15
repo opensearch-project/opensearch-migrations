@@ -168,7 +168,6 @@ boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version
 transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",     version = "4.5.14"  }
 transitive-json-path         = { module = "com.jayway.jsonpath:json-path",            version = "2.9.0"   }
 transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",         version = "1.4.21"  }
-transitive-commons-io        = { module = "commons-io:commons-io",                   version = "2.19.0"   }
 transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.11.1"   }
 transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.3"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.5.2"    }
