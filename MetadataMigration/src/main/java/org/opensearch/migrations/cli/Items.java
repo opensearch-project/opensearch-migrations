@@ -130,8 +130,4 @@ public class Items {
 
         return sb.toString();
     }
-
-    private String getPrintableList(List<String> list) {
-        return list.stream().sorted().collect(Collectors.joining(", "));
-    }
 }
