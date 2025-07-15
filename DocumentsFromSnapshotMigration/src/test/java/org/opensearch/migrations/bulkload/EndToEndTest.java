@@ -80,7 +80,7 @@ public class EndToEndTest extends SourceTestBase {
             Startables.deepStart(sourceCluster, targetCluster).join();
 
             var indexName = "blog_2023";
-            var numberOfShards = 1;
+            var numberOfShards = 3;
             var sourceClusterOperations = new ClusterOperations(sourceCluster);
             var targetClusterOperations = new ClusterOperations(targetCluster);
 
