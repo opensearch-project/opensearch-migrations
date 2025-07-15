@@ -359,7 +359,7 @@ export class NetworkStack extends Stack {
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
         } else if (!props.sourceClusterDisabled && !this.albSourceClusterTG) {
-            throw new Error(`Elasticsearch Service or SourceClusterEndpoint must be enabled, unless the source cluster is disabled.`);
+            throw new Error(`The sourceCluster definition must be provided, or disabled with a definition similar to "sourceCluster":{"disabled":true}`);
         }
 
         if (!props.addOnMigrationDeployId) {

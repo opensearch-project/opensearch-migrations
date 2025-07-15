@@ -487,17 +487,17 @@ export function validateAndReturnFormattedHttpURL(urlString: string) {
 export function parseClusterDefinition(json: any, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterYaml {
     let endpoint = json.endpoint
     if (!endpoint) {
-        throw new Error('Missing required field in cluster definition: endpoint')
+        throw new Error(`Missing required field in ${clusterType} cluster definition: endpoint`)
     }
     const version = json.version;
     if (clusterType == ClusterType.SOURCE && !version) {
-        throw new Error("The `sourceCluster` object requires a `version` field.")
+        throw new Error(`Missing required field in ${clusterType} cluster definition: version`)
     }
     endpoint = validateAndReturnFormattedHttpURL(endpoint)
     const allowInsecure = json.allow_insecure;
     const auth = parseAuth(json.auth, clusterType, scope, stage, deployId)
     if (!auth) {
-        throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
+        throw new Error(`Invalid auth type when parsing ${clusterType} cluster definition: ${json.auth.type}`)
     }
     return new ClusterYaml({endpoint, version, allowInsecure, auth})
 }
