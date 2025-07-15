@@ -13,7 +13,7 @@ plugins {
 // Update java-library-conventions if updated
 def libVersions = extensions.getByType(VersionCatalogsExtension).named('libs')
 def bomAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('boms.') }
-// Exclude lucene aliases since their version cannot be forced
+// Exclude lucene aliases since multiple versions are used in this project
 def luceneAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('lucene.') }
 def depAliases = libVersions.libraryAliases - bomAliases - luceneAliases
 def forced = depAliases.collect { String alias ->
