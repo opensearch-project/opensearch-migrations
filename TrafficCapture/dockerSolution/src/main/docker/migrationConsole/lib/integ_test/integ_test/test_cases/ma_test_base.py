@@ -1,5 +1,7 @@
 from enum import Enum
 
+import requests
+
 from ..common_utils import wait_for_service_status
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -20,6 +22,17 @@ class ClusterVersionCombinationUnsupported(Exception):
         self.target_version = target_version
         self.message = f"{message}: Source version '{source_version}' and Target version '{target_version}'"
         super().__init__(self.message)
+
+
+def check_ma_system_health():
+    print("check_ma_system_health")
+    resp = requests.get("http://127.0.0.1:80/api/system/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "checks" in data
+    assert all(val == "ok" for val in data["checks"].values())
+    print("check_ma_system_health complete")
 
 
 class MATestBase:
@@ -57,6 +70,7 @@ class MATestBase:
         self.backfill: Backfill = console_link_env.backfill
         self.metadata: Metadata = console_link_env.metadata
         self.replayer: Replayer = console_link_env.replay
+        check_ma_system_health()
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
