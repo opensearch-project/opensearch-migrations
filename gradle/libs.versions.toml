@@ -155,3 +155,25 @@ testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers"
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
 
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
+
+# List all boms here with prefix boms- to force platforms across all projects
+boms-aws-sdk          = { module = "software.amazon.awssdk:bom", version.ref = "aws-sdk" }
+boms-jackson          = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+boms-junit            = { module = "org.junit:junit-bom", version.ref = "junit-jupiter" }
+boms-netty            = { module = "io.netty:netty-bom", version.ref = "netty" }
+boms-testcontainers   = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
+boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "opentelemetry" }
+
+# Transitive dependencies to force based on CVEs
+transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",     version = "4.5.14"  }
+transitive-json-path         = { module = "com.jayway.jsonpath:json-path",            version = "2.9.0"   }
+transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",         version = "1.4.21"  }
+transitive-commons-io        = { module = "commons-io:commons-io",                   version = "2.19.0"   }
+transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.11.1"   }
+transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.3"    }
+transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.5.2"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.1"    }
+transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.10"   }
+transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.1"   }
+transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.7" }
+transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
