@@ -1,0 +1,113 @@
+plugins {
+    id 'base'
+    id 'de.undercouch.download' version '5.5.0' // For downloading the OpenAPI spec
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    openapiSpecUrl = 'http://localhost:8000/openapi.json'
+    openapiSpecFile = "${buildDir}/openapi.json"
+    generatedClientDir = "${buildDir}/generated-react-client"
+    openapiGeneratorVersion = '7.5.0'
+}
+
+configurations {
+    openapiGenerator
+}
+
+dependencies {
+    openapiGenerator "org.openapitools:openapi-generator-cli:${openapiGeneratorVersion}"
+}
+
+task downloadOpenApiSpec(type: de.undercouch.gradle.tasks.download.Download) {
+    src openapiSpecUrl
+    dest file(openapiSpecFile)
+    onlyIfModified true
+}
+
+task generateReactClient(type: JavaExec) {
+    dependsOn downloadOpenApiSpec
+    mainClass.set('org.openapitools.codegen.OpenAPIGenerator')
+    classpath = configurations.openapiGenerator
+    args = [
+        'generate',
+        '-i', openapiSpecFile,
+        '-g', 'typescript-fetch',
+        '-o', generatedClientDir,
+        '--additional-properties=supportsES6=true,typescriptThreePlus=true,withInterfaces=true'
+    ]
+}
+
+def workingDir = project.projectDir
+
+def gunicornProcessFile = file("$buildDir/gunicorn.pid")
+def gunicornOutFile = file("$buildDir/gunicorn.out")
+def gunicornErrFile = file("$buildDir/gunicorn.err")
+def gunicornPidFile = file("$buildDir/gunicorn.pid")
+def fastapiCommand = ["pipenv", "run", "gunicorn", "console_link.api.main:app",
+                      "-k", "uvicorn.workers.UvicornWorker",
+                      "-w", "4",
+                      "-b", "127.0.0.1:8000"]
+def openapiUrl = new URL("http://localhost:8000/openapi.json")
+
+
+tasks.register('startFastApiServer') {
+    doLast {
+        def pb = new ProcessBuilder(fastapiCommand)
+                .directory(workingDir)
+                .redirectOutput(gunicornOutFile)
+                .redirectError(gunicornErrFile)
+
+        def process = pb.start()
+        gunicornPidFile.text = process.pid().toString()
+
+        println "Waiting for FastAPI server..."
+        def ok = false
+        for (int i = 0; i < 20; i++) {
+            try {
+                openapiUrl.openConnection().with {
+                    connectTimeout = 1000
+                    readTimeout = 1000
+                    connect()
+                }
+                ok = true
+                break
+            } catch (Exception ignored) {
+                Thread.sleep(500)
+            }
+        }
+        if (!ok) {
+            throw new GradleException("FastAPI server failed to start in time.")
+        }
+    }
+}
+
+tasks.register('stopFastApiServer') {
+    doLast {
+        if (gunicornPidFile.exists()) {
+            def pid = gunicornPidFile.text.trim()
+            println "Stopping FastAPI server with PID ${pid}"
+            ['kill', pid].execute().waitFor()
+        }
+    }
+}
+
+task cleanReactClient(type: Delete) {
+    delete file(generatedClientDir)
+}
+
+tasks.named('generateReactClient') {
+    dependsOn startFastApiServer
+    finalizedBy stopFastApiServer
+}
+
+tasks.named('clean') {
+    delete gunicornPidFile, gunicornOutFile, gunicornErrFile
+}
+
+
+
+clean.dependsOn cleanReactClient

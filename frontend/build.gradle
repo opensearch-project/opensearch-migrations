@@ -33,6 +33,14 @@ def buildOutputs = [
     'out'
 ]
 
+
+def fastapiProject = gradle.includedBuild('console_link')
+tasks.register('syncOpenApiClient', Copy) {
+    dependsOn fastapiProject.task(':generateReactClient')
+    from(fastapiProject.projectDir.toPath().resolve("build/generated-react-client/src"))
+    into file("src/api/client")
+}
+
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
     args = ['run', 'build']
