@@ -1,5 +1,5 @@
 from enum import Enum
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Callable, Dict
 import os
