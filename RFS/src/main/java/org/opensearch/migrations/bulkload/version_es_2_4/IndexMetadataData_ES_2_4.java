@@ -47,14 +47,7 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
     @Override
     public int getNumberOfShards() {
-        JsonNode settingsNode = getSettings();
-        if (settingsNode != null && settingsNode.has("index")) {
-            JsonNode indexNode = settingsNode.get("index");
-            if (indexNode.has("number_of_shards")) {
-                return indexNode.get("number_of_shards").asInt();
-            }
-        }
-        return 1; // default fallback
+        return this.getSettings().get("index.number_of_shards").asInt();
     }
 
     @Override
