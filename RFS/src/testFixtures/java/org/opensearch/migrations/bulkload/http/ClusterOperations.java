@@ -224,7 +224,7 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
-        boolean useTypedMappings = !VersionMatchers.isES_8_X.test(clusterVersion);
+        boolean useTypedMappings = UnboundVersionMatchers.isBelowES_8_X.test(clusterVersion);
 
         var matchPatternClause = (UnboundVersionMatchers.isBelowES_6_X)
             .test(clusterVersion)
