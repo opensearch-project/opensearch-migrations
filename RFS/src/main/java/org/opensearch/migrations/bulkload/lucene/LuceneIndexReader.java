@@ -5,6 +5,7 @@ import java.nio.file.Path;
 
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
@@ -88,10 +89,15 @@ public interface LuceneIndexReader {
         private final ClusterSnapshotReader snapshotReader;
 
         public LuceneIndexReader getReader(Path path) {
-            if (VersionMatchers.isES_5_X.test(snapshotReader.getVersion())) {
+            if (VersionMatchers.isES_2_X.test(snapshotReader.getVersion())) {
+                log.atInfo().setMessage("Creating IndexReader5").log();
+                return new IndexReader5(
+                    path
+                );
+            } else if (VersionMatchers.isES_5_X.test(snapshotReader.getVersion())) {
                 log.atInfo().setMessage("Creating IndexReader6").log();
                 return new IndexReader6(
-                    path
+                        path
                 );
             } else if (VersionMatchers.isES_6_X.test(snapshotReader.getVersion())) {
                 log.atInfo().setMessage("Creating IndexReader7").log();

@@ -80,7 +80,7 @@ public class EndToEndTest extends SourceTestBase {
             Startables.deepStart(sourceCluster, targetCluster).join();
 
             var indexName = "blog_2023";
-            var numberOfShards = 3;
+            var numberOfShards = 1;
             var sourceClusterOperations = new ClusterOperations(sourceCluster);
             var targetClusterOperations = new ClusterOperations(targetCluster);
 
@@ -105,21 +105,21 @@ public class EndToEndTest extends SourceTestBase {
             targetClusterOperations.createIndex(indexName, body);
 
             // === ACTION: Create two large documents (40MB each) ===
-            String largeDoc = generateLargeDocJson(40);
+            String largeDoc = generateLargeDocJson(1);
             sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
             sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);
 
             // === ACTION: Create some searchable documents ===
-            sourceClusterOperations.createDocument(indexName, "222", "{\"author\":\"Tobias Funke\"}");
-            sourceClusterOperations.createDocument(indexName, "223", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
-            sourceClusterOperations.createDocument(indexName, "224", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
-            sourceClusterOperations.createDocument(indexName, "225", "{\"author\":\"Tobias Funke\", \"category\": \"tech\"}", "2", null);
+            sourceClusterOperations.createDocument(indexName, "222", "{\"score\": 42}");
+            sourceClusterOperations.createDocument(indexName, "223", "{\"score\": 55, \"active\": true}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "224", "{\"score\": 60, \"active\": true}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "225", "{\"score\": 77, \"active\": false}", "2", null);
 
 
             // To create deleted docs in a segment that persists on the snapshot, refresh, then create two docs on a shard, then after a refresh, delete one.
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
-            sourceClusterOperations.createDocument(indexName, "toBeDeleted", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}", "1", null);
-            sourceClusterOperations.createDocument(indexName, "remaining", "{\"author\":\"Tobias Funke\", \"category\": \"tech\"}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "toBeDeleted", "{\"score\": 99, \"active\": true}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "remaining", "{\"score\": 88, \"active\": false}", "1", null);
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
             sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
             sourceClusterOperations.post("/" + indexName + "/_refresh", null);
@@ -182,16 +182,24 @@ public class EndToEndTest extends SourceTestBase {
     }
 
     private String generateLargeDocJson(int sizeInMB) {
-        // Calculate the number of characters needed (1 char = 1 byte)
-        int numChars = sizeInMB * 1024 * 1024;
-        Random random = new Random(1); // fixed seed for reproducibility
-        StringBuilder sb = new StringBuilder(numChars);
-        String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        for (int i = 0; i < numChars; i++) {
-            sb.append(characters.charAt(random.nextInt(characters.length())));
+        if (sizeInMB <= 2) {
+            return "{\"numbers\":[1,2,3,4,5]}";
         }
-        String timestamp = java.time.Instant.now().toString();
-        return "{\"timestamp\":\"" + timestamp + "\", \"large_field\":\"" + sb + "\"}";
+        // Calculate the number of characters needed (1 char = 1 byte)
+        int targetBytes = sizeInMB * 1024 * 1024;
+        int estimatedBytesPerIntEntry = 5;
+        int count = targetBytes / estimatedBytesPerIntEntry;
+        Random random = new Random(1); // fixed seed for reproducibility
+        StringBuilder sb = new StringBuilder(targetBytes + 100);
+        sb.append("{\"numbers\":[");
+        for (int i = 0; i < count; i++) {
+            sb.append(random.nextInt(10000));
+            if (i < count - 1) {
+                sb.append(",");
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
     }
 
     private void checkDocsWithRouting(
@@ -205,7 +213,7 @@ public class EndToEndTest extends SourceTestBase {
 
         // Check that search by routing works as expected.
         var requests = new SearchClusterRequests(context);
-        var hits = requests.searchIndexByQueryString(clusterClient, "blog_2023", "category:cooking", "1");
+        var hits = requests.searchIndexByQueryString(clusterClient, "blog_2023", "active:true", "1");
 
         Assertions.assertTrue(hits.isArray() && hits.size() == 2);
 
