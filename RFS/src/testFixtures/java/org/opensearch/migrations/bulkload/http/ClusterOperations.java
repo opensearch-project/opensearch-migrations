@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -225,8 +226,7 @@ public class ClusterOperations {
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
         boolean useTypedMappings = !VersionMatchers.isES_8_X.test(clusterVersion);
 
-        var matchPatternClause = (VersionMatchers.isES_2_X
-            .or(VersionMatchers.isES_5_X))
+        var matchPatternClause = (UnboundVersionMatchers.isBelowES_6_X)
             .test(clusterVersion)
             ? "\"template\":\"" + pattern + "\","
             : "\"index_patterns\": [\r\n" + //
@@ -258,14 +258,11 @@ public class ClusterOperations {
             "  }\r\n" +
             "}";
 
-        var extraParameters = (
-                VersionMatchers.isES_2_X
-                        .or(VersionMatchers.isES_5_X)
-                        .or(VersionMatchers.isES_8_X)
-                        .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_6)
-            ).test(clusterVersion)
-                    ? ""
-                    : "?include_type_name=true";
+        boolean needsTypeName = (
+                VersionMatchers.equalOrGreaterThanES_6_7
+                .or(VersionMatchers.isES_7_X)
+            ).test(clusterVersion);
+        var extraParameters = needsTypeName ? "?include_type_name=true" : "";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
