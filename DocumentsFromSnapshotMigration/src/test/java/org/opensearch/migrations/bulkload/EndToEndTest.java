@@ -105,7 +105,7 @@ public class EndToEndTest extends SourceTestBase {
             targetClusterOperations.createIndex(indexName, body);
 
             // === ACTION: Create two large documents (40MB each) ===
-            String largeDoc = generateLargeDocJson(1);
+            String largeDoc = generateLargeDocJson(2);
             sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
             sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);
 
@@ -182,19 +182,16 @@ public class EndToEndTest extends SourceTestBase {
     }
 
     private String generateLargeDocJson(int sizeInMB) {
-        if (sizeInMB <= 2) {
-            return "{\"numbers\":[1,2,3,4,5]}";
-        }
-        // Calculate the number of characters needed (1 char = 1 byte)
         int targetBytes = sizeInMB * 1024 * 1024;
-        int estimatedBytesPerIntEntry = 5;
-        int count = targetBytes / estimatedBytesPerIntEntry;
-        Random random = new Random(1); // fixed seed for reproducibility
+
+        // Each number + comma is about 8 bytes: 7 digits + 1 comma
+        int bytesPerEntry = 8;
+        int numEntries = targetBytes / bytesPerEntry;
         StringBuilder sb = new StringBuilder(targetBytes + 100);
         sb.append("{\"numbers\":[");
-        for (int i = 0; i < count; i++) {
-            sb.append(random.nextInt(10000));
-            if (i < count - 1) {
+        for (int i = 0; i < numEntries; i++) {
+            sb.append("1000000");  // fixed 7-digit number
+            if (i < numEntries - 1) {
                 sb.append(",");
             }
         }
