@@ -214,9 +214,10 @@ export class StackComposer {
         // that fully define the source and target cluster configurations. For the time being, we're supporting both.
         const sourceClusterDisabledField = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
         const sourceClusterEndpointField = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
-        let sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
+        const sourceClusterField = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
+        let sourceClusterDefinition = sourceClusterField
 
-        if (!sourceClusterDefinition && sourceClusterEndpointField) {
+        if (!sourceClusterField && sourceClusterEndpointField) {
             CdkLogger.warn("The `sourceClusterEndpoint` option is being deprecated in favor of a `endpoint` field in the `sourceCluster` object.")
             CdkLogger.warn("Please update your CDK context block to use the `sourceCluster` object.")
             CdkLogger.warn("Defaulting to source cluster version: ES_7.10")
@@ -226,7 +227,7 @@ export class StackComposer {
                 "version": "ES_7.10"
             }
         }
-        const sourceClusterDisabled = (sourceClusterDefinition?.disabled ?? sourceClusterDisabledField)
+        const sourceClusterDisabled = (sourceClusterField?.disabled ?? sourceClusterDisabledField)
         if (sourceClusterDisabled) {
             if (sourceClusterDisabledField) {
                 CdkLogger.warn("The `sourceClusterDisabled` field is being deprecated in favor of a `disabled: true` field in the `sourceCluster` object.")
@@ -314,8 +315,8 @@ export class StackComposer {
         }
 
         if (!sourceClusterDisabled && (!sourceClusterDefinition && !elasticsearchServiceEnabled && !captureProxyServiceEnabled)) {
-            throw new Error("A source cluster must be specified by one of: [sourceCluster, elasticsearchServiceEnabled, captureProxyServiceEnabled] or disabled by " +
-                "specifying `disabled: true` in the `sourceCluster` object ");
+            throw new Error("A source cluster must be specified by one of: [sourceCluster, elasticsearchServiceEnabled, captureProxyServiceEnabled] or" +
+                            " disabled with a definition similar to \"sourceCluster\":{\"disabled\":true} ");
         }
 
         // If enabled re-use existing VPC and/or associated resources or create new
@@ -356,9 +357,10 @@ export class StackComposer {
         const existingSnapshotDefinition = this.getContextForType('snapshot', 'object', defaultValues, contextJSON)
         let snapshotYaml
         if (existingSnapshotDefinition) {
-            if(!servicesYaml.source_cluster?.version) {
+            if(!sourceClusterField?.version) {
                 throw new Error("The `sourceCluster` object must be provided with a `version` field when using an external snapshot to ensure proper parsing of " +
-                    "the snapshot based on cluster version. See options.md for more details.")
+                    "the snapshot based on cluster version. The `sourceCluster` object can still be disabled by providing the `disabled: true` field which would " +
+                    "would result in a minimal source cluster object similar to: \"sourceCluster\":{\"version\":\"ES 7.10\",\"disabled\":true}")
             }
             snapshotYaml = parseSnapshotDefinition(existingSnapshotDefinition)
         } else {

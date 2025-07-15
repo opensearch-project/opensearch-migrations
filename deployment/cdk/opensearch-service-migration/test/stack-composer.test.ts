@@ -360,7 +360,7 @@ describe('Stack Composer Tests', () => {
     expect(createStackFunc).toThrow()
   })
 
-  test('Test that a context with no source cluster details succeeds if sourceClusterDisabled', () => {
+  test('Test that a context with no source cluster details succeeds if sourceCluster.disabled', () => {
     const sourceClusterDisabledContextOptions = {
       sourceCluster: {
         "disabled": true
@@ -395,6 +395,49 @@ describe('Stack Composer Tests', () => {
     }
     const sourceClusterDisabledWithEndpointCreateStackFunc = () => createStackComposer(sourceClusterDisabledWithEndpointContextOptions)
     expect (sourceClusterDisabledWithEndpointCreateStackFunc).toThrow()
+  })
+
+  test('Test that a context with a snapshot block and sourceCluster block succeeds if sourceCluster is disabled and has version', () => {
+    const contextOptions = {
+      sourceCluster: {
+        "disabled": true,
+        "version": "ES_7.10"
+      },
+      snapshot: {
+        "snapshotName": "my-snapshot-name",
+        "snapshotRepoName": "my-snapshot-repo",
+        "s3Uri": "s3://my-s3-bucket-name/my-bucket-path-to-snapshot-repo",
+        "s3Region": "us-east-2"
+      },
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true,
+
+    }
+    const openSearchStacks = createStackComposer(contextOptions)
+    expect(openSearchStacks.stacks).toHaveLength(4)
+  })
+
+  test('Test that a context with a snapshot block and sourceCluster block fails if sourceCluster does not have version', () => {
+    const contextOptions = {
+      sourceCluster: {
+        "disabled": true
+      },
+      snapshot: {
+        "snapshotName": "my-snapshot-name",
+        "snapshotRepoName": "my-snapshot-repo",
+        "s3Uri": "s3://my-s3-bucket-name/my-bucket-path-to-snapshot-repo",
+        "s3Region": "us-east-2"
+      },
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true,
+
+    }
+    const createStackComposerWithContextOptions = () => createStackComposer(contextOptions)
+    expect (createStackComposerWithContextOptions).toThrow()
   })
 
 
