@@ -39,27 +39,49 @@ charts:
               Kube_Tag_Prefix  kube.var.log.containers.
               Merge_Log        On
               Merge_Log_Key    log_processed
-
+          
           [FILTER]
               Name          rewrite_tag
               Match         kube.*
-              Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+              Rule          $kubernetes['pod_name'] ^(.*)$ fluentbit-$1 false
               Emitter_Name  re_emitted
           
           [FILTER]
-              Name  modify
-              Match *
-              Copy  log message
+              Name         nest
+              Match        fluentbit-*
+              Operation    lift
+              Nested_under kubernetes
+
+          [FILTER]
+              Name         nest
+              Match        fluentbit-*
+              Operation    lift
+              Nested_under labels
+          
+          [FILTER]
+              Name           modify
+              Match          fluentbit-*
+              Rename         container_name container
+              Rename         container_image image
+              Rename         pod_name pod
+              Rename         namespace_name namespace
+              Remove         _p
+              Move_to_start  log
+
         # Change output destination to be CloudWatch
         outputs: |
           [OUTPUT]
               Name                cloudwatch_logs
-              Match               *
+              Match               fluentbit-*
               region              ${AWS_REGION}
               log_group_name      /migration-assistant-${STAGE_NAME}-${AWS_REGION}/logs
-              log_stream_prefix   from-fluentbit-
+              log_stream_prefix   from-
               auto_create_group   true
-              log_key             message
+          
+#          [OUTPUT]
+#              Name stdout
+#              Match fluentbit-*
+#              Format json_lines
 
       # Remove unnecessary mounts for EKS deployment
       extraVolumes: []
