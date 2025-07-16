@@ -1,5 +1,6 @@
 import time
 import logging
+import requests
 from requests.exceptions import ConnectionError, SSLError
 from console_link.middleware.clusters import call_api, CallAPIResult
 from console_link.models.cluster import HttpMethod, Cluster
@@ -20,6 +21,8 @@ EXPECTED_BENCHMARK_DOCS = {
     "sonested": {"count": 1000},
     "nyc_taxis": {"count": 1000}
 }
+
+API_ENDPOINT = "http://127.0.0.1:80/api"
 
 
 class ClusterAPIRequestError(Exception):
@@ -87,3 +90,14 @@ def wait_for_service_status(status_func, desired_status, max_attempts: int = 25,
             error_message = ""
             time.sleep(delay)
     raise ServiceStatusError(error_message)
+
+
+def check_ma_system_health():
+    uriSystemHealth = API_ENDPOINT + "/system/health"
+    resp = requests.get(uriSystemHealth)
+    logger.info(f"Request GET {uriSystemHealth} returned response {resp.status_code}, body: {resp.json()}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "checks" in data
+    assert all(val == "ok" for val in data["checks"].values())

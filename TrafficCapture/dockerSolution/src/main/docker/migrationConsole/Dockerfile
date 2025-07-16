@@ -74,6 +74,9 @@ RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 
+COPY start-console.sh /root/
+RUN chmod +x /root/start-console.sh
+
 WORKDIR /root
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
@@ -84,7 +87,6 @@ RUN pipenv install --deploy
 COPY cluster_tools /root/cluster_tools
 WORKDIR /root/cluster_tools
 RUN pipenv install
-
 WORKDIR /root
 
 # Console setup bash completion and venv for interactive access
@@ -106,4 +108,4 @@ COPY workflows /root/workflows
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
 
-CMD ["/bin/bash", "-c", "/root/loadServicesFromParameterStore.sh && tail -f /dev/null"]
+CMD ["/root/start-console.sh"]

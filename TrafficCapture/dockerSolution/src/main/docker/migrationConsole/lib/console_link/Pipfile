@@ -11,6 +11,10 @@ pyyaml = "*"
 Click = "*"
 cerberus = "*"
 awscli = "*"
+fastapi = "*"
+pydantic = "*"
+gunicorn = "*"
+uvicorn = {extras = ["standard"], version = "*"}
 
 [dev-packages]
 pytest = "*"
@@ -19,6 +23,7 @@ requests-mock = "*"
 coverage = "*"
 moto = "*"
 testcontainers = "*"
+httpx = "*"
 
 [requires]
 python_version = "3.11"

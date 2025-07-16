@@ -20,6 +20,9 @@
   - [Development](#development)
     - [Unit Tests](#unit-tests)
     - [Coverage](#coverage)
+    - [Backend APIs](#backend-apis)
+      - [Locally testing](#locally-testing)
+      - [Deployment](#deployment)
 
 The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app and a web API, for instance.
 
@@ -324,3 +327,45 @@ or generated as HTML:
 ```shell
 pipenv run coverage html
 ```
+
+### Backend APIs
+
+As part of the Migration console many console commands are available for use by the frontend website or by workflow management tools.  This is a sub-set of the console_link library, ensuring the command line and backend functionality is passing through the same systems. 
+
+#### Locally testing
+
+```shell
+pipenv run gunicorn console_link.api.main:app \
+    -k uvicorn.workers.UvicornWorker \
+    -w 4 \
+    -b 0.0.0.0:8000 \
+    --access-logfile - \
+    --error-logfile -
+```
+
+*Website passthrough*
+
+To test the api when the the web frontend is running without deploying in AWS or kubernetes, make the following updates:
+
+1. Update `frontend/nginx.conf` to allow communication to the local host
+`        proxy_pass         http://127.0.0.1:8000/;` -> 
+`        proxy_pass         http://host.docker.internal:8000/;`
+
+2. Rebuild the website docker image
+```shell
+./gradlew :frontend:buildDockerImage
+```
+
+3. Run the website with the additional host
+```shell
+docker run -p 8080:80 --add-host=host.docker.internal:host-gateway migrations/website
+```
+
+4. Access the api through the website passthrough
+```shell
+curl http://localhost:8080/api/docs
+```
+
+#### Deployment
+
+Consult the [frontend readme](../../../../../../../../frontend/README.md) for access when hosted in AWS or kubernetes.
