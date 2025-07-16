@@ -95,7 +95,7 @@ def wait_for_service_status(status_func, desired_status, max_attempts: int = 25,
 def check_ma_system_health():
     uriSystemHealth = API_ENDPOINT + "/system/health"
     resp = requests.get(uriSystemHealth)
-    logger.debug(f"Request GET {uriSystemHealth} returned response {resp.status_code}, body: {resp.json()}")
+    logger.info(f"Request GET {uriSystemHealth} returned response {resp.status_code}, body: {resp.json()}")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
