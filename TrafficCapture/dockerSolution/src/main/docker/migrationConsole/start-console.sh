@@ -6,12 +6,8 @@ if [[ -f /root/loadServicesFromParameterStore.sh ]]; then
 fi
 
 echo "Starting API server..."
-if [ -n "$SHARED_LOGS_DIR_PATH" ]; then
-    LOG_DIR="$SHARED_LOGS_DIR_PATH/api/logs"
-    mkdir -p "$LOG_DIR"
-else
-    LOG_DIR="/var/log"
-fi
+LOG_DIR="${SHARED_LOGS_DIR_PATH:-/var/log}/api/logs"
+mkdir -p "$LOG_DIR"
 
 cd /root/lib/console_link
 export FASTAPI_ROOT_PATH=/api
