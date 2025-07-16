@@ -13,20 +13,35 @@ class ConnectionResult:
     cluster_version: str
 
 
+@dataclass
+class CallAPIResult:
+    http_response: str
+    error_message: str
+
+
 def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None,
              session=None, raise_error=False):
-    r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout, session=session,
-                         raise_error=raise_error)
-    return r
+    try:
+        r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout, session=session,
+                             raise_error=raise_error)
+        return CallAPIResult(http_response=r, error_message=None)
+    except Exception as e:
+        logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
+        return CallAPIResult(http_response=None, error_message=f"Error: Unable to perform cluster command "
+                                                               f"with message: {e}")
 
 
 def cat_indices(cluster: Cluster, refresh=False, as_json=False):
-    if refresh:
-        cluster.call_api('/_refresh')
-    as_json_suffix = "?format=json" if as_json else "?v=true"
-    cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
-    r = cluster.call_api(cat_indices_path)
-    return r.json() if as_json else r.content
+    try:
+        if refresh:
+            cluster.call_api('/_refresh')
+        as_json_suffix = "?format=json" if as_json else "?v=true"
+        cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
+        r = cluster.call_api(cat_indices_path)
+        return r.json() if as_json else r.content
+    except Exception as e:
+        logger.debug("Exception occurred when using call_api on cluster: ", exc_info=True)
+        return f"Error: Unable to perform cat-indices command with message: {e}"
 
 
 def connection_check(cluster: Cluster) -> ConnectionResult:

@@ -201,9 +201,10 @@ class Metadata:
 
         if self._target_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
+                auth_details = self._target_cluster.get_basic_auth_details()
                 command_args.update({
-                    "--target-username": self._target_cluster.auth_details.get("username"),
-                    "--target-password": self._target_cluster.get_basic_auth_password()
+                    "--target-username": auth_details.username,
+                    "--target-password": auth_details.password
                 })
                 logger.info("Using basic auth for target cluster")
             except KeyError as e:

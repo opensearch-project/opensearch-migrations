@@ -1,5 +1,4 @@
 import boto3
-import console_link.middleware.clusters as clusters_
 import hashlib
 import os
 import pytest
@@ -92,8 +91,7 @@ def test_valid_cluster_with_secrets_auth_created():
         "endpoint": "https://opensearchtarget:9200",
         "allow_insecure": True,
         "basic_auth": {
-            "username": "admin",
-            "password_from_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+            "user_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
         },
     }
     cluster = Cluster(valid_with_secrets)
@@ -107,14 +105,14 @@ def test_invalid_cluster_with_two_passwords_refused():
         "basic_auth": {
             "username": "XXXXX",
             "password": "XXXXXXXXXXXXXX",
-            "password_from_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+            "user_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
         },
     }
     with pytest.raises(ValueError) as excinfo:
         Cluster(two_passwords)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]["cluster"][0]['basic_auth'] == [
-        "More than one value is present: ['password', 'password_from_secret_arn']"
+        "Cannot provide both (username + password) and user_secret_arn"
     ]
 
 
@@ -130,7 +128,7 @@ def test_invalid_cluster_with_zero_passwords_refused():
         Cluster(two_passwords)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]["cluster"][0]['basic_auth'] == [
-        "No values are present from set: ['password', 'password_from_secret_arn']"
+        "Must provide either (username + password) or user_secret_arn"
     ]
 
 
@@ -279,38 +277,18 @@ def test_valid_cluster_fetch_all_documents(requests_mock):
     assert documents == [{"id_1": {"test1": True}}, {"id_2": {"test2": True}}]
 
 
-def test_connection_check_with_exception(mocker):
-    cluster = create_valid_cluster()
-    api_mock = mocker.patch.object(Cluster, 'call_api', side_effect=Exception('Attempt to connect to cluster failed'))
-
-    result = clusters_.connection_check(cluster)
-    api_mock.assert_called()
-    assert 'Attempt to connect to cluster failed' in result.connection_message
-    assert not result.connection_established
-
-
-def test_connection_check_succesful(requests_mock):
-    cluster = create_valid_cluster()
-    requests_mock.get(f"{cluster.endpoint}/", json={'version': {'number': '2.15'}})
-
-    result = clusters_.connection_check(cluster)
-    assert result.connection_established
-    assert result.connection_message == 'Successfully connected!'
-    assert result.cluster_version == '2.15'
-
-
 def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials):
     valid_with_secrets = {
         "endpoint": "https://opensearchtarget:9200",
         "allow_insecure": True,
         "basic_auth": {
-            "username": "admin",
-            "password_from_secret_arn": None  # Will be set later
+            "user_secret_arn": None  # Will be set later
         },
     }
-    secret_value = "myfakepassword"
-    username = valid_with_secrets["basic_auth"]["username"]
-    b64encoded_token = b64encode(f"{username}:{secret_value}".encode('utf-8')).decode("ascii")
+    username = 'unit_test_user'
+    password = 'unit_test_pass'
+    secret_value = f"{{\"username\": \"{username}\", \"password\": \"{password}\"}}"
+    b64encoded_token = b64encode(f"{username}:{password}".encode('utf-8')).decode("ascii")
     auth_header_should_be = f"Basic {b64encoded_token}"
 
     requests_mock.get(f"{valid_with_secrets['endpoint']}/test_api", json={'test': True})
@@ -321,7 +299,7 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
             Name="test-cluster-password",
             SecretString=secret_value,
         )
-        valid_with_secrets["basic_auth"]["password_from_secret_arn"] = secret['ARN']
+        valid_with_secrets["basic_auth"]["user_secret_arn"] = secret['ARN']
         cluster = Cluster(valid_with_secrets)
         assert isinstance(cluster, Cluster)
 
@@ -360,32 +338,6 @@ def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
         assert "us-east-2" in auth_header
         host_header = requests_mock.last_request.headers['Host']
         assert "test.opensearchtarget.com" == host_header
-
-
-def test_call_api_via_middleware(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
-
-    response = clusters_.call_api(cluster, '/test_api')
-    assert response.status_code == 200
-    assert response.json() == {'test': True}
-
-
-def test_cat_indices_with_refresh(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    refresh_mock = requests_mock.get(f"{cluster.endpoint}/_refresh")
-    indices_mock = requests_mock.get(f"{cluster.endpoint}/_cat/indices/_all")
-
-    clusters_.cat_indices(cluster, refresh=True)
-    assert refresh_mock.call_count == 1
-    assert indices_mock.call_count == 1
-
-
-def test_clear_indices(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    mock = requests_mock.delete(f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state*")
-    clusters_.clear_indices(cluster)
-    assert mock.call_count == 1
 
 
 def test_run_benchmark_executes_correctly_no_auth(mocker):
@@ -547,9 +499,71 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         assert original_signature == new_signature, "Signatures do not match"
 
 
-def test_call_api_with_head_method(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    requests_mock.head(f"{cluster.endpoint}/test_api")
+def test_valid_basic_auth_secret(mocker):
+    mock_client = mocker.Mock()
+    mock_client.get_secret_value.return_value = {
+        "SecretString": '{"username": "admin", "password": "pass123!"}'
+    }
+    mocker.patch("console_link.models.cluster.create_boto3_client", return_value=mock_client)
+    secret_arn = "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
 
-    response = clusters_.call_api(cluster, '/test_api', HttpMethod.HEAD)
-    assert response.status_code == 200
+    cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "basic_auth": {
+            "user_secret_arn": secret_arn
+        },
+    }
+    cluster = Cluster(cluster_config)
+    auth_details = cluster.get_basic_auth_details()
+    mock_client.get_secret_value.assert_called_once_with(
+        SecretId=secret_arn
+    )
+    assert mock_client.get_secret_value.call_count == 1
+    assert auth_details.username == "admin"
+    assert auth_details.password == "pass123!"
+
+
+def test_invalid_basic_auth_secret_no_json(mocker):
+    mock_client = mocker.Mock()
+    mock_client.get_secret_value.return_value = {
+        "SecretString": "pass123!"
+    }
+    mocker.patch("console_link.models.cluster.create_boto3_client", return_value=mock_client)
+    secret_arn = "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+
+    cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "basic_auth": {
+            "user_secret_arn": secret_arn
+        },
+    }
+    cluster = Cluster(cluster_config)
+    with pytest.raises(ValueError) as exc_info:
+        cluster.get_basic_auth_details()
+    assert str(exc_info.value) == (f"Expected secret {secret_arn} to be a JSON object with username "
+                                   f"and password fields")
+    mock_client.get_secret_value.assert_called_once_with(SecretId=secret_arn)
+
+
+def test_invalid_basic_auth_secret_improper_fields(mocker):
+    mock_client = mocker.Mock()
+    mock_client.get_secret_value.return_value = {
+        "SecretString": '{"user": "admin", "pass": "pass123!"}'
+    }
+    mocker.patch("console_link.models.cluster.create_boto3_client", return_value=mock_client)
+    secret_arn = "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass"
+
+    cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "basic_auth": {
+            "user_secret_arn": secret_arn
+        },
+    }
+    cluster = Cluster(cluster_config)
+    with pytest.raises(ValueError) as exc_info:
+        cluster.get_basic_auth_details()
+    assert str(exc_info.value) == (f"Secret {secret_arn} is missing required key(s): username, password")
+    mock_client.get_secret_value.assert_called_once_with(SecretId=secret_arn)

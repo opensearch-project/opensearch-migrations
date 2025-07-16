@@ -38,8 +38,7 @@ dependencies {
     implementation libs.log4j.slf4j2.impl
     implementation libs.slf4j.api
     implementation libs.disruptor
-    implementation libs.aws.arns
-    implementation libs.aws.secretsmanager
+    implementation libs.aws.auth
     implementation libs.aws.sdk.core
     implementation libs.aws.msk.iam.auth
     implementation libs.commons.compress

@@ -1,9 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {VpcDetails} from "../network-stack";
 import {SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
     createMigrationStringParameter,
     createAllAccessOpenSearchIAMAccessPolicy,
@@ -12,11 +12,11 @@ import {
     getMigrationStringParameterValue,
     hashStringSHA256,
     MigrationSSMParameter,
-    createSnapshotOnAOSRole
+    createSnapshotOnAOSRole, createECSTaskRole
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import {Fn} from "aws-cdk-lib";
-import {ClusterYaml, MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
+import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
@@ -29,7 +29,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
-    readonly sourceCluster?: ClusterYaml,
     readonly managedServiceSourceSnapshotEnabled?: boolean
 }
 
@@ -92,8 +91,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }))
         );
 
-        let servicePortMappings: PortMapping[]|undefined
-        let imageCommand: string[]|undefined
+        const serviceName = "migration-console"
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
@@ -179,17 +177,18 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getTargetSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn ?
-            getSecretAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn) : null;
-
-        const getSourceSecretsPolicy = props.sourceCluster?.auth.basicAuth?.password_from_secret_arn ?
-            getSecretAccessPolicy(props.sourceCluster?.auth.basicAuth?.password_from_secret_arn) : null;
+        const servicesYaml = props.servicesYaml
+        const secretPolicies = []
+        if (servicesYaml.target_cluster.auth.basicAuth?.user_secret_arn) {
+            secretPolicies.push(getSecretAccessPolicy(servicesYaml.target_cluster.auth.basicAuth.user_secret_arn))
+        }
+        if (servicesYaml.source_cluster?.auth.basicAuth?.user_secret_arn) {
+            secretPolicies.push(getSecretAccessPolicy(servicesYaml.source_cluster.auth.basicAuth.user_secret_arn))
+        }
 
         // Upload the services.yaml file to Parameter Store
-        const servicesYaml = props.servicesYaml
-        servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
-        servicesYaml.metadata_migration.source_cluster_version = props.sourceCluster?.version
+        servicesYaml.metadata_migration.source_cluster_version = props.servicesYaml.source_cluster?.version
         if (props.otelCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
             if (servicesYaml.metadata_migration) {
@@ -205,18 +204,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        const serviceTaskRole = new Role(this, 'MigrationServiceTaskRole', {
-            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'Role for Migration Console ECS Tasks',
-        });
+        const serviceTaskRole = createECSTaskRole(this, serviceName, this.region, props.stage)
 
         const openSearchPolicy = createAllAccessOpenSearchIAMAccessPolicy()
         const openSearchServerlessPolicy = createAllAccessOpenSearchServerlessIAMAccessPolicy()
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, s3AccessPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
-            // only add secrets policies if they're non-null
-            ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
-            ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
+            ...secretPolicies
         ]
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
@@ -246,11 +240,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
 
         this.createService({
-            serviceName: "migration-console",
+            serviceName: serviceName,
             dockerImageName: "migrations/migration_console:latest",
             securityGroups: securityGroups,
-            portMappings: servicePortMappings,
-            dockerImageCommand: imageCommand,
             volumes: [sharedLogFileSystem.asVolume()],
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             environment: environment,

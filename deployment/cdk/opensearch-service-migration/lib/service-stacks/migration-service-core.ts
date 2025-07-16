@@ -14,7 +14,8 @@ import {
     Volume,
     AwsLogDriverMode,
     ContainerDependencyCondition,
-    ServiceManagedVolume
+    ServiceManagedVolume,
+    Secret as EcsSecret
 } from "aws-cdk-lib/aws-ecs";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
@@ -44,7 +45,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
     readonly targetGroups?: ELBTargetGroup[],
-    readonly ephemeralStorageGiB?: number
+    readonly ephemeralStorageGiB?: number,
+    readonly secrets?: Record<string, EcsSecret>
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
@@ -58,7 +60,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpcDetails.vpc
         })
 
-        this.serviceTaskRole = props.taskRole ?? createDefaultECSTaskRole(this, props.serviceName)
+        this.serviceTaskRole = props.taskRole ?? createDefaultECSTaskRole(this, props.serviceName, this.region, props.stage)
         props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
@@ -89,6 +91,7 @@ export class MigrationServiceCore extends Stack {
             containerName: props.serviceName,
             command: props.dockerImageCommand,
             environment: props.environment,
+            secrets: props.secrets,
             portMappings: props.portMappings,
             logging: LogDrivers.awsLogs({
                 streamPrefix: `${props.serviceName}-logs`,
@@ -167,7 +170,7 @@ export class MigrationServiceCore extends Stack {
 
         // Add any ServiceManagedVolumes to the service, if they exist
         if (props.volumes) {
-            props.volumes.filter(vol => vol instanceof ServiceManagedVolume).forEach(vol => fargateService.addVolume(vol as ServiceManagedVolume));
+            props.volumes.filter(vol => vol instanceof ServiceManagedVolume).forEach(vol => fargateService.addVolume(vol));
         }
 
         if (props.targetGroups) {

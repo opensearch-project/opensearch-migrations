@@ -5,12 +5,38 @@
 plugins {
     // Apply the java Plugin to add support for Java.
     id 'java'
+    id 'java-test-fixtures'
+}
+
+// Force resolution of all versions of dependencies explicitly listed in the version catalog even if
+// transitive dependency calls for it with a different (higher or lower) version
+// Update java-library-conventions if updated
+def libVersions = extensions.getByType(VersionCatalogsExtension).named('libs')
+def bomAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('boms.') }
+// Exclude lucene aliases since multiple versions are used in this project
+def luceneAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('lucene.') }
+def depAliases = libVersions.libraryAliases - bomAliases - luceneAliases
+def forced = depAliases.collect { String alias ->
+    libVersions.findLibrary(alias).get().get()
+}.findAll { it -> it.version != null }
+configurations.configureEach {
+    resolutionStrategy.force(*forced)
+    resolutionStrategy {
+        preferProjectModules()
+    }
 }
 
 dependencies {
-    // Use JUnit Jupiter for testing.
-    testImplementation libs.junit.jupiter
-    testRuntimeOnly libs.junit.platform.launcher
+    bomAliases.each { alias ->
+        // Using compileOnly for standard and testFixtures to avoid
+        compileOnly(enforcedPlatform(libVersions.findLibrary(alias).get()))
+        testImplementation(enforcedPlatform(libVersions.findLibrary(alias).get()))
+        testFixturesCompileOnly(enforcedPlatform(libVersions.findLibrary(alias).get()))
+    }
+
+    // JUnit Jupiter
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks.named('test') {

@@ -15,6 +15,8 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -215,7 +217,7 @@ public class RfsMigrateDocuments {
                 throw new ParameterException("Incoming value '" + value + "'did not match regex pattern " + REGEX_PATTERN);
             }
         }
-    };
+    }
 
     @Getter
     public static class DocParams implements TransformerParams {
@@ -254,6 +256,28 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
+    public static class EnvParameters {
+
+        private EnvParameters() {
+            throw new IllegalStateException("EnvParameters utility class should not instantiated");
+        }
+
+        public static void injectFromEnv(Args args) {
+            List<String> addedEnvParams = new ArrayList<>();
+            if (args.targetArgs.username == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
+                args.targetArgs.username = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
+            }
+            if (args.targetArgs.password == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
+                args.targetArgs.password = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
+            }
+            if (!addedEnvParams.isEmpty()) {
+                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            }
+        }
+    }
+
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
@@ -286,9 +310,8 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
-        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
-        System.err.println("Starting program with: " + String.join(" ", args));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
         // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
         // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
         System.setProperty("log4j2.shutdownHookEnabled", "false");
@@ -297,6 +320,7 @@ public class RfsMigrateDocuments {
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
+        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();

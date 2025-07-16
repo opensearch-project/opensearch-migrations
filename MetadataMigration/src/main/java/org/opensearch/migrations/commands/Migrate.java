@@ -33,11 +33,11 @@ public class Migrate extends MigratorEvaluatorBase {
             migrateResult.exitCode(INVALID_PARAMETER_CODE)
                 .errorMessage("Invalid parameter: " + pe.getMessage())
                 .build();
-        } catch (Throwable e) {
+        } catch (Exception e) {
             log.atError().setCause(e).setMessage("Unexpected failure").log();
             migrateResult
                 .exitCode(UNEXPECTED_FAILURE_CODE)
-                .errorMessage("Unexpected failure: " + e.getMessage())
+                .errorMessage(createUnexpectedErrorMessage(e))
                 .build();
         }
 

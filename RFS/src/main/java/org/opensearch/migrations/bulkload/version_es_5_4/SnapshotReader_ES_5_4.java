@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_es_5_4;
 
-import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -28,8 +27,7 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     @Override
     public boolean looseCompatibleWith(Version version) {
-        return UnboundVersionMatchers.isBelowES_5_X
-            .or(VersionMatchers.equalOrBetween_ES_5_0_and_5_4)
+        return VersionMatchers.equalOrBetween_ES_5_0_and_5_4
             .test(version);
     }
 
@@ -62,12 +60,12 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     @Override
     public boolean getSoftDeletesPossible() {
-        return false;
+        return ElasticsearchConstants_ES_5_4.SOFT_DELETES_POSSIBLE;
     }
 
     @Override
     public String getSoftDeletesFieldData() {
-        return null;
+        return ElasticsearchConstants_ES_5_4.SOFT_DELETES_FIELD;
     }
 
     @Override
@@ -77,7 +75,7 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     @Override
     public int getBufferSizeInBytes() {
-        return 102400;
+        return ElasticsearchConstants_ES_5_4.BUFFER_SIZE_IN_BYTES;
     }
 
     private SnapshotRepo.Provider getSnapshotRepo() {

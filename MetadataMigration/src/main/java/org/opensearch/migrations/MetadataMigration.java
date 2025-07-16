@@ -1,13 +1,11 @@
 package org.opensearch.migrations;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
-import org.opensearch.migrations.commands.Configure;
-import org.opensearch.migrations.commands.Evaluate;
-import org.opensearch.migrations.commands.EvaluateArgs;
-import org.opensearch.migrations.commands.Migrate;
-import org.opensearch.migrations.commands.MigrateArgs;
-import org.opensearch.migrations.commands.Result;
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.commands.*;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -17,11 +15,18 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.FileAppender;
 
 @Slf4j
 public class MetadataMigration {
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(
+                args,
+                ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
+        )));
         var metadataArgs = new MetadataArgs();
         var migrateArgs = new MigrateArgs();
         var evaluateArgs = new EvaluateArgs();
@@ -31,6 +36,8 @@ public class MetadataMigration {
             .addCommand(evaluateArgs)
             .build();
         jCommander.parse(args);
+        EnvArgs.injectFromEnv(migrateArgs);
+        EnvArgs.injectFromEnv(evaluateArgs);
 
         var context = new RootMetadataMigrationContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(metadataArgs.otelCollectorEndpoint, "metadata",
@@ -39,8 +46,6 @@ public class MetadataMigration {
         );
 
         var meta = new MetadataMigration();
-
-        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
 
         if (metadataArgs.help || jCommander.getParsedCommand() == null) {
             printTopLevelHelp(jCommander);
@@ -78,6 +83,9 @@ public class MetadataMigration {
                 break;
         }
         log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
+
+        reportLogPath();
+
         System.exit(result.getExitCode());
     }
 
@@ -98,13 +106,13 @@ public class MetadataMigration {
         sb.append("Usage: [options] [command] [commandOptions]");
         sb.append("Options:");
         for (var parameter : commander.getParameters()) {
-            sb.append("  " + parameter.getNames());
-            sb.append("    " + parameter.getDescription());
+            sb.append("  ").append(parameter.getNames());
+            sb.append("    ").append(parameter.getDescription());
         }
 
         sb.append("Commands:");
         for (var command : commander.getCommands().entrySet()) {
-            sb.append("  " + command.getKey());
+            sb.append("  ").append(command.getKey());
         }
         sb.append("\nUse --help with a specific command for more information.");
         log.info(sb.toString());
@@ -114,5 +122,23 @@ public class MetadataMigration {
         var sb = new StringBuilder();
         jCommander.getUsageFormatter().usage(jCommander.getParsedCommand(), sb);
         log.info(sb.toString());
+    }
+
+    private static void reportLogPath() {
+        try {
+            var loggingContext = (LoggerContext) LogManager.getContext(false);
+            var loggingConfig = loggingContext.getConfiguration();
+            // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
+            var metadataLogAppender = (FileAppender) loggingConfig.getAppender("MetadataRun");
+            if (metadataLogAppender != null) {
+                var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
+                log.atInfo()
+                    .setMessage("Consult {} to see detailed logs for this run")
+                    .addArgument(logFilePath.toAbsolutePath())
+                    .log();
+            }
+        } catch (Exception e) {
+            // Ignore any exceptions if we are unable to get the log configuration
+        }
     }
 }

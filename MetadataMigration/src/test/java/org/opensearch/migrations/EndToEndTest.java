@@ -42,7 +42,7 @@ class EndToEndTest extends BaseMigrationTest {
     protected File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.supportedPairs(false).stream()
+        Stream<Arguments> normalScenarios = SupportedClusters.supportedPairs(false).stream()
             .flatMap(pair -> {
                 List<TemplateType> templateTypes = Stream.concat(
                             (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
@@ -58,6 +58,29 @@ class EndToEndTest extends BaseMigrationTest {
                     .map(medium -> Arguments.of(pair.source(), pair.target(), medium, templateTypes))
                         .toList().stream();
             });
+
+        // Extra ES 2.4 test cases for metadata migration ONLY
+        // This should be reverted back after adding RFS support for ES 2.4
+        // by adding ES 2.4 in the list of sources under SUpportedClusters
+        List<SearchClusterContainer.ContainerVersion> osTargets = List.of(
+            SearchClusterContainer.OS_V1_3_16,
+            SearchClusterContainer.OS_V2_19_1,
+            SearchClusterContainer.OS_V3_0_0
+        );
+
+        Stream<Arguments> es24Scenarios = osTargets.stream()
+            .flatMap(target ->
+                Arrays.stream(TransferMedium.values())
+                    .map(medium -> Arguments.of(
+                            SearchClusterContainer.ES_V2_4_6,
+                            target,
+                            medium,
+                            List.of(TemplateType.Legacy) // only legacy for ES 2.4
+                    ))
+            );
+
+        // Combine them
+        return Stream.concat(normalScenarios, es24Scenarios);
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
@@ -142,12 +165,15 @@ class EndToEndTest extends BaseMigrationTest {
 
             // Create documents that use the templates
             String blogIndexName = "blog_" + uniqueSuffix + "_2023";
-            sourceOperations.createDocument(blogIndexName, "222", "{\"" + fieldName + "\":\"Tobias Funke\"}");
+            sourceOperations.createDocument(blogIndexName, "222",
+                "{ \"age\": 42, \"is_active\": true }");
             testData.blogIndexNames.add(blogIndexName);
         }
 
-        sourceOperations.createDocument(testData.movieIndexName, "123", "{\"title\":\"This is Spinal Tap\"}");
-        sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{}");
+        sourceOperations.createDocument(testData.movieIndexName, "123",
+            "{ \"age\": 55, \"is_active\": false }");
+        sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66",
+            "{ \"age\": 99, \"is_active\": true }");
 
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);
