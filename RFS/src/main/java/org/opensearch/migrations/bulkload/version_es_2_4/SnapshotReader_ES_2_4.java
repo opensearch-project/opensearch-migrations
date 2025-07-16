@@ -11,10 +11,13 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
+import lombok.Getter;
+
 
 public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     private Version version;
+    @Getter
     private SourceRepo sourceRepo;
 
     @Override

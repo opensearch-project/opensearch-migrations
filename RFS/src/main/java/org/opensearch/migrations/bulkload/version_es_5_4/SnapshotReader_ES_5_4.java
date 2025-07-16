@@ -12,9 +12,12 @@ import org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataFactory_ES
 import org.opensearch.migrations.bulkload.version_es_6_8.ShardMetadataFactory_ES_6_8;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
+import lombok.Getter;
+
 public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     private Version version;
+    @Getter
     private SourceRepo sourceRepo;
 
     @Override
