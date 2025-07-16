@@ -104,7 +104,7 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
 
-            // === ACTION: Create two large documents (40MB each) ===
+            // === ACTION: Create two large documents (2MB each) ===
             String largeDoc = generateLargeDocJson(2);
             sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
             sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);

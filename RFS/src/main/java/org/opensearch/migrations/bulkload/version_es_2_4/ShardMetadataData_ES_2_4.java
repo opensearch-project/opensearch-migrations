@@ -17,9 +17,12 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
+
 @Getter
+@Slf4j
 public class ShardMetadataData_ES_2_4 implements ShardMetadata {
     private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
 
@@ -50,11 +53,11 @@ public class ShardMetadataData_ES_2_4 implements ShardMetadata {
         this.indexName = indexName;
         this.indexId = indexId;
         this.shardId = shardId;
-        this.indexVersion = indexVersion != null ? indexVersion : -1;
-        this.startTime = startTime != null ? startTime : 0L;
-        this.time = time != null ? time : 0L;
-        this.numberOfFiles = numberOfFiles != null ? numberOfFiles : 0;
-        this.totalSizeBytes = totalSize != null ? totalSize : 0L;
+        this.indexVersion = requireNonNull("indexVersion", indexVersion);
+        this.startTime = requireNonNull("startTime", startTime);
+        this.time = requireNonNull("time", time);
+        this.numberOfFiles = requireNonNull("numberOfFiles", numberOfFiles);
+        this.totalSizeBytes = requireNonNull("totalSize", totalSize);
 
         // Convert raw file metadata to strongly typed FileInfo
         List<FileInfo> convertedFiles = new java.util.ArrayList<>();
@@ -178,6 +181,13 @@ public class ShardMetadataData_ES_2_4 implements ShardMetadata {
                 return "Error converting to string: " + e.getMessage();
             }
         }
+    }
+
+    private static <T> T requireNonNull(String name, T value) {
+        if (value == null) {
+            throw new IllegalArgumentException(name + " is required in ES 2.4 shard metadata JSON but was missing!");
+        }
+        return value;
     }
 
     public static class FileInfoRaw {
