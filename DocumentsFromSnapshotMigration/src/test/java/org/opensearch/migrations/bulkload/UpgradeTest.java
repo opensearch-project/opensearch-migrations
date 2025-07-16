@@ -36,6 +36,7 @@ public class UpgradeTest extends SourceTestBase {
 
     private static Stream<Arguments> scenarios() {
         var scenarios = Stream.<Arguments>builder();
+        scenarios.add(Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_LATEST));
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_LATEST));
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_LATEST));
         scenarios.add(Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_LATEST));

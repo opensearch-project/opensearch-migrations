@@ -47,9 +47,7 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     @Override
     public ShardMetadata.Factory getShardMetadata() {
-        throw new UnsupportedOperationException(
-            "Reading ShardMetadata for ES 2.4 snapshots is not yet implemented."
-        );
+        return new ShardMetadataFactory_ES_2_4(getSnapshotRepo());
     }
 
     @Override
