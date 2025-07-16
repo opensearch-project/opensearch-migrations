@@ -105,7 +105,7 @@ public class ConnectionContext {
         var dataBuilder = new LinkedHashMap<String, String>();
         dataBuilder.put("Uri", getUri().toString());
         dataBuilder.put("Protocol", getProtocol().toString());
-        dataBuilder.put("TLS Verification", isInsecure() ? "Enabled" : "Disabled");
+        dataBuilder.put("TLS Verification", isInsecure() ? "Disabled" : "Enabled");
         if (awsSpecificAuthentication) {
             dataBuilder.put("AWS Auth", "Enabled");
         }

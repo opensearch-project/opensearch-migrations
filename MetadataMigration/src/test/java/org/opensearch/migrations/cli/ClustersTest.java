@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
@@ -80,13 +81,13 @@ public class ClustersTest {
         assertThat(result, containsString("Clusters:"));
         assertThat(result, containsString("Source:"));
         assertThat(result, containsString("Source:"));
-        assertThat(result, containsString("Type: MockRemoteReader (OPENSEARCH 54.0.0)"));
-        assertThat(result, containsString("Uri: http://remote.source"));
-        assertThat(result, containsString("TLS Verification: Disabled"));
+        assertThat(result, stringContainsInOrder("Type: MockRemoteReader (OPENSEARCH 54.0.0)",
+                                                 "Uri: http://remote.source",
+                                                 "TLS Verification: Disabled"));
         assertThat(result, containsString("Target:"));
-        assertThat(result, containsString("Type: MockClusterWriter (OPENSEARCH 2000.0.0)"));
-        assertThat(result, containsString("Uri: http://remote.target"));
-        assertThat(result, containsString("TLS Verification: Enabled"));
+        assertThat(result, stringContainsInOrder("Type: MockClusterWriter (OPENSEARCH 2000.0.0)",
+                                                 "Uri: http://remote.target",
+                                                 "TLS Verification: Enabled"));
         assertThat(result, hasLineCount(12));
     }
 
@@ -116,7 +117,7 @@ public class ClustersTest {
         when(clusterReader.getVersion()).thenReturn(Version.fromString("OS 54.0"));
         var targetArgs = new ConnectionContext.SourceArgs();
         targetArgs.host = "http://remote.source";
-        targetArgs.insecure = false;
+        targetArgs.insecure = true;
         when(clusterReader.getConnection()).thenReturn(targetArgs.toConnectionContext());
         return clusterReader;
     }
@@ -127,7 +128,6 @@ public class ClustersTest {
         when(clusterWriter.getVersion()).thenReturn(Version.fromString("OS 2000"));
         var targetArgs = new ConnectionContext.TargetArgs();
         targetArgs.host = "http://remote.target";
-        targetArgs.insecure = true;
         when(clusterWriter.getConnection()).thenReturn(targetArgs.toConnectionContext());
         return clusterWriter;
     }

@@ -133,7 +133,7 @@ public class ItemsTest {
         assertThat("Results with no errors do not print exception info", result, not(containsString("exception-without-failure-type")));
         assertThat(result, stringContainsInOrder("i4 failed on target cluster", "i5 failed on target cluster: re1"));
         assertThat("Expect an exception's toString() if there was no message in the exception", result, containsString("i6 failed on target cluster: java.lang.RuntimeException"));
-        assertThat(result, hasLineCount(18));
+        assertThat(result, hasLineCount(17));
     }
 
     private ItemsBuilder createEmptyItemsBuilder() {
