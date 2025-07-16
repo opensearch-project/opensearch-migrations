@@ -27,7 +27,7 @@ class HealthApiResponse(BaseModel):
 def check_shared_logs_config() -> str:
     path = "/shared-logs-output"
     if not os.path.exists(path):
-        raise Exception(f"Missing required path: {path}")
+        raise FileNotFoundError(f"Missing required path: {path}")
     return HealthStatus.ok
 
 
