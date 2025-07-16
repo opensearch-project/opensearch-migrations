@@ -59,9 +59,9 @@ class EndToEndTest extends BaseMigrationTest {
                         .toList().stream();
             });
         
-            // Extra ES 2.4 test cases for metadata migration ONLY
-        // This should be reverted back after adding RFS support for ES 2.4
-        // by adding ES 2.4 in the list of sources under SUpportedClusters
+        // Extra ES 1.7 test cases for metadata migration ONLY
+        // This should be reverted back after adding RFS support for ES 1.7
+        // by adding ES 1.7 in the list of sources under SUpportedClusters
         List<SearchClusterContainer.ContainerVersion> osTargets = List.of(
             SearchClusterContainer.OS_V1_3_16,
             SearchClusterContainer.OS_V2_19_1,
