@@ -92,7 +92,8 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         sourceOperations.createIndex(indexName, requestBody);
 
 
-        // Define custom transformations
+        // TODO: This is brittle since it's pointing to a relative path, and does not work on deployed solutions
+        // We should identify a syntax to use a "resources" provided script
         String customTransformationJson = "[{\n" +
             "    \"JsonJSTransformerProvider\": {\n" +
             "      \"initializationScriptFile\": \"../transformation/standardJavascriptTransforms/src/es8-vector-metadata.js\",\n" +
