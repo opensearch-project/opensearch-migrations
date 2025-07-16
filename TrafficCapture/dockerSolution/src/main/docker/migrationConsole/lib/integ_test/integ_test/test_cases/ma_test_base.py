@@ -57,12 +57,12 @@ class MATestBase:
         self.backfill: Backfill = console_link_env.backfill
         self.metadata: Metadata = console_link_env.metadata
         self.replayer: Replayer = console_link_env.replay
-        check_ma_system_health()
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
 
     def test_before(self):
+        check_ma_system_health()
         pass
 
     def snapshot_before(self):
