@@ -62,12 +62,27 @@ public interface IndexMetadata extends Index {
             }
         }
 
+        JsonNode getJsonNode(SnapshotRepo.Provider repo, String indexName, String snapshotName, SmileFactory smileFactory);
+
         default IndexMetadata fromRepo(String snapshotName, String indexName) {
             SmileFactory smileFactory = getSmileFactory();
-            String indexId = getRepoDataProvider().getIndexId(indexName);
-            String indexFileId = getIndexFileId(snapshotName, indexName);
-            JsonNode root = getJsonNode(indexId, indexFileId, smileFactory);
-            return fromJsonNode(root, indexId, indexName);
+            if (smileFactory == null) {
+                // ES 1.7 path
+                return fromJsonNode(
+                    getJsonNode(getRepoDataProvider(), indexName, snapshotName, null),
+                    getRepoDataProvider().getIndexId(indexName),
+                    indexName
+                );
+            } else {
+                // ES 2.4 path
+                String indexId = getRepoDataProvider().getIndexId(indexName);
+                String indexFileId = getIndexFileId(snapshotName, indexName);
+                return fromJsonNode(
+                    getJsonNode(indexId, indexFileId, smileFactory),
+                    indexId,
+                    indexName
+                );
+            }
         }
 
         // Version-specific implementation
