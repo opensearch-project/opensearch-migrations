@@ -1,14 +1,14 @@
 [versions]
-aws-crt = "0.38.5"
+aws-crt = "0.38.6"
 aws-msk-iam-auth = "2.3.2"
-aws-sdk = "2.31.77"
+aws-sdk = "2.32.0"
 bouncycastle = "1.81"
 commons-collections = "4.5.0"
-commons-compress = "1.27.1"
+commons-compress = "1.26.2"
 disruptor = "4.0.0"
-dockerapi = "3.5.2"
-errorprone = "2.39.0"
-graalvm = "24.2.1"
+dockerapi = "3.5.3"
+errorprone = "2.40.0"
+graalvm = "24.2.2"
 groovy = "3.0.25"
 guava = "33.4.8-jre"
 hamcrest = "3.0"
@@ -24,7 +24,7 @@ json = "20250517"
 junit-platform = "1.13.3"
 junit-jupiter = "5.13.3"
 kafka-clients = "4.0.0"
-log4j = "2.25.0"
+log4j = "2.25.1"
 lombok = "1.18.38"
 lucene5 = '5.5.5'
 lucene6 = '6.6.6'
@@ -33,11 +33,11 @@ lucene9 = "9.12.1"
 mockito = "5.18.0"
 netty = "4.1.122.Final"
 opensearch-testcontainers = "2.0.1"
-opentelemetry = "1.51.0"
+opentelemetry = "1.52.0"
 opentelemetry-semconv = "1.23.1-alpha"
 protobuf = "4.31.1"
-reactor-netty = "1.2.7"
-reactor-test = "3.7.7"
+reactor-netty = "1.2.8"
+reactor-test = "3.7.8"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
@@ -158,3 +158,24 @@ testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers"
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
 
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
+
+# List all boms here with prefix boms- to force platforms across all projects
+boms-aws-sdk          = { module = "software.amazon.awssdk:bom", version.ref = "aws-sdk" }
+boms-jackson          = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+boms-junit            = { module = "org.junit:junit-bom", version.ref = "junit-jupiter" }
+boms-netty            = { module = "io.netty:netty-bom", version.ref = "netty" }
+boms-testcontainers   = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
+boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "opentelemetry" }
+
+# Transitive dependencies to force based on CVEs
+transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",    version = "4.5.14"  }
+transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "2.9.0"   }
+transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",        version = "1.4.21"  }
+transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.11.1"   }
+transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.3"    }
+transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.5.2"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.1"    }
+transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.10"   }
+transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.1"   }
+transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.7" }
+transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
