@@ -1,59 +1,68 @@
 import {z, ZodType, ZodTypeAny} from 'zod';
 
-export type NormalizedParamDef<T, R extends boolean = false> = {
+export type InputParamDef<T, REQ extends boolean> = {
+    schema: ZodType<T>;
+    defaultValue?: T;
+    description?: string;
+} & (REQ extends false ? { _hasDefault: true } : {});
+
+export function defineParam<T>(opts: {
+    defaultValue: T;
+    description?: string;
+}): InputParamDef<T, false> {
+    return {
+        schema: z.custom<T>(),
+        defaultValue: opts.defaultValue,
+        description: opts.description,
+        _hasDefault: true
+    };
+}
+
+export function defineRequiredParam<T>(opts: {
     type: ZodType<T>;
-    defaultValue: T | null;
+    description?: string;
+}): InputParamDef<T, true> {
+    return {
+        schema: opts.type,
+        description: opts.description,
+    };
+}
+
+export type OutputParamDef<T> = {
+    type: ZodType<T>;
     description: string | null;
-    required : R;
 };
 
-type ParamShape<R extends boolean = boolean> = Record<string, NormalizedParamDef<any, R>>;
+export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
+export type OutputParametersRecord = Record<string, OutputParamDef<any>>;
 
-// Utility to map ParamDef<T> to ZodType<T>
-type ExtractZodShape<T extends ParamShape> = {
-    [K in keyof T]: T[K]['type'];
+export type TemplateDef<
+    IN extends InputParametersRecord = InputParametersRecord,
+    OUT extends OutputParametersRecord = OutputParametersRecord
+> = {
+    inputs: IN,
+    outputs?: OUT
 };
 
-export function paramsToCallerSchema<T extends ParamShape>(
+export function paramsToCallerSchema<T extends InputParametersRecord>(
     defs: T
-): z.ZodObject<{
-    [K in keyof T]: T[K]['required'] extends true
-        ? T[K]['type']
-        : z.ZodOptional<T[K]['type']>;
-}> {
+): z.ZodObject<{ [K in keyof T]: T[K] extends { _hasDefault: true } ? z.ZodOptional<T[K]['schema']> : T[K]['schema']; }> {
     const shape: Record<string, ZodTypeAny> = {};
     for (const [key, param] of Object.entries(defs)) {
-        shape[key] = param.required === true ? param.type : param.type.optional();
+        shape[key] = '_hasDefault' in param ? param.schema.optional() : param.schema;
     }
 
     return z.object(shape) as any;
 }
 
-export function defineParam<T, R extends boolean = false>(opts: {
-  type?: z.ZodType<T>;
-  description?: string;
-  defaultValue?: T;
-  required?: R;
-}): NormalizedParamDef<T, R extends undefined ? false : R> {
-    const inferredType: ZodType<T> | null = opts.type ?? (
-        opts.defaultValue !== undefined
-            ? z.custom<T>()
-            : null
-    );
-
-    if (!inferredType) throw new Error("Missing 'type' or 'defaultValue'");
-    if (opts.defaultValue !== undefined && opts.required) throw new Error("No reason to define a defaultValue for a requiredParam")
-    return {
-        type: inferredType,
-        description: opts.description ?? null,
-        defaultValue: opts.defaultValue ?? null,
-        required: (opts.required ?? (opts.defaultValue == null)) as any,
-    };
-}
-
-export function defineRequiredParam<T>(opts: {
-    type?: z.ZodType<T>;
-    description?: string;
-}): NormalizedParamDef<T, true> {
-    return defineParam({type: opts.type, description: opts.description, required: true});
+export function defineOuterWorkflowTemplate<
+    T extends Record<string, TemplateDef<any>>,
+    IPR extends InputParametersRecord
+>(wf: {
+    name: string;
+    serviceAccountName: string;
+    workflowParams?: IPR,
+    templates: T;
+}) {
+    return wf;
 }

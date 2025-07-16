@@ -30,6 +30,13 @@ K8sTemplate {
           s3RepoUri: InputParameterDefinition<string> {
             defaultValue: ValueFromConfigMap(map: workflowParameters.s3SnapshotConfigMap, key: "repo_uri")
           }
+        ),
+        imageParams: Bundle(
+          { for k in [captureProxy, trafficReplayer, reindexFromSnapshot, migrationConsole, etcdUtils] {
+              "\(k)Image": ValueFromConfigMap(map: workflowParameters.migrationImageConfigMap, key: "\(k)Image")
+              "\(k)ImagePullPolicy": ValueFromConfigMap(map: workflowParameters.migrationImageConfigMap, key: "\(k)PullPolicy")
+            }
+          }
         )
       }
       steps: [
@@ -69,7 +76,8 @@ K8sTemplate {
         targets:               list<CLUSTER_CONFIG>,
         s3Config:              struct<>
         latchCoordinationPrefix: string
-        sampleOptionalArg?:    { type: boolean }
+        sampleOptionalArg?:    { type: boolean },
+
       },
       steps: [
 
