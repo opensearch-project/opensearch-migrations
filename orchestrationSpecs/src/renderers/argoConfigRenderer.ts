@@ -1,4 +1,3 @@
-import {K8sWorkflowTemplate} from "@/schemas/workflowTemplateBundleSchema"
 import {
     InputParamDef,
     InputParametersRecord,
