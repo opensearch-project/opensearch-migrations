@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_universal;
 
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Provider;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
@@ -48,5 +49,10 @@ public class RemoteIndexMetadataFactory implements IndexMetadata.Factory {
     @Override
     public String getIndexFileId(String snapshotName, String indexName) {
         throw new UnsupportedOperationException("Unimplemented method 'getIndexFileId'");
+    }
+
+    @Override
+    public JsonNode getJsonNode(SnapshotRepo.Provider repo, String indexName, String snapshotName, SmileFactory smileFactory) {
+        throw new UnsupportedOperationException("getJsonNode with repo is not used in this version");
     }
 }

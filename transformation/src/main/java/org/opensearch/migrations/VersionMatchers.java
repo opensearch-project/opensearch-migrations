@@ -6,6 +6,7 @@ import lombok.experimental.UtilityClass;
 
 @UtilityClass
 public class VersionMatchers {
+    public static final Predicate<Version> isES_1_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 1.7"));
     public static final Predicate<Version> isES_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 2.4"));
     public static final Predicate<Version> isES_5_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 5.6"));
     public static final Predicate<Version> equalOrBetween_ES_5_0_and_5_4 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 5.0"))

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,5 +34,10 @@ public class IndexMetadataFactory_ES_2_4 implements IndexMetadata.Factory {
     @Override
     public SnapshotRepoES24 getRepoDataProvider() {
         return repoProvider;
+    }
+
+    @Override
+    public JsonNode getJsonNode(SnapshotRepo.Provider repo, String indexName, String snapshotName, SmileFactory smileFactory) {
+        throw new UnsupportedOperationException("getJsonNode with repo is not used in this version");
     }
 }
