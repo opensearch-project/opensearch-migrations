@@ -33,7 +33,6 @@ uninstall_charts() {
           done
         fi
 
-        # Remove fluent-bit logging chart skipped in main uninstall job
         if [ -n "$RELEASE_NAME" ]; then
           echo "Found Helm release: $RELEASE_NAME in namespace: $NAMESPACE"
 

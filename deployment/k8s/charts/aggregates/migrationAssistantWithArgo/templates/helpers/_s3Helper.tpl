@@ -25,16 +25,27 @@
 
     ENDPOINT_FLAG=$(get_s3_endpoint_flag)
     while [ "$attempt" -le "$max_retries" ]; do
-      if output=$(aws $ENDPOINT_FLAG s3api head-bucket --bucket "$bucket" 2>&1 >/dev/null); then
+      output=$(aws $ENDPOINT_FLAG s3api head-bucket --bucket "$bucket" 2>&1 >/dev/null)
+      exit_code=$?
+
+      if [ "$exit_code" -eq 0 ]; then
         return 0
-      else
-        echo "Attempt $attempt/$max_retries: Bucket not found or not accessible:"
-        echo "$output"
-        if [ "$attempt" -lt "$max_retries" ]; then
-          sleep 2
-        fi
-        attempt=$((attempt + 1))
       fi
+      if echo "$output" | grep -q 'Not Found\|NoSuchBucket'; then
+        echo "Bucket '$bucket' does not exist."
+        return 1
+      fi
+      if echo "$output" | grep -q 'AccessDenied'; then
+        echo "Bucket exists but access denied."
+        return 1
+      fi
+
+      echo "Attempt $attempt/$max_retries failed:"
+      echo "$output"
+      if [ "$attempt" -lt "$max_retries" ]; then
+        sleep 2
+      fi
+      attempt=$((attempt + 1))
     done
     return 1
   }

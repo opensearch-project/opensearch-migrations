@@ -49,7 +49,7 @@ images:
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
-  eksEnabled: false
+  configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
 

@@ -2,7 +2,7 @@ conditionalPackageInstalls:
   localstack: false
 
 aws:
-  eksEnabled: true
+  configureAwsEksResources: true
   region: ""
   account: ""
 
