@@ -1,113 +1,52 @@
 plugins {
     id 'base'
-    id 'de.undercouch.download' version '5.5.0' // For downloading the OpenAPI spec
+    id 'de.undercouch.download' version '5.5.0'
 }
 
-repositories {
-    mavenCentral()
-}
+def fastApiPort = 8000
+def openapiUrl = "http://127.0.0.1:${fastApiPort}/openapi.json"
+def serverPidFile = "${buildDir}/fastapi.pid"
+def openapiOutFile = "${buildDir}/openapi.json"
 
-ext {
-    openapiSpecUrl = 'http://localhost:8000/openapi.json'
-    openapiSpecFile = "${buildDir}/openapi.json"
-    generatedClientDir = "${buildDir}/generated-react-client"
-    openapiGeneratorVersion = '7.5.0'
-}
-
-configurations {
-    openapiGenerator
-}
-
-dependencies {
-    openapiGenerator "org.openapitools:openapi-generator-cli:${openapiGeneratorVersion}"
-}
-
-task downloadOpenApiSpec(type: de.undercouch.gradle.tasks.download.Download) {
-    src openapiSpecUrl
-    dest file(openapiSpecFile)
-    onlyIfModified true
-}
-
-task generateReactClient(type: JavaExec) {
-    dependsOn downloadOpenApiSpec
-    mainClass.set('org.openapitools.codegen.OpenAPIGenerator')
-    classpath = configurations.openapiGenerator
-    args = [
-        'generate',
-        '-i', openapiSpecFile,
-        '-g', 'typescript-fetch',
-        '-o', generatedClientDir,
-        '--additional-properties=supportsES6=true,typescriptThreePlus=true,withInterfaces=true'
-    ]
-}
-
-def workingDir = project.projectDir
-
-def gunicornProcessFile = file("$buildDir/gunicorn.pid")
-def gunicornOutFile = file("$buildDir/gunicorn.out")
-def gunicornErrFile = file("$buildDir/gunicorn.err")
-def gunicornPidFile = file("$buildDir/gunicorn.pid")
-def fastapiCommand = ["pipenv", "run", "gunicorn", "console_link.api.main:app",
-                      "-k", "uvicorn.workers.UvicornWorker",
-                      "-w", "4",
-                      "-b", "127.0.0.1:8000"]
-def openapiUrl = new URL("http://localhost:8000/openapi.json")
-
+def pythonSources = fileTree(dir: projectDir, include: '**/*.py')
+def dependencyFiles = files(
+    "Pipfile",
+    "Pipfile.lock"
+).filter { it.exists() }
 
 tasks.register('startFastApiServer') {
     doLast {
-        def pb = new ProcessBuilder(fastapiCommand)
-                .directory(workingDir)
-                .redirectOutput(gunicornOutFile)
-                .redirectError(gunicornErrFile)
-
-        def process = pb.start()
-        gunicornPidFile.text = process.pid().toString()
-
-        println "Waiting for FastAPI server..."
-        def ok = false
-        for (int i = 0; i < 20; i++) {
-            try {
-                openapiUrl.openConnection().with {
-                    connectTimeout = 1000
-                    readTimeout = 1000
-                    connect()
-                }
-                ok = true
-                break
-            } catch (Exception ignored) {
-                Thread.sleep(500)
-            }
-        }
-        if (!ok) {
-            throw new GradleException("FastAPI server failed to start in time.")
-        }
+        def proc = "pipenv run uvicorn main:app --port ${fastApiPort}".execute()
+        logger.info("uvicorn server started, pid: ${proc.pid()}")
+        new File(serverPidFile).text = "${proc.pid()}"
     }
+}
+
+tasks.register('downloadOpenApiSpec', de.undercouch.gradle.tasks.download.Download) {
+    src openapiUrl
+    dest openapiOutFile
+
+    inputs.files(pythonSources)
+    inputs.files(dependencyFiles)
+    outputs.file(openapiOutFile)
 }
 
 tasks.register('stopFastApiServer') {
     doLast {
-        if (gunicornPidFile.exists()) {
-            def pid = gunicornPidFile.text.trim()
-            println "Stopping FastAPI server with PID ${pid}"
-            ['kill', pid].execute().waitFor()
+        def pidFile = new File(serverPidFile)
+        if (pidFile.exists()) {
+            def pid = pidFile.text.trim()
+            logger.info("Killing FastAPI server with PID $pid")
+            ["kill", pid].execute().waitFor()
+            pidFile.delete()
         }
     }
 }
 
-task cleanReactClient(type: Delete) {
-    delete file(generatedClientDir)
+tasks.register('fetchOpenApiSpec') {
+    dependsOn 'downloadOpenApiSpec'
+    finalizedBy 'stopFastApiServer'
+    doLast {
+        logger.lifecycle("OpenAPI spec downloaded to ${openapiOutFile}")
+    }
 }
-
-tasks.named('generateReactClient') {
-    dependsOn startFastApiServer
-    finalizedBy stopFastApiServer
-}
-
-tasks.named('clean') {
-    delete gunicornPidFile, gunicornOutFile, gunicornErrFile
-}
-
-
-
-clean.dependsOn cleanReactClient

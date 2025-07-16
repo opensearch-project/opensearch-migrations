@@ -33,25 +33,43 @@ def buildOutputs = [
     'out'
 ]
 
+def generatedApiClientOutputs = ""
 
 def fastapiProject = gradle.includedBuild('console_link')
-tasks.register('syncOpenApiClient', Copy) {
-    dependsOn fastapiProject.task(':generateReactClient')
-    from(fastapiProject.projectDir.toPath().resolve("build/generated-react-client/src"))
-    into file("src/api/client")
+tasks.register('syncBackendClientDefinition', Copy) {
+    dependsOn fastapiProject.task(':fetchOpenApiSpec')
+    from "${fastapiProject.projectDir}/build/openapi.json"
+    into "$buildDir"
+}
+
+tasks.register('generateBackendClient', NpmTask) {
+    dependsOn 'syncBackendClientDefinition'
+    group = 'build'
+    description = 'Generates the TypeScript API client from openapi.json'
+
+    args = [
+        'exec',
+        '--',
+        'openapi-ts',
+        '--input', "$buildDir/openapi.json",
+        '--output', "src/api-client"
+    ]
 }
 
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
+    dependsOn 'syncBackendClientDefinition'
+    group = 'build'
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.files fileTree(dir: '.', include: buildOutputs, exclude: buildExclusions)
 }
 
 tasks.register('lintFrontend', NpmTask) {
+    dependsOn 'buildFrontend'
+    group = 'check'
     args =  ['run', 'lint']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
-    dependsOn 'buildFrontend'
 }
 
 tasks.register('cleanFrontend', Delete) {
