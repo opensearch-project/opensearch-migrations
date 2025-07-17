@@ -1,17 +1,14 @@
-import type { Auth } from '../core/auth';
-import type {
-  Client as CoreClient,
-  Config as CoreConfig,
-} from '../core/types';
-import type { Middleware } from './utils';
+import type { Auth } from "../core/auth";
+import type { Client as CoreClient, Config as CoreConfig } from "../core/types";
+import type { Middleware } from "./utils";
 
 export interface Config<T extends ClientOptions = ClientOptions>
-  extends Omit<RequestInit, 'body' | 'headers' | 'method'>,
+  extends Omit<RequestInit, "body" | "headers" | "method">,
     CoreConfig {
   /**
    * Base URL for all requests made by this client.
    */
-  baseUrl?: T['baseUrl'];
+  baseUrl?: T["baseUrl"];
   /**
    * Fetch API implementation. You can use this option to provide a custom
    * fetch instance.
@@ -28,19 +25,19 @@ export interface Config<T extends ClientOptions = ClientOptions>
    * @default 'auto'
    */
   parseAs?:
-    | 'arrayBuffer'
-    | 'auto'
-    | 'blob'
-    | 'formData'
-    | 'json'
-    | 'stream'
-    | 'text';
+    | "arrayBuffer"
+    | "auto"
+    | "blob"
+    | "formData"
+    | "json"
+    | "stream"
+    | "text";
   /**
    * Throw an error instead of returning it in the response?
    *
    * @default false
    */
-  throwOnError?: T['throwOnError'];
+  throwOnError?: T["throwOnError"];
 }
 
 export interface RequestOptions<
@@ -102,7 +99,7 @@ type MethodFn = <
   TError = unknown,
   ThrowOnError extends boolean = false,
 >(
-  options: Omit<RequestOptions<ThrowOnError>, 'method'>,
+  options: Omit<RequestOptions<ThrowOnError>, "method">,
 ) => RequestResult<TData, TError, ThrowOnError>;
 
 type RequestFn = <
@@ -110,8 +107,8 @@ type RequestFn = <
   TError = unknown,
   ThrowOnError extends boolean = false,
 >(
-  options: Omit<RequestOptions<ThrowOnError>, 'method'> &
-    Pick<Required<RequestOptions<ThrowOnError>>, 'method'>,
+  options: Omit<RequestOptions<ThrowOnError>, "method"> &
+    Pick<Required<RequestOptions<ThrowOnError>>, "method">,
 ) => RequestResult<TData, TError, ThrowOnError>;
 
 type BuildUrlFn = <
@@ -122,7 +119,7 @@ type BuildUrlFn = <
     url: string;
   },
 >(
-  options: Pick<TData, 'url'> & Options<TData>,
+  options: Pick<TData, "url"> & Options<TData>,
 ) => string;
 
 export type Client = CoreClient<RequestFn, Config, MethodFn, BuildUrlFn> & {
@@ -154,20 +151,20 @@ type OmitKeys<T, K> = Pick<T, Exclude<keyof T, K>>;
 export type Options<
   TData extends TDataShape = TDataShape,
   ThrowOnError extends boolean = boolean,
-> = OmitKeys<RequestOptions<ThrowOnError>, 'body' | 'path' | 'query' | 'url'> &
-  Omit<TData, 'url'>;
+> = OmitKeys<RequestOptions<ThrowOnError>, "body" | "path" | "query" | "url"> &
+  Omit<TData, "url">;
 
 export type OptionsLegacyParser<
   TData = unknown,
   ThrowOnError extends boolean = boolean,
 > = TData extends { body?: any }
   ? TData extends { headers?: any }
-    ? OmitKeys<RequestOptions<ThrowOnError>, 'body' | 'headers' | 'url'> & TData
-    : OmitKeys<RequestOptions<ThrowOnError>, 'body' | 'url'> &
+    ? OmitKeys<RequestOptions<ThrowOnError>, "body" | "headers" | "url"> & TData
+    : OmitKeys<RequestOptions<ThrowOnError>, "body" | "url"> &
         TData &
-        Pick<RequestOptions<ThrowOnError>, 'headers'>
+        Pick<RequestOptions<ThrowOnError>, "headers">
   : TData extends { headers?: any }
-    ? OmitKeys<RequestOptions<ThrowOnError>, 'headers' | 'url'> &
+    ? OmitKeys<RequestOptions<ThrowOnError>, "headers" | "url"> &
         TData &
-        Pick<RequestOptions<ThrowOnError>, 'body'>
-    : OmitKeys<RequestOptions<ThrowOnError>, 'url'> & TData;
+        Pick<RequestOptions<ThrowOnError>, "body">
+    : OmitKeys<RequestOptions<ThrowOnError>, "url"> & TData;

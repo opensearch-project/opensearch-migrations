@@ -4,36 +4,37 @@
  * HealthApiResponse
  */
 export type HealthApiResponse = {
-    /**
-     * Checks
-     */
-    checks: {
-        [key: string]: string;
-    };
-    status: HealthStatus;
+  /**
+   * Checks
+   */
+  checks: {
+    [key: string]: string;
+  };
+  status: HealthStatus;
 };
 
 /**
  * HealthStatus
  */
-export type HealthStatus = 'ok' | 'error';
+export type HealthStatus = "ok" | "error";
 
-export type HealthSystemHealthGetData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/system/health';
+export type SystemHealthData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/system/health";
 };
 
-export type HealthSystemHealthGetResponses = {
-    /**
-     * Successful Response
-     */
-    200: HealthApiResponse;
+export type SystemHealthResponses = {
+  /**
+   * Successful Response
+   */
+  200: HealthApiResponse;
 };
 
-export type HealthSystemHealthGetResponse = HealthSystemHealthGetResponses[keyof HealthSystemHealthGetResponses];
+export type SystemHealthResponse =
+  SystemHealthResponses[keyof SystemHealthResponses];
 
 export type ClientOptions = {
-    baseUrl: `${string}://${string}` | (string & {});
+  baseUrl: `${string}://${string}` | (string & {});
 };

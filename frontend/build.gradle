@@ -35,10 +35,10 @@ def buildOutputs = [
 
 def generatedApiClientOutputs = ""
 
-def fastapiProject = gradle.includedBuild('console_link')
+def backendApiProject = gradle.includedBuild('console_link')
 tasks.register('syncBackendClientDefinition', Copy) {
-    dependsOn fastapiProject.task(':fetchOpenApiSpec')
-    from "${fastapiProject.projectDir}/build/openapi.json"
+    dependsOn backendApiProject.task(':fetchOpenApiSpec')
+    from "${backendApiProject.projectDir}/build/openapi.json"
     into "$buildDir"
 }
 
