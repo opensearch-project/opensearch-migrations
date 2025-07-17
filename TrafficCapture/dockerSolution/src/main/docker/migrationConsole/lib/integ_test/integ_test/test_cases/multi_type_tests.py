@@ -46,6 +46,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
     def test_before(self):
+        super().test_before()
         union_transform = self.source_operations.get_type_mapping_union_transformation(
             multi_type_index_name=self.index_name,
             doc_type_1=self.doc_type1,
@@ -139,6 +140,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
     def test_before(self):
+        super().test_before()
         split_transform = self.source_operations.get_type_mapping_split_transformation(
             multi_type_index_name=self.index_name,
             doc_type_1=self.doc_type1,

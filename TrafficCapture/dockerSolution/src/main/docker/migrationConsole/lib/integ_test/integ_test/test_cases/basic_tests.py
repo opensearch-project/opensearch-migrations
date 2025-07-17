@@ -24,6 +24,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
         self.doc_id = "test_0001_doc"
 
     def test_before(self):
+        super().test_before()
         # Create single document
         self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
                                                doc_id=self.doc_id)
@@ -57,6 +58,7 @@ class Test0002IndexWithNoDocumentsMetadataMigration(MATestBase):
         self.index_name = f"test_0002_{self.unique_id}"
 
     def test_before(self):
+        super().test_before()
         # Create empty index
         self.source_operations.create_index(cluster=self.source_cluster, index_name=self.index_name)
         self.source_operations.get_index(cluster=self.source_cluster, index_name=self.index_name)

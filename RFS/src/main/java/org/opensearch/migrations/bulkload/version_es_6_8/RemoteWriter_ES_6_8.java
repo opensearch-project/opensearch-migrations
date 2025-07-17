@@ -93,7 +93,7 @@ public class RemoteWriter_ES_6_8 implements RemoteCluster, ClusterWriter {
         return client;
     }
 
-    private ConnectionContext getConnection() {
+    public ConnectionContext getConnection() {
         if (connection == null) {
             throw new UnsupportedOperationException("initialize(...) must be called");
         }
@@ -105,5 +105,11 @@ public class RemoteWriter_ES_6_8 implements RemoteCluster, ClusterWriter {
             throw new UnsupportedOperationException("initialize(...) must be called");
         }
         return dataFilterArgs;
-    } 
+    }
+
+    @Override
+    public String getFriendlyTypeName() {
+        return "Remote Cluster";
+    }
+
 }

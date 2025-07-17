@@ -24,4 +24,12 @@ public interface ClusterSnapshotReader extends ClusterReader {
 
     /** gets the soft deletes can field data */
     String getSoftDeletesFieldData();
+
+    /** Get the source repo for the snapshot */
+    SourceRepo getSourceRepo();
+
+    @Override
+    default String getFriendlyTypeName() {
+        return "Snapshot";
+    }
 }
