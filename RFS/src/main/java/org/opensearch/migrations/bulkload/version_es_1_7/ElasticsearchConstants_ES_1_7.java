@@ -1,7 +1,7 @@
 package org.opensearch.migrations.bulkload.version_es_1_7;
 
 /**
- * Central place to store constant field names and other ES 2.4 specific static configuration.
+ * Central place to store constant field names and static configuration.
  */
 public final class ElasticsearchConstants_ES_1_7 {
     private ElasticsearchConstants_ES_1_7() {}

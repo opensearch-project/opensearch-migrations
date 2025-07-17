@@ -46,7 +46,7 @@ public class GlobalMetadataFactory_ES_1_7 implements GlobalMetadata.Factory {
     @Override
     public SmileFactory getSmileFactory() {
         // ES 1.7 snapshots are always JSON, no Smile encoding
-        return null;
+        throw new IllegalArgumentException("ES 1.x does not use Smile encoding for global metadata");
     }
 
     @Override

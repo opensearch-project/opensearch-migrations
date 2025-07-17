@@ -67,7 +67,7 @@ public class IndexMetadataData_ES_1_7 implements IndexMetadata {
 
     @Override
     public String getId() {
-        // In ES 2.4, the index ID is the same as the index name
+        // In ES 1.7, the index ID is the same as the index name
         return getName();
     }
 }
