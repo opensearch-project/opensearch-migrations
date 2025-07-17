@@ -10,7 +10,19 @@ defaultBucketConfiguration:
   useLocalStack: false
   deleteOnUninstall: true
   emptyBeforeDelete: true
-  endpoint: ""
+
+# Useful for updating images while developing
+#images:
+#  captureProxy:
+#    pullPolicy: Always
+#  trafficReplayer:
+#    pullPolicy: Always
+#  reindexFromSnapshot:
+#    pullPolicy: Always
+#  migrationConsole:
+#    pullPolicy: Always
+#  installer:
+#    pullPolicy: Always
 
 charts:
   fluent-bit:
@@ -28,46 +40,6 @@ charts:
               key: STAGE_NAME
 
       config:
-        # Remove lua processing from default chart
-        filters: |
-          [FILTER]
-              Name             kubernetes
-              Match            kube.*
-              Kube_URL         https://kubernetes.default.svc:443
-              Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-              Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
-              Kube_Tag_Prefix  kube.var.log.containers.
-              Merge_Log        On
-              Merge_Log_Key    log_processed
-          
-          [FILTER]
-              Name          rewrite_tag
-              Match         kube.*
-              Rule          $kubernetes['pod_name'] ^(.*)$ fluentbit-$1 false
-              Emitter_Name  re_emitted
-          
-          [FILTER]
-              Name         nest
-              Match        fluentbit-*
-              Operation    lift
-              Nested_under kubernetes
-
-          [FILTER]
-              Name         nest
-              Match        fluentbit-*
-              Operation    lift
-              Nested_under labels
-          
-          [FILTER]
-              Name           modify
-              Match          fluentbit-*
-              Rename         container_name container
-              Rename         container_image image
-              Rename         pod_name pod
-              Rename         namespace_name namespace
-              Remove         _p
-              Move_to_start  log
-
         # Change output destination to be CloudWatch
         outputs: |
           [OUTPUT]
@@ -77,12 +49,14 @@ charts:
               log_group_name      /migration-assistant-${STAGE_NAME}-${AWS_REGION}/logs
               log_stream_prefix   from-
               auto_create_group   true
-          
-#          [OUTPUT]
-#              Name stdout
-#              Match fluentbit-*
-#              Format json_lines
 
-      # Remove unnecessary mounts for EKS deployment
-      extraVolumes: []
-      extraVolumeMounts: []
+      # Remove logs PVC mount for EKS deployment
+      extraVolumes:
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+
+      extraVolumeMounts:
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true

@@ -219,7 +219,9 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            generateName: rfs-
+            name: "{{inputs.parameters.session-name}}-rfs"
+            labels:
+              workflows.argoproj.io/workflow: "{{workflow.name}}"
           spec:
             replicas: {{inputs.parameters.replicas}}
             selector:
@@ -229,6 +231,7 @@ spec:
               metadata:
                 labels:
                   app: bulk-loader
+                  workflows.argoproj.io/workflow: "{{workflow.name}}"
               spec:
                 volumes:
                 - name: shared-data
@@ -399,7 +402,7 @@ spec:
                   value: "{{inputs.parameters.migration-console-pull-policy}}"
                 - name: command
                   value: |
-                    set -x && 
+                    set -e && 
                     python -c '
                     import sys
                     from lib.console_link.console_link.environment import Environment
@@ -425,4 +428,4 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            name: "bulk-loader-{{inputs.parameters.name}}"
+            name: "{{inputs.parameters.name}}-rfs"
