@@ -33,11 +33,13 @@ public class ScopedWorkCoordinator {
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {
             @Override
             public T onAlreadyCompleted() throws IOException {
+                log.info("Work item already marked as completed. Skipping.");
                 return visitor.onAlreadyCompleted();
             }
 
             @Override
             public T onNoAvailableWorkToBeDone() throws IOException {
+                log.info("No available work to be done at this time.");
                 return visitor.onNoAvailableWorkToBeDone();
             }
 
@@ -45,11 +47,21 @@ public class ScopedWorkCoordinator {
             public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException,
                 InterruptedException {
                 var workItemId = workItem.getWorkItem().toString();
+                log.info("Acquired work item: {} with lease expiration at {}", workItemId, workItem.leaseExpirationTime);
                 leaseExpireTrigger.registerExpiration(workItemId, workItem.leaseExpirationTime);
-                var rval = visitor.onAcquiredWork(workItem);
-                workCoordinator.completeWorkItem(workItemId, contextSupplier);
-                leaseExpireTrigger.markWorkAsCompleted(workItemId);
-                return rval;
+                long startTime = System.currentTimeMillis();
+                try {
+                    T result = visitor.onAcquiredWork(workItem);
+                    long duration = System.currentTimeMillis() - startTime;
+                    log.info("Finished onAcquiredWork for work item: {} in {} ms", workItemId, duration);
+                    workCoordinator.completeWorkItem(workItemId, contextSupplier);
+                    log.info("Marked work item {} as completed and released lease", workItemId);
+                    leaseExpireTrigger.markWorkAsCompleted(workItemId);
+                    return result;
+                } catch (Exception e) {
+                    log.error("Exception while processing work item {}: {}", workItemId, e.toString(), e);
+                    throw e;
+                }
             }
         });
     }
