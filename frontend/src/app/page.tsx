@@ -1,6 +1,6 @@
 "use client";
 
-import { systemHealth } from "@/lib/client";
+import { systemHealth } from "@/generated/api";
 import { Box } from "@cloudscape-design/components";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
