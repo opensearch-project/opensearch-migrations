@@ -14,6 +14,7 @@ import lombok.Getter;
 
 public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
     private Version version;
+    
     @Getter
     private SourceRepo sourceRepo;
 

@@ -132,7 +132,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
         @Override
         public String getId() {
-            return name;
+            return getName();
         }
     }
 
@@ -152,7 +152,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
         @Override
         public String getId() {
-            return name;
+            return getName();
         }
 
         @Override
@@ -162,7 +162,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
         @Override
         public String toString() {
-            return name;
+            return getName();
         }
     }
 }

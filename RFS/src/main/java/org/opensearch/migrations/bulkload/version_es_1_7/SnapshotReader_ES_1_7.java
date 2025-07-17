@@ -48,7 +48,7 @@ public class SnapshotReader_ES_1_7 implements ClusterSnapshotReader {
 
     @Override
     public IndexMetadata.Factory getIndexMetadata() {
-        return new IndexMetadataFactory_ES_1_7((SnapshotRepoES17) getSnapshotRepo());
+        return new IndexMetadataFactory_ES_1_7(getSnapshotRepo());
     }
 
     @Override
