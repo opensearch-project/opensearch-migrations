@@ -9,6 +9,7 @@ import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
+import lombok.Getter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -33,6 +34,7 @@ public class S3Repo implements SourceRepo {
     public static final String INDICES_PREFIX_STR = "indices/";
 
     private final Path s3LocalDir;
+    @Getter
     @ToString.Include
     private final S3Uri s3RepoUri;
     private final String s3Region;

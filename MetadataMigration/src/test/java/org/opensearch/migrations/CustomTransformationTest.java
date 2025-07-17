@@ -71,7 +71,7 @@ class CustomTransformationTest extends BaseMigrationTest {
         var originalIndexName = "test_index";
         var transformedIndexName = "transformed_index";
         var documentId = "1";
-        var documentContent = "{\"field\":\"value\"}";
+        var documentContent = "{\"field\":100}";
 
         // Create index and add a document on the source cluster
         sourceOperations.createIndex(originalIndexName);

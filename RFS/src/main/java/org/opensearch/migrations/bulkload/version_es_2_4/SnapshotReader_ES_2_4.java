@@ -11,10 +11,13 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
+import lombok.Getter;
+
 
 public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     private Version version;
+    @Getter
     private SourceRepo sourceRepo;
 
     @Override
@@ -47,9 +50,7 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     @Override
     public ShardMetadata.Factory getShardMetadata() {
-        throw new UnsupportedOperationException(
-            "Reading ShardMetadata for ES 2.4 snapshots is not yet implemented."
-        );
+        return new ShardMetadataFactory_ES_2_4(getSnapshotRepo());
     }
 
     @Override

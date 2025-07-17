@@ -33,6 +33,7 @@ updates:
       - dependency-name: "org.apache.lucene:*"
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "io.netty:*"
+      - dependency-name: "org.apache.commons:commons-compress"
         update-types:
           - "version-update:semver-major"
           - "version-update:semver-minor"

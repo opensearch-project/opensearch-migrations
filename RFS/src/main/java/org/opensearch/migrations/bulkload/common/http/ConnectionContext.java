@@ -4,6 +4,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.opensearch.migrations.arguments.ArgNameConstants;
 
@@ -96,6 +98,18 @@ public class ConnectionContext {
                 params.getClientCert(),
                 params.getClientCertKey());
         }
+    }
+
+    // Used for presentation to user facing output
+    public Map<String, String> toUserFacingData() {
+        var dataBuilder = new LinkedHashMap<String, String>();
+        dataBuilder.put("Uri", getUri().toString());
+        dataBuilder.put("Protocol", getProtocol().toString());
+        dataBuilder.put("TLS Verification", isInsecure() ? "Disabled" : "Enabled");
+        if (awsSpecificAuthentication) {
+            dataBuilder.put("AWS Auth", "Enabled");
+        }
+        return dataBuilder;
     }
 
     /**
