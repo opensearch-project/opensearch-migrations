@@ -147,7 +147,7 @@ public class ShardMetadataData_ES_1_7 implements ShardMetadata {
             this.writtenBy = writtenBy;
             this.metaHash = metaHash;
 
-            // Calculate number of parts, matching Elasticsearch 2.4 logic
+            // Calculate number of parts, matching SnapshotReader_ES_2_4 logic
             long partBytes = Long.MAX_VALUE;
             if (partSize != Long.MAX_VALUE) {
                 partBytes = partSize;

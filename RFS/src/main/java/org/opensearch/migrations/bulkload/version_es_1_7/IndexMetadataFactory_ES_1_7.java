@@ -45,7 +45,7 @@ public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     @Override
     public SmileFactory getSmileFactory() {
         // ES 1.7 snapshots are plain JSON
-        return null;
+        throw new IllegalArgumentException("ES 1.x does not use Smile encoding for global metadata");
     }
 
     @Override
