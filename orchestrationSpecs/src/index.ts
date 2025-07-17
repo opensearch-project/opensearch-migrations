@@ -1,5 +1,5 @@
 import {renderWorkflowTemplate} from "@/renderers/argoConfigRenderer";
-import {paramsToCallerSchema} from "@/schemas/workflowSchemas";
+import {paramsToCallerSchema} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
 import {FullMigration} from "@/workflowTemplates/fullMigration";
 //

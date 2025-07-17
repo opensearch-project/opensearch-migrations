@@ -1,4 +1,4 @@
-import {defineParam, defineRequiredParam} from "@/schemas/workflowSchemas";
+import {defineParam, defineRequiredParam} from "@/schemas/parameterSchemas";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints:       defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),

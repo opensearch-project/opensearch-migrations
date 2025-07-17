@@ -3,7 +3,9 @@ import {
     InputParamDef,
     defineParam,
     defineRequiredParam,
-    paramsToCallerSchema,
+    paramsToCallerSchema
+} from '../schemas/parameterSchemas'
+import {
     defineOuterWorkflowTemplate, TemplateScope, defineStepsTemplate,
     TemplateDef
 } from '../schemas/workflowSchemas'
