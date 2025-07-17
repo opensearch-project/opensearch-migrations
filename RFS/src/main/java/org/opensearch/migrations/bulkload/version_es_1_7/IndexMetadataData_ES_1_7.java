@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.FIELD_MAPPINGS;
 import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.FIELD_SETTINGS;
 
-@NoArgsConstructor(force = true)
+@NoArgsConstructor(force = true) // For Jackson
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE)
 @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
 public class IndexMetadataData_ES_1_7 implements IndexMetadata {

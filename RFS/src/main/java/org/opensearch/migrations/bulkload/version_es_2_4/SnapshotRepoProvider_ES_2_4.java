@@ -12,9 +12,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
-
     private static final String INDICES_DIR_NAME = "indices";
-
     private final SourceRepo repo;
     private SnapshotRepoData_ES_2_4 repoData;
 
@@ -27,6 +25,60 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
             repoData = SnapshotRepoData_ES_2_4.fromRepo(repo);
         }
         return repoData;
+    }
+
+    @Override
+    public List<SnapshotRepo.Snapshot> getSnapshots() {
+        List<SnapshotRepo.Snapshot> result = new ArrayList<>();
+        for (String name : getRepoData().getSnapshots()) {
+            result.add(new SimpleSnapshot(name));
+        }
+        return result;
+    }
+
+    @Override
+    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        List<SnapshotRepo.Index> result = new ArrayList<>();
+        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
+        File[] indexDirs = indicesRoot.toFile().listFiles();
+        if (indexDirs == null) {
+            return Collections.emptyList();
+        }
+        for (File indexDir : indexDirs) {
+            if (!indexDir.isDirectory()) {
+                continue;
+            }
+
+            if (containsMetaFile(indexDir, snapshotName)) {
+                result.add(new SimpleIndex(indexDir.getName(), snapshotName));
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public String getSnapshotId(String snapshotName) {
+        for (String name : getRepoData().getSnapshots()) {
+            if (name.equals(snapshotName)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public String getIndexId(String indexName) {
+        return indexName;
+    }
+
+    @Override
+    public SourceRepo getRepo() {
+        return repo;
+    }
+
+    @Override
+    public SnapshotRepo.Provider getDelegateRepo() {
+        return this;
     }
 
     @Override
@@ -60,37 +112,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
         }
     }
 
-    @Override
-    public List<SnapshotRepo.Snapshot> getSnapshots() {
-        List<SnapshotRepo.Snapshot> result = new ArrayList<>();
-        for (String name : getRepoData().getSnapshots()) {
-            result.add(new SimpleSnapshot(name));
-        }
-        return result;
-    }
-
-    @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-
-        File[] indexDirs = indicesRoot.toFile().listFiles();
-        if (indexDirs == null) {
-            return Collections.emptyList();
-        }
-
-        for (File indexDir : indexDirs) {
-            if (!indexDir.isDirectory()) {
-                continue;
-            }
-
-            if (containsMetaFile(indexDir, snapshotName)) {
-                result.add(new SimpleIndex(indexDir.getName(), snapshotName));
-            }
-        }
-        return result;
-    }
-
     private boolean containsMetaFile(File dir, String snapshotName) {
         File[] files = dir.listFiles();
         if (files == null) {
@@ -102,31 +123,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepoES24 {
             }
         }
         return false;
-    }
-
-    @Override
-    public String getSnapshotId(String snapshotName) {
-        for (String name : getRepoData().getSnapshots()) {
-            if (name.equals(snapshotName)) {
-                return name;
-            }
-        }
-        return null;
-    }
-
-    @Override
-    public String getIndexId(String indexName) {
-        return indexName;
-    }
-
-    @Override
-    public SourceRepo getRepo() {
-        return repo;
-    }
-
-    @Override
-    public SnapshotRepo.Provider getDelegateRepo() {
-        return this;
     }
 
     public static class SimpleSnapshot implements SnapshotRepo.Snapshot {

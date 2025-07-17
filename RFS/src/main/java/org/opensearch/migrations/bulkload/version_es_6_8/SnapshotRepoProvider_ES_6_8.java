@@ -22,11 +22,9 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
         return repoData;
     }
 
-    public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
-        return getRepoData().getIndices().entrySet()
-            .stream()
-            .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-            .collect(Collectors.toList());
+    @Override
+    public List<SnapshotRepo.Snapshot> getSnapshots() {
+        return new ArrayList<>(getRepoData().getSnapshots());
     }
 
     @Override
@@ -48,11 +46,6 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     }
 
     @Override
-    public List<SnapshotRepo.Snapshot> getSnapshots() {
-        return new ArrayList<>(getRepoData().getSnapshots());
-    }
-
-    @Override
     public String getSnapshotId(String snapshotName) {
         for (SnapshotRepoData_ES_6_8.Snapshot snapshot : getRepoData().getSnapshots()) {
             if (snapshot.getName().equals(snapshotName)) {
@@ -70,5 +63,12 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     @Override
     public SourceRepo getRepo() {
         return repo;
+    }
+
+    public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
+        return getRepoData().getIndices().entrySet()
+            .stream()
+            .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
     }
 }

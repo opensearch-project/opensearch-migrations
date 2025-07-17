@@ -22,7 +22,6 @@ public final class ElasticsearchConstants_ES_2_4 {
     public static final String FIELD_ALIASES = "aliases";
     public static final String FIELD_ROUTING_NUM_SHARDS = "routing_num_shards";
 
-
     static {
         // Taken from : https://github.com/opensearch-project/OpenSearch/blob/e41ae25b1e4ce15e2281de4f8699beea09584ec2/core/src/main/java/org/elasticsearch/common/blobstore/fs/FsBlobStore.java#L49
         BUFFER_SIZE_IN_BYTES = 102400;

@@ -12,9 +12,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
-@Slf4j
 @NoArgsConstructor
 public class SnapshotRepoData_ES_2_4 {
 
@@ -53,17 +51,9 @@ public class SnapshotRepoData_ES_2_4 {
      */
     public static SnapshotRepoData_ES_2_4 fromRepoFile(Path filePath) {
         try {
-            log.debug("Reading ES 2.4 repo 'index' file: {}", filePath);
             ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
             SnapshotRepoData_ES_2_4 data = mapper.readValue(filePath.toFile(), SnapshotRepoData_ES_2_4.class);
             data.filePath = filePath;
-
-            if (data.snapshots == null || data.snapshots.isEmpty()) {
-                log.warn("Loaded ES 2.4 'index' file but found no snapshots! File: {}", filePath);
-            } else {
-                log.info("Loaded ES 2.4 'index' file with snapshots: {}", data.snapshots);
-            }
-
             return data;
         } catch (IOException e) {
             throw new CantParseRepoFile("Can't read or parse the ES 2.4 repo metadata file: " + filePath, e);

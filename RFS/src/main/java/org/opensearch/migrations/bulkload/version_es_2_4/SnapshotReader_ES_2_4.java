@@ -12,7 +12,6 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 
 public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
-
     private Version version;
     private SourceRepo sourceRepo;
 
@@ -30,6 +29,12 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     @Override
     public ClusterSnapshotReader initialize(SourceRepo sourceRepo) {
         this.sourceRepo = sourceRepo;
+        return this;
+    }
+
+    @Override
+    public ClusterSnapshotReader initialize(Version version) {
+        this.version = version;
         return this;
     }
 
@@ -66,12 +71,6 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     @Override
     public Version getVersion() {
         return version;
-    }
-
-    @Override
-    public ClusterSnapshotReader initialize(Version version) {
-        this.version = version;
-        return this;
     }
 
     @Override

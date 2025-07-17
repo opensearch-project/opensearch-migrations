@@ -34,9 +34,4 @@ public class IndexMetadataFactory_ES_6_8 implements IndexMetadata.Factory {
     public SnapshotRepo.Provider getRepoDataProvider() {
         return repoDataProvider;
     }
-
-    @Override
-    public JsonNode getJsonNode(SnapshotRepo.Provider repo, String indexName, String snapshotName, SmileFactory smileFactory) {
-        throw new UnsupportedOperationException("getJsonNode with repo is not used in this version");
-    }
 }

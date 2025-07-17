@@ -10,9 +10,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
-
     private final SnapshotRepo.Provider repoDataProvider;
-
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public IndexMetadataFactory_ES_1_7(SnapshotRepo.Provider repoDataProvider) {
@@ -20,12 +18,13 @@ public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     }
 
     @Override
-    public JsonNode getJsonNode(SnapshotRepo.Provider repo, String indexName, String snapshotName, SmileFactory smileFactory) {
+    public IndexMetadata fromRepo(String snapshotName, String indexName) {
         try {
-            SnapshotRepoES17 es17Repo = (SnapshotRepoES17) repo;
-            // ES 1.7 stores it as snapshot-<snapshotName> under the index dir
+            SnapshotRepoES17 es17Repo = (SnapshotRepoES17) getRepoDataProvider();
+            // ES 1.7 stores it as snapshot-{snapshotName} under the index dir
             byte[] data = es17Repo.getIndexMetadataFile(indexName, snapshotName);
-            return objectMapper.readTree(data);
+            JsonNode root = objectMapper.readTree(data);
+            return fromJsonNode(root.get(indexName), indexName, indexName);
         } catch (Exception e) {
             throw new RfsException("Could not load index metadata for index: " + indexName, e);
         }
@@ -33,13 +32,7 @@ public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
 
     @Override
     public IndexMetadata fromJsonNode(JsonNode root, String indexId, String indexName) {
-        ObjectNode objectNodeRoot = (ObjectNode) root.get(indexName);
-        return new IndexMetadataData_ES_1_7(objectNodeRoot, indexName);
-    }
-
-    @Override
-    public SnapshotRepo.Provider getRepoDataProvider() {
-        return repoDataProvider;
+        return new IndexMetadataData_ES_1_7((ObjectNode) root, indexName);
     }
 
     @Override
@@ -52,5 +45,10 @@ public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     public String getIndexFileId(String snapshotName, String indexName) {
         // ES 1.7 follows indices/blog_legacy_2023/snapshot-my_snap_evaluate
         return "snapshot-" + snapshotName;
+    }
+
+    @Override
+    public SnapshotRepo.Provider getRepoDataProvider() {
+        return repoDataProvider;
     }
 }

@@ -45,10 +45,8 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
         if (mappings != null) {
             return mappings;
         }
-
         ObjectNode mappingsNode = (ObjectNode) rawJson.get("mappings");
         mappings = mappingsNode;
-
         return mappings;
     }
 
@@ -62,11 +60,8 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
         if (settings != null) {
             return settings;
         }
-
         ObjectNode treeSettings = TransformFunctions.convertFlatSettingsToTree((ObjectNode) rawJson.get("settings"));
-
         settings = treeSettings;
-
         return settings;
     }
 

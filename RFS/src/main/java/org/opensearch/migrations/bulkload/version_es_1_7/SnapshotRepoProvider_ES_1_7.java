@@ -11,11 +11,8 @@ import java.util.List;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
-
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
-
     private static final String INDICES_DIR_NAME = "indices";
-
     private final SourceRepo repo;
     private SnapshotRepoData_ES_1_7 repoData;
 
@@ -33,7 +30,6 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     public List<String> listIndices() {
         List<String> indexNames = new ArrayList<>();
         Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-
         File[] children = indicesRoot.toFile().listFiles();
         if (children != null) {
             for (File f : children) {
@@ -70,15 +66,13 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        // Very similar logic as ES 2.4 but different file name
+        // Very similar logic as SnapshotRepoProvider_ES_2_4 but different file name
         List<SnapshotRepo.Index> result = new ArrayList<>();
         Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-
         File[] indexDirs = indicesRoot.toFile().listFiles();
         if (indexDirs == null) {
             return Collections.emptyList();
         }
-
         for (File indexDir : indexDirs) {
             if (!indexDir.isDirectory()) {
                 continue;
