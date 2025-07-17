@@ -10,9 +10,12 @@ app = FastAPI(
 )
 
 origins = [
-    # Enable development environments by default
+    # Enable development environments
     "http://127.0.0.1:3000",
     "http://localhost:3000",
+    # Enable prod container environments
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
 ]
 
 app.add_middleware(
