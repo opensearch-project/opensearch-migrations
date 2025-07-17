@@ -22,7 +22,7 @@ export default function DefaultPage() {
           return;
         }
         router.replace("/loading");
-      } catch (err) {
+      } catch {
         router.replace("/loading");
       }
     };

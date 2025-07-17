@@ -12,6 +12,6 @@ export function getSiteReadiness(): boolean {
 export function setSiteReadiness(value: boolean) {
   localStorage.setItem(
     CACHE_KEY,
-    JSON.stringify({ ready: value, timestamp: Date.now() })
+    JSON.stringify({ ready: value, timestamp: Date.now() }),
   );
 }
