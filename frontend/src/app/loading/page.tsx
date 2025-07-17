@@ -9,7 +9,7 @@ import Alert from '@cloudscape-design/components/alert';
 import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import { useRouter } from 'next/navigation';
 import { systemHealth } from '@/lib/client';
-import { Box, ProgressBar, Spinner } from '@cloudscape-design/components';
+import { Box, Spinner } from '@cloudscape-design/components';
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
 
 
@@ -26,7 +26,7 @@ export default function LandingPage() {
       try {
         const res = await systemHealth();
 
-        if (res.data?.status !== 'ok' || getSiteReadiness()) {
+        if (res.data?.status === 'ok' || getSiteReadiness()) {
           setIsReady(true);
           setErrorMessage(null);
           setIsPolling(false);
