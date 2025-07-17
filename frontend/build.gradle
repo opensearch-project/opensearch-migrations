@@ -47,13 +47,7 @@ tasks.register('generateBackendClient', NpmTask) {
     group = 'build'
     description = 'Generates the TypeScript API client from openapi.json'
 
-    args = [
-        'exec',
-        '--',
-        'openapi-ts',
-        '--input', "$buildDir/openapi.json",
-        '--output', "src/api-client"
-    ]
+    args = ['run', 'openapi-ts']
 }
 
 tasks.register('buildFrontend', NpmTask) {
