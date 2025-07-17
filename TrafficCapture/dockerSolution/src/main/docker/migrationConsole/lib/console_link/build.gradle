@@ -17,11 +17,11 @@ def projectDirRef = projectDir
 
 tasks.register('startApiServer') {
     doLast {
-        def command = "pipenv run gunicorn console_link.api.main:app -k uvicorn.workers.UvicornWorker -w 1 -b 127.0.0.1:${apiPort} --error-logfile -"
+        def command = "pipenv run gunicorn console_link.api.main:app -k uvicorn.workers.UvicornWorker -w 1 -b 127.0.0.1:${apiPort}"
         def proc = command.execute(null, projectDirRef)
         sleep 2000
 
-        logger.lifecycle("Server started with ${command}, pid: ${proc.pid()}")
+        logger.info("Server started with ${command}, pid: ${proc.pid()}")
         new File(serverPidFile).text = "${proc.pid()}"
     }
 }
@@ -30,7 +30,6 @@ tasks.register('downloadOpenApiSpec', de.undercouch.gradle.tasks.download.Downlo
     src openapiUrl
     dest openapiOutFile
     dependsOn 'startApiServer'
-
     inputs.files(pythonSources)
     inputs.files(dependencyFiles)
     outputs.file(openapiOutFile)
@@ -46,7 +45,6 @@ tasks.register('stopApiServer') {
             pidFile.delete()
         }
     }
-    inputs.files(serverPidFile)
 }
 
 tasks.register('fetchOpenApiSpec') {
@@ -55,4 +53,7 @@ tasks.register('fetchOpenApiSpec') {
     doLast {
         logger.lifecycle("OpenAPI spec downloaded to ${openapiOutFile}")
     }
+    inputs.files(pythonSources)
+    inputs.files(dependencyFiles)
+    outputs.file(openapiOutFile)
 }
