@@ -70,6 +70,7 @@ public class DocumentsRunner {
 
                 @Override
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
+                    log.info("Acquired work item: {}", workItem.getWorkItem());
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
                     var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
@@ -102,7 +103,14 @@ public class DocumentsRunner {
                     // the in-flight requests to be finished before creating the successor items.
                     cancellationTriggerConsumer.accept(disposable::dispose);
                     try {
+                        log.info("Waiting on latch for index={}, shard={}...", 
+                                    workItem.getWorkItem().getIndexName(), 
+                                    workItem.getWorkItem().getShardNumber());
+                        long start = System.currentTimeMillis();
                         latch.await();
+                        long duration = System.currentTimeMillis() - start;
+                        log.info("Latch released after {} ms for index={}, shard={}",
+                                    duration, workItem.getWorkItem().getIndexName(), workItem.getWorkItem().getShardNumber());
                         return CompletionStatus.WORK_COMPLETED;
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -140,10 +148,25 @@ public class DocumentsRunner {
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.getReader(unpacker.unpack());
         timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
+        
+        log.info("Setting up doc migration for index={}, shard={}",
+             workItem.getIndexName(), workItem.getShardNumber());
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
+            .doOnSubscribe(s -> log.info("Subscribed to docMigrationCursors for index={}, shard={}",
+                                         workItem.getIndexName(), workItem.getShardNumber()))
+            .doOnNext(cursor -> log.debug("Cursor emitted for index={}, shard={}: {}",
+                                          workItem.getIndexName(), workItem.getShardNumber(), cursor))
+            .doOnError(err -> log.error("Error during docMigration for index={}, shard={}", 
+                                        workItem.getIndexName(), workItem.getShardNumber(), err))
+            .doOnComplete(() -> log.info("Completed docMigration for index={}, shard={}",
+                                         workItem.getIndexName(), workItem.getShardNumber()))
+            .doOnTerminate(() -> log.info("Terminating docMigration Flux for index={}, shard={}",
+                                          workItem.getIndexName(), workItem.getShardNumber()))
+            .doOnCancel(() -> log.warn("docMigration Flux cancelled for index={}, shard={}",
+                                       workItem.getIndexName(), workItem.getShardNumber()))
             .doOnNext(cursorConsumer);
     }
 }
