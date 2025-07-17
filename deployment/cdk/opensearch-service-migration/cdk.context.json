@@ -7,9 +7,8 @@
       "allow_insecure": true,
       "auth": {
         "type": "none | basic | sigv4",
-        "// basic auth documentation": "The next two lines are relevant for basic auth only",
-        "username": "<USERNAME>",
-        "passwordFromSecretArn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
+        "// basic auth documentation": "The next line is relevant for basic auth only",
+        "userSecretArn": "<ARN_OF_SECRET_CONTAINING_USERNAME_AND_PASSWORD_KEY_VALUE_PAIRS>",
         "// sigv4 documentation": "The next two lines are relevant for sigv4 only",
         "region": "<REGION>",
         "serviceSigningName": "es | aoss"
@@ -22,9 +21,8 @@
       "version": "<SOURCE_CLUSTER_VERSION, ES_7.10 or OS_1.3>",
       "auth": {
         "type": "none | basic | sigv4",
-        "// basic auth documentation": "The next two lines are relevant for basic auth only",
-        "username": "<USERNAME>",
-        "passwordFromSecretArn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
+        "// basic auth documentation": "The next line is relevant for basic auth only",
+        "userSecretArn": "<ARN_OF_SECRET_CONTAINING_USERNAME_AND_PASSWORD_KEY_VALUE_PAIRS>",
         "// sigv4 documentation": "The next two lines are relevant for sigv4 only",
         "region": "<REGION>",
         "serviceSigningName": "es | aoss"
@@ -34,20 +32,23 @@
       "maxCapacity": 16384
     },
     "vpcId": "<VPC_ID>",
+    "// help vpcAZCount": "For deployments using the capture-proxy, this AZ count should match the source cluster AZ count.",
+    "vpcAZCount": 2,
+
     "reindexFromSnapshotServiceEnabled": true,
     "reindexFromSnapshotMaxShardSizeGiB": 80,
 
-    "// settingsForCaptureAndReplay": "Enable the below services for live traffic capture and replay",
+    "// settingsForCaptureAndReplay": "Enable the following services for live traffic capture and replay:",
     "trafficReplayerServiceEnabled": false,
-
-    "// help trafficReplayerExtraArgs": "Increase speedup factor in order replay requests at a faster rate to catchup",
-    "trafficReplayerExtraArgs": "--speedup-factor 1.5",
-
-    "// help capture/target proxy pt. 1 of 2": "captureProxyService and targetClusterProxyService require networking access configured to successfully deploy,",
-    "// help capture/target proxy pt. 2 of 2": "consider deploying without first and enabling after ensuring cluster networking access on the migration console",
     "captureProxyServiceEnabled": false,
-    "captureProxyDesiredCount": 0,
     "targetClusterProxyServiceEnabled": false,
-    "targetClusterProxyDesiredCount": 0
+
+    "// help capture/target proxy pt. 1 of 2": "captureProxyService and targetClusterProxyService deployment will fail without network access to clusters.",
+    "// help capture/target proxy pt. 2 of 2": "In most cases, keep the desired count setting at `0` until you verify connectivity in the migration console. After verifying connectivity, you can redeploy with a higher desired count.",
+    "captureProxyDesiredCount": 0,
+    "targetClusterProxyDesiredCount": 0,
+
+    "// help trafficReplayerExtraArgs": "Increase the speedup factor to replay requests at a faster rate in order to catch up.",
+    "trafficReplayerExtraArgs": "--speedup-factor 1.5"
   }
 }

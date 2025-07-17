@@ -1,16 +1,29 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
+import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {ContainerImage, CpuArchitecture} from "aws-cdk-lib/aws-ecs";
-import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
+import {RemovalPolicy, SecretValue, Stack} from "aws-cdk-lib";
+import {IStringParameter, StringParameter} from "aws-cdk-lib/aws-ssm";
+import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 import * as forge from 'node-forge';
 import {ClusterYaml, SnapshotYaml} from "./migration-services-yaml";
-import { CdkLogger } from "./cdk-logger";
-import { mkdtempSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
-import { execSync } from 'child_process';
+import {CdkLogger} from "./cdk-logger";
+import {mkdtempSync, writeFileSync} from 'fs';
+import {join} from 'path';
+import {tmpdir} from 'os';
+import {execSync} from 'child_process';
+
+export const MAX_IAM_ROLE_NAME_LENGTH = 64;
+export const MAX_STAGE_NAME_LENGTH = 15;
+export enum ClusterType {
+    SOURCE = 'source',
+    TARGET = 'target',
+}
+export enum ContainerEnvVarNames {
+    TARGET_USERNAME = 'TARGET_USERNAME',
+    TARGET_PASSWORD = 'TARGET_PASSWORD',
+}
+
 export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
@@ -170,11 +183,26 @@ export function createAwsDistroForOtelPushInstrumentationPolicy(): PolicyStateme
     })
 }
 
-export function createDefaultECSTaskRole(scope: Construct, serviceName: string): Role {
-    const serviceTaskRole = new Role(scope, `${serviceName}-TaskRole`, {
+export function createECSTaskRole(scope: Construct, serviceName: string, region: string, stage: string): Role {
+    let taskRoleName = `OSMigrations-${stage}-${region}-${serviceName}-task`
+    const excessCharacters = taskRoleName.length - MAX_IAM_ROLE_NAME_LENGTH
+    if (excessCharacters > 0) {
+        if (excessCharacters > serviceName.length) {
+            throw Error(`Unexpected ECS task role name length for proposed name: '${taskRoleName}' could not be reasonably truncated 
+                below ${MAX_IAM_ROLE_NAME_LENGTH} characters`)
+        }
+        const truncatedServiceName = serviceName.slice(0, serviceName.length - excessCharacters)
+        taskRoleName = `OSMigrations-${stage}-${region}-${truncatedServiceName}-task`
+    }
+    return new Role(scope, `${serviceName}-TaskRole`, {
         assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
-        description: 'ECS Service Task Role'
+        description: `ECS Service Task Role for ${serviceName}`,
+        roleName: taskRoleName
     });
+}
+
+export function createDefaultECSTaskRole(scope: Construct, serviceName: string, region: string, stage: string): Role {
+    const serviceTaskRole = createECSTaskRole(scope, serviceName, region, stage)
     // Add default Task Role policy to allow exec and writing logs
     serviceTaskRole.addToPolicy(new PolicyStatement({
         effect: Effect.ALLOW,
@@ -301,7 +329,6 @@ export enum MigrationSSMParameter {
     MSK_CLUSTER_NAME = 'mskClusterName',
     OS_ACCESS_SECURITY_GROUP_ID = 'osAccessSecurityGroupId',
     OS_CLUSTER_ENDPOINT = 'osClusterEndpoint',
-    OS_USER_AND_SECRET_ARN = 'osUserAndSecretArn',
     OSI_PIPELINE_LOG_GROUP_NAME = 'osiPipelineLogGroupName',
     OSI_PIPELINE_ROLE_ARN = 'osiPipelineRoleArn',
     SHARED_LOGS_SECURITY_GROUP_ID = 'sharedLogsSecurityGroupId',
@@ -334,28 +361,7 @@ export class ClusterSigV4Auth {
 }
 
 export class ClusterBasicAuth {
-    username: string;
-    password?: string;
-    password_from_secret_arn?: string;
-
-    constructor({
-        username,
-        password,
-        password_from_secret_arn,
-    }: {
-        username: string;
-        password?: string;
-        password_from_secret_arn?: string;
-    }) {
-        this.username = username;
-        this.password = password;
-        this.password_from_secret_arn = password_from_secret_arn;
-
-        // Validation: Exactly one of password or password_from_secret_arn must be provided
-        if ((password && password_from_secret_arn) || (!password && !password_from_secret_arn)) {
-            throw new Error('Exactly one of password or password_from_secret_arn must be provided');
-        }
-    }
+    constructor(public user_secret_arn: string) {}
 }
 
 export class ClusterAuth {
@@ -391,24 +397,41 @@ export class ClusterAuth {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getBasicClusterAuth(basicAuthObject: Record<string, any>): ClusterBasicAuth {
-    // Destructure and validate the input object
-    const { username, password, passwordFromSecretArn } = basicAuthObject;
-    // Ensure the required 'username' field is present
-    if (typeof username !== 'string' || !username) {
-        throw new Error('Invalid input: "username" must be a non-empty string');
+export function getBasicClusterAuth(basicAuthObject: Record<any, any>, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterBasicAuth {
+    const { username, password, userSecretArn } = basicAuthObject;
+
+    for (const [key, value] of Object.entries({ username, password, userSecretArn })) {
+        if (value !== undefined) {
+            if (typeof value !== 'string' || value.trim().length === 0) {
+                throw new Error(`Cluster auth field '${key}' must be a non-empty string.`);
+            }
+        }
     }
-    // Ensure that exactly one of 'password' or 'passwordFromSecretArn' is provided
-    const hasPassword = typeof password === 'string' && password.trim() !== '';
-    const hasPasswordFromSecretArn = typeof passwordFromSecretArn === 'string' && passwordFromSecretArn.trim() !== '';
-    if ((hasPassword && hasPasswordFromSecretArn) || (!hasPassword && !hasPasswordFromSecretArn)) {
-        throw new Error('Exactly one of "password" or "passwordFromSecretArn" must be provided');
+
+    let user_secret_arn = userSecretArn
+    if (userSecretArn) {
+        if (username || password) {
+            throw new Error("Provide only userSecretArn or username/password, not both.");
+        }
+    } else if (!username || !password) {
+        throw new Error("Both username and password must be provided if userSecretArn is not given.");
     }
-    return new ClusterBasicAuth({
-        username,
-        password: hasPassword ? password : undefined,
-        password_from_secret_arn: hasPasswordFromSecretArn ? passwordFromSecretArn : undefined,
-    });
+
+    user_secret_arn ??= createBasicAuthSecret(username, password, clusterType, scope, stage, deployId).secretArn;
+
+    return new ClusterBasicAuth(user_secret_arn)
+}
+
+export function createBasicAuthSecret(username: string, password: string, clusterType: ClusterType, scope: Construct,
+                               stage: string, deployId: string): Secret {
+    CdkLogger.warn(`Password passed in plain text for ${clusterType} cluster, this is insecure and will leave your password exposed.`)
+    return new Secret(scope, `${clusterType}ClusterBasicAuthSecret`, {
+        secretName: `${clusterType}-cluster-basic-auth-secret-${stage}-${deployId}`,
+        secretObjectValue: {
+            username: SecretValue.unsafePlainText(username),
+            password: SecretValue.unsafePlainText(password)
+        }
+    })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -422,9 +445,9 @@ function getSigV4ClusterAuth(sigv4AuthObject: Record<string, any>): ClusterSigV4
 
 // Function to parse and validate auth object
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseAuth(json: any): ClusterAuth | null {
-    if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromSecretArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromSecretArn === 'string')) {
-        return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
+function parseAuth(json: any, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterAuth | null {
+    if (json.type === 'basic') {
+        return new ClusterAuth({basicAuth: getBasicClusterAuth(json, clusterType, scope, stage, deployId)});
     } else if (json.type === 'sigv4' && typeof json.region === 'string' && typeof json.serviceSigningName === 'string') {
         return new ClusterAuth({sigv4: getSigV4ClusterAuth(json)});
     } else if (json.type === 'none') {
@@ -461,17 +484,20 @@ export function validateAndReturnFormattedHttpURL(urlString: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function parseClusterDefinition(json: any): ClusterYaml {
+export function parseClusterDefinition(json: any, clusterType: ClusterType, scope: Construct, stage: string, deployId: string): ClusterYaml {
     let endpoint = json.endpoint
     if (!endpoint) {
-        throw new Error('Missing required field in cluster definition: endpoint')
+        throw new Error(`Missing required field in ${clusterType} cluster definition: endpoint`)
+    }
+    const version = json.version;
+    if (clusterType == ClusterType.SOURCE && !version) {
+        throw new Error(`Missing required field in ${clusterType} cluster definition: version`)
     }
     endpoint = validateAndReturnFormattedHttpURL(endpoint)
     const allowInsecure = json.allow_insecure;
-    const version = json.version;
-    const auth = parseAuth(json.auth)
+    const auth = parseAuth(json.auth, clusterType, scope, stage, deployId)
     if (!auth) {
-        throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
+        throw new Error(`Invalid auth type when parsing ${clusterType} cluster definition: ${json.auth.type}`)
     }
     return new ClusterYaml({endpoint, version, allowInsecure, auth})
 }

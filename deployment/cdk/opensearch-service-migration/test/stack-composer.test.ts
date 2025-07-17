@@ -20,7 +20,10 @@ describe('Stack Composer Tests', () => {
 
   test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
     const contextOptions = {
-      domainName: ""
+      domainName: "",
+      sourceCluster: {
+        disabled: true
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -115,7 +118,10 @@ describe('Stack Composer Tests', () => {
 
   test('Test ES_7.10 engine version format is parsed', () => {
     const contextOptions = {
-      engineVersion: "ES_7.10"
+      engineVersion: "ES_7.10",
+      sourceCluster: {
+        disabled: true
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -127,7 +133,10 @@ describe('Stack Composer Tests', () => {
 
   test('Test OS 1.3 engine version format is parsed', () => {
     const contextOptions = {
-      engineVersion: "OS_1.3"
+      engineVersion: "OS_1.3",
+      sourceCluster: {
+        disabled: true
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -139,6 +148,9 @@ describe('Stack Composer Tests', () => {
 
   test('Test access policy is parsed for proper array format', () => {
     const contextOptions = {
+      sourceCluster: {
+        disabled: true
+      },
       accessPolicies:
         {
           "Version": "2012-10-17",
@@ -168,6 +180,9 @@ describe('Stack Composer Tests', () => {
 
   test('Test access policy is parsed for proper block format', () => {
     const contextOptions = {
+      sourceCluster: {
+        disabled: true
+      },
       accessPolicies:
         {
           "Version": "2012-10-17",
@@ -261,7 +276,10 @@ describe('Stack Composer Tests', () => {
 
   test('Test that app registry association is created when migrationsAppRegistryARN is provided', () => {
     const contextOptions = {
-      stage: "unit-test"
+      stage: "unit-test",
+      sourceCluster: {
+        disabled: true
+      }
     }
 
     const app = new App({
@@ -342,7 +360,7 @@ describe('Stack Composer Tests', () => {
     expect(createStackFunc).toThrow()
   })
 
-  test('Test that a context with no source cluster details succeeds if sourceClusterDisabled', () => {
+  test('Test that a context with no source cluster details succeeds if sourceCluster.disabled', () => {
     const sourceClusterDisabledContextOptions = {
       sourceCluster: {
         "disabled": true
@@ -379,6 +397,49 @@ describe('Stack Composer Tests', () => {
     expect (sourceClusterDisabledWithEndpointCreateStackFunc).toThrow()
   })
 
+  test('Test that a context with a snapshot block and sourceCluster block succeeds if sourceCluster is disabled and has version', () => {
+    const contextOptions = {
+      sourceCluster: {
+        "disabled": true,
+        "version": "ES_7.10"
+      },
+      snapshot: {
+        "snapshotName": "my-snapshot-name",
+        "snapshotRepoName": "my-snapshot-repo",
+        "s3Uri": "s3://my-s3-bucket-name/my-bucket-path-to-snapshot-repo",
+        "s3Region": "us-east-2"
+      },
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true,
+
+    }
+    const openSearchStacks = createStackComposer(contextOptions)
+    expect(openSearchStacks.stacks).toHaveLength(4)
+  })
+
+  test('Test that a context with a snapshot block and sourceCluster block fails if sourceCluster does not have version', () => {
+    const contextOptions = {
+      sourceCluster: {
+        "disabled": true
+      },
+      snapshot: {
+        "snapshotName": "my-snapshot-name",
+        "snapshotRepoName": "my-snapshot-repo",
+        "s3Uri": "s3://my-s3-bucket-name/my-bucket-path-to-snapshot-repo",
+        "s3Region": "us-east-2"
+      },
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true,
+
+    }
+    const createStackComposerWithContextOptions = () => createStackComposer(contextOptions)
+    expect (createStackComposerWithContextOptions).toThrow()
+  })
+
 
   test('Test backwards compatibility of source/target cluster params', () => {
     // This is effectively a smoke test with the "old-style" flat source and target cluster parameters.
@@ -389,8 +450,6 @@ describe('Stack Composer Tests', () => {
       sourceClusterEndpoint: "https://test-cluster",
       reindexFromSnapshotServiceEnabled: true,
       trafficReplayerServiceEnabled: true,
-      fineGrainedManagerUserName: "admin",
-      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
       nodeToNodeEncryptionEnabled: true, // required if FGAC is being used
       encryptionAtRestEnabled: true, // required if FGAC is being used
       enforceHTTPS: true // required if FGAC is being used

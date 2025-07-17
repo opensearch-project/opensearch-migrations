@@ -1,12 +1,14 @@
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {
-    parseClusterDefinition,
-    validateFargateCpuArch,
-    parseArgsToDict,
     appendArgIfNotInExtraArgs,
-    validateAndReturnFormattedHttpURL
+    ClusterType,
+    parseArgsToDict,
+    parseClusterDefinition,
+    validateAndReturnFormattedHttpURL,
+    validateFargateCpuArch
 } from "../lib/common-utilities";
-import {describe, test, expect} from '@jest/globals';
+import {describe, expect, test} from '@jest/globals';
+import {App, Stack} from "aws-cdk-lib";
 
 describe('appendArgIfNotInExtraArgs', () => {
 
@@ -249,25 +251,25 @@ describe('validateFargateCpuArch', () => {
             version: 'ES_7.10',
             auth: {
               type: 'basic',
-              username: 'admin',
-              passwordFromSecretArn: 'arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc'
+              userSecretArn: 'arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc'
             }
-          }
-        const parsed = parseClusterDefinition(clusterDefinition);
+        }
+        const scope = new Stack(new App(), 'TestStack');
+        const parsed = parseClusterDefinition(clusterDefinition, ClusterType.SOURCE, scope, "test-stage", "default");
         expect(parsed).toBeDefined();
         expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
         expect(parsed.version).toBe(clusterDefinition.version);
         expect(parsed.auth.basicAuth).toBeDefined();
-        expect(parsed.auth.basicAuth?.username).toBe(clusterDefinition.auth.username);
-        expect(parsed.auth.basicAuth?.password_from_secret_arn).toBe(clusterDefinition.auth.passwordFromSecretArn);
+        expect(parsed.auth.basicAuth?.user_secret_arn).toBe(clusterDefinition.auth.userSecretArn);
     })
 
     test('parseClusterDefinition with no auth', () => {
         const clusterDefinition = {
             endpoint: 'https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443',
             auth: {"type": "none"}
-          }
-        const parsed = parseClusterDefinition(clusterDefinition);
+        }
+        const scope = new Stack(new App(), 'TestStack');
+        const parsed = parseClusterDefinition(clusterDefinition, ClusterType.TARGET, scope, "test-stage", "default");
         expect(parsed).toBeDefined();
         expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
         expect(parsed.auth.noAuth).toBeDefined();
@@ -282,7 +284,8 @@ describe('validateFargateCpuArch', () => {
               serviceSigningName: 'es'
             }
           }
-        const parsed = parseClusterDefinition(clusterDefinition);
+        const scope = new Stack(new App(), 'TestStack');
+        const parsed = parseClusterDefinition(clusterDefinition, ClusterType.TARGET, scope, "test-stage", "default");
         expect(parsed).toBeDefined();
         expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
         expect(parsed.auth.sigv4).toBeDefined();

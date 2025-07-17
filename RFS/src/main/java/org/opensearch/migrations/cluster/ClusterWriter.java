@@ -24,4 +24,6 @@ public interface ClusterWriter extends VersionSpecificCluster {
     /** Gets the awareness attribute settings of the cluster */
     AwarenessAttributeSettings getAwarenessAttributeSettings();
 
+    /** Get the type of reader that is user facing */
+    String getFriendlyTypeName();
 }

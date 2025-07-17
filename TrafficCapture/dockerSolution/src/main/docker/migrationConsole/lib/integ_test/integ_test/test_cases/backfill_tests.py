@@ -49,6 +49,7 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
         self.transform_config_file = "/shared-logs-output/test-transformations/transformation.json"
 
     def test_before(self):
+        super().test_before()
         self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
         # Current test structure requires a transformation config
         union_transform = self.source_operations.get_type_mapping_only_union_transformation(

@@ -36,10 +36,7 @@ export interface SolutionsInfrastructureStackEKSProps extends StackProps {
     readonly stackNameSuffix?: string;
 }
 
-function importVPC(stack: Stack, vpdIdParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter): IVpc {
-    // TODO add support for import VPC scenario with VPC validations
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const privateSubnetIds = privateSubnetIdsParameter.valueAsList
+function importVPC(stack: Stack, vpdIdParameter: CfnParameter): IVpc {
     return Vpc.fromLookup(stack, 'ImportedVPC', {
         vpcId: vpdIdParameter.valueAsString,
     });
@@ -134,7 +131,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             });
             addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnets")
             importedVPCParameters.push(vpcIdParameter.logicalId, privateSubnetIdsParameter.logicalId)
-            vpc = importVPC(this, vpcIdParameter, privateSubnetIdsParameter);
+            vpc = importVPC(this, vpcIdParameter);
         }
 
         const eksClusterName = `migration-eks-cluster-${stackMarker}`

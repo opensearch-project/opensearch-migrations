@@ -7,4 +7,6 @@ public interface RemoteCluster extends VersionSpecificCluster {
 
     /** Remote clusters are communicated with via a connection */
     RemoteCluster initialize(ConnectionContext connection);
+
+    ConnectionContext getConnection();
 }

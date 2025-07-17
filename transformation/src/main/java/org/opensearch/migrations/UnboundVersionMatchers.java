@@ -12,6 +12,7 @@ public class UnboundVersionMatchers {
     public static final Predicate<Version> isBelowES_5_X = belowMajorVersion(Version.fromString("ES 5.0.0"));
     public static final Predicate<Version> isBelowES_6_X = belowMajorVersion(Version.fromString("ES 6.0.0"));
     public static final Predicate<Version> isBelowES_7_X = belowMajorVersion(Version.fromString("ES 7.0.0"));
+    public static final Predicate<Version> isBelowES_8_X = belowMajorVersion(Version.fromString("ES 8.0.0"));
     public static final Predicate<Version> isGreaterOrEqualES_6_X = greaterOrEqualMajorVersion(Version.fromString("ES 6.0.0"));
     public static final Predicate<Version> isGreaterOrEqualES_7_X = greaterOrEqualMajorVersion(Version.fromString("ES 7.0.0"));
     public static final Predicate<Version> isGreaterOrEqualES_7_10 = greaterOrEqualMajorVersion(Version.fromString("ES 7.10.0"));

@@ -75,10 +75,16 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
         return client;
     }
 
-    private ConnectionContext getConnection() {
+    public ConnectionContext getConnection() {
         if (connection == null) {
             throw new UnsupportedOperationException("initialize(...) must be called");
         }
         return connection;
     }
+
+    @Override
+    public String getFriendlyTypeName() {
+        return "Remote Cluster";
+    }
+
 }

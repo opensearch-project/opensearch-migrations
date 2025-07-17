@@ -192,10 +192,15 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     if path[0] != '/':
         path = '/' + path
 
-    response = clusters_.call_api(cluster, path, method=HttpMethod[request], headers=headers, data=data)
-    if not response.ok:
-        click.echo(f"Error: {response.status_code}")
-    click.echo(response.text)
+    result: clusters_.CallAPIResult = clusters_.call_api(cluster, path, method=HttpMethod[request],
+                                                         headers=headers, data=data)
+    if result.error_message:
+        click.echo(result.error_message)
+    else:
+        response = result.http_response
+        if not response.ok:
+            click.echo(f"Error: {response.status_code}")
+        click.echo(response.text)
 
 
 # ##################### SNAPSHOT ###################
@@ -220,7 +225,7 @@ def snapshot_group(ctx):
     _external_snapshots_check(ctx.env.snapshot)
 
 
-@snapshot_group.command(name="create", context_settings=dict(ignore_unknown_options=True))
+@snapshot_group.command(name="create", context_settings={'ignore_unknown_options': True})
 @click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
 @click.option('--max-snapshot-rate-mb-per-node', type=int, default=None,
               help='Maximum snapshot rate in MB/s per node')
@@ -431,10 +436,10 @@ def metadata_group(ctx):
         raise click.UsageError("Metadata is not set")
 
 
-@metadata_group.command(name="migrate", context_settings=dict(
-    ignore_unknown_options=True,
-    help_option_names=[]
-))
+@metadata_group.command(name="migrate", context_settings={
+    'ignore_unknown_options': True,
+    'help_option_names': []
+})
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
 def migrate_metadata_cmd(ctx, extra_args):
@@ -444,10 +449,10 @@ def migrate_metadata_cmd(ctx, extra_args):
     click.echo(message)
 
 
-@metadata_group.command(name="evaluate", context_settings=dict(
-    ignore_unknown_options=True,
-    help_option_names=[]
-))
+@metadata_group.command(name="evaluate", context_settings={
+    'ignore_unknown_options': True,
+    'help_option_names': []
+})
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
 def evaluate_metadata_cmd(ctx, extra_args):

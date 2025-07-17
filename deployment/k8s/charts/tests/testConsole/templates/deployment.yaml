@@ -32,7 +32,7 @@ spec:
             - "/bin/sh"
             - "-c"
             - |
-               tail -f /dev/null
+               /root/start-console.sh
           volumeMounts:
             - name: {{ $envVarMountName }}
               mountPath: /shared2

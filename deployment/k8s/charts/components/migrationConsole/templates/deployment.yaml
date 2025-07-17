@@ -43,7 +43,7 @@ spec:
               {{- if .Values.developerModeEnabled }}
               source /.venv/bin/activate && pipenv install -e ~/lib/console_link
               {{- end }}
-              tail -f /dev/null
+              /root/start-console.sh
           volumeMounts:
             {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs

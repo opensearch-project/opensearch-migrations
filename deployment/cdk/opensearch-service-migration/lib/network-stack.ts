@@ -31,14 +31,17 @@ import {LoadBalancerTarget} from "aws-cdk-lib/aws-route53-targets";
 import {AcmCertificateImporter} from "./service-stacks/acm-cert-importer";
 import {Stack} from "aws-cdk-lib";
 import {
+    ClusterType,
     createMigrationStringParameter,
     getMigrationStringParameterName,
     isStackInGovCloud,
-    MigrationSSMParameter
+    MigrationSSMParameter,
+    parseClusterDefinition
 } from "./common-utilities";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CdkLogger} from "./cdk-logger";
 import {StreamingSourceType} from "./streaming-source-type";
+import {ClusterYaml} from "./migration-services-yaml";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -49,11 +52,10 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly captureProxyServiceEnabled?: boolean;
     readonly targetClusterProxyServiceEnabled?: boolean;
     readonly sourceClusterDisabled?: boolean;
-    readonly sourceClusterEndpoint?: string;
-    readonly targetClusterEndpoint?: string;
-    readonly targetClusterUsername?: string;
-    readonly targetClusterPasswordSecretArn?: string;
     readonly albAcmCertArn?: string;
+    readonly managedServiceSourceSnapshotEnabled: boolean;
+    readonly sourceClusterDefinition?: Record<string, unknown>;
+    readonly targetClusterDefinition?: Record<string, unknown>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readonly env?: Record<string, any>;
 }
@@ -133,7 +135,9 @@ export class VpcDetails {
             if (uniqueAzPrivateSubnets.subnetIds.length < azCount) {
                 throw new Error(`Not enough AZs (${azCount} unique AZs detected) used for private subnets to meet the ${azCount} AZ requirement. Alternatively subnets can be manually specified with the 'vpcSubnetIds' option and the AZ requirement set with the 'vpcAZCount' option`)
             }
-            const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds.sort().slice(0, azCount)
+            const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds
+                .sort((a, b) => a.localeCompare(b))
+                .slice(0, azCount);
             this.subnetSelection = vpc.selectSubnets({
                 subnetFilters: [
                     SubnetFilter.byIds(desiredSubnetIds)
@@ -147,6 +151,8 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
+    public readonly sourceClusterYaml?: ClusterYaml;
+    public readonly targetClusterYaml?: ClusterYaml;
     public readonly vpcDetails: VpcDetails;
 
     private createVpcEndpoints(vpc: IVpc) {
@@ -190,6 +196,7 @@ export class NetworkStack extends Stack {
         super(scope, id, props);
         let vpc: IVpc;
         const zoneCount = props.vpcAZCount ?? 2
+        const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
@@ -256,7 +263,18 @@ export class NetworkStack extends Stack {
 
         this.vpcDetails = new VpcDetails(vpc, zoneCount, props.vpcSubnetIds);
 
-        if(needAlb) {
+        this.sourceClusterYaml = props.sourceClusterDefinition
+            ? parseClusterDefinition(props.sourceClusterDefinition, ClusterType.SOURCE, this, props.stage, deployId)
+            : undefined
+        this.targetClusterYaml = props.targetClusterDefinition
+            ? parseClusterDefinition(props.targetClusterDefinition, ClusterType.TARGET, this, props.stage, deployId)
+            : undefined
+        if (props.managedServiceSourceSnapshotEnabled && !this.sourceClusterYaml?.auth.sigv4) {
+            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
+                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        }
+
+        if (needAlb) {
             // Create the ALB with the strongest TLS 1.3 security policy
             const alb = new ApplicationLoadBalancer(this, 'ALB', {
                 vpc: vpc,
@@ -335,13 +353,13 @@ export class NetworkStack extends Stack {
         }
 
         // Create Source SSM Parameter
-        if (props.sourceClusterEndpoint) {
-            createMigrationStringParameter(this, props.sourceClusterEndpoint, {
+        if (this.sourceClusterYaml?.endpoint) {
+            createMigrationStringParameter(this, this.sourceClusterYaml.endpoint, {
                 ...props,
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
         } else if (!props.sourceClusterDisabled && !this.albSourceClusterTG) {
-            throw new Error(`Elasticsearch Service or SourceClusterEndpoint must be enabled, unless the source cluster is disabled.`);
+            throw new Error(`The sourceCluster definition must be provided, or disabled with a definition similar to "sourceCluster":{"disabled":true}`);
         }
 
         if (!props.addOnMigrationDeployId) {
@@ -358,24 +376,12 @@ export class NetworkStack extends Stack {
                 parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID
             });
 
-            if (props.targetClusterEndpoint) {
-                const deployId = props.addOnMigrationDeployId ?? props.defaultDeployId;
-                createMigrationStringParameter(this, props.targetClusterEndpoint, {
+            if (this.targetClusterYaml?.endpoint) {
+                createMigrationStringParameter(this, this.targetClusterYaml.endpoint, {
                     stage: props.stage,
                     defaultDeployId: deployId,
                     parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
                 });
-                // This is a somewhat surprising place for this non-network related set of parameters, but it pairs well with
-                // the OS_CLUSTER_ENDPOINT parameter and is helpful to ensure it happens. This probably isn't a long-term place
-                // for it, but is helpful for the time being.
-                if (props.targetClusterUsername && props.targetClusterPasswordSecretArn) {
-                    createMigrationStringParameter(this,
-                        `${props.targetClusterUsername} ${props.targetClusterPasswordSecretArn}`, {
-                        parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-                        defaultDeployId: deployId,
-                        stage: props.stage,
-                    });
-                }
             }
         }
     }

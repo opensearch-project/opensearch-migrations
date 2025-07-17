@@ -1,6 +1,6 @@
 from enum import Enum
 
-from ..common_utils import wait_for_service_status
+from ..common_utils import check_ma_system_health, wait_for_service_status
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
 
@@ -62,6 +62,7 @@ class MATestBase:
         return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
 
     def test_before(self):
+        check_ma_system_health()
         pass
 
     def snapshot_before(self):
