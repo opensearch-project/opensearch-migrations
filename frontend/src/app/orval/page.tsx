@@ -8,23 +8,19 @@ import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Flashbar from '@cloudscape-design/components/flashbar';
 import Box from '@cloudscape-design/components/box';
-import { healthSystemHealthGet } from '@/lib/client';
-// import CopyToClipboard from '@/components/copy-to-clipboard';
-import { createClient } from '@/lib/client/client';
-
-const myClient = createClient({
-  baseUrl: 'http://127.0.0.1:8000',
-});
+import { healthSystemHealthGet } from '@/lib/orval'
 
 export default function Page() {
   const [isReady, setIsReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    setTimeout(async () => {
       try {
-        const res = await healthSystemHealthGet({client: myClient })
-        if (res.data?.status === 'ok') {
+        const res = await healthSystemHealthGet({
+          baseURL: 'http://127.0.0.1:8000',
+        })
+        if (res.data.status === 'ok') {
           setIsReady(true);
           setErrorMessage(null);
         } else {
@@ -39,9 +35,7 @@ export default function Page() {
         setErrorMessage(err.message);
         console.log("Error Response: \n " + JSON.stringify(err, null, 3));
       }
-    }, 10000);
-
-    return () => clearInterval(interval);
+    });
   }, []);
 
   return (

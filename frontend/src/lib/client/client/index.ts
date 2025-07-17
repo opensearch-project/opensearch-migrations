@@ -16,7 +16,6 @@ export type {
   OptionsLegacyParser,
   RequestOptions,
   RequestResult,
-  ResponseStyle,
   TDataShape,
 } from './types';
-export { createConfig, mergeHeaders } from './utils';
+export { createConfig } from './utils';

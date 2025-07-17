@@ -21,7 +21,7 @@ export default function Page() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    setTimeout(async () => {
       try {
         const res = await healthSystemHealthGet({client: myClient })
         if (res.data?.status === 'ok') {
@@ -39,9 +39,7 @@ export default function Page() {
         setErrorMessage(err.message);
         console.log("Error Response: \n " + JSON.stringify(err, null, 3));
       }
-    }, 10000);
-
-    return () => clearInterval(interval);
+    });
   }, []);
 
   return (

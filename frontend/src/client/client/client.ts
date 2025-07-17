@@ -1,4 +1,4 @@
-import type { Client, Config, RequestOptions } from './types';
+import type { Client, Config, RequestOptions } from "./types";
 import {
   buildUrl,
   createConfig,
@@ -7,9 +7,9 @@ import {
   mergeConfigs,
   mergeHeaders,
   setAuthParams,
-} from './utils';
+} from "./utils";
 
-type ReqInit = Omit<RequestInit, 'body' | 'headers'> & {
+type ReqInit = Omit<RequestInit, "body" | "headers"> & {
   body?: any;
   headers: ReturnType<typeof mergeHeaders>;
 };
@@ -27,7 +27,7 @@ export const createClient = (config: Config = {}): Client => {
   const interceptors = createInterceptors<Response, unknown, RequestOptions>();
 
   // @ts-expect-error
-  const request: Client['request'] = async (options) => {
+  const request: Client["request"] = async (options) => {
     const opts = {
       ..._config,
       ...options,
@@ -51,8 +51,8 @@ export const createClient = (config: Config = {}): Client => {
     }
 
     // remove Content-Type header if body is empty to avoid sending invalid requests
-    if (opts.body === undefined || opts.body === '') {
-      opts.headers.delete('Content-Type');
+    if (opts.body === undefined || opts.body === "") {
+      opts.headers.delete("Content-Type");
     }
 
     for (const fn of interceptors.request._fns) {
@@ -67,7 +67,7 @@ export const createClient = (config: Config = {}): Client => {
     const _fetch = opts.fetch!;
     let response = await _fetch(url, {
       ...opts,
-      body: opts.body as ReqInit['body'],
+      body: opts.body as ReqInit["body"],
     });
 
     for (const fn of interceptors.response._fns) {
@@ -83,7 +83,7 @@ export const createClient = (config: Config = {}): Client => {
     if (response.ok) {
       if (
         response.status === 204 ||
-        response.headers.get('Content-Length') === '0'
+        response.headers.get("Content-Length") === "0"
       ) {
         return {
           data: {},
@@ -92,27 +92,27 @@ export const createClient = (config: Config = {}): Client => {
       }
 
       const parseAs =
-        (opts.parseAs === 'auto'
-          ? getParseAs(response.headers.get('Content-Type'))
-          : opts.parseAs) ?? 'json';
+        (opts.parseAs === "auto"
+          ? getParseAs(response.headers.get("Content-Type"))
+          : opts.parseAs) ?? "json";
 
       let data: any;
       switch (parseAs) {
-        case 'arrayBuffer':
-        case 'blob':
-        case 'formData':
-        case 'json':
-        case 'text':
+        case "arrayBuffer":
+        case "blob":
+        case "formData":
+        case "json":
+        case "text":
           data = await response[parseAs]();
           break;
-        case 'stream':
+        case "stream":
           return {
             data: response.body,
             ...result,
           };
       }
 
-      if (parseAs === 'json') {
+      if (parseAs === "json") {
         if (opts.responseValidator) {
           await opts.responseValidator(data);
         }
@@ -160,18 +160,18 @@ export const createClient = (config: Config = {}): Client => {
 
   return {
     buildUrl,
-    connect: (options) => request({ ...options, method: 'CONNECT' }),
-    delete: (options) => request({ ...options, method: 'DELETE' }),
-    get: (options) => request({ ...options, method: 'GET' }),
+    connect: (options) => request({ ...options, method: "CONNECT" }),
+    delete: (options) => request({ ...options, method: "DELETE" }),
+    get: (options) => request({ ...options, method: "GET" }),
     getConfig,
-    head: (options) => request({ ...options, method: 'HEAD' }),
+    head: (options) => request({ ...options, method: "HEAD" }),
     interceptors,
-    options: (options) => request({ ...options, method: 'OPTIONS' }),
-    patch: (options) => request({ ...options, method: 'PATCH' }),
-    post: (options) => request({ ...options, method: 'POST' }),
-    put: (options) => request({ ...options, method: 'PUT' }),
+    options: (options) => request({ ...options, method: "OPTIONS" }),
+    patch: (options) => request({ ...options, method: "PATCH" }),
+    post: (options) => request({ ...options, method: "POST" }),
+    put: (options) => request({ ...options, method: "PUT" }),
     request,
     setConfig,
-    trace: (options) => request({ ...options, method: 'TRACE' }),
+    trace: (options) => request({ ...options, method: "TRACE" }),
   };
 };

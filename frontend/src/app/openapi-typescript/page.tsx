@@ -8,22 +8,22 @@ import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Flashbar from '@cloudscape-design/components/flashbar';
 import Box from '@cloudscape-design/components/box';
-import { healthSystemHealthGet } from '@/lib/client';
 // import CopyToClipboard from '@/components/copy-to-clipboard';
-import { createClient } from '@/lib/client/client';
+import type { paths } from '@/lib/ot';
+import createClient from "openapi-fetch";
 
-const myClient = createClient({
-  baseUrl: 'http://127.0.0.1:8000',
-});
+const client = createClient<paths>({ baseUrl: "http://127.0.0.1:8000" });
+
+
 
 export default function Page() {
   const [isReady, setIsReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    setTimeout(async () => {
       try {
-        const res = await healthSystemHealthGet({client: myClient })
+        const res = await client.GET("/system/health");
         if (res.data?.status === 'ok') {
           setIsReady(true);
           setErrorMessage(null);
@@ -39,10 +39,8 @@ export default function Page() {
         setErrorMessage(err.message);
         console.log("Error Response: \n " + JSON.stringify(err, null, 3));
       }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, []);
+    });
+  });
 
   return (
     <SpaceBetween size="m">
