@@ -21,7 +21,6 @@ public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     public IndexMetadata fromRepo(String snapshotName, String indexName) {
         try {
             SnapshotRepoES17 es17Repo = (SnapshotRepoES17) getRepoDataProvider();
-            // ES 1.7 stores it as snapshot-{snapshotName} under the index dir
             byte[] data = es17Repo.getIndexMetadataFile(indexName, snapshotName);
             JsonNode root = objectMapper.readTree(data);
             return fromJsonNode(root.get(indexName), indexName, indexName);
