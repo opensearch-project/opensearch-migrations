@@ -3,8 +3,8 @@ plugins {
     id 'de.undercouch.download' version '5.5.0'
 }
 
-def fastApiPort = 8000
-def openapiUrl = "http://127.0.0.1:${fastApiPort}/openapi.json"
+def apiPort = 8099 // Not a commonly used
+def openapiUrl = "http://127.0.0.1:${apiPort}/openapi.json"
 def serverPidFile = "${buildDir}/fastapi.pid"
 def openapiOutFile = "${buildDir}/openapi.json"
 
@@ -13,11 +13,15 @@ def dependencyFiles = files(
     "Pipfile",
     "Pipfile.lock"
 ).filter { it.exists() }
+def projectDirRef = projectDir
 
-tasks.register('startFastApiServer') {
+tasks.register('startApiServer') {
     doLast {
-        def proc = "pipenv run uvicorn main:app --port ${fastApiPort}".execute()
-        logger.info("uvicorn server started, pid: ${proc.pid()}")
+        def command = "pipenv run gunicorn console_link.api.main:app -k uvicorn.workers.UvicornWorker -w 1 -b 127.0.0.1:${apiPort} --error-logfile -"
+        def proc = command.execute(null, projectDirRef)
+        sleep 2000
+
+        logger.lifecycle("Server started with ${command}, pid: ${proc.pid()}")
         new File(serverPidFile).text = "${proc.pid()}"
     }
 }
@@ -25,13 +29,14 @@ tasks.register('startFastApiServer') {
 tasks.register('downloadOpenApiSpec', de.undercouch.gradle.tasks.download.Download) {
     src openapiUrl
     dest openapiOutFile
+    dependsOn 'startApiServer'
 
     inputs.files(pythonSources)
     inputs.files(dependencyFiles)
     outputs.file(openapiOutFile)
 }
 
-tasks.register('stopFastApiServer') {
+tasks.register('stopApiServer') {
     doLast {
         def pidFile = new File(serverPidFile)
         if (pidFile.exists()) {
@@ -41,11 +46,12 @@ tasks.register('stopFastApiServer') {
             pidFile.delete()
         }
     }
+    inputs.files(serverPidFile)
 }
 
 tasks.register('fetchOpenApiSpec') {
     dependsOn 'downloadOpenApiSpec'
-    finalizedBy 'stopFastApiServer'
+    finalizedBy 'stopApiServer'
     doLast {
         logger.lifecycle("OpenAPI spec downloaded to ${openapiOutFile}")
     }

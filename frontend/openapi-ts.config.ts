@@ -1,6 +1,6 @@
-import { createClient } from '@hey-api/openapi-ts';
+import { defineConfig } from '@hey-api/openapi-ts';
 
-createClient({
+export default defineConfig({
   input: './build/openapi.json',
   output: {
     path: 'src/client',
