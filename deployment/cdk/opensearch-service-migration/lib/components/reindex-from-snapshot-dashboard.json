@@ -10,6 +10,17 @@
             "visible": false
         },
         {
+            "type": "property",
+            "property": "DomainName",
+            "inputType": "select",
+            "id": "TC_DOMAIN_NAME",
+            "label": "Target Cluster Domain Name",
+            "search": "{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\"",
+            "populateFrom": "DomainName",
+            "defaultValue": "placeholder-name",
+            "visible": true
+        },
+        {
             "type": "pattern",
             "pattern": "MA_STAGE",
             "inputType": "input",
