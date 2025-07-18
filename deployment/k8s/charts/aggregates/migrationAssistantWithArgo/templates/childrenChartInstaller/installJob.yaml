@@ -31,7 +31,7 @@ spec:
             - -c
             - |
               #!/bin/sh
-              set -e -x
+              set -e
 
       {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
                   (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}

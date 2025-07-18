@@ -21,10 +21,20 @@ metadata:
 data:
   trim.lua: |
     function trim_log(tag, timestamp, record)
-        local log = record["log"]
-        if log then
-            log = string.gsub(log, "(\r?\n)$", "")
-            record["log"] = log
+        if record["log_processed"] then
+            if record["log_processed"]["msg"] then
+                record["orig_log"] = record["log"]
+                record["log"] = record["log_processed"]["msg"]
+            end
+            if record["log_processed"]["level"] then
+                record["level"] = record["log_processed"]["level"]
+            end
+        elseif record["log"] then
+            if record["msg"] then
+                record["orig_log"] = record["log"]
+                record["log"] = record["msg"]
+            end
+            record["log"] = string.gsub(record["log"], "(\r?\n)$", "")
         end
         return 1, timestamp, record
     end
