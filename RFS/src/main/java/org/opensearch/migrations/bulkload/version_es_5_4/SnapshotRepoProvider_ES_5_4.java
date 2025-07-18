@@ -25,29 +25,23 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
         return repoData;
     }
 
-    public List<SnapshotRepoData_ES_5_4.Index> getIndices() {
-        return getRepoData().getIndices().entrySet()
-            .stream()
-            .map(entry -> SnapshotRepoData_ES_5_4.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-            .collect(Collectors.toList());
+    @Override
+    public List<SnapshotRepo.Snapshot> getSnapshots() {
+        return new ArrayList<>(getRepoData().getSnapshots());
     }
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
-
         var targetSnapshot = getRepoData().getSnapshots().stream()
                 .filter(snapshot -> snapshotName.equals(snapshot.getName()))
                 .findFirst()
                 .orElse(null);
-
         if (targetSnapshot == null) {
             throw new IllegalArgumentException("Snapshot with name [" + snapshotName + "] not found in repository");
         }
-
         getRepoData().getIndices().forEach((indexName, rawIndex) -> {
             var snapshotNames = rawIndex.getSnapshots();
-
             if (snapshotNames == null || snapshotNames.isEmpty()) {
                 log.atWarn()
                     .setMessage("Index [{}] skipped — no snapshots listed")
@@ -69,13 +63,7 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
                 matchedIndices.add(SnapshotRepoData_ES_5_4.Index.fromRawIndex(indexName, rawIndex));
             }
         });
-
         return matchedIndices;
-    }
-
-    @Override
-    public List<SnapshotRepo.Snapshot> getSnapshots() {
-        return new ArrayList<>(getRepoData().getSnapshots());
     }
 
     @Override
@@ -96,5 +84,12 @@ public class SnapshotRepoProvider_ES_5_4 implements SnapshotRepo.Provider {
     @Override
     public SourceRepo getRepo() {
         return repo;
+    }
+
+    public List<SnapshotRepoData_ES_5_4.Index> getIndices() {
+        return getRepoData().getIndices().entrySet()
+            .stream()
+            .map(entry -> SnapshotRepoData_ES_5_4.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
     }
 }

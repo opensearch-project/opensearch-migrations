@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.version_es_2_4;
+package org.opensearch.migrations.bulkload.version_es_1_7;
 
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
@@ -10,13 +10,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import static org.opensearch.migrations.bulkload.version_es_2_4.ElasticsearchConstants_ES_2_4.FIELD_MAPPINGS;
-import static org.opensearch.migrations.bulkload.version_es_2_4.ElasticsearchConstants_ES_2_4.FIELD_SETTINGS;
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.FIELD_MAPPINGS;
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.FIELD_SETTINGS;
 
 @NoArgsConstructor(force = true) // For Jackson
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE)
 @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
-public class IndexMetadataData_ES_2_4 implements IndexMetadata {
+public class IndexMetadataData_ES_1_7 implements IndexMetadata {
     @Getter
     @JsonProperty("body")
     private final ObjectNode rawJson;
@@ -27,10 +27,10 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
     @Override
     public JsonNode getAliases() {
-        return rawJson.get("aliases");        
+        return rawJson.get("aliases"); 
     }
 
-    public IndexMetadataData_ES_2_4(ObjectNode rawJson, String indexName) {
+    public IndexMetadataData_ES_1_7(ObjectNode rawJson, String indexName) {
         this.rawJson = rawJson;
         this.indexName = indexName;
     }
@@ -42,7 +42,11 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
     @Override
     public JsonNode getMappings() {
-        return rawJson.get(FIELD_MAPPINGS);
+        JsonNode mappingsNode = rawJson.get(FIELD_MAPPINGS);
+        if (mappingsNode != null && mappingsNode.isArray() && mappingsNode.size() > 0) {
+            return mappingsNode.get(0);
+        }
+        return mappingsNode;
     }
 
     @Override
@@ -58,12 +62,12 @@ public class IndexMetadataData_ES_2_4 implements IndexMetadata {
 
     @Override
     public IndexMetadata deepCopy() {
-        return new IndexMetadataData_ES_2_4(rawJson.deepCopy(), indexName);
+        return new IndexMetadataData_ES_1_7(rawJson.deepCopy(), indexName);
     }
 
     @Override
     public String getId() {
-        // In ES 2.4, the index ID is the same as the index name
+        // In ES 1.7, the index ID is the same as the index name
         return getName();
     }
 }

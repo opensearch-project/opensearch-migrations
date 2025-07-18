@@ -1,6 +1,8 @@
-package org.opensearch.migrations.bulkload.version_es_2_4;
+package org.opensearch.migrations.bulkload.version_es_1_7;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -9,20 +11,48 @@ import java.util.List;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
-public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
+public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     private static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
-    private SnapshotRepoData_ES_2_4 repoData;
+    private SnapshotRepoData_ES_1_7 repoData;
 
-    public SnapshotRepoProvider_ES_2_4(SourceRepo repo) {
+    public SnapshotRepoProvider_ES_1_7(SourceRepo repo) {
         this.repo = repo;
     }
 
-    protected SnapshotRepoData_ES_2_4 getRepoData() {
+    protected SnapshotRepoData_ES_1_7 getRepoData() {
         if (repoData == null) {
-            repoData = SnapshotRepoData_ES_2_4.fromRepo(repo);
+            repoData = SnapshotRepoData_ES_1_7.fromRepo(repo);
         }
         return repoData;
+    }
+
+    public List<String> listIndices() {
+        List<String> indexNames = new ArrayList<>();
+        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
+        File[] children = indicesRoot.toFile().listFiles();
+        if (children != null) {
+            for (File f : children) {
+                if (f.isDirectory()) {
+                    indexNames.add(f.getName());
+                }
+            }
+        }
+        return indexNames;
+    }
+
+    @Override
+    public byte[] getIndexMetadataFile(String indexName, String snapshotName) {
+        Path metaFile = repo.getRepoRootDir()
+                .resolve(INDICES_DIR_NAME)
+                .resolve(indexName)
+                .resolve("snapshot-" + snapshotName);
+
+        try {
+            return Files.readAllBytes(metaFile);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read snapshot file for index: " + indexName, e);
+        }
     }
 
     @Override
@@ -36,6 +66,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        // Very similar logic as SnapshotRepoProvider_ES_2_4 but different file name
         List<SnapshotRepo.Index> result = new ArrayList<>();
         Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
         File[] indexDirs = indicesRoot.toFile().listFiles();
@@ -47,7 +78,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
                 continue;
             }
 
-            if (containsMetaFile(indexDir, snapshotName)) {
+            if (containsSnapshotFile(indexDir, snapshotName)) {
                 result.add(new SimpleIndex(indexDir.getName(), snapshotName));
             }
         }
@@ -55,13 +86,34 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     }
 
     @Override
-    public String getSnapshotId(String snapshotName) {
-        for (String name : getRepoData().getSnapshots()) {
-            if (name.equals(snapshotName)) {
-                return name;
+    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
+        return repo.getRepoRootDir()
+                .resolve(INDICES_DIR_NAME)
+                .resolve(indexId)
+                .resolve(String.valueOf(shardId))
+                .resolve("snapshot-" + snapshotId);
+    }
+
+    public Path getSnapshotMetadataFile(String snapshotName) {
+        return repo.getRepoRootDir().resolve("metadata-" + snapshotName);
+    }
+
+    private boolean containsSnapshotFile(File dir, String snapshotName) {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return false;
+        }
+        for (File f : files) {
+            if (f.getName().equals("snapshot-" + snapshotName)) {
+                return true;
             }
         }
-        return null;
+        return false;
+    }
+
+    @Override
+    public String getSnapshotId(String snapshotName) {
+        return snapshotName;
     }
 
     @Override
@@ -74,19 +126,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
         return repo;
     }
 
-    private boolean containsMetaFile(File dir, String snapshotName) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return false;
-        }
-        for (File f : files) {
-            if (f.getName().equals("meta-" + snapshotName + ".dat")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
+    // Simple classes for snapshot and index listing
     public static class SimpleSnapshot implements SnapshotRepo.Snapshot {
         private final String name;
 
@@ -131,7 +171,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
         @Override
         public String toString() {
-            return name;
+            return getName();
         }
     }
 }

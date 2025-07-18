@@ -35,5 +35,4 @@ public class IndexMetadataFactory_ES_7_10 implements IndexMetadata.Factory {
     public SnapshotRepo.Provider getRepoDataProvider() {
         return repoDataProvider;
     }
-
 }

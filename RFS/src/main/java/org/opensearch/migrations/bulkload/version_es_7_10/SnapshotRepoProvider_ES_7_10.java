@@ -22,11 +22,9 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         return repoData;
     }
 
-    public List<SnapshotRepo.Index> getIndices() {
-        return getRepoData().getIndices().entrySet()
-            .stream()
-            .map(entry -> SnapshotRepoData_ES_7_10.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-            .collect(Collectors.toList());
+    @Override
+    public List<SnapshotRepo.Snapshot> getSnapshots() {
+        return new ArrayList<>(getRepoData().getSnapshots());
     }
 
     @Override
@@ -48,11 +46,6 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         return matchedIndices;
     }
 
-    @Override
-    public List<SnapshotRepo.Snapshot> getSnapshots() {
-        return new ArrayList<>(getRepoData().getSnapshots());
-    }
-
     public String getSnapshotId(String snapshotName) {
         for (SnapshotRepoData_ES_7_10.Snapshot snapshot : getRepoData().getSnapshots()) {
             if (snapshot.getName().equals(snapshotName)) {
@@ -70,6 +63,13 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
     @Override
     public SourceRepo getRepo() {
         return repo;
+    }
+
+    public List<SnapshotRepo.Index> getIndices() {
+        return getRepoData().getIndices().entrySet()
+            .stream()
+            .map(entry -> SnapshotRepoData_ES_7_10.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
     }
 
     public String getIndexMetadataId(String snapshotName, String indexName) {

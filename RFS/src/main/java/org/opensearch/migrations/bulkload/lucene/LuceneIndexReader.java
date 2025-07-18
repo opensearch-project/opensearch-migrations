@@ -89,7 +89,7 @@ public interface LuceneIndexReader {
         private final ClusterSnapshotReader snapshotReader;
 
         public LuceneIndexReader getReader(Path path) {
-            if (VersionMatchers.isES_2_X.test(snapshotReader.getVersion())) {
+            if (VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(snapshotReader.getVersion())) {
                 log.atInfo().setMessage("Creating IndexReader5").log();
                 return new IndexReader5(
                     path
