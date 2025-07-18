@@ -23,7 +23,7 @@ class DeploymentStatus(NamedTuple):
     terminating: int = 0
 
     def __str__(self):
-        return f"Running={self.running}\nPending={self.pending}\nDesired={self.desired}\nTerminating={self.terminating}"
+        return f"Running={self.running} Pending={self.pending} Desired={self.desired} Terminating={self.terminating}"
 
 
 class AWSAPIError(Exception):
