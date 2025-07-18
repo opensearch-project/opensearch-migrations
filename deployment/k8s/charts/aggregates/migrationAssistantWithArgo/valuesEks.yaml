@@ -10,6 +10,7 @@ defaultBucketConfiguration:
   useLocalStack: false
   deleteOnUninstall: true
   emptyBeforeDelete: true
+  endpoint: ""
 
 # Useful for updating images while developing
 #images:
