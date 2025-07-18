@@ -60,15 +60,30 @@ export type WorkflowTask<
 type TaskGetterNames<T> = { [K in keyof T]: T[K] extends () => WorkflowTask<any, any> ? K : never; }[keyof T];
 type TaskGetters<T> = Pick<T, TaskGetterNames<T>>;
 
-export abstract class Steps<
-    STEPS extends Record<string, WorkflowTask<any, any>>
+// Base class for defining workflow steps with type constraints
+export abstract class StepsTemplate<
+    IN extends InputParametersRecord = any,
+    OUT extends OutputParametersRecord = any
 > {
-    public abstract readonly steps: STEPS;
+    public abstract readonly inputs: IN;
+    public abstract readonly outputs: OUT;
+    public abstract readonly steps: Record<string, WorkflowTask<any, any>>;
 }
 
-export abstract class StepsTemplate<S> {
-    public abstract readonly steps: S;
+// More specific base class that enforces the relationship between inputs/outputs and steps
+export abstract class TypedStepsTemplate<
+    IN extends InputParametersRecord,
+    OUT extends OutputParametersRecord
+> extends StepsTemplate<IN, OUT> {
+    public abstract readonly inputs: IN;
+    public abstract readonly outputs: OUT;
+    // Steps can reference this.inputs and previous steps
+    public abstract readonly steps: Record<string, WorkflowTask<any, any>>;
 }
+
+// Helper types for extracting types from steps templates
+export type ExtractInputs<T> = T extends StepsTemplate<infer IN, any> ? IN : never;
+export type ExtractOutputs<T> = T extends StepsTemplate<any, infer OUT> ? OUT : never;
 
 // export function defineDagTemplate<>() {
 //
@@ -80,28 +95,7 @@ export abstract class StepsTemplate<S> {
 //     }
 // }
 
-// More flexible approach that works with your existing inline structure
-export function callTemplate<
-    TClass extends Record<string, any>,
-    TKey extends keyof TClass
->(
-    classConstructor: TClass,
-    key: TKey,
-    params: any
-): WorkflowTask<any, any>;
-
-// Overload with explicit type parameter for better type safety when needed
-export function callTemplate<
-    IN extends InputParametersRecord,
-    TClass extends Record<string, any>,
-    TKey extends keyof TClass
->(
-    classConstructor: TClass,
-    key: TKey,
-    params: z.infer<ReturnType<typeof paramsToCallerSchema<IN>>>
-): WorkflowTask<IN, any>;
-
-// Implementation
+// Simplified approach that focuses on practical type safety
 export function callTemplate<
     TClass extends Record<string, any>,
     TKey extends keyof TClass
@@ -113,6 +107,19 @@ export function callTemplate<
     const kvp = getKeyAndValueClass(classConstructor, key);
     return {
         templateRef: { key: key as string, value: kvp.value },
+        arguments: { parameters: params }
+    };
+}
+
+// Type-safe version that requires explicit input type specification
+export function callTemplateWithInputs<
+    IN extends InputParametersRecord
+>(
+    templateRef: { key: string, value: { inputs: IN } },
+    params: z.infer<ReturnType<typeof paramsToCallerSchema<IN>>>
+): WorkflowTask<IN, any> {
+    return {
+        templateRef: { key: templateRef.key, value: templateRef.value as any },
         arguments: { parameters: params }
     };
 }

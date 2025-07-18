@@ -3,7 +3,7 @@ import {defineParam, defineRequiredParam, InputParametersRecord} from '@/schemas
 import {
     OuterWorkflowTemplateScope,
     WorkflowTask,
-    ContainerTemplateDef, callTemplate, templateRef, Steps, StepsTemplate
+    ContainerTemplateDef, callTemplate, templateRef, StepsTemplate, TypedStepsTemplate, callTemplateWithInputs
 } from '@/schemas/workflowSchemas'
 import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
@@ -38,8 +38,8 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
     // }
 
     static get main() {
-        return new (class  {
-            inputs = {
+        return new (class extends TypedStepsTemplate<any, any> {
+            readonly inputs = {
                 sourceMigrationConfigs: defineRequiredParam({
                     type: SNAPSHOT_MIGRATION_CONFIG,
                     description: "List of server configurations to direct migrated traffic toward",
@@ -63,26 +63,24 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
                     description: "OCI image locations and pull policies for required images"
                 })
             };
-            steps =
-                //sameMatchingItems<WorkflowTask<any,any>>( 
-                    (() => {
-                    const parentInputs = this.inputs;
-                    return new (class {
-                        init = callTemplate(TargetLatchHelpers, "init", {});
-                        mainThing = callTemplate(FullMigration, "singleSourceMigration", {
-                            // sourceConfig: parentInputs.sourceMigrationConfigs,
-                            targetCluster: parentInputs.targets,
-                            // migrationName and dryRun are optional since they have defaults
-                            migrationName: "custom-migration-name"
-                        });
-                        cleanup: WorkflowTask<any, any> = {
-                            templateRef: getKeyAndValue(TargetLatchHelpers, "cleanup")
-                        };
-                    })();
-                })()
-                //, getAlwaysMatchPredicate())
-            ;
-            outputs = {
+            
+            readonly steps = {
+                init: callTemplate(TargetLatchHelpers, "init", {}),
+                mainThing: callTemplateWithInputs(
+                    templateRef(FullMigration, "singleSourceMigration"),
+                    {
+                        // sourceConfig: this.inputs.sourceMigrationConfigs, // Test: commenting this out should cause compile error
+                        // targetCluster: this.inputs.targets,
+                        // migrationName and dryRun are optional since they have defaults
+                        dummy: "custom-migration-name"
+                    }
+                ),
+                cleanup: {
+                    templateRef: getKeyAndValue(TargetLatchHelpers, "cleanup")
+                } as WorkflowTask<any, any>
+            };
+            
+            readonly outputs = {
                 foo: this.inputs.sourceMigrationConfigs,
                 bar: this.steps.init.templateRef.value.outputs.abc
             };
@@ -92,21 +90,17 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
     static get singleSourceMigration() {
         return new (class {
             inputs = {
-                sourceConfig: defineRequiredParam({
-                    type: SNAPSHOT_MIGRATION_CONFIG,
-                    description: "Source migration configuration"
-                }),
-                targetCluster: defineRequiredParam({
-                    type: CLUSTER_CONFIG,
-                    description: "Target cluster configuration"
-                }),
-                migrationName: defineParam({
+                // sourceConfig: defineRequiredParam({
+                //     type: SNAPSHOT_MIGRATION_CONFIG,
+                //     description: "Source migration configuration"
+                // }),
+                // targetCluster: defineRequiredParam({
+                //     type: CLUSTER_CONFIG,
+                //     description: "Target cluster configuration"
+                // }),
+                dummy: defineParam({
                     defaultValue: "default-migration",
                     description: "Name for this migration"
-                }),
-                dryRun: defineParam({
-                    defaultValue: false,
-                    description: "Whether to perform a dry run"
                 })
             };
             outputs = {
