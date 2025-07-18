@@ -47,6 +47,9 @@ const nextConfig: NextConfig = {
     });
     return config;
   },
+  eslint: {
+    dirs: ["src/app", "src/component", "src/context", "src/hooks", "src/lib","src/types", "src/utils"]
+  },
   trailingSlash: true,
   output: 'export'
 };

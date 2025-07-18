@@ -9,7 +9,8 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "openapi-ts": "openapi-ts"
   },
   "dependencies": {
     "@cloudscape-design/board-components": "^3.0.99",
@@ -28,6 +29,8 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@hey-api/client-next": "^0.5.1",
+    "@hey-api/openapi-ts": "^0.78.3",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/jest": "^29.5.14",
@@ -42,6 +45,6 @@
     "jest-environment-jsdom": "^29.7.0",
     "prettier": "^3.5.3",
     "ts-jest": "^29.3.2",
-    "typescript": "^5"
+    "typescript": "^5.8.3"
   }
 }

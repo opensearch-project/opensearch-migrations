@@ -61,8 +61,11 @@ include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
 include 'frontend'
 include 'buildImages'
+includeBuild('TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link')
+
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())
+
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
     develocity {
