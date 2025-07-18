@@ -1,9 +1,9 @@
 import {
-    InputParamDef,
-    InputParametersRecord,
+    OuterWorkflowTemplate,
     TemplateDef
 } from "@/schemas/workflowSchemas";
 import {ZodTypeAny} from "zod";
+import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 
 function formatParameterDefinition<P extends InputParamDef<ZodTypeAny, boolean>>(inputs : P) {
     return {
@@ -25,16 +25,9 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
 }
 
 export function renderWorkflowTemplate<
-    T extends Record<string, TemplateDef>,
+    T extends Record<string, TemplateDef<any, any>>,
     IPR extends InputParametersRecord
->
-(wf: {
-    name: string;
-    serviceAccountName: string;
-    workflowParams?: IPR,
-    templates: T;
- }
-) {
+>(wf: OuterWorkflowTemplate<T, IPR>) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",
@@ -55,4 +48,3 @@ export function renderWorkflowTemplate<
         },
     };
 }
-

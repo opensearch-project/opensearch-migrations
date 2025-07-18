@@ -7,9 +7,9 @@ import {FullMigration} from "@/workflowTemplates/fullMigration";
 // console.log("OUTPUT: ");
 // console.log(JSON.stringify(finalConfig, null, 2));
 //
-// const FullMigrationSignature = paramsToCallerSchema(fullMigrationWorkflowTemplate.templates.main.inputs);
+`// const FullMigrationSignature = paramsToCallerSchema(fullMigrationWorkflowTemplate.templates.main.inputs);
 // type FullMigrationMainInputs = z.infer<typeof FullMigrationSignature>;
-//
+//`
 // const t : FullMigrationMainInputs = {
 //     targets: [],
 //     sourceMigrationConfigs: {

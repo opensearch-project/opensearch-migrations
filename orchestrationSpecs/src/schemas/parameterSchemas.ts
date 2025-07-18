@@ -30,7 +30,7 @@ export function defineRequiredParam<T>(opts: {
 
 export type OutputParamDef<T> = {
     type: ZodType<T>;
-    description: string | null;
+    description?: string | null;
 };
 
 export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
