@@ -47,7 +47,7 @@ public class TransformerMapper {
     }
 
     private Transformer mapStrictSourceVersion(int awarenessAttributes, MetadataTransformerParams metadataTransformerParams) {
-        if (VersionMatchers.isES_2_X.test(sourceVersion)) {
+        if (VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(sourceVersion)) {
             return new Transformer_ES_2_4_to_OS_2_19(awarenessAttributes, metadataTransformerParams);
         }
         if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
