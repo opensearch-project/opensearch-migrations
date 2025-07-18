@@ -33,11 +33,11 @@
       fi
       if echo "$output" | grep -q 'Not Found\|NoSuchBucket'; then
         echo "Bucket '$bucket' does not exist."
-        return 1
+        return 2
       fi
       if echo "$output" | grep -q 'AccessDenied'; then
         echo "Bucket exists but access denied."
-        return 1
+        return 3
       fi
 
       echo "Attempt $attempt/$max_retries failed:"
