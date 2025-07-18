@@ -274,14 +274,21 @@ charts:
       config:
         customParsers: |
           [PARSER]
-              Name               argo_logfmt
+              Name               logfmt_parser
               Format             logfmt
+          
+          [PARSER]
+              Name               java_log_parser
+              Format             regex
+              Regex              ^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?<level>[A-Z]+)\s+(?<source>[\w\d]+:\d+) - (?<msg>.*)$
+              Time_Key           time
+              Time_Format        %Y-%m-%d %H:%M:%S
+    
 
         inputs: |
           [INPUT]
               Name               tail
               Tag                kube.*
-              Exclude_Path       /var/log/containers/fluent-bit*
               Path               /var/log/containers/*.log
               multiline.parser   docker, cri
               Refresh_Interval   5
@@ -308,19 +315,26 @@ charts:
               Emitter_Name       re_emitted
           
           [FILTER]
+              Name               parser
+              Match              fluentbit-*
+              Key_Name           log
+              Parser             logfmt_parser
+              Preserve_Key       On
+              Reserve_Data       On
+      
+          [FILTER]
+              Name               parser
+              Match              fluentbit-*-rfs-*
+              Key_Name           log
+              Parser             java_log_parser
+              Preserve_Key       On
+              Reserve_Data       On
+          
+          [FILTER]
               Name               lua
               Match              fluentbit-*
               script             /fluentbit/scripts/trim.lua
               call               trim_log
-          
-          # Lift fields from argo logfmt to top level
-          [FILTER]
-              Name               parser
-              Match              fluentbit-argo-*
-              Key_Name           log
-              Parser             argo_logfmt
-              Preserve_Key       On
-              Reserve_Data       On
     
           [FILTER]
               Name               nest
@@ -348,6 +362,7 @@ charts:
               Remove             pod-template-hash
               Remove             workflows.argoproj.io/completed
               Remove_regex       ^app\.kubernetes\.io
+              Remove_regex       ^batch\.kubernetes\.io
               Move_to_start      log
 
         outputs: |
