@@ -1,7 +1,7 @@
 import {z, ZodType, ZodTypeAny} from 'zod';
 
 export type InputParamDef<T, REQ extends boolean> = {
-    schema: ZodType<T>;
+    type: ZodType<T>;
     defaultValue?: T;
     description?: string;
 } & (REQ extends false ? { _hasDefault: true } : {});
@@ -11,7 +11,7 @@ export function defineParam<T>(opts: {
     description?: string;
 }): InputParamDef<T, false> {
     return {
-        schema: z.custom<T>(),
+        type: z.custom<T>(),
         defaultValue: opts.defaultValue,
         description: opts.description,
         _hasDefault: true
@@ -23,7 +23,7 @@ export function defineRequiredParam<T>(opts: {
     description?: string;
 }): InputParamDef<T, true> {
     return {
-        schema: opts.type,
+        type: opts.type,
         description: opts.description,
     };
 }
@@ -38,10 +38,10 @@ export type OutputParametersRecord = Record<string, OutputParamDef<any>>;
 
 export function paramsToCallerSchema<T extends InputParametersRecord>(
     defs: T
-): z.ZodObject<{ [K in keyof T]: T[K] extends { _hasDefault: true } ? z.ZodOptional<T[K]['schema']> : T[K]['schema']; }> {
+): z.ZodObject<{ [K in keyof T]: T[K] extends { _hasDefault: true } ? z.ZodOptional<T[K]['type']> : T[K]['type']; }> {
     const shape: Record<string, ZodTypeAny> = {};
     for (const [key, param] of Object.entries(defs)) {
-        shape[key] = '_hasDefault' in param ? param.schema.optional() : param.schema;
+        shape[key] = '_hasDefault' in param ? param.type.optional() : param.type;
     }
 
     return z.object(shape) as any;

@@ -3,7 +3,8 @@ import {defineParam, defineRequiredParam, InputParametersRecord} from '@/schemas
 import {
     OuterWorkflowTemplateScope,
     WorkflowTask,
-    ContainerTemplateDef, callTemplate, templateRef, StepsTemplate, TypedStepsTemplate, callTemplateWithInputs
+    ContainerTemplateDef,
+    callTemplate, StepsInterface, stepsList
 } from '@/schemas/workflowSchemas'
 import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
@@ -24,7 +25,9 @@ export class TargetLatchHelpers extends OuterWorkflowTemplateScope<typeof Common
         return {
             container: {args: [], image: ""},
             inputs: {},
-            outputs: {}};
+            outputs: {
+                abc: { type: z.string() }
+            }};
     }
 }
 
@@ -37,8 +40,8 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
     //     });
     // }
 
-    static get main() {
-        return new (class extends TypedStepsTemplate<any, any> {
+    static get main() : StepsInterface {
+        return new (class {
             readonly inputs = {
                 sourceMigrationConfigs: defineRequiredParam({
                     type: SNAPSHOT_MIGRATION_CONFIG,
@@ -48,10 +51,6 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
                     type: z.array(CLUSTER_CONFIG),
                     description: "List of server configurations to direct migrated traffic toward"
                 }),
-                test: defineParam(({defaultValue: "hello"})),
-                foo: "bar",
-                //    s3Params: defineParam({type: }),
-
                 imageParams: defineParam({
                     defaultValue:
                         Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
@@ -63,31 +62,45 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
                     description: "OCI image locations and pull policies for required images"
                 })
             };
-            
-            readonly steps = {
-                init: callTemplate(TargetLatchHelpers, "init", {}),
-                mainThing: callTemplateWithInputs(
-                    templateRef(FullMigration, "singleSourceMigration"),
-                    {
-                        // sourceConfig: this.inputs.sourceMigrationConfigs, // Test: commenting this out should cause compile error
-                        // targetCluster: this.inputs.targets,
-                        // migrationName and dryRun are optional since they have defaults
-                        dummy: "custom-migration-name"
-                    }
-                ),
-                cleanup: {
-                    templateRef: getKeyAndValue(TargetLatchHelpers, "cleanup")
-                } as WorkflowTask<any, any>
-            };
+
+            readonly steps = stepsList((() => {
+                const parentInputs = this.inputs;
+                return new (class {
+                    init = callTemplate(TargetLatchHelpers, "init", {});
+                    mainThing = callTemplate(FullMigration, "singleSourceMigration",
+                        {
+                            // sourceConfig: this.inputs.sourceMigrationConfigs,
+                            // targetCluster: this.inputs.targets,
+                            // Can reference init step outputs:
+                            // initData: this.init.templateRef.value.outputs.abc,
+                            // dummy: "custom-migration-name"
+                            required: "aaaa" + parentInputs.sourceMigrationConfigs // TODO - figure out how to get inside the object
+                        });
+                    cleanup = {
+                        templateRef: getKeyAndValue(TargetLatchHelpers, "cleanup"),
+                        arguments: {
+                            parameters: {
+                                // Can reference previous step outputs:
+                                // initData: this.init.templateRef.value.outputs.abc,
+                                // migrationId: this.mainThing.templateRef.value.outputs.migrationId
+                                required: "aaaa" + parentInputs.sourceMigrationConfigs // TODO - figure out how to get inside the object
+                            }
+                        }
+                    } as WorkflowTask<any, any>;
+                })();
+            })());
             
             readonly outputs = {
-                foo: this.inputs.sourceMigrationConfigs,
-                bar: this.steps.init.templateRef.value.outputs.abc
+                // foo: this.inputs.sourceMigrationConfigs,
+                // bar: this.steps.init.templateRef.value.outputs.a,
+                // migrationResult: this.steps.mainThing.templateRef.value.outputs.migrationId,
+                // cleanupStatus: this.steps.cleanup.templateRef.value.outputs.status
             };
         })();
     }
 
     static get singleSourceMigration() {
+        const s = this.main.steps.mainThing.arguments?.parameters;
         return new (class {
             inputs = {
                 // sourceConfig: defineRequiredParam({
@@ -101,7 +114,8 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
                 dummy: defineParam({
                     defaultValue: "default-migration",
                     description: "Name for this migration"
-                })
+                }),
+                required: defineRequiredParam({type: z.string()})
             };
             outputs = {
                 migrationId: { type: z.string(), description: "Generated migration ID" },
@@ -110,56 +124,3 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
         })();
     }
 }
-
-// export const fullMigrationWorkflowTemplate = defineOuterWorkflowTemplate({
-//     name: "fullMigration",
-//     serviceAccountName: "serviceaccount",
-//     workflowParams: CommonWorkflowParameters,
-//     templates: {
-//         main: {
-//             inputs: {
-//                 sourceMigrationConfigs: defineRequiredParam({ type: SNAPSHOT_MIGRATION_CONFIG,
-//                     description: "List of server configurations to direct migrated traffic toward",
-//                 }),
-//                 targets: defineRequiredParam({ type: z.array(CLUSTER_CONFIG),
-//                     description: "List of server configurations to direct migrated traffic toward" } ),
-//                 //    s3Params: defineParam({type: }),
-//
-//                 imageParams: defineParam({
-//                     defaultValue:
-//                         Object.fromEntries([ "captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils" ]
-//                             .flatMap((k) => [
-//                                 [`${k}Image`, ""],
-//                                 [`${k}ImagePullPolicy`, ""]
-//                             ])
-//                         ),
-//                     description: "OCI image locations and pull policies for required images"
-//                 })
-//             }, // as const satisfies Record<string, InputParamDef<any>>;
-//             steps: [{
-//                 init: {
-//                     templateRef: {}
-//                 },
-//                 singleSourceMigration: {
-//                     template: {
-//                         // .. .../singleSourceMigration
-//                     }
-//                 },
-//                 cleanup: {
-//                     templateRef: {},
-//                     arguments: {
-//                         parameters: {
-//                             // steps.init.outputs.parameters.prefix
-//                         }
-//                     }
-//                 }
-//             }]
-//         },
-//         singleSourceMigration: {
-//             inputs: {
-//                 //fullMigrationWorkflowTemplate.
-//             }
-//         }
-//     }
-// });
-//
