@@ -1,8 +1,16 @@
-aws:
-  eksEnabled: true
-  region: ""
+conditionalPackageInstalls:
+  localstack: false
 
-stageName: dev
+aws:
+  configureAwsEksResources: true
+  region: ""
+  account: ""
+
+defaultBucketConfiguration:
+  useLocalStack: false
+  deleteOnUninstall: true
+  emptyBeforeDelete: true
+  endpoint: ""
 
 charts:
   fluent-bit:

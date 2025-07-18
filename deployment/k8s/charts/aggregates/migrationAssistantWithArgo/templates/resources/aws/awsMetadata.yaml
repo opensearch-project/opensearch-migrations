@@ -1,4 +1,4 @@
-{{- if eq (default false .Values.aws.eksEnabled) true }}
+{{- if eq (default false .Values.aws.configureAwsEksResources) true }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,8 +6,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-weight": "-1" # Make accessible earlier for charts that mount
 data:
-  STAGE_NAME: "{{ .Values.stageName }}"
-  AWS_REGION: "{{ .Values.aws.region }}"
+  STAGE_NAME: {{ required "Missing required value: .Values.stageName" .Values.stageName | quote }}
+  AWS_REGION: {{ required "Missing required value: .Values.aws.region" .Values.aws.region | quote }}
+  ACCOUNT: {{ required "Missing required value: .Values.aws.account" (toString .Values.aws.account) | quote }}
 {{- end }}
