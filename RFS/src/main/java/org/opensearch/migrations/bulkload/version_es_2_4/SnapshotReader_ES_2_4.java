@@ -49,7 +49,7 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     @Override
     public IndexMetadata.Factory getIndexMetadata() {
-        return new IndexMetadataFactory_ES_2_4((SnapshotRepoES24) getSnapshotRepo());
+        return new IndexMetadataFactory_ES_2_4(getSnapshotRepo());
     }
 
     @Override

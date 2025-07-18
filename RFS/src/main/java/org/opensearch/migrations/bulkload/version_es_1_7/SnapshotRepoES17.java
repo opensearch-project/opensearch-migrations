@@ -11,4 +11,5 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 public interface SnapshotRepoES17 extends SnapshotRepo.Provider {
     byte[] getIndexMetadataFile(String indexName, String snapshotName);
     Path getSnapshotMetadataFile(String snapshotName);
+    Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId);
 }

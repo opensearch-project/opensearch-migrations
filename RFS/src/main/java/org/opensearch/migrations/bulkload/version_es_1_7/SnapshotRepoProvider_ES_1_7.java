@@ -85,6 +85,15 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         return result;
     }
 
+    @Override
+    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
+        return repo.getRepoRootDir()
+                .resolve(INDICES_DIR_NAME)
+                .resolve(indexId)
+                .resolve(String.valueOf(shardId))
+                .resolve("snapshot-" + snapshotId);
+    }
+
     public Path getSnapshotMetadataFile(String snapshotName) {
         return repo.getRepoRootDir().resolve("metadata-" + snapshotName);
     }
