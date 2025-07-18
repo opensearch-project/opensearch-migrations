@@ -90,8 +90,13 @@ class RegistryImageBuildUtils {
                 """.stripIndent()
             }
 
-            project.tasks.matching { it.name.startsWith("buildKit") || it.name.endsWith("jib") }.configureEach {
+            project.tasks.matching { it.name.startsWith("buildKit") }.configureEach {
                 dependsOn project.tasks.named("loginToECR")
+            }
+            project.subprojects { subproject ->
+                subproject.tasks.matching { it.name.endsWith("jib") }.configureEach {
+                    dependsOn project.tasks.named("loginToECR")
+                }
             }
         }
     }
