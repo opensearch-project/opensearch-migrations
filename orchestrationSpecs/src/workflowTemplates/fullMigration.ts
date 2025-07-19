@@ -11,27 +11,32 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {getKeyAndValue} from "@/utils";
 import {EverythingToRecordScope, getAlwaysMatchPredicate, sameMatchingItems} from "@/scopeHelpers";
 
-export class TargetLatchHelpers extends OuterWorkflowTemplateScope<typeof CommonWorkflowParameters> {
-    static get init(): ContainerTemplateDef<InputParametersRecord> {
-        return {
-            container: {args: [], image: ""},
-            inputs: {},
-            outputs: {
-                abc: { type: z.string() }
+export class TargetLatchHelpers extends OuterWorkflowTemplateScope {
+    static get init() {
+        return new (class {
+            inputs = {
+                prefix: defineRequiredParam({type: z.string()}),
+                other: defineParam({defaultValue: 8})
+            };
+            outputs = {
+                prefix: { type: z.string() },
+                processorsPerTarget: { type: z.number() }
+            };
+            container = {
+
             }
-        };
+        })();
     }
-    static get cleanup(): ContainerTemplateDef<InputParametersRecord> {
-        return {
-            container: {args: [], image: ""},
-            inputs: {},
-            outputs: {
-                abc: { type: z.string() }
-            }};
+    static get cleanup() {
+        return new (class {
+            inputs = {
+                prefix: defineRequiredParam({type: z.string()})
+            };
+        })();
     }
 }
 
-export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkflowParameters> {
+export class FullMigration extends OuterWorkflowTemplateScope {
     // build() {
     //     return super.build({
     //         name: "fullMigration",
@@ -66,7 +71,9 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
             readonly steps = stepsList((() => {
                 const parentInputs = this.inputs;
                 return new (class {
-                    init = callTemplate(TargetLatchHelpers, "init", {});
+                    init = callTemplate(TargetLatchHelpers, "init", {
+                        prefix: ""
+                    });
                     mainThing = callTemplate(FullMigration, "singleSourceMigration",
                         {
                             // sourceConfig: this.inputs.sourceMigrationConfigs,
@@ -100,7 +107,7 @@ export class FullMigration extends OuterWorkflowTemplateScope<typeof CommonWorkf
     }
 
     static get singleSourceMigration() {
-        const s = this.main.steps.mainThing.arguments?.parameters;
+        //const s = this.main.steps.mainThing.arguments?.parameters;
         return new (class {
             inputs = {
                 // sourceConfig: defineRequiredParam({

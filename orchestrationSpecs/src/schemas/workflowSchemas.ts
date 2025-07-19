@@ -3,6 +3,7 @@ import {z} from "zod";
 import {AggregatingScope} from "@/scopeHelpers";
 import {getKeyAndValue, getKeyAndValueClass} from "@/utils";
 import {Class} from "zod/v4/core/util";
+import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 
 export type OuterWorkflowTemplate<
     T extends Record<string, TemplateDef<any,any>>,
@@ -27,18 +28,9 @@ export type TemplateDef<
     outputs: OUT;
 };
 
-
-export class OuterWorkflowTemplateScope<WP extends InputParametersRecord> extends AggregatingScope<TemplateDef<any,any>> {
-    protected predicate =
-        (k:string, v: any) : v is TemplateDef<any, any> => (!!v && typeof v === "object" && "inputs" in v);
-
-    // build(p:{
-    //     name: string,
-    //     serviceAccountName: string,
-    //     workflowParameters: WP
-    // }) : OuterWorkflowTemplate<typeof this.allMatchingItems, WP> {
-    //     return {...p, templates: this.allMatchingItems};
-    // }
+export abstract class OuterWorkflowTemplateScope {
+    workflowParameters: InputParametersRecord = CommonWorkflowParameters;
+    serviceAccountName?: string;
 }
 
 export interface StepListInterface {
@@ -152,7 +144,7 @@ export function callTemplate<
     classConstructor: TClass,
     key: TKey,
     params: z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
-): WorkflowTask<TClass[TKey]["inputs"], any> {
+): WorkflowTask<TClass[TKey]["inputs"], TClass[TKey]["outputs"]> {
     const value = classConstructor[key];
     return {
         templateRef: { key, value },
