@@ -1,9 +1,81 @@
-import {InputParametersRecord, OutputParametersRecord, paramsToCallerSchema} from "@/schemas/parameterSchemas";
+import {
+    defineParam,
+    defineRequiredParam,
+    InputParamDef,
+    InputParametersRecord,
+    OutputParametersRecord,
+    paramsToCallerSchema
+} from "@/schemas/parameterSchemas";
 import {z} from "zod";
 import {AggregatingScope} from "@/scopeHelpers";
 import {getKeyAndValue, getKeyAndValueClass} from "@/utils";
 import {Class} from "zod/v4/core/util";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
+import {ZodType} from "zod/index";
+
+export type Scope = Record<string, any>;
+export type ExtendScope<S extends Scope, ADDITIONS extends Scope> = S & ADDITIONS;
+export type ScopeFn<S extends Scope, ADDITIONS extends Scope> = (scope: Readonly<S>) => ADDITIONS;
+export type TemplateBuilderFn<S extends Scope, NS extends Scope> = (tb: TemplateBuilder<S>) => TemplateBuilder<NS>;
+export type BuilderCtor<S extends Scope, B extends ScopeBuilder<S>> = (scope: Readonly<S>) => B;
+
+export class ScopeBuilder<S extends Scope = Scope> {
+    constructor(protected readonly scope: S) {}
+
+    protected addWithCtor<
+        Add extends Scope,
+        B extends ScopeBuilder<ExtendScope<S, Add>>
+    >(
+        fn: ScopeFn<S, Add>,
+        builderCtor: BuilderCtor<ExtendScope<S, Add>, B>
+    ): B {
+        const newScope = { ...this.scope, ...fn(this.scope) } as ExtendScope<S, Add>;
+        return builderCtor(newScope);
+    }
+
+    protected add<Add extends Scope>(
+        fn: ScopeFn<S, Add>
+    ): ScopeBuilder<ExtendScope<S, Add>> {
+        return this.addWithCtor(fn, s => new ScopeBuilder(s));
+    }
+
+    build(): S {
+        return this.scope;
+    }
+}
+
+export class WFBuilder<S extends Scope = Scope> extends ScopeBuilder<S> {
+    private readonly ctor = <S extends Scope>(a: S) => new WFBuilder(a);
+    addParams(params: InputParametersRecord) {
+        return super.addWithCtor(() => ({ "workflowParams": params }), this.ctor);
+    }
+    addTemplate<NS extends Scope>(name: string, fn: TemplateBuilderFn<S, NS>) {
+        const templateToAdd = fn(new TemplateBuilder(this.scope)).build();
+        return super.addWithCtor(() => ({ "templates": { [name]: templateToAdd } }), this.ctor);
+    }
+}
+
+export class TemplateBuilder<S extends Scope = Scope> extends ScopeBuilder<S> {
+    private readonly ctor = <S extends Scope>(a: S) => new TemplateBuilder(a);
+
+    addOptional<T>(name: string,
+        defaultValueFromScopeFn: (scope: S) => T,
+        description?: string
+    ) {
+        const param =  defineParam({defaultValue: defaultValueFromScopeFn(this.scope), description: description});
+        return super.addWithCtor(() => ({ [name]: param }), this.ctor);
+    }
+
+    // export function defineRequiredParam<T>(opts: {
+    //     type: ZodType<T>;
+    //     description?: string;
+    // }): InputParamDef<T, true> {
+    //     return {
+    //         type: opts.type,
+    //         description: opts.description,
+    //     };
+    // }
+}
 
 export type OuterWorkflowTemplate<
     T extends Record<string, TemplateDef<any,any>>,

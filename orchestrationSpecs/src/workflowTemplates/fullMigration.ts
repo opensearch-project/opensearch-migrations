@@ -4,12 +4,33 @@ import {
     OuterWorkflowTemplateScope,
     WorkflowTask,
     ContainerTemplateDef,
-    callTemplate, StepsInterface, stepsList
+    callTemplate, StepsInterface, stepsList, WFBuilder
 } from '@/schemas/workflowSchemas'
 import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {getKeyAndValue} from "@/utils";
 import {EverythingToRecordScope, getAlwaysMatchPredicate, sameMatchingItems} from "@/scopeHelpers";
+
+export const TLH = new WFBuilder({})
+    .addParams(CommonWorkflowParameters)
+        .addTemplate("main", t=> t
+            .addOptional("prefix", (s=>s.workflowParams), "no desc" )
+            .addOptional("next", (s => "prefix-"+s.prefix))
+            .addOptional("a", s=>s.next+"wow"))
+    .build();
+    // .
+    // .add(s=> ({}))
+    // .add(s => ({ "params": CommonWorkflowParameters}))
+    //
+    // .addParams(CommonWorkflowParameters)
+    // .
+    //.build();
+    ;
+
+export const FM = new WFBuilder({})
+    .addParams(CommonWorkflowParameters)
+    // .build();
+;
 
 export class TargetLatchHelpers extends OuterWorkflowTemplateScope {
     static get init() {
