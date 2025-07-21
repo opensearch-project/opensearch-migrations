@@ -29,18 +29,6 @@ import org.testcontainers.utility.MountableFile;
  */
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
-    public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
-
-    private static Map<String, String> overrideAndRemoveEnv(
-            Map<String, String> base,
-            Map<String, String> overrides,
-            Set<String> keysToRemove
-    ) {
-        Map<String, String> merged = new HashMap<>(base);
-        keysToRemove.forEach(merged::remove);
-        merged.putAll(overrides);
-        return Collections.unmodifiableMap(merged);
-    }
 
     /**
      * These settings must be injected via elasticsearch.yml for ES 5.0–5.4.
@@ -56,228 +44,85 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "path.repo: \"/tmp/snapshots\""
     );
 
+    // This version of doesn't support path.repo based via env variables, passing this value via config
+    private static final String OLDER_ES_CONFIG_PATH = "/usr/share/elasticsearch/config/elasticsearch.yml";
+    private static final String OLDER_ES_CONFIG = "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\"";
+    public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
+
     private static String buildEs5ConfigYml(List<String> baseLines, String... extraLines) {
         List<String> allLines = new ArrayList<>(baseLines);
         Collections.addAll(allLines, extraLines);
         return String.join("\n", allLines);
     }
-
     private static final String ES_5_0_AND_5_1_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES
     );
-
     private static final String ES_5_2_AND_5_3_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES,
         "bootstrap.system_call_filter: false"
     );
 
-    public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
-        Version.fromString("ES 7.17.22")
-    );
-    public static final ContainerVersion ES_V8_17 = new Elasticsearch8Version(
-        "docker.elastic.co/elasticsearch/elasticsearch:8.17.5",
-        Version.fromString("ES 8.17.5")
-    );
-    public static final ContainerVersion ES_V7_9 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.9.3",
-            Version.fromString("ES 7.9.3")
-    );
-    public static final ContainerVersion ES_V7_8 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.8.1",
-            Version.fromString("ES 7.8.1")
-    );
-    public static final ContainerVersion ES_V7_7 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.7.1",
-            Version.fromString("ES 7.7.1")
-    );
-    public static final ContainerVersion ES_V7_6 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.6.2",
-            Version.fromString("ES 7.6.2")
-    );
-    public static final ContainerVersion ES_V7_5 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.5.2",
-            Version.fromString("ES 7.5.2")
-    );
-    public static final ContainerVersion ES_V7_4 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.4.2",
-            Version.fromString("ES 7.4.2")
-    );
-    public static final ContainerVersion ES_V7_3 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.2",
-            Version.fromString("ES 7.3.2")
-    );
-    public static final ContainerVersion ES_V7_2 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.2.1",
-            Version.fromString("ES 7.2.1")
-    );
-    public static final ContainerVersion ES_V7_1 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.1.1",
-            Version.fromString("ES 7.1.1")
-    );
-        public static final ContainerVersion ES_V7_0 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.0.1",
-            Version.fromString("ES 7.0.1")
-    );
-    public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
-        Version.fromString("ES 7.10.2")
-    );
-    public static final ContainerVersion ES_V6_8_23 = new ElasticsearchOssVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
-        Version.fromString("ES 6.8.23")
-    );
-    public static final ContainerVersion ES_V6_7 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.7.2",
-            Version.fromString("ES 6.7.2")
-    );
-    public static final ContainerVersion ES_V6_6 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.6.2",
-            Version.fromString("ES 6.6.2")
-    );
-    public static final ContainerVersion ES_V6_5 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.5.4",
-            Version.fromString("ES 6.5.4")
-    );
-    public static final ContainerVersion ES_V6_4 = new ElasticsearchOssVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.4.3",
-            Version.fromString("ES 6.4.3")
-    );
-    public static final ContainerVersion ES_V6_3 = new Elasticsearch6Version(
-            "docker.elastic.co/elasticsearch/elasticsearch:6.3.2",
-            Version.fromString("ES 6.3.2")
-    );
-    public static final ContainerVersion ES_V6_2 = new Elasticsearch6Version(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.2.4",
-            Version.fromString("ES 6.2.4")
-    );
-    public static final ContainerVersion ES_V6_1 = new Elasticsearch6Version(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.1.4",
-            Version.fromString("ES 6.1.4")
-    );
-    public static final ContainerVersion ES_V6_0 = new Elasticsearch6Version(
-            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.0.1",
-            Version.fromString("ES 6.0.1")
-    );
+    private static Map<String, String> overrideAndRemoveEnv(
+            Map<String, String> base,
+            Map<String, String> overrides,
+            Set<String> keysToRemove
+    ) {
+        Map<String, String> merged = new HashMap<>(base);
+        keysToRemove.forEach(merged::remove);
+        merged.putAll(overrides);
+        return Collections.unmodifiableMap(merged);
+    }
 
-    public static final ContainerVersion ES_V5_6_16 = new ElasticsearchVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
-        Version.fromString("ES 5.6.16")
-    );
-    public static final ContainerVersion ES_V5_5 = new ElasticsearchVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch:5.5.2",
-        Version.fromString("ES 5.5.2")
-    );
-    public static final ContainerVersion ES_V5_4 = new ElasticsearchVersion(
-            "docker.elastic.co/elasticsearch/elasticsearch:5.4.2",
-            Version.fromString("ES 5.4.2")
-    );
-    public static final ContainerVersion ES_V5_3 = new Elasticsearch5Version(
-        "elasticsearch:5.3.2",
-        Version.fromString("ES 5.3.2"),
-        "/usr/share/elasticsearch/config/elasticsearch.yml",
-        ES_5_2_AND_5_3_CONFIG_YML
-    );
-    public static final ContainerVersion ES_V5_2 = new Elasticsearch5Version(
-        "elasticsearch:5.2.2",
-        Version.fromString("ES 5.2.2"),
-        "/usr/share/elasticsearch/config/elasticsearch.yml",
-        ES_5_2_AND_5_3_CONFIG_YML
-    );
-    public static final ContainerVersion ES_V5_1 = new Elasticsearch5Version(
-        "elasticsearch:5.1.2",
-        Version.fromString("ES 5.1.2"),
-        "/usr/share/elasticsearch/config/elasticsearch.yml",
-        ES_5_0_AND_5_1_CONFIG_YML
-    );
-    public static final ContainerVersion ES_V5_0 = new Elasticsearch5Version(
-        "elasticsearch:5.0.2",
-        Version.fromString("ES 5.0.2"),
-        "/usr/share/elasticsearch/config/elasticsearch.yml",
-        ES_5_0_AND_5_1_CONFIG_YML
-    );
+    public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.5");
 
-    public static final ContainerVersion ES_V2_4_6 = new OlderElasticsearchVersion(
-        "elasticsearch:2.4.6",
-        Version.fromString("ES 2.4.6"),
-        // This version of doesn't support path.repo based via env variables, passing this value via config
-        "/usr/share/elasticsearch/config/elasticsearch.yml",
-        "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V2_3 = new OlderElasticsearchVersion(
-            "elasticsearch:2.3.5",
-            Version.fromString("ES 2.3.5"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V2_2 = new OlderElasticsearchVersion(
-            "elasticsearch:2.2.2",
-            Version.fromString("ES 2.2.2"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V2_1 = new OlderElasticsearchVersion(
-            "elasticsearch:2.1.2",
-            Version.fromString("ES 2.1.2"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V2_0 = new OlderElasticsearchVersion(
-            "elasticsearch:2.0.2",
-            Version.fromString("ES 2.0.2"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
+    public static final ContainerVersion ES_V7_17 = ElasticsearchVersion.fromTag("7.17.22");
+    public static final ContainerVersion ES_V7_10_2 = ElasticsearchOssVersion.fromTag("7.10.2");
+    public static final ContainerVersion ES_V7_9 = ElasticsearchOssVersion.fromTag("7.9.3");
+    public static final ContainerVersion ES_V7_8 = ElasticsearchOssVersion.fromTag("7.8.1");
+    public static final ContainerVersion ES_V7_7 = ElasticsearchOssVersion.fromTag("7.7.1");
+    public static final ContainerVersion ES_V7_6 = ElasticsearchOssVersion.fromTag("7.6.2");
+    public static final ContainerVersion ES_V7_5 = ElasticsearchOssVersion.fromTag("7.5.2");
+    public static final ContainerVersion ES_V7_4 = ElasticsearchOssVersion.fromTag("7.4.2");
+    public static final ContainerVersion ES_V7_3 = ElasticsearchOssVersion.fromTag("7.3.2");
+    public static final ContainerVersion ES_V7_2 = ElasticsearchOssVersion.fromTag("7.2.1");
+    public static final ContainerVersion ES_V7_1 = ElasticsearchOssVersion.fromTag("7.1.1");
+    public static final ContainerVersion ES_V7_0 = ElasticsearchOssVersion.fromTag("7.0.1");
 
-    public static final ContainerVersion ES_V1_7_6 = new OlderElasticsearchVersion(
-            "elasticsearch:1.7.6",
-            Version.fromString("ES 1.7.6"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V1_6 = new OlderElasticsearchVersion(
-            "elasticsearch:1.6.2",
-            Version.fromString("ES 1.6.2"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V1_5 = new OlderElasticsearchVersion(
-            "elasticsearch:1.5.2",
-            Version.fromString("ES 1.5.2"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
-    public static final ContainerVersion ES_V1_0 = new OlderElasticsearchVersion(
-            "elasticsearch:1",
-            Version.fromString("ES 1.0"),
-            // This version of doesn't support path.repo based via env variables, passing this value via config
-            "/usr/share/elasticsearch/config/elasticsearch.yml",
-            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
-    );
+    public static final ContainerVersion ES_V6_8_23 = ElasticsearchOssVersion.fromTag("6.8.23");
+    public static final ContainerVersion ES_V6_7 = ElasticsearchOssVersion.fromTag("6.7.2");
+    public static final ContainerVersion ES_V6_6 = ElasticsearchOssVersion.fromTag("6.6.2");
+    public static final ContainerVersion ES_V6_5 = ElasticsearchOssVersion.fromTag("6.5.4");
+    public static final ContainerVersion ES_V6_4 = ElasticsearchOssVersion.fromTag("6.4.3");
+    public static final ContainerVersion ES_V6_3 = Elasticsearch6Version.fromTag("6.3.2", false);
+    public static final ContainerVersion ES_V6_2 = Elasticsearch6Version.fromTag("6.2.4");
+    public static final ContainerVersion ES_V6_1 = Elasticsearch6Version.fromTag("6.1.4");
+    public static final ContainerVersion ES_V6_0 = Elasticsearch6Version.fromTag("6.0.1");
 
-    public static final ContainerVersion OS_V1_3_16 = new OpenSearchVersion(
-        "opensearchproject/opensearch:1.3.16",
-        Version.fromString("OS 1.3.16")
-    );
-    public static final ContainerVersion OS_V2_19_1 = new OpenSearchVersion(
-        "opensearchproject/opensearch:2.19.1",
-        Version.fromString("OS 2.19.1")
-    );
-    public static final ContainerVersion OS_V3_0_0 = new OpenSearchVersion(
-        "opensearchproject/opensearch:3.0.0",
-        Version.fromString("OS 3.0.0")
-    );
+    public static final ContainerVersion ES_V5_6_16 = ElasticsearchVersion.fromTag("5.6.16");
+    public static final ContainerVersion ES_V5_5 = ElasticsearchVersion.fromTag("5.5.2");
+    public static final ContainerVersion ES_V5_4 = ElasticsearchVersion.fromTag("5.4.2");
+    public static final ContainerVersion ES_V5_3 = Elasticsearch5Version.fromTag("5.3.2", ES_5_2_AND_5_3_CONFIG_YML);
+    public static final ContainerVersion ES_V5_2 = Elasticsearch5Version.fromTag("5.2.2", ES_5_2_AND_5_3_CONFIG_YML);
+    public static final ContainerVersion ES_V5_1 = Elasticsearch5Version.fromTag("5.1.2", ES_5_0_AND_5_1_CONFIG_YML);
+    public static final ContainerVersion ES_V5_0 = Elasticsearch5Version.fromTag("5.0.2", ES_5_0_AND_5_1_CONFIG_YML);
 
+    public static final ContainerVersion ES_V2_4_6 = OlderElasticsearchVersion.fromTag("2.4.6");
+    public static final ContainerVersion ES_V2_3 = OlderElasticsearchVersion.fromTag("2.3.5");
+    public static final ContainerVersion ES_V2_2 = OlderElasticsearchVersion.fromTag("2.2.2");
+    public static final ContainerVersion ES_V2_1 = OlderElasticsearchVersion.fromTag("2.1.2");
+    public static final ContainerVersion ES_V2_0 = OlderElasticsearchVersion.fromTag("2.0.2");
+
+    public static final ContainerVersion ES_V1_7_6 = OlderElasticsearchVersion.fromTag("1.7.6");
+    public static final ContainerVersion ES_V1_6 = OlderElasticsearchVersion.fromTag("1.6.2");
+    public static final ContainerVersion ES_V1_5 = OlderElasticsearchVersion.fromTag("1.5.2");
+    public static final ContainerVersion ES_V1_0 = OlderElasticsearchVersion.fromTag("1");
+
+    public static final ContainerVersion OS_V1_3_16 = OpenSearchVersion.fromTag("1.3.16");
+    public static final ContainerVersion OS_V2_19_1 = OpenSearchVersion.fromTag("2.19.1");
+    public static final ContainerVersion OS_V3_0_0 = OpenSearchVersion.fromTag("3.0.0");
     public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
-    private enum INITIALIZATION_FLAVOR {
+    public enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
             "path.repo", CLUSTER_SNAPSHOT_DIR,
             "index.store.type", "mmapfs",
@@ -492,11 +337,21 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         public ElasticsearchOssVersion(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS, "elasticsearch");
         }
+        public static ElasticsearchOssVersion fromTag(String tag) {
+            String imageName = "docker.elastic.co/elasticsearch/elasticsearch-oss:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new ElasticsearchOssVersion(imageName, version);
+        }
     }
 
     public static class ElasticsearchVersion extends ContainerVersion {
         public ElasticsearchVersion(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH, "elasticsearch");
+        }
+        public static ElasticsearchVersion fromTag(String tag) {
+            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new ElasticsearchVersion(imageName, version);
         }
     }
 
@@ -504,11 +359,25 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         public Elasticsearch8Version(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
         }
+        public static Elasticsearch8Version fromTag(String tag) {
+            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new Elasticsearch8Version(imageName, version);
+        }
     }
 
     public static class Elasticsearch6Version extends ContainerVersion {
         public Elasticsearch6Version(String imageName, Version version) {
             super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_6, "elasticsearch");
+        }
+        public static Elasticsearch6Version fromTag(String tag, boolean oss) {
+            String prefix = oss ? "elasticsearch-oss" : "elasticsearch";
+            String imageName = "docker.elastic.co/elasticsearch/" + prefix + ":" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new Elasticsearch6Version(imageName, version);
+        }
+        public static Elasticsearch6Version fromTag(String tag) {
+            return fromTag(tag, true); // default to OSS
         }
     }
 
@@ -523,11 +392,21 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         public INITIALIZATION_FLAVOR getInitializationType() {
             return INITIALIZATION_FLAVOR.ELASTICSEARCH_5;
         }
+        public static Elasticsearch5Version fromTag(String tag, String configContent) {
+            String imageName = "elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new Elasticsearch5Version(imageName, version, OLDER_ES_CONFIG_PATH, configContent);
+        }
     }
 
     public static class OpenSearchVersion extends ContainerVersion {
         public OpenSearchVersion(String imageName, Version version) {
             super(imageName, version, VersionMatchers.isOS_2_19_OrGreater.test(version) ? INITIALIZATION_FLAVOR.OPENSEARCH_2_19_PLUS : INITIALIZATION_FLAVOR.OPENSEARCH, "opensearch");
+        }
+        public static OpenSearchVersion fromTag(String tag) {
+            String imageName = "opensearchproject/opensearch:" + tag;
+            Version version = Version.fromString("OS " + tag);
+            return new OpenSearchVersion(imageName, version);
         }
     }
 
@@ -542,6 +421,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             super(imageName, version);
             this.contents = contents;
             this.filePath = filePath;
+        }
+        public static OlderElasticsearchVersion fromTag(String tag) {
+            String imageName = "elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new OlderElasticsearchVersion(imageName, version, OLDER_ES_CONFIG_PATH, OLDER_ES_CONFIG);
         }
     }
 }
