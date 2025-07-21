@@ -17,6 +17,7 @@ public class FilterScheme {
             "ecs@",
             "elastic-connectors-",
             "ilm-history-",
+            "metrics-elastic_agent",
             "profiling-",
             "synthetics-"
     );
