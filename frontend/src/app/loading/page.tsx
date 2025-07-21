@@ -27,9 +27,12 @@ export default function LoadingPage() {
         setErrorMessage(null);
         return true;
       }
-    
+
       try {
-        const res = await withTimeLimit(systemHealth(), DEFAULT_POLLING_INTERVAL_MS);
+        const res = await withTimeLimit(
+          systemHealth(),
+          DEFAULT_POLLING_INTERVAL_MS,
+        );
         if (res.data?.status === "ok") {
           setIsReady(true);
           setErrorMessage(null);
@@ -42,10 +45,8 @@ export default function LoadingPage() {
       } catch (err) {
         console.error(err);
         const formattedError =
-          err instanceof Error
-            ? { name: err.name, message: err.message }
-            : err;
-    
+          err instanceof Error ? { name: err.name, message: err.message } : err;
+
         setErrorMessage(JSON.stringify(formattedError, null, 2));
         setIsReady(false);
       }
