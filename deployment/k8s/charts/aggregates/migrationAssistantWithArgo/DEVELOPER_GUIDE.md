@@ -22,3 +22,13 @@ Since Fluent Bit will also send its own pod logs to the configured destination i
 ```shell
 kubectl -n ma logs fluent-bit-<pod_id>
 ```
+
+#### Sample AWS Cloudwatch Insights Query
+Sample query to see all logs from the pods that get created for a given Argo workflow run
+```
+fields @timestamp, level, log, pod, container, workflow, image
+| filter workflow like /full-migration-/
+#| filter pod like /reindex-from-snapshot/
+| sort @timestamp asc 
+| limit 10000
+```
