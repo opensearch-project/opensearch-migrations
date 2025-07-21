@@ -16,64 +16,130 @@ import {ZodType} from "zod/index";
 export type Scope = Record<string, any>;
 export type ExtendScope<S extends Scope, ADDITIONS extends Scope> = S & ADDITIONS;
 export type ScopeFn<S extends Scope, ADDITIONS extends Scope> = (scope: Readonly<S>) => ADDITIONS;
-export type TemplateBuilderFn<S extends Scope, NS extends Scope> = (tb: TemplateBuilder<S>) => TemplateBuilder<NS>;
-export type BuilderCtor<S extends Scope, B extends ScopeBuilder<S>> = (scope: Readonly<S>) => B;
 
-export class ScopeBuilder<S extends Scope = Scope> {
-    constructor(protected readonly scope: S) {}
+class ScopeBuilder<SigScope extends Scope = Scope, FullScope extends Scope = Scope> {
+    constructor(
+        protected readonly sigScope: SigScope,
+        protected readonly fullScope: FullScope
+    ) {}
 
     protected addWithCtor<
-        Add extends Scope,
-        B extends ScopeBuilder<ExtendScope<S, Add>>
+        AddSig extends Scope,
+        AddFull extends Scope,
+        B extends ScopeBuilder<ExtendScope<SigScope, AddSig>, ExtendScope<FullScope, AddFull>>
     >(
-        fn: ScopeFn<S, Add>,
-        builderCtor: BuilderCtor<ExtendScope<S, Add>, B>
+        sigFn: ScopeFn<SigScope, AddSig>,
+        fullFn: ScopeFn<FullScope, AddFull>,
+        builderCtor: (sigScope: Readonly<ExtendScope<SigScope, AddSig>>, fullScope: Readonly<ExtendScope<FullScope, AddFull>>) => B
     ): B {
-        const newScope = { ...this.scope, ...fn(this.scope) } as ExtendScope<S, Add>;
+        const newSigScope = { ...this.sigScope, ...sigFn(this.sigScope) } as ExtendScope<SigScope, AddSig>;
+        const newFullScope = { ...this.fullScope, ...fullFn(this.fullScope) } as ExtendScope<FullScope, AddFull>;
+        return builderCtor(newSigScope, newFullScope);
+    }
+
+    getSigScope(): SigScope {
+        return this.sigScope;
+    }
+    getFullScope(): FullScope {
+        return this.fullScope;
+    }
+}
+
+class UnifiedScopeBuilder<SingleScope extends Scope = Scope> extends ScopeBuilder<SingleScope, SingleScope> {
+    constructor(protected readonly scope: SingleScope) {
+        super(scope, scope);
+    }
+
+    protected addToBothWithCtor<
+        Add extends Scope,
+        B extends ScopeBuilder<ExtendScope<SingleScope, Add>, ExtendScope<SingleScope, Add>>
+    >(
+        fn: ScopeFn<SingleScope, Add>,
+        builderCtor: (scope: ExtendScope<SingleScope, Add>) => B
+    ): B {
+        const newScope = { ...this.sigScope, ...fn(this.sigScope) } as ExtendScope<SingleScope, Add>;
         return builderCtor(newScope);
     }
-
-    protected add<Add extends Scope>(
-        fn: ScopeFn<S, Add>
-    ): ScopeBuilder<ExtendScope<S, Add>> {
-        return this.addWithCtor(fn, s => new ScopeBuilder(s));
-    }
-
-    build(): S {
-        return this.scope;
-    }
 }
 
-export class WFBuilder<S extends Scope = Scope> extends ScopeBuilder<S> {
-    private readonly ctor = <S extends Scope>(a: S) => new WFBuilder(a);
+export class WFBuilder<S extends Scope = Scope> extends UnifiedScopeBuilder<Scope> {
+    static createEmpty(): WFBuilder {
+        return new WFBuilder({});
+    }
+
     addParams(params: InputParametersRecord) {
-        return super.addWithCtor(() => ({ "workflowParams": params }), this.ctor);
-    }
-    addTemplate<NS extends Scope>(name: string, fn: TemplateBuilderFn<S, NS>) {
-        const templateToAdd = fn(new TemplateBuilder(this.scope)).build();
-        return super.addWithCtor(() => ({ "templates": { [name]: templateToAdd } }), this.ctor);
+        const wfp = ({"workflowParams": params});
+        return super.addToBothWithCtor(
+            () => wfp,
+            ss => new TemplateChainer(ss,ss)
+        );
     }
 }
 
-export class TemplateBuilder<S extends Scope = Scope> extends ScopeBuilder<S> {
-    private readonly ctor = <S extends Scope>(a: S) => new TemplateBuilder(a);
 
+export class TemplateChainer<SigScope extends Scope = Scope, FullScope extends Scope = Scope>
+    extends ScopeBuilder<SigScope, FullScope>
+{
+    addTemplate<
+        NSS extends Scope,
+        NFS extends Scope
+    >(name: string, fn: (tb: TemplateBuilder<SigScope>) => TemplateBuilder<NSS>) {
+        // Create a template-scoped builder that exposes workflowParams and inputs separately
+        const templateScope = {
+            ...this.sigScope,
+            inputs: {} // Start with empty inputs for the template
+        };
+        // start w/ the same public/full scope for a new TemplateBuilder
+        const templateResult = fn(new TemplateBuilder(templateScope));
+
+        return super.addWithCtor(() => ({
+                "templates": {
+                    ...((this.sigScope as any).templates || {}),
+                    [name]: {
+                        input: (templateResult.getSigScope().inputs || {})
+                    }
+                }
+            }),
+            () => ({
+                "templates": {
+                    ...((this.fullScope as any).templates || {}),
+                    [name]: templateResult.getFullScope()
+                }
+            }), (sigScope, fullScope) => new TemplateChainer(sigScope, fullScope));
+    }
+}
+
+export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedScopeBuilder<SingleScope> {
     addOptional<T>(name: string,
-        defaultValueFromScopeFn: (scope: S) => T,
+        defaultValueFromScopeFn: (scope: SingleScope) => T,
         description?: string
     ) {
-        const param =  defineParam({defaultValue: defaultValueFromScopeFn(this.scope), description: description});
-        return super.addWithCtor(() => ({ [name]: param }), this.ctor);
+        const param = defineParam({
+            defaultValue: defaultValueFromScopeFn(this.scope),
+            description: description
+        });
+        
+        return super.addToBothWithCtor(() => ({
+            inputs: { 
+                ...((this.sigScope as any).inputs || {}), 
+                [name]: param 
+            } 
+        }), (sigScope) => new TemplateBuilder(sigScope));
     }
 
-    // export function defineRequiredParam<T>(opts: {
-    //     type: ZodType<T>;
-    //     description?: string;
-    // }): InputParamDef<T, true> {
-    //     return {
-    //         type: opts.type,
-    //         description: opts.description,
-    //     };
+    // addRequired<T>(name: string, type: ZodType<T>, description?: string) {
+    //     const param = defineRequiredParam({type, description});
+    //     return super.addWithCtor(() => ({
+    //         inputs: {
+    //             ...((this.sigScope as any).inputs || {}),
+    //             [name]: param
+    //         }
+    //     }), () => ({
+    //         inputs: {
+    //             ...((this.fullScope as any).inputs || {}),
+    //             [name]: param
+    //         }
+    //     }), (sigScope, fullScope) => new TemplateBuilder(sigScope, fullScope));
     // }
 }
 

@@ -11,13 +11,13 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {getKeyAndValue} from "@/utils";
 import {EverythingToRecordScope, getAlwaysMatchPredicate, sameMatchingItems} from "@/scopeHelpers";
 
-export const TLH = new WFBuilder({})
+export const TLH = WFBuilder.createEmpty()
     .addParams(CommonWorkflowParameters)
-        .addTemplate("main", t=> t
+    .addTemplate("main", t=> t
             .addOptional("prefix", (s=>s.workflowParams), "no desc" )
             .addOptional("next", (s => "prefix-"+s.prefix))
             .addOptional("a", s=>s.next+"wow"))
-    .build();
+    .getFullScope();
     // .
     // .add(s=> ({}))
     // .add(s => ({ "params": CommonWorkflowParameters}))
@@ -27,7 +27,7 @@ export const TLH = new WFBuilder({})
     //.build();
     ;
 
-export const FM = new WFBuilder({})
+export const FM = WFBuilder.createEmpty()
     .addParams(CommonWorkflowParameters)
     // .build();
 ;
