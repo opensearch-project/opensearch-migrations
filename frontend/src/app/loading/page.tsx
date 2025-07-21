@@ -22,13 +22,15 @@ export default function LoadingPage() {
 
   useEffect(() => {
     const pollHealth = async () => {
+      if (getSiteReadiness()) {
+        setIsReady(true);
+        setErrorMessage(null);
+        return true;
+      }
+    
       try {
-        const res = await withTimeLimit(
-          systemHealth(),
-          DEFAULT_POLLING_INTERVAL_MS,
-        );
-
-        if (res.data?.status === "ok" || getSiteReadiness()) {
+        const res = await withTimeLimit(systemHealth(), DEFAULT_POLLING_INTERVAL_MS);
+        if (res.data?.status === "ok") {
           setIsReady(true);
           setErrorMessage(null);
           setSiteReadiness(true);
@@ -39,21 +41,12 @@ export default function LoadingPage() {
         }
       } catch (err) {
         console.error(err);
-        if (err instanceof Error) {
-          setErrorMessage(
-            JSON.stringify(
-              {
-                name: err.name,
-                message: err.message,
-              },
-              null,
-              2,
-            ),
-          );
-        } else {
-          // Fallback for other kinds of errors
-          setErrorMessage(JSON.stringify(err, null, 2));
-        }
+        const formattedError =
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : err;
+    
+        setErrorMessage(JSON.stringify(formattedError, null, 2));
         setIsReady(false);
       }
       return false;

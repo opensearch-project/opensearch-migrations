@@ -3,7 +3,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import LandingPage from "@/app/loading/page";
 import { server } from "@tests/__utils__/mswServer";
 import { http, HttpResponse } from "msw";
-import { setSiteReadiness } from "@/lib/site-readiness";
+import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
 
 jest.mock("@/lib/site-readiness", () => ({
   getSiteReadiness: jest.fn(() => false),
@@ -20,6 +20,25 @@ describe("LandingPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
+
+  it("shows loading and then success UI from cache", async () => {
+    (getSiteReadiness as jest.Mock).mockReturnValueOnce(true);
+    let serviceCalled = false;
+    server.use(
+      http.get("http://localhost/system/health", () => {
+        serviceCalled = true;
+        HttpResponse.json({status: "ok", checks: {} });
+      })
+    );
+
+    render(<LandingPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument()
+    );
+    expect(setSiteReadiness).not.toHaveBeenCalled();
+    expect(serviceCalled).toBe(false);
+  });
+
 
   it("shows loading and then success UI", async () => {
     server.use(
@@ -67,9 +86,8 @@ describe("LandingPage", () => {
 
     render(<LandingPage />);
     await screen.findByText(/Waiting for Migration Assistant/i);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument()
-    , {timeout: 11_000});
+    await waitFor(() => expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument(), {timeout: 11_000});
     expect(callCount).toBe(3);
+    expect(setSiteReadiness).toHaveBeenCalledWith(true);
   });
 });

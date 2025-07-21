@@ -5,6 +5,7 @@ import { Box } from "@cloudscape-design/components";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
+import { withTimeLimit } from "@/utils/async";
 
 export default function DefaultPage() {
   const router = useRouter();
@@ -16,7 +17,7 @@ export default function DefaultPage() {
       }
 
       try {
-        const res = await systemHealth();
+        const res = await withTimeLimit(systemHealth(), 5000);
         if (res.data?.status === "ok") {
           setSiteReadiness(true);
           return;
