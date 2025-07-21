@@ -16,7 +16,9 @@ public class FilterScheme {
             "data-streams@",
             "ecs@",
             "elastic-connectors-",
+            "elastic_agent.",
             "ilm-history-",
+            "logs-elastic_agent",
             "metrics-elastic_agent",
             "profiling-",
             "synthetics-"
