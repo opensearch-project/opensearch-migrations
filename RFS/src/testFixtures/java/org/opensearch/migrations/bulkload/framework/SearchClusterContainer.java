@@ -204,10 +204,59 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "/usr/share/elasticsearch/config/elasticsearch.yml",
         "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
     );
+    public static final ContainerVersion ES_V2_3 = new OlderElasticsearchVersion(
+            "elasticsearch:2.3.5",
+            Version.fromString("ES 2.3.5"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
+    public static final ContainerVersion ES_V2_2 = new OlderElasticsearchVersion(
+            "elasticsearch:2.2.2",
+            Version.fromString("ES 2.2.2"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
+    public static final ContainerVersion ES_V2_1 = new OlderElasticsearchVersion(
+            "elasticsearch:2.1.2",
+            Version.fromString("ES 2.1.2"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
+    public static final ContainerVersion ES_V2_0 = new OlderElasticsearchVersion(
+            "elasticsearch:2.0.2",
+            Version.fromString("ES 2.0.2"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
 
     public static final ContainerVersion ES_V1_7_6 = new OlderElasticsearchVersion(
             "elasticsearch:1.7.6",
             Version.fromString("ES 1.7.6"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
+    public static final ContainerVersion ES_V1_6 = new OlderElasticsearchVersion(
+            "elasticsearch:1.6.2",
+            Version.fromString("ES 1.6.2"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
+    public static final ContainerVersion ES_V1_5 = new OlderElasticsearchVersion(
+            "elasticsearch:1.5.2",
+            Version.fromString("ES 1.5.2"),
+            // This version of doesn't support path.repo based via env variables, passing this value via config
+            "/usr/share/elasticsearch/config/elasticsearch.yml",
+            "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
+    );
+    public static final ContainerVersion ES_V1_0 = new OlderElasticsearchVersion(
+            "elasticsearch:1",
+            Version.fromString("ES 1.0"),
             // This version of doesn't support path.repo based via env variables, passing this value via config
             "/usr/share/elasticsearch/config/elasticsearch.yml",
             "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\""
