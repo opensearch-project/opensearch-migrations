@@ -13,9 +13,24 @@ def dependencyFiles = files(
     "Pipfile",
     "Pipfile.lock"
 ).filter { it.exists() }
+def venv = layout.projectDir.dir(".venv")
+
+// Needed dereferenced pointer for configuration cache
 def projectDirRef = projectDir
 
+tasks.register('preparePipenv') {
+    inputs.files(dependencyFiles)
+    outputs.dir(venv)
+
+    doLast {
+        ['pipenv', 'install', '--dev'].execute(null, projectDirRef).waitFor()
+        logger.info("Ran pipenv install")
+    }
+}
+
 tasks.register('startApiServer') {
+    dependsOn 'preparePipenv'
+
     doLast {
         def command = "pipenv run gunicorn console_link.api.main:app -k uvicorn.workers.UvicornWorker -w 1 -b 127.0.0.1:${apiPort}"
         def proc = command.execute(null, projectDirRef)
@@ -36,6 +51,8 @@ tasks.register('downloadOpenApiSpec', de.undercouch.gradle.tasks.download.Downlo
 }
 
 tasks.register('stopApiServer') {
+    dependsOn 'preparePipenv'
+
     doLast {
         def pidFile = new File(serverPidFile)
         if (pidFile.exists()) {
