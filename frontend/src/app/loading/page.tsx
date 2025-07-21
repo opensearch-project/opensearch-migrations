@@ -62,21 +62,19 @@ export default function LandingPage() {
               Enter
             </Button>
           ) : (
-            <>
-              <Alert type="info">
-                <Box variant="span" display="inline">
-                  <Spinner size="normal" />{" "}
-                  <Box variant="span" margin={{ left: "xs" }}>
-                    Waiting for Migration Assistant to be ready...
-                  </Box>
-                  {errorMessage && (
-                    <ExpandableSection headerText="Details">
-                      <pre>Error Message: {errorMessage}</pre>
-                    </ExpandableSection>
-                  )}
+            <Alert type="info">
+              <Box variant="span" display="inline">
+                <Spinner size="normal" />{" "}
+                <Box variant="span" margin={{ left: "xs" }}>
+                  Waiting for Migration Assistant to be ready...
                 </Box>
-              </Alert>
-            </>
+                {errorMessage && (
+                  <ExpandableSection headerText="Details">
+                    <pre>Error Message: {errorMessage}</pre>
+                  </ExpandableSection>
+                )}
+              </Box>
+            </Alert>
           )}
         </SpaceBetween>
       </Container>

@@ -37,7 +37,9 @@ tasks.register('startApiServer') {
         sleep 2000
 
         logger.info("Server started with ${command}, pid: ${proc.pid()}")
-        new File(serverPidFile).text = "${proc.pid()}"
+        def pidFile = new File(serverPidFile)
+        pidFile.parentFile.mkdirs()
+        pidFile.text = "${proc.pid()}"
     }
 }
 
