@@ -22,17 +22,6 @@ class ClusterVersionCombinationUnsupported(Exception):
         super().__init__(self.message)
 
 
-def check_ma_system_health():
-    print("check_ma_system_health")
-    resp = requests.get("http://127.0.0.1:80/api/system/health")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ok"
-    assert "checks" in data
-    assert all(val == "ok" for val in data["checks"].values())
-    print("check_ma_system_health complete")
-
-
 class MATestBase:
     def __init__(self, console_config_path: str, console_link_env: Environment, unique_id: str, description: str,
                  migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL, MigrationType.CAPTURE_AND_REPLAY],
