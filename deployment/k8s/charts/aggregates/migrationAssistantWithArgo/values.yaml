@@ -316,7 +316,7 @@ charts:
           
           [FILTER]
               Name               parser
-              Match              fluentbit-*
+              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(etcd|run-console|latch|create-rs|delete-rs)-.*$
               Key_Name           log
               Parser             logfmt_parser
               Preserve_Key       On
@@ -324,7 +324,7 @@ charts:
       
           [FILTER]
               Name               parser
-              Match              fluentbit-*-rfs-*
+              Match              fluentbit-*-reindex-from-snapshot-*
               Key_Name           log
               Parser             java_log_parser
               Preserve_Key       On

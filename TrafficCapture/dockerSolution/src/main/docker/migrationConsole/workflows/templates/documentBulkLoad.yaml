@@ -219,7 +219,7 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            name: "{{inputs.parameters.session-name}}-rfs"
+            name: "{{inputs.parameters.session-name}}-reindex-from-snapshot"
             labels:
               workflows.argoproj.io/workflow: "{{workflow.name}}"
           spec:
@@ -428,4 +428,4 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            name: "{{inputs.parameters.name}}-rfs"
+            name: "{{inputs.parameters.name}}-reindex-from-snapshot"
