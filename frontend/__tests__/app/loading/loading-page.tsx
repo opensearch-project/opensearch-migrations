@@ -27,7 +27,7 @@ describe("LandingPage", () => {
     server.use(
       http.get("http://localhost/system/health", () => {
         serviceCalled = true;
-        HttpResponse.json({status: "ok", checks: {} });
+        HttpResponse.json({ status: "ok", checks: {} });
       })
     );
 
@@ -39,16 +39,17 @@ describe("LandingPage", () => {
     expect(serviceCalled).toBe(false);
   });
 
-
   it("shows loading and then success UI", async () => {
     server.use(
-      http.get("http://localhost/system/health", () => 
-        HttpResponse.json({status: "ok", checks: {} })
+      http.get("http://localhost/system/health", () =>
+        HttpResponse.json({ status: "ok", checks: {} })
       )
     );
 
     render(<LandingPage />);
-    expect(screen.getByText(/Waiting for Migration Assistant/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Waiting for Migration Assistant/i)
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument()
     );
@@ -57,8 +58,8 @@ describe("LandingPage", () => {
 
   it("shows error details on failure response", async () => {
     server.use(
-      http.get("http://localhost/system/health", () => 
-        HttpResponse.json({status: "error", checks: {} }, {status: 503})
+      http.get("http://localhost/system/health", () =>
+        HttpResponse.json({ status: "error", checks: {} }, { status: 503 })
       )
     );
 
@@ -73,20 +74,29 @@ describe("LandingPage", () => {
     let callCount = 0;
     server.use(
       http.get("http://localhost/system/health", () => {
-        switch(++callCount) {
+        switch (++callCount) {
           case 1:
             throw new Error("Connection Unavailable");
           case 2:
-            return HttpResponse.json({status: "error", checks: { count: callCount } }, {status: 503})
+            return HttpResponse.json(
+              { status: "error", checks: { count: callCount } },
+              { status: 503 }
+            );
           default:
-            return HttpResponse.json({status: "ok", checks: {} })
+            return HttpResponse.json({ status: "ok", checks: {} });
         }
       })
     );
 
     render(<LandingPage />);
     await screen.findByText(/Waiting for Migration Assistant/i);
-    await waitFor(() => expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument(), {timeout: 11_000});
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole("button", { name: /enter/i })
+        ).toBeInTheDocument(),
+      { timeout: 11_000 }
+    );
     expect(callCount).toBe(3);
     expect(setSiteReadiness).toHaveBeenCalledWith(true);
   });
