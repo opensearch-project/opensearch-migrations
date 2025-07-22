@@ -27,8 +27,8 @@ class K8sReplayer(Replayer):
         return self.kubectl_runner.perform_scale_command(replicas=0)
 
     def get_status(self, *args, **kwargs) -> CommandResult:
-        logger.info("Getting status of K8s replayer")
         deployment_status = self.kubectl_runner.retrieve_deployment_status()
+        logger.info(f"Get status K8s replayer: {deployment_status}")
         if not deployment_status:
             return CommandResult(False, "Failed to get deployment status for Replayer")
         status_str = str(deployment_status)
