@@ -2,6 +2,7 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Callable, Dict
+from console_link.environment import Environment
 import os
 
 system_router = APIRouter(
@@ -31,8 +32,22 @@ def check_shared_logs_config() -> str:
     return HealthStatus.ok
 
 
+def check_env_config() -> str:
+    env_config = "/config/migration_services.yaml"
+    if not os.path.exists(env_config):
+        raise FileNotFoundError(f"Environment config not found: {env_config}")
+    
+    try:
+        Environment(env_config)
+    except Exception as e:
+        raise Exception(f"Unable to load environment configuration due to issue: {e}")
+
+    return HealthStatus.ok
+
+
 HEALTH_CHECKS: Dict[str, Callable[[], str]] = {
     "shared_logs_config": check_shared_logs_config,
+    "environment_config": check_env_config,
 }
 
 
