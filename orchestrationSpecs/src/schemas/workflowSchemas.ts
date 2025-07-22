@@ -62,12 +62,16 @@ class UnifiedScopeBuilder<SingleScope extends Scope = Scope> extends ScopeBuilde
     }
 }
 
-export class WFBuilder<S extends Scope = Scope> extends UnifiedScopeBuilder<Scope> {
-    static createEmpty(): WFBuilder {
+/**
+ * Entry-point to build a top-level K8s resource.  Allows the addition of workflow parameters
+ * and then transitions to the repeated addition of templates with the TemplateChainer
+ */
+export class WFBuilder<S extends Scope = Scope> extends UnifiedScopeBuilder<S> {
+    static createEmpty(): WFBuilder<{}> {
         return new WFBuilder({});
     }
 
-    addParams(params: InputParametersRecord) {
+    addParams<P extends InputParametersRecord>(params: P) {
         const wfp = ({"workflowParams": params});
         return super.addToBothWithCtor(
             () => wfp,
@@ -76,14 +80,21 @@ export class WFBuilder<S extends Scope = Scope> extends UnifiedScopeBuilder<Scop
     }
 }
 
-
+/**
+ * Builds the top-level workflow one template at a time, via a TemplateBuilder instance. This implementation tracks two different scopes - a public one that is pushed down to all new Templates
+ * to be constructed that includes previous template's inputs/outputs + workflow parameters as well as the
+ * entire scope.  The first scope is passed to the TemplateBuilder so that it can be used to compile check
+ * all the templates, asserting that they only use exposed variables.  The second scope is used to generate
+ * the final resource.
+ */
 export class TemplateChainer<SigScope extends Scope = Scope, FullScope extends Scope = Scope>
     extends ScopeBuilder<SigScope, FullScope>
 {
     addTemplate<
         NSS extends Scope,
-        NFS extends Scope
-    >(name: string, fn: (tb: TemplateBuilder<SigScope>) => TemplateBuilder<NSS>) {
+        NFS extends Scope,
+        STB extends SpecificTemplateBuilder<NSS, NFS>
+    >(name: string, fn: (tb: TemplateBuilder<SigScope>) => STB) {
         // Create a template-scoped builder that exposes workflowParams and inputs separately
         const templateScope = {
             ...this.sigScope,
@@ -109,6 +120,12 @@ export class TemplateChainer<SigScope extends Scope = Scope, FullScope extends S
     }
 }
 
+/**
+ * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
+ * as well as newly created inputs/outputs for this template.  To define a specific template, use one of
+ * the builder methods, which, like `addTemplate` will return a new builder for that type of template
+ * receives the specification up to that point.
+ */
 export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedScopeBuilder<SingleScope> {
     addOptional<T>(name: string,
         defaultValueFromScopeFn: (scope: SingleScope) => T,
@@ -127,7 +144,7 @@ export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedS
         }), (sigScope) => new TemplateBuilder(sigScope));
     }
 
-    addRequired(name: string, type: ZodType<any>, description?: string) {
+    addRequired(name: string, type: any, description?: string) {
         const param: InputParamDef<any, true> = {
             type: type as any,
             description: description,
@@ -138,6 +155,21 @@ export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedS
                 [name]: param
             }
         }), (sigScope) => new TemplateBuilder(sigScope));
+    }
+}
+
+export class SpecificTemplateBuilder<
+    SigScope extends Scope,
+    FullScope extends Scope> extends ScopeBuilder<SigScope, FullScope> {
+
+}
+
+export class StepsTemplateBuilder<
+    SigScope extends Scope,
+    FullScope extends Scope>
+    extends SpecificTemplateBuilder<SigScope, FullScope> {
+    addStep() {
+        return this;
     }
 }
 

@@ -14,12 +14,14 @@ import {EverythingToRecordScope, getAlwaysMatchPredicate, sameMatchingItems} fro
 export const TLH = WFBuilder.createEmpty()
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
-            .addOptional("prefix", (s=> s.workflowParams), "no desc" )
-            .addRequired("next", z.string() as any)
-        // .addOptional("a", s=>s.next+"wow")
+            .addOptional("good", (s=> ""+s.workflowParams.etcdUser.defaultValue), "no desc" )
+            //.addOptional("bad", (s=> ""+s.workflowParams.main), "no desc" )
+            .addRequired("next", z.string())
+            // .addSteps(sb => sb
+            //     //.getSigScope().inputs.main
+            //     .addStep(/**/))
     )
-    .addTemplate("other", t => t
-    )
+    .addTemplate("other", t => t)
     .getFullScope();
 // .
 // .add(s=> ({}))
