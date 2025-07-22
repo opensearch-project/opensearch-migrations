@@ -5,8 +5,8 @@ plugins {
 
 def apiPort = 8099 // Not a commonly used
 def openapiUrl = "http://127.0.0.1:${apiPort}/openapi.json"
-def serverPidFile = "${buildDir}/fastapi.pid"
-def openapiOutFile = "${buildDir}/openapi.json"
+def serverPidFile = layout.buildDirectory.file("fastapi.pid")
+def openapiOutFile = layout.buildDirectory.file("openapi.json")
 
 def pythonSources = fileTree(dir: projectDir, include: '**/*.py')
 def dependencyFiles = files(
@@ -37,7 +37,7 @@ tasks.register('startApiServer') {
         sleep 2000
 
         logger.info("Server started with ${command}, pid: ${proc.pid()}")
-        def pidFile = new File(serverPidFile)
+        def pidFile = serverPidFile.get().asFile
         pidFile.parentFile.mkdirs()
         pidFile.text = "${proc.pid()}"
     }
@@ -56,7 +56,7 @@ tasks.register('stopApiServer') {
     dependsOn 'preparePipenv'
 
     doLast {
-        def pidFile = new File(serverPidFile)
+        def pidFile = serverPidFile.get().asFile
         if (pidFile.exists()) {
             def pid = pidFile.text.trim()
             logger.info("Killing FastAPI server with PID $pid")

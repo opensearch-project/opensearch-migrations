@@ -33,11 +33,9 @@ def buildOutputs = [
     'out'
 ]
 
-def generatedApiClientOutputs = ""
-
-def backendApiProject = gradle.includedBuild('console_link')
+def backendApiProject = project(':console_link')
 tasks.register('syncBackendClientDefinition', Copy) {
-    dependsOn backendApiProject.task(':fetchOpenApiSpec')
+    dependsOn backendApiProject.tasks.named('fetchOpenApiSpec')
     from "${backendApiProject.projectDir}/build/openapi.json"
     into "$buildDir"
 }
