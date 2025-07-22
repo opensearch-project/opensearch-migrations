@@ -118,29 +118,27 @@ export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedS
             defaultValue: defaultValueFromScopeFn(this.scope),
             description: description
         });
-        
+
         return super.addToBothWithCtor(() => ({
-            inputs: { 
-                ...((this.sigScope as any).inputs || {}), 
-                [name]: param 
-            } 
+            inputs: {
+                ...((this.sigScope as any).inputs || {}),
+                [name]: param
+            }
         }), (sigScope) => new TemplateBuilder(sigScope));
     }
 
-    // addRequired<T>(name: string, type: ZodType<T>, description?: string) {
-    //     const param = defineRequiredParam({type, description});
-    //     return super.addWithCtor(() => ({
-    //         inputs: {
-    //             ...((this.sigScope as any).inputs || {}),
-    //             [name]: param
-    //         }
-    //     }), () => ({
-    //         inputs: {
-    //             ...((this.fullScope as any).inputs || {}),
-    //             [name]: param
-    //         }
-    //     }), (sigScope, fullScope) => new TemplateBuilder(sigScope, fullScope));
-    // }
+    addRequired(name: string, type: ZodType<any>, description?: string) {
+        const param: InputParamDef<any, true> = {
+            type: type as any,
+            description: description,
+        };
+        return super.addToBothWithCtor(() => ({
+            inputs: {
+                ...((this.sigScope as any).inputs || {}),
+                [name]: param
+            }
+        }), (sigScope) => new TemplateBuilder(sigScope));
+    }
 }
 
 export type OuterWorkflowTemplate<

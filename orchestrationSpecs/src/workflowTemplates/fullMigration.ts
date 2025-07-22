@@ -14,18 +14,21 @@ import {EverythingToRecordScope, getAlwaysMatchPredicate, sameMatchingItems} fro
 export const TLH = WFBuilder.createEmpty()
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
-            .addOptional("prefix", (s=>s.workflowParams), "no desc" )
-            .addOptional("next", (s => "prefix-"+s.prefix))
-            .addOptional("a", s=>s.next+"wow"))
+            .addOptional("prefix", (s=> s.workflowParams), "no desc" )
+            .addRequired("next", z.string() as any)
+        // .addOptional("a", s=>s.next+"wow")
+    )
+    .addTemplate("other", t => t
+    )
     .getFullScope();
-    // .
-    // .add(s=> ({}))
-    // .add(s => ({ "params": CommonWorkflowParameters}))
-    //
-    // .addParams(CommonWorkflowParameters)
-    // .
-    //.build();
-    ;
+// .
+// .add(s=> ({}))
+// .add(s => ({ "params": CommonWorkflowParameters}))
+//
+// .addParams(CommonWorkflowParameters)
+// .
+//.build();
+;
 
 export const FM = WFBuilder.createEmpty()
     .addParams(CommonWorkflowParameters)
