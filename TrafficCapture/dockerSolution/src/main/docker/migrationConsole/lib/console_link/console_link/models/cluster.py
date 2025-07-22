@@ -191,7 +191,6 @@ class Cluster:
         # Extract query parameters from kwargs
         params = kwargs.get('params', {})
 
-        logger.info(f"Performing request: {method.name} {self.endpoint}{path}")
         r = session.request(
             method.name,
             f"{self.endpoint}{path}",
@@ -202,7 +201,7 @@ class Cluster:
             headers=request_headers,
             timeout=timeout
         )
-        logger.info(f"Received response: {r.status_code} {method.name} {self.endpoint}{path} - {r.text[:1000]}")
+        logger.info(f"call_api request {method.name} {self.endpoint}{path}, response: {r.status_code} {r.text[:1000]}")
         if raise_error:
             r.raise_for_status()
         return r
