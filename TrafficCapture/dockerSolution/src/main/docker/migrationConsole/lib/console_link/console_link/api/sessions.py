@@ -19,9 +19,12 @@ sessions_table = db.table("sessions")
 def is_url_safe(name: str) -> bool:
     return re.match(r'^[a-zA-Z0-9_\-]+$', name) is not None
 
+def unexpected_length(name: str) -> bool:
+    return len(name) <= 0 or len(name) > 50
+
 
 class SessionBase(BaseModel):
-    name: constr(min_length=1, max_length=50)
+    name: str
     model_config = {
         "arbitrary_types_allowed": True,
     }
@@ -63,18 +66,24 @@ def create_session(session: SessionBase):
     if not is_url_safe(session.name):
         raise HTTPException(status_code=400, detail="Session name must be URL-safe (letters, numbers, '_', '-').")
 
+    if unexpected_length(session.name):
+        raise HTTPException(status_code=400, detail="Session name less than 50 characters in length.")
+
     SessionQuery = Query()
     existing = sessions_table.get(SessionQuery.name == session.name)
     if existing:
         raise HTTPException(status_code=409, detail="Session already exists.")
 
-    now = datetime.now(UTC)
-    session = Session(
-        name=session.name,
-        created=now,
-        updated=now,
-    )
-    sessions_table.insert(session.model_dump())
+    try:
+        now = datetime.now(UTC)
+        session = Session(
+            name=session.name,
+            created=now,
+            updated=now,
+        )
+        sessions_table.insert(session.model_dump())
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to create session: {e}")
     return session
 
 
