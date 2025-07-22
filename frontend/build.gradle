@@ -36,8 +36,8 @@ def buildOutputs = [
 def backendApiProject = project(':console_link')
 tasks.register('syncBackendClientDefinition', Copy) {
     dependsOn backendApiProject.tasks.named('fetchOpenApiSpec')
-    from "${backendApiProject.projectDir}/build/openapi.json"
-    into "$buildDir"
+    from backendApiProject.layout.buildDirectory.file('openapi.json')
+    into layout.buildDirectory.file('openapi')
 }
 
 tasks.register('generateBackendClient', NpmTask) {
