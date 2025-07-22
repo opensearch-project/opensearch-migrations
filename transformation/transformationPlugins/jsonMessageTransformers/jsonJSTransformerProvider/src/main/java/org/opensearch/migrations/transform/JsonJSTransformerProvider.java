@@ -1,6 +1,8 @@
 package org.opensearch.migrations.transform;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -15,6 +17,7 @@ import lombok.SneakyThrows;
 public class JsonJSTransformerProvider implements IJsonTransformerProvider {
 
     public static final String SCRIPT_FILE_KEY = "initializationScriptFile";
+    public static final String RESOURCE_PATH_KEY = "initializationResourcePath";
     public static final String INLINE_SCRIPT_KEY = "initializationScript";
     public static final String BINDINGS_OBJECT = "bindingsObject";
 
@@ -54,6 +57,7 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, " +
             "with keys: " + INLINE_SCRIPT_KEY + " or " + SCRIPT_FILE_KEY + ", " + BINDINGS_OBJECT + ".\n" +
             SCRIPT_FILE_KEY + " is a string pointing to a full file path to a JavaScript file to load. \n" +
+            RESOURCE_PATH_KEY + " is a string pointing to a resource path to a JavaScript file in a jar on the classpath. \n" +
             INLINE_SCRIPT_KEY + " is a string consisting of Javascript which may define functions and ends in an evaluation that returns" +
             " a main function which takes in the " + BINDINGS_OBJECT + " and returns a transform function which takes in a json object and returns the transformed object.\n" +
             BINDINGS_OBJECT + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array," +
@@ -64,7 +68,7 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
     @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
-        var exclusiveScriptParameters = List.of(SCRIPT_FILE_KEY, INLINE_SCRIPT_KEY)
+        var exclusiveScriptParameters = List.of(SCRIPT_FILE_KEY, INLINE_SCRIPT_KEY, RESOURCE_PATH_KEY)
             .stream()
             .map(key -> "\"" + key + "\"")
             .collect(Collectors.joining(","));
@@ -79,6 +83,18 @@ public class JsonJSTransformerProvider implements IJsonTransformerProvider {
                 script = Files.readString(Path.of(scriptFile));
             } catch (IOException ioe) {
                 throw new IllegalArgumentException("Failed to load script file '" + scriptFile + "'. " + getConfigUsageStr(), ioe);
+            }
+        }
+
+        String resourceFile = (String) config.getOrDefault(RESOURCE_PATH_KEY, null);
+        if (resourceFile != null) {
+            try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourceFile)) {
+                if (is == null) {
+                    throw new IllegalArgumentException("Resource not found: " + resourceFile);
+                }
+                script = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException ioe) {
+                throw new IllegalArgumentException("Failed to load script resource '" + resourceFile + "'. " + getConfigUsageStr(), ioe);
             }
         }
 
