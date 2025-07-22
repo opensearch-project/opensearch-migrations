@@ -183,7 +183,7 @@ spec:
             template: delete-rs
             arguments:
               parameters:
-                - name: name
+                - name: session-name
                   value: "{{inputs.parameters.session-name}}"
 
 
@@ -420,7 +420,7 @@ spec:
     - name: delete-rs
       inputs:
         parameters:
-          - name: name
+          - name: session-name
       resource:
         action: delete
         flags: ["--ignore-not-found"]
@@ -428,4 +428,4 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            name: "{{inputs.parameters.name}}-reindex-from-snapshot"
+            name: "{{inputs.parameters.session-name}}-reindex-from-snapshot"
