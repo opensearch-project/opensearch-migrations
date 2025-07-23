@@ -144,7 +144,7 @@ class ConnectionContextTest {
         assertNull(targetArgs.getAwsRegion());
         assertNull(targetArgs.getAwsServiceSigningName());
         assertFalse(targetArgs.isInsecure());
-        assertFalse(targetArgs.getCompressionEnabled());
+        assertNull(targetArgs.getCompressionEnabled());
     }
 
     @Test
