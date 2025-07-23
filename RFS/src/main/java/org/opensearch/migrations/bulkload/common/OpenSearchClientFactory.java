@@ -89,7 +89,7 @@ public class OpenSearchClientFactory {
             .major(2)
             .build();
 
-    public Boolean getCompressionEnabled() {
+    private Boolean getCompressionEnabled() {
         log.atInfo().setMessage("Checking compression on cluster").log();
         return client.getAsync("_cluster/settings?include_defaults=true", null)
                 .flatMap(this::checkCompressionFromResponse)
