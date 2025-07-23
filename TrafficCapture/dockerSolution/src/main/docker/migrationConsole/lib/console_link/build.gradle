@@ -19,6 +19,8 @@ def venv = layout.projectDir.dir(".venv")
 def projectDirRef = projectDir
 
 tasks.register('preparePipenv') {
+    mustRunAfter tasks.named('spotlessCheck')
+    mustRunAfter tasks.named('spotlessApply')
     inputs.files(dependencyFiles)
     outputs.dir(venv)
 
