@@ -75,10 +75,9 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
             }
         }
 
-        from fileTree("src/main/docker/${projectName}") {
-            exclude '**/build/**'
-            exclude '**/.venv/**'
-        }
+        from(project.layout.projectDirectory.dir("src/main/docker/${projectName}").asFileTree.matching {
+            exclude("**/build/**", "**/.venv/**")
+        })
     }
 
     // Collect assemble tasks from libraries and applications
