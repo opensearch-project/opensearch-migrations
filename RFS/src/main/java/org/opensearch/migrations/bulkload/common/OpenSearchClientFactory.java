@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.common;
 
-
 import java.lang.reflect.InvocationTargetException;
 import java.util.HashSet;
 import java.util.Optional;
@@ -30,7 +29,7 @@ public class OpenSearchClientFactory {
     private ConnectionContext connectionContext;
     private Version version;
     RestClient client;
- 
+
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
         if (connectionContext == null) {
             throw new IllegalArgumentException("Connection context was not provided in constructor.");
@@ -40,30 +39,23 @@ public class OpenSearchClientFactory {
     }
 
     public OpenSearchClient determineVersionAndCreate() {
-        if (version == null) {
-            version = getClusterVersion();
-        }
-
-        if (connectionContext.getCompressionSupported() == null) {
-            var compressionSupported = getCompressionEnabled();
-            connectionContext.setCompressionSupported(compressionSupported);
-        }
-
-        var clientClass = getOpenSearchClientClass(version);
-        try {
-            return clientClass.getConstructor(ConnectionContext.class, Version.class)
-                    .newInstance(connectionContext, version);
-        } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
-        }
+        return determineVersionAndCreate(null, null);
     }
 
     public OpenSearchClient determineVersionAndCreate(RestClient restClient, FailedRequestsLogger failedRequestsLogger) {
         if (version == null) {
             version = getClusterVersion();
         }
+        if (connectionContext.getCompressionSupported() == null) {
+            var compressionSupported = getCompressionEnabled();
+            connectionContext.setCompressionSupported(compressionSupported);
+        }
         var clientClass = getOpenSearchClientClass(version);
         try {
+            if (restClient == null && failedRequestsLogger == null) {
+                return clientClass.getConstructor(ConnectionContext.class, Version.class)
+                        .newInstance(connectionContext, version);
+            }
             return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class)
                     .newInstance(restClient, failedRequestsLogger, version);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
@@ -82,8 +74,8 @@ public class OpenSearchClientFactory {
         throw new IllegalArgumentException("Unsupported version: " + version);
     }
 
-    /** Amazon OpenSearch Serverless cluster don't have a version number, but
-     * it is closely aligned with the latest open-source OpenSearch 2.X */
+    /** Amazon OpenSearch Serverless clusters don't have a version number, but
+     * they are closely aligned with the latest open-source OpenSearch 2.X */
     private static final Version AMAZON_SERVERLESS_VERSION = Version.builder()
             .flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH)
             .major(2)
@@ -139,7 +131,7 @@ public class OpenSearchClientFactory {
                 .onErrorResume(e -> {
                     log.atWarn()
                             .setCause(e)
-                            .setMessage("Unable to CompatibilityMode or determine the version from a plugin, falling back to version {}")
+                            .setMessage("Unable to determine CompatibilityMode or version from plugin, falling back to version {}")
                             .addArgument(versionFromRootApi).log();
                     return Mono.just(versionFromRootApi);
                 })
@@ -172,55 +164,48 @@ public class OpenSearchClientFactory {
     }
 
     Mono<Boolean> checkCompatibilityModeFromResponse(HttpResponse resp) {
-        if (resp.statusCode != 200) {
-            return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
-        }
-        try {
-            var body = Optional.of(objectMapper.readTree(resp.body));
-            var persistentlyInCompatibilityMode = inCompatibilityMode(body.map(n -> n.get("persistent")));
-            var transientlyInCompatibilityMode = inCompatibilityMode(body.map(n -> n.get("transient")));
-            return Mono.just(persistentlyInCompatibilityMode || transientlyInCompatibilityMode);
-        } catch (Exception e) {
-            log.error("Unable to determine if the cluster is in compatibility mode", e);
-            return Mono.error(new OpenSearchClient.OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
-        }
+        return checkBooleanSettingFromResponse(
+                resp,
+                "compatibility",
+                "override_main_response_version",
+                "Unable to determine if the cluster is in compatibility mode");
     }
-
 
     Mono<Boolean> checkCompressionFromResponse(HttpResponse resp) {
+        return checkBooleanSettingFromResponse(
+                resp,
+                "http_compression",
+                "enabled",
+                "Unable to determine if compression is supported");
+    }
+
+    private Mono<Boolean> checkBooleanSettingFromResponse(
+            HttpResponse resp,
+            String primaryKey,
+            String secondaryKey,
+            String errorLogMessage) {
+
         if (resp.statusCode != 200) {
             return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
         }
         try {
             var body = Optional.of(objectMapper.readTree(resp.body));
-            var persistentlyCompressionSupported = isCompressionSupported(body.map(n -> n.get("persistent")));
-            var transientlyCompressionSupported = isCompressionSupported(body.map(n -> n.get("transient")));
-            return Mono.just(persistentlyCompressionSupported || transientlyCompressionSupported);
+            var persistentEnabled = isSettingEnabled(body.map(n -> n.get("persistent")), primaryKey, secondaryKey);
+            var transientEnabled = isSettingEnabled(body.map(n -> n.get("transient")), primaryKey, secondaryKey);
+            return Mono.just(persistentEnabled || transientEnabled);
         } catch (Exception e) {
-            log.error("Unable to determine if the cluster is in compatibility mode", e);
-            return Mono.error(new OpenSearchClient.OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
+            log.error(errorLogMessage, e);
+            return Mono.error(new OpenSearchClient.OperationFailed(errorLogMessage + " from response: " + e.getMessage(), resp));
         }
     }
 
-    private boolean isCompressionSupported(Optional<JsonNode> node) {
+    private boolean isSettingEnabled(Optional<JsonNode> node, String primaryKey, String secondaryKey) {
         return node.filter(n -> !n.isNull())
-                .map(n -> n.get("http_compression"))
+                .map(n -> n.get(primaryKey))
                 .filter(n -> !n.isNull())
-                .map(n -> n.get("enabled"))
+                .map(n -> n.get(secondaryKey))
                 .filter(n -> !n.isNull())
                 .map(JsonNode::asBoolean)
-                .orElse(false);
-    }
-
-
-
-    private boolean inCompatibilityMode(Optional<JsonNode> node) {
-        return node.filter(n -> !n.isNull())
-                .map(n -> n.get("compatibility"))
-                .filter(n -> !n.isNull())
-                .map(n -> n.get("override_main_response_version"))
-                .filter(n -> !n.isNull())
-                .map(n -> n.asBoolean())
                 .orElse(false);
     }
 
@@ -262,5 +247,4 @@ public class OpenSearchClientFactory {
             super(message, cause);
         }
     }
-
 }
