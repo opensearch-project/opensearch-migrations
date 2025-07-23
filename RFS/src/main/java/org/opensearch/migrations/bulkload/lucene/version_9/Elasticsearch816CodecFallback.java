@@ -35,7 +35,7 @@ public class Elasticsearch816CodecFallback extends Codec {
 
     @Override
     public StoredFieldsFormat storedFieldsFormat() {
-        return new Elasticsearch8CompatibleFieldsFormat();
+        return new Elasticsearch814ZstdFieldsFormat();
     }
 
     @Override

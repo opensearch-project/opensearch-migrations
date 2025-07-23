@@ -48,7 +48,7 @@ public class EndToEndCompressionTest extends SourceTestBase {
 
                             // TODO: Enable below tests once zstd and zstd_no_dict are supported on OS 2
                             // Add zstd and zstd_no_dict if OS version >= 2.9.0
-                            if (VersionMatchers.isOS_2_9_OrGreater.test(source.getVersion())) {
+                            if (VersionMatchers.equalOrGreaterThanOS_2_9.test(source.getVersion())) {
                                 log.atInfo().setMessage("Skipping OS 2 test with ZSTD since unsupported")
                                         .log();
 //                        args.add(Arguments.of(source, target, "zstd"));

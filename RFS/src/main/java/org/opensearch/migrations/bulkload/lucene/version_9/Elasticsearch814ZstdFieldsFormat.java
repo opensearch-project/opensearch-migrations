@@ -13,7 +13,7 @@ import shadow.lucene9.org.apache.lucene.store.Directory;
 import shadow.lucene9.org.apache.lucene.store.IOContext;
 
 @NoArgsConstructor
-public class Elasticsearch8CompatibleFieldsFormat extends StoredFieldsFormat {
+public class Elasticsearch814ZstdFieldsFormat extends StoredFieldsFormat {
     public static final String MODE_KEY = "Zstd814StoredFieldsFormat.mode";
 
     public StoredFieldsReader fieldsReader(Directory directory, SegmentInfo si, FieldInfos fn, IOContext context) throws IOException {
