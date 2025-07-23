@@ -183,7 +183,7 @@ spec:
             template: delete-rs
             arguments:
               parameters:
-                - name: name
+                - name: session-name
                   value: "{{inputs.parameters.session-name}}"
 
 
@@ -219,7 +219,9 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            generateName: rfs-
+            name: "{{inputs.parameters.session-name}}-reindex-from-snapshot"
+            labels:
+              workflows.argoproj.io/workflow: "{{workflow.name}}"
           spec:
             replicas: {{inputs.parameters.replicas}}
             selector:
@@ -229,6 +231,7 @@ spec:
               metadata:
                 labels:
                   app: bulk-loader
+                  workflows.argoproj.io/workflow: "{{workflow.name}}"
               spec:
                 volumes:
                 - name: shared-data
@@ -399,7 +402,7 @@ spec:
                   value: "{{inputs.parameters.migration-console-pull-policy}}"
                 - name: command
                   value: |
-                    set -x && 
+                    set -e && 
                     python -c '
                     import sys
                     from lib.console_link.console_link.environment import Environment
@@ -417,7 +420,7 @@ spec:
     - name: delete-rs
       inputs:
         parameters:
-          - name: name
+          - name: session-name
       resource:
         action: delete
         flags: ["--ignore-not-found"]
@@ -425,4 +428,4 @@ spec:
           apiVersion: apps/v1
           kind: ReplicaSet
           metadata:
-            name: "bulk-loader-{{inputs.parameters.name}}"
+            name: "{{inputs.parameters.session-name}}-reindex-from-snapshot"
