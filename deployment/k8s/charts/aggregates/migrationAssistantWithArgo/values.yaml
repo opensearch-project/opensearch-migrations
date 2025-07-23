@@ -272,47 +272,106 @@ charts:
           readOnly: true
 
       config:
+        customParsers: |
+          [PARSER]
+              Name               logfmt_parser
+              Format             logfmt
+          
+          [PARSER]
+              Name               java_log_parser
+              Format             regex
+              Regex              ^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?<level>[A-Z]+)\s+(?<source>[\w\d]+:\d+) - (?<msg>.*)$
+              Time_Key           time
+              Time_Format        %Y-%m-%d %H:%M:%S
+    
+
         inputs: |
           [INPUT]
-              Name             tail
-              Tag              kube.*
-              Path             /var/log/containers/*.log
-              multiline.parser docker, cri
-              Refresh_Interval 5
-              Mem_Buf_Limit    5MB
-              Skip_Long_Lines  Off
-              Skip_Empty_Lines On
+              Name               tail
+              Tag                kube.*
+              Path               /var/log/containers/*.log
+              multiline.parser   docker, cri
+              Refresh_Interval   5
+              Mem_Buf_Limit      5MB
+              Skip_Long_Lines    Off
+              Skip_Empty_Lines   On
 
         filters: |
           [FILTER]
-              Name             kubernetes
-              Match            kube.*
-              Kube_URL         https://kubernetes.default.svc:443
-              Kube_CA_File     /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-              Kube_Token_File  /var/run/secrets/kubernetes.io/serviceaccount/token
-              Kube_Tag_Prefix  kube.var.log.containers.
-              Merge_Log        On
-              Merge_Log_Key    log_processed
+              Name               kubernetes
+              Match              kube.*
+              Kube_URL           https://kubernetes.default.svc:443
+              Kube_CA_File       /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              Kube_Token_File    /var/run/secrets/kubernetes.io/serviceaccount/token
+              Kube_Tag_Prefix    kube.var.log.containers.
+              Merge_Log          On
+              Merge_Log_Key      log_processed
+              Annotations        Off
           
           [FILTER]
-              Name          rewrite_tag
-              Match         kube.*
-              Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
-              Emitter_Name  re_emitted
+              Name               rewrite_tag
+              Match              kube.*
+              Rule               $kubernetes['pod_name'] ^(.*)$ fluentbit-$1 false
+              Emitter_Name       re_emitted
           
           [FILTER]
-              Name          lua
-              Match         *
-              script        /fluentbit/scripts/trim.lua
-              call          trim_log
+              Name               parser
+              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(etcd|run-console|latch|create-rs|delete-rs)-.*$
+              Key_Name           log
+              Parser             logfmt_parser
+              Preserve_Key       On
+              Reserve_Data       On
+      
+          [FILTER]
+              Name               parser
+              Match              fluentbit-*-reindex-from-snapshot-*
+              Key_Name           log
+              Parser             java_log_parser
+              Preserve_Key       On
+              Reserve_Data       On
+          
+          [FILTER]
+              Name               lua
+              Match              fluentbit-*
+              script             /fluentbit/scripts/trim.lua
+              call               trim_log
+    
+          [FILTER]
+              Name               nest
+              Match              fluentbit-*
+              Operation          lift
+              Nested_under       kubernetes
+
+          [FILTER]
+              Name               nest
+              Match              fluentbit-*
+              Operation          lift
+              Nested_under       labels
+          
+          [FILTER]
+              Name               modify
+              Match              fluentbit-*
+              Rename             container_name container
+              Rename             container_image image
+              Rename             pod_name pod
+              Rename             namespace_name namespace
+              Rename             workflows.argoproj.io/workflow workflow
+              Remove             _p
+              Remove             docker_id
+              Remove             container_hash
+              Remove             pod-template-hash
+              Remove             workflows.argoproj.io/completed
+              Remove_regex       ^app\.kubernetes\.io
+              Remove_regex       ^batch\.kubernetes\.io
+              Move_to_start      log
 
         outputs: |
           [OUTPUT]
-              Name          file
-              Match         *
-              Path          /shared_logs
-              Format        ${OUTPUT_FORMAT}
-              Template      {log}
+              Name               file
+              Match              fluentbit-*
+              Path               /shared_logs
+              Format             ${OUTPUT_FORMAT}
+              Template           {log}
 
       serviceAccount:
         create: false
