@@ -42,6 +42,8 @@ def call(Map config = [:]) {
                 steps {
                     script {
                         git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                        // Remove any additional files in git tree that are not listed in .gitignore
+                        sh 'sudo --preserve-env git clean -fd'
                     }
                 }
             }
