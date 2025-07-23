@@ -15,8 +15,8 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import lombok.Getter;
 
 public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
-
     private Version version;
+    
     @Getter
     private SourceRepo sourceRepo;
 
@@ -69,13 +69,19 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
     }
 
     @Override
+    public int getBufferSizeInBytes() {
+        return ElasticsearchConstants_ES_5_4.BUFFER_SIZE_IN_BYTES;
+    }
+
+    @Override
     public Version getVersion() {
         return version;
     }
 
     @Override
-    public int getBufferSizeInBytes() {
-        return ElasticsearchConstants_ES_5_4.BUFFER_SIZE_IN_BYTES;
+    public String toString() {
+        // These values could be null, don't want to crash during toString
+        return String.format("Snapshot: %s %s", version, sourceRepo);
     }
 
     private SnapshotRepo.Provider getSnapshotRepo() {
@@ -83,11 +89,5 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
             throw new UnsupportedOperationException("initialize(...) must be called");
         }
         return new SnapshotRepoProvider_ES_5_4(sourceRepo);
-    }
-
-    @Override
-    public String toString() {
-        // These values could be null, don't want to crash during toString
-        return String.format("Snapshot: %s %s", version, sourceRepo);
     }
 }

@@ -12,8 +12,8 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import lombok.Getter;
 
 public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
-
     private Version version;
+    
     @Getter
     private SourceRepo sourceRepo;
 

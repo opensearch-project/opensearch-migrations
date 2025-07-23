@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
 
-import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -15,8 +14,8 @@ import lombok.Getter;
 
 
 public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
-
     private Version version;
+    
     @Getter
     private SourceRepo sourceRepo;
 
@@ -27,8 +26,7 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     @Override
     public boolean looseCompatibleWith(Version version) {
-        return UnboundVersionMatchers.isBelowES_5_X
-            .or(VersionMatchers.isES_2_X)
+        return VersionMatchers.isES_2_X
             .test(version);
     }
 
@@ -39,13 +37,19 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     }
 
     @Override
+    public ClusterSnapshotReader initialize(Version version) {
+        this.version = version;
+        return this;
+    }
+
+    @Override
     public GlobalMetadata.Factory getGlobalMetadata() {
         return new GlobalMetadataFactory_ES_2_4(getSnapshotRepo());
     }
 
     @Override
     public IndexMetadata.Factory getIndexMetadata() {
-        return new IndexMetadataFactory_ES_2_4((SnapshotRepoES24) getSnapshotRepo());
+        return new IndexMetadataFactory_ES_2_4(getSnapshotRepo());
     }
 
     @Override
@@ -71,12 +75,6 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
     @Override
     public Version getVersion() {
         return version;
-    }
-
-    @Override
-    public ClusterSnapshotReader initialize(Version version) {
-        this.version = version;
-        return this;
     }
 
     @Override

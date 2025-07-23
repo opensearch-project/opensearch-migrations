@@ -172,10 +172,12 @@ public class EndToEndTest extends SourceTestBase {
 
             // Check that the docs were migrated
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
+            boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
+            boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
 
-            // Check that that docs were migrated with routing
-            checkDocsWithRouting(sourceCluster, testDocMigrationContext);
-            checkDocsWithRouting(targetCluster, testDocMigrationContext);
+            // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
+            checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
+            checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
         } finally {
             deleteTree(localDirectory.toPath());
         }
@@ -201,7 +203,8 @@ public class EndToEndTest extends SourceTestBase {
 
     private void checkDocsWithRouting(
         SearchClusterContainer clusterContainer,
-        DocumentMigrationTestContext context) {
+        DocumentMigrationTestContext context,
+        boolean validateRoutingFieldOnResponse) {
         var clusterClient = new RestClient(ConnectionContextTestParams.builder()
             .host(clusterContainer.getUrl())
             .build()
@@ -212,11 +215,14 @@ public class EndToEndTest extends SourceTestBase {
         var requests = new SearchClusterRequests(context);
         var hits = requests.searchIndexByQueryString(clusterClient, "blog_2023", "active:true", "1");
 
-        Assertions.assertTrue(hits.isArray() && hits.size() == 2);
+        Assertions.assertTrue(hits.isArray());
+        Assertions.assertEquals(2, hits.size());
 
-        for (JsonNode hit : hits) {
-            String routing = hit.path("_routing").asText();
-            Assertions.assertEquals("1", routing);
+        if (validateRoutingFieldOnResponse) {
+            for (JsonNode hit : hits) {
+                String routing = hit.path("_routing").asText();
+                Assertions.assertEquals("1", routing);
+            }
         }
     }
     

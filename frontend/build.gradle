@@ -33,26 +33,29 @@ def buildOutputs = [
     'out'
 ]
 
-def generatedApiClientOutputs = ""
-
-def backendApiProject = gradle.includedBuild('console_link')
+def backendApiProject = project(':console_link')
 tasks.register('syncBackendClientDefinition', Copy) {
-    dependsOn backendApiProject.task(':fetchOpenApiSpec')
-    from "${backendApiProject.projectDir}/build/openapi.json"
-    into "$buildDir"
+    dependsOn backendApiProject.tasks.named('fetchOpenApiSpec')
+    from backendApiProject.layout.buildDirectory.file('openapi.json')
+    into layout.buildDirectory.dir('openapi')
+
+    outputs.file(layout.buildDirectory.file('openapi/openapi.json'))
 }
 
 tasks.register('generateBackendClient', NpmTask) {
+    dependsOn 'npmInstall'
     dependsOn 'syncBackendClientDefinition'
     group = 'build'
     description = 'Generates the TypeScript API client from openapi.json'
 
     args = ['run', 'openapi-ts']
+    inputs.file layout.buildDirectory.file('openapi/openapi.json')
+    outputs.dir layout.projectDirectory.dir('src/generated')
 }
 
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
-    dependsOn 'syncBackendClientDefinition'
+    dependsOn 'generateBackendClient'
     group = 'build'
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)

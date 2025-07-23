@@ -20,33 +20,13 @@ import lombok.RequiredArgsConstructor;
 
 @Getter
 public class SnapshotRepoData_ES_7_10 {
-    public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
-        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
-        try {
-            SnapshotRepoData_ES_7_10 data = mapper.readValue(
-                new File(filePath.toString()),
-                SnapshotRepoData_ES_7_10.class
-            );
-            data.filePath = filePath;
-            return data;
-        } catch (IOException e) {
-            throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
-        }
-    }
-
-    public static SnapshotRepoData_ES_7_10 fromRepo(SourceRepo repo) {
-        Path file = repo.getSnapshotRepoDataFilePath();
-        if (file == null) {
-            throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
-        }
-        return fromRepoFile(file);
-    }
-
     private Path filePath;
     private List<Snapshot> snapshots;
     private Map<String, RawIndex> indices;
+
     @JsonProperty("min_version")
     private String minVersion;
+    
     @JsonProperty("index_metadata_identifiers")
     private Map<String, String> indexMetadataIdentifiers;
 
@@ -88,5 +68,27 @@ public class SnapshotRepoData_ES_7_10 {
         private final String id;
         private final List<String> snapshots;
         private final List<String> shardGenerations;
+    }
+
+    public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
+        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
+        try {
+            SnapshotRepoData_ES_7_10 data = mapper.readValue(
+                new File(filePath.toString()),
+                SnapshotRepoData_ES_7_10.class
+            );
+            data.filePath = filePath;
+            return data;
+        } catch (IOException e) {
+            throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
+        }
+    }
+
+    public static SnapshotRepoData_ES_7_10 fromRepo(SourceRepo repo) {
+        Path file = repo.getSnapshotRepoDataFilePath();
+        if (file == null) {
+            throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
+        }
+        return fromRepoFile(file);
     }
 }

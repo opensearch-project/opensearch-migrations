@@ -6,6 +6,7 @@ import lombok.experimental.UtilityClass;
 
 @UtilityClass
 public class VersionMatchers {
+    public static final Predicate<Version> isES_1_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 1.7"));
     public static final Predicate<Version> isES_2_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 2.4"));
     public static final Predicate<Version> isES_5_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 5.6"));
     public static final Predicate<Version> equalOrBetween_ES_5_0_and_5_4 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 5.0"))
@@ -30,6 +31,8 @@ public class VersionMatchers {
     public static final Predicate<Version> isOS_3_X = VersionMatchers.matchesMajorVersion(Version.fromString("OS 3.0.0"));
     public static final Predicate<Version> isOS_2_19_OrGreater = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.19.0"))
                                                                     .or(VersionMatchers.isOS_3_X);
+    public static final Predicate<Version> equalOrGreaterThanOS_2_9 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("OS 2.9.0"))
+            .or(VersionMatchers.isOS_3_X);
     public static final Predicate<Version> anyOS = VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isOS_3_X);
 
     static Predicate<Version> matchesFlavor(final Version version) {
