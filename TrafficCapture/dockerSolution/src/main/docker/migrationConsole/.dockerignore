@@ -1,0 +1,7 @@
+**/.venv
+**/build
+**/.gradle
+**/.coverage
+
+**/.vscode
+**/.idea

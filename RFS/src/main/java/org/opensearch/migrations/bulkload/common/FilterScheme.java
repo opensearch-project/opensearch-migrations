@@ -16,7 +16,14 @@ public class FilterScheme {
             "data-streams@",
             "ecs@",
             "elastic-connectors-",
+            "elastic_agent.",
             "ilm-history-",
+            "logs-elastic_agent",
+            "logs-index_pattern",
+            "metricbeat-",
+            "metrics-elastic_agent",
+            "metrics-endpoint.",
+            "metrics-index_pattern",
             "profiling-",
             "synthetics-"
     );
@@ -24,6 +31,7 @@ public class FilterScheme {
     private static final List<String> EXCLUDED_SUFFIXES = Arrays.asList(
             "@ilm",
             "@mappings",
+            "@package",
             "@settings",
             "@template",
             "@tsdb-settings"
