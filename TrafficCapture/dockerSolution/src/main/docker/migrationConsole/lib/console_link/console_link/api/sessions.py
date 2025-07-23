@@ -1,5 +1,5 @@
 from fastapi import HTTPException, Body, APIRouter
-from pydantic import BaseModel, constr, field_validator, field_serializer
+from pydantic import BaseModel, ValidationError, constr, field_validator, field_serializer
 from datetime import datetime, UTC
 from tinydb import TinyDB, Query
 from typing import Dict, List, Optional
@@ -18,6 +18,7 @@ sessions_table = db.table("sessions")
 # Helper for URL-safe session names
 def is_url_safe(name: str) -> bool:
     return re.match(r'^[a-zA-Z0-9_\-]+$', name) is not None
+
 
 def unexpected_length(name: str) -> bool:
     return len(name) <= 0 or len(name) > 50
@@ -94,9 +95,11 @@ def update_session(session_name: str, data: Dict = Body(...)):
     if not existing:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    updated_session = Session(**existing)
+    try:
+        updated_session = Session.model_validate(existing)
+    except ValidationError as e:
+        raise HTTPException(status_code=500, detail=f"Invalid session data: {e}")
 
-    updated_session.data = data
     updated_session.updated = datetime.now(UTC)
 
     sessions_table.update(updated_session.model_dump(), SessionQuery.name == session_name)
