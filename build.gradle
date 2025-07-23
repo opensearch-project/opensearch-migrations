@@ -164,11 +164,11 @@ subprojects {
         if (!sourceSets.test.allSource.files.isEmpty()) {
             tasks.withType(Test) {
                 testLogging {
-                    events "passed", "skipped", "failed"
-                    exceptionFormat "full"
-                    showExceptions true
-                    showCauses true
-                    showStackTraces true
+                    events = ["passed", "skipped", "failed"]
+                    exceptionFormat = "full"
+                    showExceptions = true
+                    showCauses = true
+                    showStackTraces = true
                 }
                 maxParallelForks = gradle.startParameter.maxWorkerCount
 

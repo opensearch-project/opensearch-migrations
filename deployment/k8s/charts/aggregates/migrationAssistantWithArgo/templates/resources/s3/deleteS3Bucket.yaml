@@ -1,0 +1,108 @@
+{{- if .Values.defaultBucketConfiguration.deleteOnUninstall }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: delete-s3-bucket-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-20" # Delete before charts are uninstalled
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: s3-bucket-delete
+    spec:
+      serviceAccountName: {{ .Values.defaultBucketConfiguration.serviceAccountName }}
+      restartPolicy: Never
+      containers:
+        - name: aws-cli
+          image: {{ .Values.defaultBucketConfiguration.bucketOperationImage }}
+          imagePullPolicy: {{ .Values.defaultBucketConfiguration.bucketOperationImagePullPolicy }}
+          env:
+            {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+            - name: AWS_ACCESS_KEY_ID
+              value: "test"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "test"
+            {{- end }}
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: ENDPOINT
+            - name: BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              {{ include "migration.s3Functions" . | nindent 12 }}
+
+              # Setting up variables
+              EMPTY_BEFORE_DELETE={{ .Values.defaultBucketConfiguration.emptyBeforeDelete }}
+              MAX_RETRIES=3
+              RETRY_INTERVAL=5
+              S3_ENDPOINT_FLAG=$(get_s3_endpoint_flag)
+
+              if [ -n "${S3_ENDPOINT_URL}" ]; then
+                echo "Using endpoint: $S3_ENDPOINT_URL"
+              fi
+              echo "Target bucket for deletion: $BUCKET_NAME"
+
+
+              # Wait for S3 to be available
+              retry_count=0
+              while ! check_s3_available; do
+                retry_count=$((retry_count + 1))
+                if [ $retry_count -ge $MAX_RETRIES ]; then
+                  echo "S3 endpoint not available after $MAX_RETRIES attempts. Exiting."
+                  exit 1
+                fi
+                echo "S3 endpoint not available yet. Retrying in $RETRY_INTERVAL seconds... (Attempt $retry_count/$MAX_RETRIES)"
+                sleep $RETRY_INTERVAL
+              done
+
+              echo "S3 endpoint is available. Proceeding with bucket operations."
+
+              # Delete S3 bucket (if it exists) and contents (if enabled)
+              if bucket_exists "$BUCKET_NAME"; then
+                echo "Bucket $BUCKET_NAME exists."
+
+                if [ "${EMPTY_BEFORE_DELETE}" = "true" ]; then
+                  echo "The defaultBucketConfiguration.emptyBeforeDelete value is enabled. Deleting all contents of $BUCKET_NAME..."
+                  aws $S3_ENDPOINT_FLAG s3 rm s3://"$BUCKET_NAME" --recursive
+                fi
+
+                echo "Attempting to delete bucket $BUCKET_NAME..."
+                DELETE_OUTPUT=$(aws $S3_ENDPOINT_FLAG s3 rb s3://$BUCKET_NAME 2>&1)
+                DELETE_STATUS=$?
+                if [ $DELETE_STATUS -eq 0 ]; then
+                  echo "Bucket $BUCKET_NAME deleted successfully."
+                else
+                  echo "Bucket deletion failed:"
+                  echo "$DELETE_OUTPUT"
+
+                  if echo "$DELETE_OUTPUT" | grep -q "BucketNotEmpty"; then
+                    echo "Bucket $BUCKET_NAME is not empty."
+                    if [ "${EMPTY_BEFORE_DELETE}" != "true" ]; then
+                      echo "Tip: Set defaultBucketConfiguration.emptyBeforeDelete=true to force-delete all objects before bucket deletion."
+                    fi
+                  fi
+                  exit 1
+                fi
+              else
+                echo "Bucket $BUCKET_NAME does not exist. Skipping deletion."
+              fi
+{{- end }}

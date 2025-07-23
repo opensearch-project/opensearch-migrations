@@ -13,8 +13,8 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import lombok.Getter;
 
 public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
-
     private Version version;
+    
     @Getter
     private SourceRepo sourceRepo;
 
@@ -38,6 +38,12 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
     @Override
     public ClusterSnapshotReader initialize(SourceRepo sourceRepo) {
         this.sourceRepo = sourceRepo;
+        return this;
+    }
+
+    @Override
+    public ClusterSnapshotReader initialize(Version version) {
+        this.version = version;
         return this;
     }
 
@@ -74,12 +80,6 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
     @Override
     public Version getVersion() {
         return version;
-    }
-
-    @Override
-    public ClusterSnapshotReader initialize(Version version) {
-        this.version = version;
-        return this;
     }
 
     public String toString() {

@@ -5,7 +5,6 @@ import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 public class GlobalMetadataData_ES_2_4 implements GlobalMetadata {
-
     private final ObjectNode root;
 
     public GlobalMetadataData_ES_2_4(ObjectNode root) {

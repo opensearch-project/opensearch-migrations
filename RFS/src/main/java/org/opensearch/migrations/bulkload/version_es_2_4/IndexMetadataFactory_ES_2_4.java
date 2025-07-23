@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -7,9 +8,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 public class IndexMetadataFactory_ES_2_4 implements IndexMetadata.Factory {
-    private final SnapshotRepoES24 repoProvider;
+    private final SnapshotRepo.Provider repoProvider;
 
-    public IndexMetadataFactory_ES_2_4(SnapshotRepoES24 repoProvider) {
+    public IndexMetadataFactory_ES_2_4(SnapshotRepo.Provider repoProvider) {
         this.repoProvider = repoProvider;
     }
 
@@ -31,7 +32,7 @@ public class IndexMetadataFactory_ES_2_4 implements IndexMetadata.Factory {
     }
 
     @Override
-    public SnapshotRepoES24 getRepoDataProvider() {
+    public SnapshotRepo.Provider getRepoDataProvider() {
         return repoProvider;
     }
 }
