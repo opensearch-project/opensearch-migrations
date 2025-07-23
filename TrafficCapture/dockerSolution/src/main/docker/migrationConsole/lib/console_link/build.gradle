@@ -31,6 +31,7 @@ tasks.register('preparePipenv') {
 }
 
 tasks.register('startApiServer') {
+    dependsOn 'stopApiServer'
     dependsOn 'preparePipenv'
 
     doLast {
@@ -43,15 +44,6 @@ tasks.register('startApiServer') {
         pidFile.parentFile.mkdirs()
         pidFile.text = "${proc.pid()}"
     }
-}
-
-tasks.register('downloadOpenApiSpec', de.undercouch.gradle.tasks.download.Download) {
-    src openapiUrl
-    dest openapiOutFile
-    dependsOn 'startApiServer'
-    inputs.files(pythonSources)
-    inputs.files(dependencyFiles)
-    outputs.file(openapiOutFile)
 }
 
 tasks.register('stopApiServer') {
@@ -68,9 +60,12 @@ tasks.register('stopApiServer') {
     }
 }
 
-tasks.register('fetchOpenApiSpec') {
-    dependsOn 'downloadOpenApiSpec'
+tasks.register('fetchOpenApiSpec', de.undercouch.gradle.tasks.download.Download) {
+    src openapiUrl
+    dest openapiOutFile
+    dependsOn 'startApiServer'
     finalizedBy 'stopApiServer'
+
     doLast {
         logger.lifecycle("OpenAPI spec downloaded to ${openapiOutFile}")
     }

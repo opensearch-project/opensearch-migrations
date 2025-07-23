@@ -36,16 +36,6 @@ export type Session = {
    * Name
    */
   name: string;
-};
-
-/**
- * SessionDB
- */
-export type SessionDb = {
-  /**
-   * Name
-   */
-  name: string;
   /**
    * Created
    */
@@ -54,6 +44,16 @@ export type SessionDb = {
    * Updated
    */
   updated: string;
+};
+
+/**
+ * SessionBase
+ */
+export type SessionBase = {
+  /**
+   * Name
+   */
+  name: string;
 };
 
 /**
@@ -103,14 +103,14 @@ export type SessionsListResponses = {
    * Response Sessionslist
    * Successful Response
    */
-  200: Array<SessionDb>;
+  200: Array<Session>;
 };
 
 export type SessionsListResponse =
   SessionsListResponses[keyof SessionsListResponses];
 
 export type SessionCreateData = {
-  body: Session;
+  body: SessionBase;
   path?: never;
   query?: never;
   url: "/system/sessions";
@@ -129,7 +129,7 @@ export type SessionCreateResponses = {
   /**
    * Successful Response
    */
-  200: SessionDb;
+  200: Session;
 };
 
 export type SessionCreateResponse =
@@ -189,7 +189,7 @@ export type SessionGetResponses = {
    * Response Sessionget
    * Successful Response
    */
-  200: Array<SessionDb>;
+  200: Array<Session>;
 };
 
 export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses];
@@ -224,7 +224,7 @@ export type SessionUpdateResponses = {
   /**
    * Successful Response
    */
-  200: SessionDb;
+  200: Session;
 };
 
 export type SessionUpdateResponse =
