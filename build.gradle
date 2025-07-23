@@ -84,8 +84,7 @@ def commonExclusions = ['**/build/**',
                         '**/opensearch-cluster-cdk/**',
                         '**/cdk.out/**',
                         '**/transformation/standardJavascriptTransforms/node_modules/**',
-                        '**/frontend/**',
-                        '**/.venv/**']
+                        '**/frontend/**']
 spotless {
     format 'misc', {
         target fileTree('.') {
@@ -95,6 +94,7 @@ spotless {
         trimTrailingWhitespace()
         leadingTabsToSpaces()
         endWithNewline()
+
     }
     yaml {
         target fileTree('.') {
