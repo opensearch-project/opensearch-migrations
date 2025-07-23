@@ -102,6 +102,7 @@ class Environment:
         if 'metadata_migration' in self.config:
             self.metadata: Metadata = Metadata(self.config["metadata_migration"],
                                                target_cluster=self.target_cluster,
+                                               source_cluster=self.source_cluster,
                                                snapshot=self.snapshot)
         if 'kafka' in self.config:
             self.kafka: Kafka = get_kafka(self.config["kafka"])

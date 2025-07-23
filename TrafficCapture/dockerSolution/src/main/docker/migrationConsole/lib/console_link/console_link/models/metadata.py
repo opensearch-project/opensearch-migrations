@@ -53,7 +53,8 @@ SCHEMA = {
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
     "component_template_allowlist": list_schema(required=False),
-    "source_cluster_version": {"type": "string", "required": False}
+    "source_cluster_version": {"type": "string", "required": False},
+    "transformer_config_base64": {"type": "string", "required": False}
 }
 
 
@@ -62,7 +63,8 @@ def generate_tmp_dir(name: str) -> str:
 
 
 class Metadata:
-    def __init__(self, config, target_cluster: Cluster, snapshot: Optional[Snapshot] = None):
+    def __init__(self, config, target_cluster: Cluster, source_cluster: Optional[Cluster] = None,
+                 snapshot: Optional[Snapshot] = None):
         logger.debug(f"Initializing Metadata with config: {config}")
         v = Validator(SCHEMA)
         if not v.validate(config):
@@ -73,21 +75,31 @@ class Metadata:
         self._snapshot = snapshot
 
         if (not snapshot) and (config["from_snapshot"] is None):
-            raise ValueError("No snapshot is specified or can be assumed "
-                             "for the metadata migration to use.")
+            raise ValueError("No snapshot is specified or can be assumed for the metadata migration to use.")
+
+        self._source_cluster_version = config.get("source_cluster_version", None)
+        if not self._source_cluster_version:
+            if source_cluster and source_cluster.version:
+                logger.info(f"Using source cluster version: {source_cluster.version} as cluster version used for "
+                            f"snapshot when performing metadata migrations")
+                self._source_cluster_version = source_cluster.version
+            else:
+                raise ValueError("A version field in the source_cluster object, or source_cluster_version in the "
+                                 "metadata object is required to perform metadata migrations e.g. version: \"ES_6.8\" ")
 
         self._awareness_attributes = config.get("cluster_awareness_attributes", 0)
         self._index_allowlist = config.get("index_allowlist", None)
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
         self._otel_endpoint = config.get("otel_endpoint", None)
-        self._source_cluster_version = config.get("source_cluster_version", None)
+        self._transformer_config_base64 = config.get("transformer_config_base64", None)
 
         logger.debug(f"Cluster awareness attributes: {self._awareness_attributes}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
         logger.debug(f"Index template allowlist: {self._index_template_allowlist}")
         logger.debug(f"Component template allowlist: {self._component_template_allowlist}")
         logger.debug(f"Otel endpoint: {self._otel_endpoint}")
+        logger.debug(f"Transformation config: {self._transformer_config_base64}")
 
         # If `from_snapshot` is fully specified, use those values to define snapshot params
         if config["from_snapshot"] is not None:
@@ -231,6 +243,9 @@ class Metadata:
 
         if self._source_cluster_version:
             command_args.update({"--source-version": self._source_cluster_version})
+
+        if self._transformer_config_base64:
+            command_args.update({"--transformer-config-base64": self._transformer_config_base64})
 
         # Extra args might not be represented with dictionary, so convert args to list and append commands
         self._append_args(command_args, extra_args)
