@@ -76,3 +76,7 @@ tasks.register('fetchOpenApiSpec') {
     inputs.files(dependencyFiles)
     outputs.file(openapiOutFile)
 }
+
+clean.doFirst {
+    delete venv
+}
