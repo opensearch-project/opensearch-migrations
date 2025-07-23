@@ -11,7 +11,7 @@ import {
   Spinner,
   Alert,
 } from "@cloudscape-design/components";
-import { sessionCreate } from "@/generated/api/sdk.gen";
+import { sessionCreate } from "@/generated/api";
 
 export default function CreateSessionPage() {
   const [name, setName] = useState("");
@@ -50,15 +50,13 @@ export default function CreateSessionPage() {
             {success && (
               <Alert
                 type="success"
-                dismissible
-                onDismiss={() => setSuccess(false)}
               >
                 Session created successfully!
               </Alert>
             )}
 
             {error && (
-              <Alert type="error" dismissible onDismiss={() => setError(null)}>
+              <Alert type="error">
                 {error}
               </Alert>
             )}
@@ -82,7 +80,7 @@ export default function CreateSessionPage() {
               Create Session
             </Button>
 
-            {updating && <Spinner size="big" />}
+            {updating && <Spinner size="big" data-testid="session-spinner"/>}
           </SpaceBetween>
         </SpaceBetween>
       </Container>

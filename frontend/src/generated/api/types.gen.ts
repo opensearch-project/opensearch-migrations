@@ -95,7 +95,7 @@ export type SessionsListData = {
   body?: never;
   path?: never;
   query?: never;
-  url: "/system/sessions";
+  url: "/sessions/";
 };
 
 export type SessionsListResponses = {
@@ -113,7 +113,7 @@ export type SessionCreateData = {
   body: SessionBase;
   path?: never;
   query?: never;
-  url: "/system/sessions";
+  url: "/sessions/";
 };
 
 export type SessionCreateErrors = {
@@ -144,7 +144,7 @@ export type SessionDeleteData = {
     session_name: string;
   };
   query?: never;
-  url: "/system/sessions/{session_name}";
+  url: "/sessions/{session_name}";
 };
 
 export type SessionDeleteErrors = {
@@ -172,7 +172,7 @@ export type SessionGetData = {
     session_name: string;
   };
   query?: never;
-  url: "/system/sessions/{session_name}";
+  url: "/sessions/{session_name}";
 };
 
 export type SessionGetErrors = {
@@ -208,7 +208,7 @@ export type SessionUpdateData = {
     session_name: string;
   };
   query?: never;
-  url: "/system/sessions/{session_name}";
+  url: "/sessions/{session_name}";
 };
 
 export type SessionUpdateErrors = {

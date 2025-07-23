@@ -6,8 +6,8 @@ from typing import Dict, List, Optional
 import re
 
 session_router = APIRouter(
-    prefix="/system",
-    tags=["system"],
+    prefix="/sessions",
+    tags=["sessions"],
 )
 
 # Initialize TinyDB
@@ -47,12 +47,12 @@ class Session(SessionBase):
         return v
 
 
-@session_router.get("/sessions", response_model=List[Session], operation_id="sessionsList")
+@session_router.get("/", response_model=List[Session], operation_id="sessionsList")
 def list_sessions():
     return sessions_table.all()
 
 
-@session_router.get("/sessions/{session_name}", response_model=List[Session], operation_id="sessionGet")
+@session_router.get("/{session_name}", response_model=List[Session], operation_id="sessionGet")
 def single_session(session_name: str):
     SessionQuery = Query()
     existing = sessions_table.get(SessionQuery.name == session_name)
@@ -62,7 +62,7 @@ def single_session(session_name: str):
     return existing
 
 
-@session_router.post("/sessions", response_model=Session, operation_id="sessionCreate")
+@session_router.post("/", response_model=Session, operation_id="sessionCreate")
 def create_session(session: SessionBase):
     if not is_url_safe(session.name):
         raise HTTPException(status_code=400, detail="Session name must be URL-safe (letters, numbers, '_', '-').")
@@ -88,7 +88,7 @@ def create_session(session: SessionBase):
     return session
 
 
-@session_router.put("/sessions/{session_name}", response_model=Session, operation_id="sessionUpdate")
+@session_router.put("/{session_name}", response_model=Session, operation_id="sessionUpdate")
 def update_session(session_name: str, data: Dict = Body(...)):
     SessionQuery = Query()
     existing = sessions_table.get(SessionQuery.name == session_name)
@@ -106,7 +106,7 @@ def update_session(session_name: str, data: Dict = Body(...)):
     return updated_session
 
 
-@session_router.delete("/sessions/{session_name}", operation_id="sessionDelete")
+@session_router.delete("/{session_name}", operation_id="sessionDelete")
 def delete_session(session_name: str):
     SessionQuery = Query()
     if sessions_table.remove(SessionQuery.name == session_name):

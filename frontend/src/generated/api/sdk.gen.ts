@@ -65,7 +65,7 @@ export const sessionsList = <ThrowOnError extends boolean = false>(
     unknown,
     ThrowOnError
   >({
-    url: "/system/sessions",
+    url: "/sessions/",
     ...options,
   });
 };
@@ -81,7 +81,7 @@ export const sessionCreate = <ThrowOnError extends boolean = false>(
     SessionCreateErrors,
     ThrowOnError
   >({
-    url: "/system/sessions",
+    url: "/sessions/",
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -101,7 +101,7 @@ export const sessionDelete = <ThrowOnError extends boolean = false>(
     SessionDeleteErrors,
     ThrowOnError
   >({
-    url: "/system/sessions/{session_name}",
+    url: "/sessions/{session_name}",
     ...options,
   });
 };
@@ -117,7 +117,7 @@ export const sessionGet = <ThrowOnError extends boolean = false>(
     SessionGetErrors,
     ThrowOnError
   >({
-    url: "/system/sessions/{session_name}",
+    url: "/sessions/{session_name}",
     ...options,
   });
 };
@@ -133,7 +133,7 @@ export const sessionUpdate = <ThrowOnError extends boolean = false>(
     SessionUpdateErrors,
     ThrowOnError
   >({
-    url: "/system/sessions/{session_name}",
+    url: "/sessions/{session_name}",
     ...options,
     headers: {
       "Content-Type": "application/json",
