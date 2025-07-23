@@ -43,6 +43,12 @@ public class OpenSearchClientFactory {
         if (version == null) {
             version = getClusterVersion();
         }
+
+        if (connectionContext.getCompressionSupported() == null) {
+            var compressionSupported = getCompressionEnabled();
+            connectionContext.setCompressionSupported(compressionSupported);
+        }
+
         var clientClass = getOpenSearchClientClass(version);
         try {
             return clientClass.getConstructor(ConnectionContext.class, Version.class)
@@ -82,6 +88,19 @@ public class OpenSearchClientFactory {
             .flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH)
             .major(2)
             .build();
+
+    public Boolean getCompressionEnabled() {
+        log.atInfo().setMessage("Checking compression on cluster").log();
+        return client.getAsync("_cluster/settings?include_defaults=true", null)
+                .flatMap(this::checkCompressionFromResponse)
+                .doOnError(e -> log.error(e.getMessage()))
+                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+                .flatMap(hasCompressionEnabled -> {
+                    log.atInfo().setMessage("Checking Compression, was enabled? {}").addArgument(hasCompressionEnabled).log();
+                    return Mono.just(hasCompressionEnabled);
+                })
+                .block();
+    }
 
     public Version getClusterVersion() {
         var versionFromRootApi = client.getAsync("", null)
@@ -166,6 +185,34 @@ public class OpenSearchClientFactory {
             return Mono.error(new OpenSearchClient.OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
         }
     }
+
+
+    Mono<Boolean> checkCompressionFromResponse(HttpResponse resp) {
+        if (resp.statusCode != 200) {
+            return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
+        }
+        try {
+            var body = Optional.of(objectMapper.readTree(resp.body));
+            var persistentlyCompressionSupported = isCompressionSupported(body.map(n -> n.get("persistent")));
+            var transientlyCompressionSupported = isCompressionSupported(body.map(n -> n.get("transient")));
+            return Mono.just(persistentlyCompressionSupported || transientlyCompressionSupported);
+        } catch (Exception e) {
+            log.error("Unable to determine if the cluster is in compatibility mode", e);
+            return Mono.error(new OpenSearchClient.OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
+        }
+    }
+
+    private boolean isCompressionSupported(Optional<JsonNode> node) {
+        return node.filter(n -> !n.isNull())
+                .map(n -> n.get("http_compression"))
+                .filter(n -> !n.isNull())
+                .map(n -> n.get("enabled"))
+                .filter(n -> !n.isNull())
+                .map(JsonNode::asBoolean)
+                .orElse(false);
+    }
+
+
 
     private boolean inCompatibilityMode(Optional<JsonNode> node) {
         return node.filter(n -> !n.isNull())

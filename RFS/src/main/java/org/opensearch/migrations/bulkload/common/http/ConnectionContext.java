@@ -14,6 +14,7 @@ import com.beust.jcommander.ParametersDelegate;
 import com.beust.jcommander.converters.PathConverter;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.ToString;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
@@ -33,7 +34,11 @@ public class ConnectionContext {
     private final Protocol protocol;
     private final boolean insecure;
     private final RequestTransformer requestTransformer;
-    private final boolean compressionSupported;
+
+    @Setter
+    // Null -> Auto detect
+    private Boolean compressionSupported;
+
     private final boolean awsSpecificAuthentication;
 
     private TlsCredentialsProvider tlsCredentialsProvider;
@@ -88,7 +93,7 @@ public class ConnectionContext {
         else {
             requestTransformer = new NoAuthTransformer();
         }
-        compressionSupported = params.isCompressionEnabled();
+        compressionSupported = params.getCompressionEnabled();
 
         validateClientCertPairPresence(params);
 
@@ -137,7 +142,7 @@ public class ConnectionContext {
 
         Path getClientCertKey();
 
-        boolean isCompressionEnabled();
+        Boolean getCompressionEnabled();
 
         boolean isInsecure();
 
@@ -210,8 +215,8 @@ public class ConnectionContext {
         TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
 
         @Override
-        public boolean isCompressionEnabled() {
-            return advancedArgs.isCompressionEnabled();
+        public Boolean getCompressionEnabled() {
+            return advancedArgs.getCompressionEnabled();
         }
     }
 
@@ -219,9 +224,10 @@ public class ConnectionContext {
     @Getter
     public static class TargetAdvancedArgs {
         @Parameter(names = {"--target-compression", "--targetCompression" },
-            description = "**Advanced**. Allow request compression to target",
-            required = false)
-        public boolean compressionEnabled = false;
+            description = "**Advanced**. Allow request compression to target.",
+            defaultValueDescription = "Autodetect based on target support"
+        )
+        public Boolean compressionEnabled = null;
     }
 
     @Getter
@@ -285,7 +291,8 @@ public class ConnectionContext {
             required = false)
         public boolean insecure = false;
 
-        public boolean isCompressionEnabled() {
+        @Override
+        public Boolean getCompressionEnabled() {
             // No compression on source due to no ingestion
             return false;
         }

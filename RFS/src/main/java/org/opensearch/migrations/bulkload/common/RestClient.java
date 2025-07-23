@@ -177,7 +177,8 @@ public class RestClient {
 
 
     public boolean supportsGzipCompression() {
-        return connectionContext.isCompressionSupported();
+        // Handle null -> false conversion
+        return Boolean.TRUE.equals(connectionContext.getCompressionSupported());
     }
 
     public static void addGzipResponseHeaders(Map<String, List<String>> headers) {
