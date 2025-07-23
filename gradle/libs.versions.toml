@@ -42,6 +42,7 @@ semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
 toxiproxy = "2.1.7"
+zstd-jni = "1.5.7-4"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
@@ -158,6 +159,8 @@ testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers"
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers" }
 
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
+
+zstd-jni = {module = "com.github.luben:zstd-jni", version.ref = "zstd-jni" }
 
 # List all boms here with prefix boms- to force platforms across all projects
 boms-aws-sdk          = { module = "software.amazon.awssdk:bom", version.ref = "aws-sdk" }
