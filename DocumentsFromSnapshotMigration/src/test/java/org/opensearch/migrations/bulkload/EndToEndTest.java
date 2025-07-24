@@ -6,9 +6,11 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -20,6 +22,7 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -48,7 +51,7 @@ public class EndToEndTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            migrationDocumentsWithClusters(sourceCluster, targetCluster);
+            migrationDocumentsWithClusters(sourceCluster, targetCluster, true);
         }
     }
 
@@ -63,14 +66,15 @@ public class EndToEndTest extends SourceTestBase {
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
         ) {
-            migrationDocumentsWithClusters(sourceCluster, targetCluster);
+            migrationDocumentsWithClusters(sourceCluster, targetCluster, false);
         }
     }
 
     @SneakyThrows
     private void migrationDocumentsWithClusters(
         final SearchClusterContainer sourceCluster,
-        final SearchClusterContainer targetCluster
+        final SearchClusterContainer targetCluster,
+        final boolean includeCompletionFieldIndex
     ) {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -103,6 +107,18 @@ public class EndToEndTest extends SourceTestBase {
             );
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
+
+            if (includeCompletionFieldIndex && sourceVersion != UnboundVersionMatchers.isBelowES_5_X) {
+                String completionIndex = "completion_index";
+                sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
+                String completionDoc =
+                "{" +
+                "    \"completion\": \"openai\" " +
+                "}";
+                String docType = sourceClusterOperations.defaultDocType();
+                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
+                sourceClusterOperations.post("/_refresh", null);
+            }
 
             // === ACTION: Create two large documents (2MB each) ===
             String largeDoc = generateLargeDocJson(2);
@@ -174,6 +190,16 @@ public class EndToEndTest extends SourceTestBase {
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
             boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
             boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
+
+            if (includeCompletionFieldIndex && sourceVersion != UnboundVersionMatchers.isBelowES_2_X) {
+                var res = targetClusterOperations.get("/completion_index/_doc/1");
+                ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
+                JsonNode doc = mapper.readTree(res.getValue());
+                JsonNode sourceNode = doc.path("_source").path("completion");
+
+                Assertions.assertTrue(sourceNode.isTextual() || sourceNode.isArray(),
+                        "Expected 'completion' field to be present and textual or array");
+            }
 
             // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
             checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
