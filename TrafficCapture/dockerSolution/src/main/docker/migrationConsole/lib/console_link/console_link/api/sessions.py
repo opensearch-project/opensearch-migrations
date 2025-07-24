@@ -54,8 +54,8 @@ class SessionExistence(Enum):
 
 
 def findSession(session_name: str, existence: SessionExistence):
-    sessionQuery = Query()
-    session = sessions_table.get(sessionQuery.name == session_name)
+    session_query = Query()
+    session = sessions_table.get(session_query.name == session_name)
     if existence == SessionExistence.MUST_EXIST and not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
