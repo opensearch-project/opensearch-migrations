@@ -20,6 +20,13 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
+                        // If in an existing git repository, remove any additional files in git tree that are not listed in .gitignore
+                        if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
+                            echo 'Cleaning any existing git files in workspace'
+                            sh 'sudo --preserve-env git clean -fd'
+                        } else {
+                            echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
+                        }
                         git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
                     }
                 }

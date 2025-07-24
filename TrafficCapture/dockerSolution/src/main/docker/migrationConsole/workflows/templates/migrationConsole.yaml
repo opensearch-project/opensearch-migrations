@@ -44,7 +44,7 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
           - |
-            set -e -x
+            set -e
             
             # Save pod name to output path
             echo $HOSTNAME > /tmp/podname
@@ -103,7 +103,7 @@ spec:
                       - "/bin/sh"
                       - "-c"
                       - |
-                        set -e -x
+                        set -e
           
                         base64 -d > /config/migration_services.yaml << EOF
                         {{= toBase64(inputs.parameters['config-contents']) }}
