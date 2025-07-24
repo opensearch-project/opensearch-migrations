@@ -33,17 +33,40 @@ def buildOutputs = [
     'out'
 ]
 
+def backendApiProject = project(':console_link')
+tasks.register('syncBackendClientDefinition', Copy) {
+    dependsOn backendApiProject.tasks.named('fetchOpenApiSpec')
+    from backendApiProject.layout.buildDirectory.file('openapi.json')
+    into layout.buildDirectory.dir('openapi')
+
+    outputs.file(layout.buildDirectory.file('openapi/openapi.json'))
+}
+
+tasks.register('generateBackendClient', NpmTask) {
+    dependsOn 'npmInstall'
+    dependsOn 'syncBackendClientDefinition'
+    group = 'build'
+    description = 'Generates the TypeScript API client from openapi.json'
+
+    args = ['run', 'openapi-ts']
+    inputs.file layout.buildDirectory.file('openapi/openapi.json')
+    outputs.dir layout.projectDirectory.dir('src/generated')
+}
+
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
+    dependsOn 'generateBackendClient'
+    group = 'build'
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.files fileTree(dir: '.', include: buildOutputs, exclude: buildExclusions)
 }
 
 tasks.register('lintFrontend', NpmTask) {
+    dependsOn 'buildFrontend'
+    group = 'check'
     args =  ['run', 'lint']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
-    dependsOn 'buildFrontend'
 }
 
 tasks.register('cleanFrontend', Delete) {

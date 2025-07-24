@@ -77,6 +77,8 @@ dependencies {
     implementation libs.netty.codec.http
     implementation libs.httpclient5
 
+    implementation libs.zstd.jni
+
     implementation libs.slf4j.api
 
     lucene5 libs.lucene.v5.core
