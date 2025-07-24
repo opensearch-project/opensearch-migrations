@@ -99,7 +99,6 @@ public class LuceneReader {
                                                 int concurrency, Path indexDirectoryPath) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = segmentReader.getLiveDocs();
-
         int segmentDocBase = readerAndBase.getDocBaseInParent();
 
         // Start at
@@ -114,10 +113,11 @@ public class LuceneReader {
             s == null ? segmentReader.toString() : s
         );
 
-        log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
-                .addArgument(readerAndBase.getReader())
-                .addArgument(startDocIdInSegment)
+        // Log doc count to process in this segment
+        log.atInfo().setMessage("Starting segment reindex: docBase={} docsToProcess={} path={}")
+                .addArgument(segmentDocBase)
                 .addArgument(numDocsToProcessInSegment)
+                .addArgument(indexDirectoryPath)
                 .log();
 
         return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)

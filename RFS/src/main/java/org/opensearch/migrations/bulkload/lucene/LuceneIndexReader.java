@@ -14,6 +14,8 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
 public interface LuceneIndexReader {
@@ -64,14 +66,26 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
+
+    // Logger added to trace document emission and completion for debugging stuck or slow backfill scenarios
+    Logger log = LoggerFactory.getLogger(LuceneIndexReader.class);
+
     default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
             this::getReader,
-            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
+            reader -> {
+                log.info("Opened Lucene DirectoryReader for reading docs from startDocIdx={}", startDocIdx);
+                return Flux.from(LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx))
+                        .doOnNext(doc -> log.info("LuceneIndexReader: Emitting docId={}", doc.getId()))
+                        .doOnComplete(() -> log.info("LuceneIndexReader: Document stream completed"))
+                        .doOnError(err -> log.error("LuceneIndexReader: Error while reading docs", err));
+            },
             reader -> {
                 try {
                     reader.close();
+                    log.info("Lucene DirectoryReader closed successfully.");
                 } catch (IOException e) {
+                    log.error("Error closing Lucene DirectoryReader", e);
                     throw Lombok.sneakyThrow(e);
                 }
         });
@@ -90,24 +104,24 @@ public interface LuceneIndexReader {
 
         public LuceneIndexReader getReader(Path path) {
             if (VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader5").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader5").log();
                 return new IndexReader5(
                     path
                 );
             } else if (VersionMatchers.isES_5_X.test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader6").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader6").log();
                 return new IndexReader6(
                         path
                 );
             } else if (VersionMatchers.isES_6_X.test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader7").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader7").log();
                 return new IndexReader7(
                     path,
                     snapshotReader.getSoftDeletesPossible(),
                     snapshotReader.getSoftDeletesFieldData()
                 );
             } else {
-                log.atInfo().setMessage("Creating IndexReader9").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader9").log();
                 return new IndexReader9(
                     path,
                     snapshotReader.getSoftDeletesPossible(),
