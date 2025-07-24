@@ -99,7 +99,7 @@ def create_session(session: SessionBase):
 
 @session_router.put("/{session_name}", response_model=Session, operation_id="sessionUpdate")
 def update_session(session_name: str, data: Dict = Body(...)):
-    sessionQuery = Query()
+    session_query = Query()
     existing = find_session(session_name, SessionExistence.MUST_EXIST)
 
     try:
@@ -109,7 +109,7 @@ def update_session(session_name: str, data: Dict = Body(...)):
 
     updated_session.updated = datetime.now(UTC)
 
-    sessions_table.update(updated_session.model_dump(), sessionQuery.name == session_name)
+    sessions_table.update(updated_session.model_dump(), session_query.name == session_name)
     return updated_session
 
 
@@ -118,8 +118,8 @@ def delete_session(session_name: str):
     # Make sure the session exists before we attempt to delete it
     find_session(session_name, SessionExistence.MUST_EXIST)
 
-    sessionQuery = Query()
-    if sessions_table.remove(sessionQuery.name == session_name):
+    session_query = Query()
+    if sessions_table.remove(session_query.name == session_name):
         return {"detail": f"Session '{session_name}' deleted."}
     else:
         raise HTTPException(status_code=404, detail="Session not found.")
