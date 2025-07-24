@@ -40,7 +40,7 @@ def check_env_config() -> str:
     try:
         Environment(env_config)
     except Exception as e:
-        raise Exception(f"Unable to load environment configuration due to issue: {e}")
+        raise ValueError(f"Unable to load environment configuration due to issue: {e}")
 
     return HealthStatus.ok
 
