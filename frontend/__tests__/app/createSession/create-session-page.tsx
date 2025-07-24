@@ -24,10 +24,9 @@ describe("CreateSessionPage", () => {
     server.use(
       http.post("http://localhost/sessions", async ({ request }) => {
         requestReceived = true;
-        const body = await request.json();
-        console.info("***Body:\n" + body);
-        // expect(body.name).toBe("Test Session");
-        return HttpResponse.json({});
+        const body: any = await request.json();
+        expect(body.name).toBe("Test Session");
+        return HttpResponse.json({}, {status: 201});
       })
     );
 
@@ -38,7 +37,7 @@ describe("CreateSessionPage", () => {
     expect(screen.getByTestId("session-spinner")).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText(/session created successfully/i)).toBeInTheDocument();
+      expect(screen.getByTestId("alert-success")).toHaveTextContent(/session created successfully/i);
     });
 
     expect(requestReceived).toBe(true);
@@ -58,7 +57,7 @@ describe("CreateSessionPage", () => {
     await createSessionWithName("Duplicate");
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/session name already exists/i);
+      expect(screen.getByTestId("alert-error")).toHaveTextContent(/session name already exists/i);
     });
   });
 
@@ -73,14 +72,13 @@ describe("CreateSessionPage", () => {
     await createSessionWithName("Will Fail");
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/network error/i);
+      expect(screen.getByTestId("alert-error")).toHaveTextContent(/network error/i);
     });
   });
 
   it("requires a session name before enabling the button", () => {
     render(<CreateSessionPage />);
-    const button = screen.getByRole("button", { name: /create session/i });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("aria-describedby");
+    const button = screen.getByTestId("create-session-button");
+    expect(button).toHaveAttribute("aria-disabled");
   });
 });

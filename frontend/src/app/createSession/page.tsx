@@ -12,6 +12,7 @@ import {
   Alert,
 } from "@cloudscape-design/components";
 import { sessionCreate } from "@/generated/api";
+import DebugCommands from "@/components/playground/debug/DebugCommands";
 
 export default function CreateSessionPage() {
   const [name, setName] = useState("");
@@ -28,10 +29,10 @@ export default function CreateSessionPage() {
 
     try {
       const res = await sessionCreate({ body: { name } });
-      if (res.error?.detail !== undefined) {
-        setError(JSON.stringify(res.error.detail, null, 2));
+      if (res.response.status === 201) {
+        setSuccess(true);
       } else {
-          setSuccess(true);
+        setError(JSON.stringify(res.error, null, 2));
       }
     } catch (err: any) {
       console.log(err);
@@ -47,19 +48,11 @@ export default function CreateSessionPage() {
 
       <Container>
         <SpaceBetween size="l">
-            {success && (
-              <Alert
-                type="success"
-              >
-                Session created successfully!
-              </Alert>
-            )}
+          {success && (
+            <Alert type="success" data-testid="alert-success">Session created successfully!</Alert>
+          )}
 
-            {error && (
-              <Alert type="error">
-                {error}
-              </Alert>
-            )}
+          {error && <Alert type="error" data-testid="alert-error">{error}</Alert>}
 
           <FormField label="Migration Session Name">
             <Input
@@ -76,14 +69,33 @@ export default function CreateSessionPage() {
               disabled={!name || updating}
               disabledReason={!name ? "Name is required" : undefined}
               onClick={handleAddSession}
+              data-testid="create-session-button"
             >
               Create Session
             </Button>
 
-            {updating && <Spinner size="big" data-testid="session-spinner"/>}
+            {updating && <Spinner size="big" data-testid="session-spinner" />}
           </SpaceBetween>
         </SpaceBetween>
       </Container>
+      <DebugCommands>
+        <SpaceBetween size="xs" direction="horizontal">
+          <Button onClick={() => setSuccess(true)}>Simulate Success</Button>
+          <Button onClick={() => setError("Simulated error occurred")}>
+            Simulate Error
+          </Button>
+          <Button onClick={() => setUpdating(true)}>Simulate Loading</Button>
+          <Button
+            onClick={() => {
+              setSuccess(false);
+              setError(null);
+              setUpdating(false);
+            }}
+          >
+            Reset
+          </Button>
+        </SpaceBetween>
+      </DebugCommands>
     </SpaceBetween>
   );
 }
