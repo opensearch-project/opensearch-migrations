@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.VersionMatchers;
@@ -12,7 +13,6 @@ import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,28 +67,44 @@ public interface LuceneIndexReader {
 
      */
 
-    // Logger added to trace document emission and completion for debugging stuck or slow backfill scenarios
     Logger log = LoggerFactory.getLogger(LuceneIndexReader.class);
 
     default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
             this::getReader,
             reader -> {
-                log.info("Opened Lucene DirectoryReader for reading docs from startDocIdx={}", startDocIdx);
+                log.atTrace()
+                    .setMessage("Opened Lucene DirectoryReader for reading docs from startDocIdx={}")
+                    .addArgument(startDocIdx)
+                    .log();
                 return Flux.from(LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx))
-                        .doOnNext(doc -> log.info("LuceneIndexReader: Emitting docId={}", doc.getId()))
-                        .doOnComplete(() -> log.info("LuceneIndexReader: Document stream completed"))
-                        .doOnError(err -> log.error("LuceneIndexReader: Error while reading docs", err));
+                    .doOnNext(doc -> log.atTrace()
+                        .setMessage("LuceneIndexReader: Emitting docId={}")
+                        .addArgument(doc.getId())
+                        .log())
+                    .doOnComplete(() -> log.atTrace()
+                        .setMessage("LuceneIndexReader: Document stream completed")
+                        .log())
+                    .doOnError(err -> log.atError()
+                        .setMessage("LuceneIndexReader: Error while reading docs")
+                        .setCause(err)
+                        .log());
             },
             reader -> {
                 try {
                     reader.close();
-                    log.info("Lucene DirectoryReader closed successfully.");
+                    log.atTrace()
+                        .setMessage("Lucene DirectoryReader closed successfully.")
+                        .log();
                 } catch (IOException e) {
-                    log.error("Error closing Lucene DirectoryReader", e);
-                    throw Lombok.sneakyThrow(e);
+                    String errorMsg = "Failed to close Lucene DirectoryReader";
+                    log.atError()
+                        .setMessage(errorMsg)
+                        .setCause(e)
+                        .log();
+                    throw new UncheckedIOException(errorMsg, e);
                 }
-        });
+            });
     }
 
     default Flux<RfsLuceneDocument> readDocuments() {

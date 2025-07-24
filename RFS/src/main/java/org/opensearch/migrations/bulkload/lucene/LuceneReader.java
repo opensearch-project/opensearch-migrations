@@ -113,12 +113,11 @@ public class LuceneReader {
             s == null ? segmentReader.toString() : s
         );
 
-        // Log doc count to process in this segment
-        log.atInfo().setMessage("Starting segment reindex: docBase={} docsToProcess={} path={}")
-                .addArgument(segmentDocBase)
-                .addArgument(numDocsToProcessInSegment)
-                .addArgument(indexDirectoryPath)
-                .log();
+        log.atTrace().setMessage("Starting segment reindex: docBase={} docsToProcess={} path={}")
+            .addArgument(segmentDocBase)
+            .addArgument(numDocsToProcessInSegment)
+            .addArgument(indexDirectoryPath)
+            .log();
 
         return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
