@@ -91,6 +91,7 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
+            var targetVersion = targetCluster.getContainerVersion().getVersion();
             boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(sourceVersion);
             String body = String.format(
                 "{" +
@@ -109,7 +110,7 @@ public class EndToEndTest extends SourceTestBase {
             targetClusterOperations.createIndex(indexName, body);
 
             // Create and verify a 'completion' index only for ES 5.x and above
-            if (sourceSupportsCompletionFields(sourceVersion)) {
+            if (sourceSupportsCompletionFields(sourceVersion, targetVersion)) {
                 String completionIndex = "completion_index";
                 sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
                 String completionDoc =
@@ -185,14 +186,16 @@ public class EndToEndTest extends SourceTestBase {
                     transformationConfig
             ));
 
-            Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
+            boolean supportsCompletion = sourceSupportsCompletionFields(sourceVersion, targetVersion);
+            int totalShards = supportsCompletion ? 2 * numberOfShards : numberOfShards;
+            Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
 
             // Check that the docs were migrated
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
             boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
             boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
 
-            if (sourceSupportsCompletionFields(sourceVersion)) {
+            if (sourceSupportsCompletionFields(sourceVersion, targetVersion)) {
                 var res = targetClusterOperations.get("/completion_index/_doc/1");
                 ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
                 JsonNode doc = mapper.readTree(res.getValue());
@@ -210,8 +213,10 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
-    private boolean sourceSupportsCompletionFields(Version sourceVersion) {
-        return !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion);
+    private boolean sourceSupportsCompletionFields(Version sourceVersion, Version targetVersion) {
+        return !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)
+                && UnboundVersionMatchers.isBelowES_8_X.test(sourceVersion)
+                && UnboundVersionMatchers.anyOS.test(targetVersion);
     }
 
     private String generateLargeDocJson(int sizeInMB) {
