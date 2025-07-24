@@ -122,6 +122,7 @@ class S3Snapshot(Snapshot):
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
+        self.s3_endpoint = config['s3'].get('endpoint')
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.source_cluster, Cluster)

@@ -1,8 +1,10 @@
+import os
 import pytest
+import shutil
 import subprocess
 
 from console_link.models.cluster import AuthMethod
-from console_link.models.metadata import Metadata
+from console_link.models.metadata import generate_tmp_dir, MAX_FILENAME_LEN, Metadata
 from console_link.models.snapshot import FileSystemSnapshot, S3Snapshot
 from tests.utils import create_valid_cluster
 
@@ -470,3 +472,17 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         '--flag',
         '--bar', 'baz'
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+
+def test_generate_tmp_dir_truncates_long_name():
+    long_name = "x" * 300  # Exceeds max allowed length
+    tmp_dir = generate_tmp_dir(long_name)
+
+    try:
+        dir_name = os.path.basename(tmp_dir)
+        assert os.path.isdir(tmp_dir)
+        assert len(dir_name) <= MAX_FILENAME_LEN
+        expected_start = "migration-"
+        assert dir_name.startswith(expected_start)
+    finally:
+        shutil.rmtree(tmp_dir)

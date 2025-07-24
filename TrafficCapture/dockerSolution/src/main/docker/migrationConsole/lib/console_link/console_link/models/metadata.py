@@ -12,6 +12,7 @@ from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapsho
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+MAX_FILENAME_LEN = 255
 
 FROM_SNAPSHOT_SCHEMA = {
     "type": "dict",
@@ -59,7 +60,15 @@ SCHEMA = {
 
 
 def generate_tmp_dir(name: str) -> str:
-    return tempfile.mkdtemp(prefix=f"migration-{name}-")
+    prefix = "migration-"
+    suffix = "-"
+    # Tempfile will add random string ~6 characters, round to 10
+    reserved_len = len(prefix) + len(suffix) + 10
+    max_name_len = MAX_FILENAME_LEN - reserved_len
+
+    # Truncate name if too long
+    safe_name = name[:max_name_len]
+    return tempfile.mkdtemp(prefix=f"{prefix}{safe_name}{suffix}")
 
 
 class Metadata:
@@ -142,6 +151,7 @@ class Metadata:
         self._snapshot_location = "s3"
         self._s3_uri = snapshot.s3_repo_uri
         self._aws_region = snapshot.s3_region
+        self._s3_endpoint = snapshot.s3_endpoint
 
     def _init_from_fs_snapshot(self, snapshot: FileSystemSnapshot) -> None:
         self._snapshot_name = snapshot.snapshot_name
@@ -206,6 +216,10 @@ class Metadata:
                 "--s3-repo-uri": self._s3_uri,
                 "--s3-region": self._aws_region,
             })
+            if hasattr(self, '_s3_endpoint') and self._s3_endpoint:
+                command_args.update({
+                    "--s3-endpoint": self._s3_endpoint,
+                })
         elif self._snapshot_location == 'fs':
             command_args.update({
                 "--file-system-repo-path": self._repo_path,

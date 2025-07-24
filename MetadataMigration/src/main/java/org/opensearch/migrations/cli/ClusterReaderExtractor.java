@@ -1,6 +1,8 @@
 package org.opensearch.migrations.cli;
 
+import java.net.URI;
 import java.nio.file.Path;
+import java.util.Optional;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
@@ -35,7 +37,12 @@ public class ClusterReaderExtractor {
         if (arguments.fileSystemRepoPath != null) {
             repo = new FileSystemRepo(Path.of(arguments.fileSystemRepoPath));
         } else if (arguments.s3LocalDirPath != null) {
-            repo = S3Repo.create(Path.of(arguments.s3LocalDirPath), new S3Uri(arguments.s3RepoUri), arguments.s3Region);
+            repo = S3Repo.create(
+                Path.of(arguments.s3LocalDirPath),
+                new S3Uri(arguments.s3RepoUri),
+                arguments.s3Region,
+                Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
+            );
         } else {
             throw new ParameterException("Unable to find valid resource provider");
         }
