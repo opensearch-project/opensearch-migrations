@@ -6,7 +6,7 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import type { ReactNode } from "react";
 
 interface DebugCommandProps {
-  children: ReactNode;
+  readonly children: ReactNode;
 }
 
 export default function DebugCommands({ children }: DebugCommandProps) {
