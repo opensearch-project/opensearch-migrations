@@ -55,7 +55,14 @@ public class SupportedClusters {
                 SearchClusterContainer.ES_V5_3,
                 SearchClusterContainer.ES_V5_2,
                 SearchClusterContainer.ES_V5_1,
-                SearchClusterContainer.ES_V5_0
+                SearchClusterContainer.ES_V5_0,
+                SearchClusterContainer.ES_V2_3,
+                SearchClusterContainer.ES_V2_2,
+                SearchClusterContainer.ES_V2_1,
+                SearchClusterContainer.ES_V2_0,
+                SearchClusterContainer.ES_V1_6,
+                SearchClusterContainer.ES_V1_5,
+                SearchClusterContainer.ES_V1_0
         );
     }
 
