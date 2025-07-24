@@ -3,13 +3,21 @@
 import { useSearchParams } from "next/navigation";
 import Box from "@cloudscape-design/components/box";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
 interface DebugCommandProps {
   readonly children: ReactNode;
 }
 
 export default function DebugCommands({ children }: DebugCommandProps) {
+  return (
+    <Suspense fallback={null}>
+      <DebugCommandsInner>{children}</DebugCommandsInner>
+    </Suspense>
+  );
+}
+
+function DebugCommandsInner({ children }: DebugCommandProps) {
   const backgroundColor = "#fff4e5";
   const borderColor = "#ec7211";
 
