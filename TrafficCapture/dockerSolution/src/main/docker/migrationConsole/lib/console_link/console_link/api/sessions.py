@@ -1,8 +1,9 @@
+from enum import Enum
 from fastapi import HTTPException, Body, APIRouter
-from pydantic import BaseModel, ValidationError, constr, field_validator, field_serializer
+from pydantic import BaseModel, ValidationError, field_validator, field_serializer
 from datetime import datetime, UTC
 from tinydb import TinyDB, Query
-from typing import Dict, List, Optional
+from typing import Dict, List
 import re
 
 session_router = APIRouter(
@@ -47,6 +48,20 @@ class Session(SessionBase):
         return v
 
 
+class SessionExistence(Enum):
+    MUST_EXIST = "must_exist"
+    MAY_NOT_EXIST = "may_not_exist"
+
+
+def findSession(session_name: str, existence: SessionExistence):
+    sessionQuery = Query()
+    session = sessions_table.get(sessionQuery.name == session_name)
+    if existence == SessionExistence.MUST_EXIST and not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    return session
+
+
 @session_router.get("/", response_model=List[Session], operation_id="sessionsList")
 def list_sessions():
     return sessions_table.all()
@@ -54,12 +69,7 @@ def list_sessions():
 
 @session_router.get("/{session_name}", response_model=List[Session], operation_id="sessionGet")
 def single_session(session_name: str):
-    SessionQuery = Query()
-    existing = sessions_table.get(SessionQuery.name == session_name)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Session not found.")
-
-    return existing
+    return findSession(session_name, SessionExistence.MUST_EXIST)
 
 
 @session_router.post("/", response_model=Session, operation_id="sessionCreate")
@@ -70,8 +80,7 @@ def create_session(session: SessionBase):
     if unexpected_length(session.name):
         raise HTTPException(status_code=400, detail="Session name less than 50 characters in length.")
 
-    SessionQuery = Query()
-    existing = sessions_table.get(SessionQuery.name == session.name)
+    existing = findSession(session.name, SessionExistence.MAY_NOT_EXIST)
     if existing:
         raise HTTPException(status_code=409, detail="Session already exists.")
 
@@ -90,10 +99,8 @@ def create_session(session: SessionBase):
 
 @session_router.put("/{session_name}", response_model=Session, operation_id="sessionUpdate")
 def update_session(session_name: str, data: Dict = Body(...)):
-    SessionQuery = Query()
-    existing = sessions_table.get(SessionQuery.name == session_name)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    sessionQuery = Query()
+    existing = findSession(session_name, SessionExistence.MUST_EXIST)
 
     try:
         updated_session = Session.model_validate(existing)
@@ -102,14 +109,17 @@ def update_session(session_name: str, data: Dict = Body(...)):
 
     updated_session.updated = datetime.now(UTC)
 
-    sessions_table.update(updated_session.model_dump(), SessionQuery.name == session_name)
+    sessions_table.update(updated_session.model_dump(), sessionQuery.name == session_name)
     return updated_session
 
 
 @session_router.delete("/{session_name}", operation_id="sessionDelete")
 def delete_session(session_name: str):
-    SessionQuery = Query()
-    if sessions_table.remove(SessionQuery.name == session_name):
+    # Make sure the session exists before we attempt to delete it
+    findSession(session_name, SessionExistence.MUST_EXIST)
+
+    sessionQuery = Query()
+    if sessions_table.remove(sessionQuery.name == session_name):
         return {"detail": f"Session '{session_name}' deleted."}
     else:
         raise HTTPException(status_code=404, detail="Session not found.")
