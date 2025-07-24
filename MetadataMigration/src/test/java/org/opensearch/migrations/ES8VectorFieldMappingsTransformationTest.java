@@ -91,24 +91,13 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         var indexName = "vector";
         sourceOperations.createIndex(indexName, requestBody);
 
-
-        String customTransformationJson = "[{\n" +
-            "    \"JsonJSTransformerProvider\": {\n" +
-            "      \"initializationResourcePath\": \"js/es8-vector-metadata.js\",\n" +
-            "      \"bindingsObject\": \"{}\"\n" +
-            "    }\n" +
-            "  }]";
-
         var snapshotName = "custom_transformation_snap";
         var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
         sourceCluster.copySnapshotData(localDirectory.toString());
         var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
 
-        // Set up transformation parameters
-        arguments.metadataCustomTransformationParams = TestCustomTransformationParams.builder()
-                .transformerConfig(customTransformationJson)
-                .build();
+        // Dense Vector transformation automatically applied
 
         // Execute migration
         MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);

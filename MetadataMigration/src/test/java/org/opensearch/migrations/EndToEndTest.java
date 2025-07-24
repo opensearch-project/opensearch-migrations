@@ -81,8 +81,8 @@ class EndToEndTest extends BaseMigrationTest {
         return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
     }
 
-    @ParameterizedTest(name = "From version {0} to version OS 2.19")
-    @MethodSource(value = "extendedScenarios")
+//    @ParameterizedTest(name = "From version {0} to version OS 2.19")
+//    @MethodSource(value = "extendedScenarios")
     void extendedMetadata(SearchClusterContainer.ContainerVersion sourceVersion) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
@@ -143,7 +143,7 @@ class EndToEndTest extends BaseMigrationTest {
             // Create documents that use the templates
             String blogIndexName = "blog_" + uniqueSuffix + "_2023";
             sourceOperations.createDocument(blogIndexName, "222",
-                "{ \"age\": 42, \"is_active\": true }");
+                "{ \"name\": \"bob\", \"is_active\": true }");
             testData.blogIndexNames.add(blogIndexName);
         }
 

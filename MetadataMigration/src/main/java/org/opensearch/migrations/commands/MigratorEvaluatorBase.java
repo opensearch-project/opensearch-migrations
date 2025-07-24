@@ -3,9 +3,12 @@ package org.opensearch.migrations.commands;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
@@ -34,6 +37,9 @@ public abstract class MigratorEvaluatorBase {
             "  }" +
             "]";
 
+    public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-string-test-keyword-metadata.js";
+    public static final String DENSE_VECTOR_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es8-vector-metadata.js";
+
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
 
@@ -55,18 +61,45 @@ public abstract class MigratorEvaluatorBase {
         return clusters.build();
     }
 
-    protected Transformer getCustomTransformer() {
+    protected Transformer getCustomTransformer(Version sourceVersion) {
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
             log.atInfo().setMessage("Metadata Transformations config string: {}")
                     .addArgument(transformerConfig).log();
         } else {
-            log.atInfo().setMessage("Using Noop custom transformation config: {}")
-                    .addArgument(NOOP_TRANSFORMATION_CONFIG).log();
-            transformerConfig = NOOP_TRANSFORMATION_CONFIG;
+            transformerConfig = getCustomTranformationConfigBySourceVersion(sourceVersion);
+            log.atInfo().setMessage("Using version specific custom transformation config: {}")
+                    .addArgument(sourceVersion).log();
         }
         var transformer =  new TransformationLoader().getTransformerFactoryLoader(transformerConfig);
         return new TransformerToIJsonTransformerAdapter(transformer);
+    }
+
+
+    protected String getCustomTranformationConfigBySourceVersion(Version sourceVersion) {
+        List<String> jsTransformationFiles = new ArrayList<>();
+        if (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)) {
+            // ES 1-5 can have indexes with `string` type
+            jsTransformationFiles.add(STRING_TEXT_KEYWORD_TRANSFORMATION_FILE);
+        }
+        if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceVersion)) {
+            // dense_vector introduced in ES 7.0
+            jsTransformationFiles.add(DENSE_VECTOR_TEXT_KEYWORD_TRANSFORMATION_FILE);
+        }
+
+        if (jsTransformationFiles.isEmpty()) {
+            return NOOP_TRANSFORMATION_CONFIG;
+        }
+
+        return jsTransformationFiles.stream()
+                .map(path ->
+                        "{" +
+                        "  \"JsonJSTransformerProvider\":{" +
+                        "    \"initializationResourcePath\":\"" + path + "\"," +
+                        "    \"bindingsObject\":\"{}\"" +
+                        "  }" +
+                        "}")
+                .collect(Collectors.joining(",", "[", "]"));
     }
 
     protected Transformer selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches) {
@@ -76,7 +109,7 @@ public abstract class MigratorEvaluatorBase {
                 arguments.metadataTransformationParams,
                 allowLooseVersionMatches
         );
-        var customTransformer = getCustomTransformer();
+        var customTransformer = getCustomTransformer(clusters.getSource().getVersion());
         var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
         log.atInfo().setMessage("Selected transformer composite: custom = {}, version = {}")
             .addArgument(customTransformer.getClass().getSimpleName())
