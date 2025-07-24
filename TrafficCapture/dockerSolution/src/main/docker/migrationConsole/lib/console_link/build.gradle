@@ -46,10 +46,10 @@ tasks.register('startApiServer') {
     }
 }
 
-tasks.register('alsoStopApiServer') {
-    dependsOn 'preparePipenv'
+def createStopApiServerTask = { Task task ->
+    task.dependsOn 'preparePipenv'
 
-    doLast {
+    task.doLast {
         def pidFile = serverPidFile.get().asFile
         if (pidFile.exists()) {
             def pid = pidFile.text.trim()
@@ -61,17 +61,11 @@ tasks.register('alsoStopApiServer') {
 }
 
 tasks.register('stopApiServer') {
-    dependsOn 'preparePipenv'
+    createStopApiServerTask(it)
+}
 
-    doLast {
-        def pidFile = serverPidFile.get().asFile
-        if (pidFile.exists()) {
-            def pid = pidFile.text.trim()
-            logger.info("Killing FastAPI server with PID $pid")
-            ["kill", pid].execute().waitFor()
-            pidFile.delete()
-        }
-    }
+tasks.register('alsoStopApiServer') {
+    createStopApiServerTask(it)
 }
 
 tasks.register('fetchOpenApiSpec', de.undercouch.gradle.tasks.download.Download) {
