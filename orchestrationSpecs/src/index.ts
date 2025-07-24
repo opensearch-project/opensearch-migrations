@@ -1,24 +1,9 @@
 import {renderWorkflowTemplate} from "@/renderers/argoConfigRenderer";
-import {paramsToCallerSchema} from "@/schemas/parameterSchemas";
-import {z} from "zod/index";
-import {FM, FullMigration, TLH} from "@/workflowTemplates/fullMigration";
-//
-// const finalConfig = renderWorkflowTemplate(new FullMigration(), "fullMigration");
-// console.log("OUTPUT: ");
-// console.log(JSON.stringify(finalConfig, null, 2));
-//
-// const FullMigrationSignature = paramsToCallerSchema(fullMigrationWorkflowTemplate.templates.main.inputs);
-// type FullMigrationMainInputs = z.infer<typeof FullMigrationSignature>;
-//`
-// const t : FullMigrationMainInputs = {
-//     targets: [],
-//     sourceMigrationConfigs: {
-//         indices: [],
-//         migrations: []
-//     }
-//     //imageParams: {}
-// };
+import {FullMigration, TargetLatchHelpers} from "@/workflowTemplates/fullMigration";
 
+console.log("TargetLatchHelper: " + JSON.stringify(TargetLatchHelpers, null, 2));
+console.log("\n\n\n");
 
-console.log("TargetLatchHelper: " + JSON.stringify(TLH, null, 2));
-console.log("FullMigration: " + FM);
+const finalConfig = renderWorkflowTemplate(TargetLatchHelpers);
+console.log("OUTPUT: ");
+console.log(JSON.stringify(finalConfig, null, 2));
