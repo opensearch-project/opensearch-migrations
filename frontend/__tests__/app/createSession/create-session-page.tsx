@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import CreateSessionPage from "@/app/createSession/page";
 import { server } from "@tests/__utils__/mswServer";
 import { http, HttpResponse } from "msw";
+import { SessionBase } from "@/generated/api";
 
 describe("CreateSessionPage", () => {
   beforeEach(() => {
@@ -24,7 +25,7 @@ describe("CreateSessionPage", () => {
     server.use(
       http.post("http://localhost/sessions", async ({ request }) => {
         requestReceived = true;
-        const body: any = await request.json();
+        const body = await request.json() as SessionBase;
         expect(body.name).toBe("Test Session");
         return HttpResponse.json({}, {status: 201});
       })

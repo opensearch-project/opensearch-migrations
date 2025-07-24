@@ -34,7 +34,7 @@ export default function CreateSessionPage() {
       } else {
         setError(JSON.stringify(res.error, null, 2));
       }
-    } catch (err: any) {
+    } catch (err) {
       console.log(err);
       setError(JSON.stringify(err, null, 2) || "Failed to create session");
     } finally {
@@ -49,10 +49,16 @@ export default function CreateSessionPage() {
       <Container>
         <SpaceBetween size="l">
           {success && (
-            <Alert type="success" data-testid="alert-success">Session created successfully!</Alert>
+            <Alert type="success" data-testid="alert-success">
+              Session created successfully!
+            </Alert>
           )}
 
-          {error && <Alert type="error" data-testid="alert-error">{error}</Alert>}
+          {error && (
+            <Alert type="error" data-testid="alert-error">
+              {error}
+            </Alert>
+          )}
 
           <FormField label="Migration Session Name">
             <Input
