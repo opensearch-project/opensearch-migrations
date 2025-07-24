@@ -14,21 +14,25 @@ spec:
           - name: source-cluster
             value: ""
             description: "Source cluster configuration (JSON)"
-          - name: snapshot-info
-            value: ""
-            description: "Snapshot configuration information (JSON)"
           - name: target-cluster
             value: ""
             description: "Target cluster configuration (JSON)"
+          - name: snapshot-info
+            value: ""
+            description: "Snapshot configuration information (JSON)"
+          - name: metadata-info
+            value: ""
+            description: "Metadata migration configuration information (JSON)"
       outputs:
         parameters:
           - name: config-contents
             valueFrom:
               expression: >-
-                (inputs.parameters['kafka-info']     != "" ? "kafka: " +          inputs.parameters['kafka-info'] + "\n" : "") + 
-                (inputs.parameters['source-cluster'] != "" ? "source_cluster: " + inputs.parameters['source-cluster'] + "\n" : "") + 
-                (inputs.parameters['snapshot-info']  != "" ? "snapshot: " +       inputs.parameters['snapshot-info'] + "\n" : "") +
-                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " + inputs.parameters['target-cluster'] + "\n" : "")
+                (inputs.parameters['kafka-info']     != "" ? "kafka: " +              inputs.parameters['kafka-info'] + "\n" : "") + 
+                (inputs.parameters['source-cluster'] != "" ? "source_cluster: " +     inputs.parameters['source-cluster'] + "\n" : "") + 
+                (inputs.parameters['snapshot-info']  != "" ? "snapshot: " +           inputs.parameters['snapshot-info'] + "\n" : "") +
+                (inputs.parameters['metadata-info']  != "" ? "metadata_migration: " + inputs.parameters['metadata-info'] + "\n" : "") +
+                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " +     inputs.parameters['target-cluster'] + "\n" : "")
       steps: [[]]
 
     - name: run-console-with-config

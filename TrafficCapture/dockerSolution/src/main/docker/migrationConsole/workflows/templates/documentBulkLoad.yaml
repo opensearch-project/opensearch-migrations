@@ -192,6 +192,8 @@ spec:
         parameters:
           - name: logging-configuration-contents
             value: '{"configuration":{"status":"ERROR","appenders":{"Console":{"name":"ConsoleAppender","PatternLayout":{"pattern":"%d{yyyy-MM-dd HH:mm:ss} %-5p %c{1}:%L - %m%n"}}},"loggers":{"logger":{"name":"org.opensearch.migrations","level":"trace","additivity":"false","AppenderRef":{"ref":"ConsoleAppender"}},"root":{"level":"warn","AppenderRef":{"ref":"ConsoleAppender"}}}}}'
+          - name: otel-collector-endpoint
+            value: "http://otel-collector:4317"
           - name: target-host
           - name: snapshot-name
           - name: session-name
@@ -206,8 +208,6 @@ spec:
           - name: target-password
           - name: doc-transformer-base64
           - name: index-allowlist
-          - name: otel-collector-endpoint
-            value: "http://otel-collector:4317"
           - name: reindex-from-snapshot-image
           - name: reindex-from-snapshot-pull-policy
           - name: migration-console-image
@@ -233,51 +233,6 @@ spec:
                   app: bulk-loader
                   workflows.argoproj.io/workflow: "{{workflow.name}}"
               spec:
-                volumes:
-                - name: shared-data
-                  emptyDir: {}
-                initContainers:
-                - name: resolver
-                  image: "{{inputs.parameters.migration-console-image}}"
-                  imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
-                  command:
-                  - sh
-                  - -c
-                  - |
-                    # Check if s3-endpoint is provided
-                    if [ -z "{{inputs.parameters.s3-endpoint}}" ]; then
-                      echo "No S3 endpoint provided, skipping resolution"
-                      exit 0
-                    fi
-
-                    echo "Resolving S3 endpoint IP address for {{inputs.parameters.s3-endpoint}}"
-                    # Extract hostname from URL if needed
-                    S3_HOST=$(echo "{{inputs.parameters.s3-endpoint}}" | sed -E 's|^https?://||' | sed -E 's|:[0-9]+$||' | sed -E 's|/.*$||')
-                    echo "Extracted hostname: $S3_HOST"
-
-                    # Resolve IP address
-                    S3_IP=$(/usr/bin/getent hosts $S3_HOST | awk '{ print $1 }')
-                    if [ -z "$S3_IP" ]; then
-                      echo "Failed to resolve $S3_HOST, using original endpoint"
-                      S3_IP="{{inputs.parameters.s3-endpoint}}"
-                    else
-                      echo "Resolved $S3_HOST to IP: $S3_IP"
-                      # Preserve protocol and port if present
-                      if echo "{{inputs.parameters.s3-endpoint}}" | grep -q "^https"; then
-                        PROTOCOL="https://"
-                      else
-                        PROTOCOL="http://"
-                      fi
-                      PORT=$(echo "{{inputs.parameters.s3-endpoint}}" | grep -Eo ':[0-9]+' || echo "")
-                      PATH_SUFFIX=$(echo "{{inputs.parameters.s3-endpoint}}" | grep -Eo '/.*$' || echo "")
-                      S3_IP="${PROTOCOL}${S3_IP}${PORT}"
-                    fi
-
-                    echo "Final S3 endpoint IP address: $S3_IP"
-                    echo "$S3_IP" > /shared-data/s3-endpoint-ip
-                  volumeMounts:
-                  - name: shared-data
-                    mountPath: /shared-data
                 containers:
                 - name: bulk-loader
                   image: "{{inputs.parameters.reindex-from-snapshot-image}}"
@@ -293,6 +248,8 @@ spec:
                       value: "{{inputs.parameters.s3-repo-uri}}"
                     - name: S3_REGION
                       value: "{{inputs.parameters.s3-region}}"
+                    - name: S3_ENDPOINT
+                      value: "{{inputs.parameters.s3-endpoint}}"
                     - name: DOCUMENTS_PER_BULK_REQUEST
                       value: "{{inputs.parameters.documents-per-bulk-request}}"
                     - name: LEASE_DURATION
@@ -329,12 +286,6 @@ spec:
                     - |
                       set -e
 
-                      # If s3-endpoint is provided and the file with resolved IP exists, use it
-                      if [ -n "{{inputs.parameters.s3-endpoint}}" ] && [ -f /shared-data/s3-endpoint-ip ]; then
-                        export S3_ENDPOINT=$(cat /shared-data/s3-endpoint-ip)
-                        echo "Using resolved S3 endpoint: $S3_ENDPOINT"
-                      fi
-
                       ARGS=""
                       ARGS="${ARGS}${S3_REPO_URI:+ --s3-repo-uri $S3_REPO_URI --s3-local-dir /tmp}"
                       ARGS="${ARGS}${S3_REGION:+ --s3-region $S3_REGION}"
@@ -368,9 +319,6 @@ spec:
 
                       export RFS_COMMAND="/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $ARGS"
                       exec /rfs-app/entrypoint.sh
-                  volumeMounts:
-                  - name: shared-data
-                    mountPath: /shared-data
 
 
     - name: wait-for-completion
