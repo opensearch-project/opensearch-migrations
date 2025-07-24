@@ -36,8 +36,20 @@ tasks.register('startApiServer') {
 
     doLast {
         def command = "pipenv run gunicorn console_link.api.main:app -k uvicorn.workers.UvicornWorker -w 1 -b 127.0.0.1:${apiPort}"
+        def stdout = new StringBuilder()
+        def stderr = new StringBuilder()
         def proc = command.execute(null, projectDirRef)
-        sleep 2000
+
+        proc.consumeProcessOutput(stdout, stderr)
+
+        sleep(2000)
+
+        if (!proc.alive) {
+            logger.error("Server failed to start. Command: ${command}")
+            logger.error("Standard Output:\n${stdout}")
+            logger.error("Standard Error:\n${stderr}")
+            throw new GradleException("Failed to start API server. See logs for details.")
+        }
 
         logger.info("Server started with ${command}, pid: ${proc.pid()}")
         def pidFile = serverPidFile.get().asFile
