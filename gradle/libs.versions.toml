@@ -114,13 +114,17 @@ lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
 
 lucene-v5-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene5" }
 lucene-v5-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene5" }
+lucene-v5-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene5" }
 lucene-v6-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene6" }
 lucene-v6-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene6" }
+lucene-v6-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene6" }
 lucene-v7-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene7" }
 lucene-v7-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene7" }
+lucene-v7-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene7" }
 lucene-v9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene9" }
 lucene-v9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
 lucene-v9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
+lucene-v9-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene9" }
 
 mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
