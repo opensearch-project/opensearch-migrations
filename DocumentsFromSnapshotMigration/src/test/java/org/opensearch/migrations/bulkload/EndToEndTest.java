@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -51,7 +52,7 @@ public class EndToEndTest extends SourceTestBase {
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            migrationDocumentsWithClusters(sourceCluster, targetCluster, true);
+            migrationDocumentsWithClusters(sourceCluster, targetCluster);
         }
     }
 
@@ -66,15 +67,14 @@ public class EndToEndTest extends SourceTestBase {
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_1)
         ) {
-            migrationDocumentsWithClusters(sourceCluster, targetCluster, false);
+            migrationDocumentsWithClusters(sourceCluster, targetCluster);
         }
     }
 
     @SneakyThrows
     private void migrationDocumentsWithClusters(
         final SearchClusterContainer sourceCluster,
-        final SearchClusterContainer targetCluster,
-        final boolean includeCompletionFieldIndex
+        final SearchClusterContainer targetCluster
     ) {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -108,7 +108,8 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
 
-            if (includeCompletionFieldIndex && sourceVersion != UnboundVersionMatchers.isBelowES_5_X) {
+            // Create and verify a 'completion' index only for ES 5.x and above
+            if (sourceSupportsCompletionFields(sourceVersion)) {
                 String completionIndex = "completion_index";
                 sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
                 String completionDoc =
@@ -191,7 +192,7 @@ public class EndToEndTest extends SourceTestBase {
             boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
             boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
 
-            if (includeCompletionFieldIndex && sourceVersion != UnboundVersionMatchers.isBelowES_2_X) {
+            if (sourceSupportsCompletionFields(sourceVersion)) {
                 var res = targetClusterOperations.get("/completion_index/_doc/1");
                 ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
                 JsonNode doc = mapper.readTree(res.getValue());
@@ -207,6 +208,10 @@ public class EndToEndTest extends SourceTestBase {
         } finally {
             deleteTree(localDirectory.toPath());
         }
+    }
+
+    private boolean sourceSupportsCompletionFields(Version sourceVersion) {
+        return !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion);
     }
 
     private String generateLargeDocJson(int sizeInMB) {
