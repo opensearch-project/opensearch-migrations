@@ -53,7 +53,7 @@ class SessionExistence(Enum):
     MAY_NOT_EXIST = "may_not_exist"
 
 
-def findSession(session_name: str, existence: SessionExistence):
+def find_session(session_name: str, existence: SessionExistence):
     session_query = Query()
     session = sessions_table.get(session_query.name == session_name)
     if existence == SessionExistence.MUST_EXIST and not session:
@@ -69,7 +69,7 @@ def list_sessions():
 
 @session_router.get("/{session_name}", response_model=List[Session], operation_id="sessionGet")
 def single_session(session_name: str):
-    return findSession(session_name, SessionExistence.MUST_EXIST)
+    return find_session(session_name, SessionExistence.MUST_EXIST)
 
 
 @session_router.post("/", response_model=Session, operation_id="sessionCreate")
@@ -80,7 +80,7 @@ def create_session(session: SessionBase):
     if unexpected_length(session.name):
         raise HTTPException(status_code=400, detail="Session name less than 50 characters in length.")
 
-    existing = findSession(session.name, SessionExistence.MAY_NOT_EXIST)
+    existing = find_session(session.name, SessionExistence.MAY_NOT_EXIST)
     if existing:
         raise HTTPException(status_code=409, detail="Session already exists.")
 
@@ -100,7 +100,7 @@ def create_session(session: SessionBase):
 @session_router.put("/{session_name}", response_model=Session, operation_id="sessionUpdate")
 def update_session(session_name: str, data: Dict = Body(...)):
     sessionQuery = Query()
-    existing = findSession(session_name, SessionExistence.MUST_EXIST)
+    existing = find_session(session_name, SessionExistence.MUST_EXIST)
 
     try:
         updated_session = Session.model_validate(existing)
@@ -116,7 +116,7 @@ def update_session(session_name: str, data: Dict = Body(...)):
 @session_router.delete("/{session_name}", operation_id="sessionDelete")
 def delete_session(session_name: str):
     # Make sure the session exists before we attempt to delete it
-    findSession(session_name, SessionExistence.MUST_EXIST)
+    find_session(session_name, SessionExistence.MUST_EXIST)
 
     sessionQuery = Query()
     if sessions_table.remove(sessionQuery.name == session_name):
