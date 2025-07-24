@@ -214,8 +214,7 @@ public class EndToEndTest extends SourceTestBase {
     }
 
     private boolean sourceSupportsCompletionFields(Version sourceVersion, Version targetVersion) {
-        return !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)
-                && UnboundVersionMatchers.isBelowES_8_X.test(sourceVersion)
+        return !UnboundVersionMatchers.isBelowES_2_X.test(sourceVersion)
                 && UnboundVersionMatchers.anyOS.test(targetVersion);
     }
 

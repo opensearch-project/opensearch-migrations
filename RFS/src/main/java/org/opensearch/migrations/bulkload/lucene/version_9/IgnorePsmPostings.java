@@ -1,7 +1,9 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
+import java.util.Arrays;
 
+import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.codecs.FieldsConsumer;
 import shadow.lucene9.org.apache.lucene.codecs.FieldsProducer;
 import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
@@ -24,6 +26,7 @@ import shadow.lucene9.org.apache.lucene.store.Directory;
  * stored in segment metadata.</p>
  *
  */
+@Slf4j
 public class IgnorePsmPostings extends PostingsFormat {
 
     public IgnorePsmPostings() {
@@ -38,16 +41,14 @@ public class IgnorePsmPostings extends PostingsFormat {
     @Override
     public FieldsProducer fieldsProducer(SegmentReadState state) throws IOException {
         Directory dir = state.directory;
-        for (String file : dir.listAll()) {
-            if (file.endsWith(".psm")) {
-                throw new UnsupportedOperationException(
-                    String.format(
-                        "Detected unsupported .psm file in segment [%s]. The index is using an unrecognized format.",
-                        state.segmentInfo.name
-                    )
-                );
-            }
+        String[] files = dir.listAll();
+
+        boolean foundPsm = Arrays.stream(files).anyMatch(f -> f.endsWith(".psm"));
+        if (foundPsm) {
+            log.warn("Ignoring .psm file(s) in segment [{}] — skipping proprietary ES812Postings data", state.segmentInfo.name);
         }
+
+        // Return an empty reader that pretends the field has no terms/postings
         return FallbackLuceneComponents.EMPTY_FIELDS_PRODUCER;
     }
 }
