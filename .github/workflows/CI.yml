@@ -112,6 +112,9 @@ jobs:
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
+          pipenv graph
+
+      - run: |
           pipenv run test
           pipenv run coverage xml
       - name: Get Sanitized Name
