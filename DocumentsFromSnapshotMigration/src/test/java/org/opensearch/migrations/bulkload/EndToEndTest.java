@@ -113,6 +113,7 @@ public class EndToEndTest extends SourceTestBase {
             if (supportsCompletion) {
                 String completionIndex = "completion_index";
                 sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
+                targetClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
                 String completionDoc =
                 "{" +
                 "    \"completion\": \"bananas\" " +
@@ -120,6 +121,7 @@ public class EndToEndTest extends SourceTestBase {
                 String docType = sourceClusterOperations.defaultDocType();
                 sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
                 sourceClusterOperations.post("/_refresh", null);
+                targetClusterOperations.post("/_refresh", null);
             }
 
             // === ACTION: Create two large documents (2MB each) ===
@@ -212,11 +214,12 @@ public class EndToEndTest extends SourceTestBase {
 
     @SneakyThrows
     private void validateCompletionDoc(ClusterOperations targetClusterOperations) {
-        var res = targetClusterOperations.get("/completion_index/_doc/1");
+        targetClusterOperations.post("/_refresh", null);
+        String docType = targetClusterOperations.defaultDocType();
+        var res = targetClusterOperations.get("/completion_index/" + docType + "/1");
         ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
         JsonNode doc = mapper.readTree(res.getValue());
         JsonNode sourceNode = doc.path("_source").path("completion");
-
         Assertions.assertTrue(sourceNode.isTextual() || sourceNode.isArray(),
                 "Expected 'completion' field to be present and textual or array");
     }
