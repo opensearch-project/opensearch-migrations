@@ -403,6 +403,7 @@ public class CaptureProxy {
         proxy.waitForClose();
     }
 
+    @SuppressWarnings("java:S4030") // Collections removeStrings and addBufs are incorrectly reported as being unused
     static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
                                                                 BacksideConnectionPool backsideConnectionPool,
                                                                 Supplier<SSLEngine> sslEngineSupplier,

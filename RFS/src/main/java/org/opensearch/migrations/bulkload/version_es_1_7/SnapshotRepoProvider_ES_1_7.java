@@ -12,6 +12,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
+    private static final String SNAPSHOT_PREFIX = "snapshot-";
     private static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
     private SnapshotRepoData_ES_1_7 repoData;
@@ -46,7 +47,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         Path metaFile = repo.getRepoRootDir()
                 .resolve(INDICES_DIR_NAME)
                 .resolve(indexName)
-                .resolve("snapshot-" + snapshotName);
+                .resolve(SNAPSHOT_PREFIX + snapshotName);
 
         try {
             return Files.readAllBytes(metaFile);
@@ -91,7 +92,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
                 .resolve(INDICES_DIR_NAME)
                 .resolve(indexId)
                 .resolve(String.valueOf(shardId))
-                .resolve("snapshot-" + snapshotId);
+                .resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 
     public Path getSnapshotMetadataFile(String snapshotName) {
@@ -104,7 +105,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
             return false;
         }
         for (File f : files) {
-            if (f.getName().equals("snapshot-" + snapshotName)) {
+            if (f.getName().equals(SNAPSHOT_PREFIX + snapshotName)) {
                 return true;
             }
         }
