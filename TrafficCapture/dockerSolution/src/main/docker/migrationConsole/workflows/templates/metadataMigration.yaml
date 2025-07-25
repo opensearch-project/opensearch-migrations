@@ -17,6 +17,7 @@ spec:
             description: "Metadata migration details"
           - name: migration-console-image
           - name: migration-console-pull-policy
+          - name: localstack-enabled
           - name: source-config
             description: "Source cluster details (Optional)"
             value: ""
@@ -46,15 +47,11 @@ spec:
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command
                   value: |
-                    set -e &&
-                    export AWS_ACCESS_KEY_ID="test" &&
-                    export AWS_SECRET_ACCESS_KEY="test" &&
-                    export AWS_SESSION_TOKEN="test" &&
-                    export AWS_DEFAULT_REGION="us-east-2" &&
-                    export AWS_REGION="us-east-2" &&
-                    
+                    set -e &&                    
                     console --config-file=/config/migration_services.yaml -v metadata evaluate ;
                     console --config-file=/config/migration_services.yaml -v metadata migrate
+                - name: use-localstack-aws-creds
+                  value: "{{inputs.parameters.localstack-enabled}}"
                 - name: migration-console-image
                   value: "{{inputs.parameters.migration-console-image}}"
                 - name: migration-console-pull-policy

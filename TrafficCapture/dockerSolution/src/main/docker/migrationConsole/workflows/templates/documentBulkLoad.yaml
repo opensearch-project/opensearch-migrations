@@ -23,6 +23,8 @@ spec:
             value: ""
           - name: image-config
             description: "Map of MA images and settings (e.g. pull policy)"
+          - name: localstack-enabled
+            description: "Is Localstack being used for AWS endpoints"
       steps:
         - - name: run-bulk-load
             template: run-bulk-load
@@ -48,6 +50,8 @@ spec:
                   value: "{{inputs.parameters.session-name}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: use-localstack-aws-creds
+                  value: "{{inputs.parameters.localstack-enabled}}"
                   # TODO - parse the other stuff out and into the args.
 
     - name: run-bulk-load
@@ -71,7 +75,9 @@ spec:
             
           - name: image-config
             description: "Map of MA images and settings (e.g. pull policy)"
-            
+          - name: use-localstack-aws-creds
+            description: "Is Localstack being used for AWS endpoints"
+
           # Parameters with defaults - split into input and default pairs
           - name: replicas
             value: ""
@@ -149,6 +155,8 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
                 - name: migration-console-pull-policy
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
+                - name: use-localstack-aws-creds
+                  value: "{{inputs.parameters.use-localstack-aws-creds}}"
 
         - - name: setup-wait-for-completion
             templateRef:
@@ -194,6 +202,8 @@ spec:
             value: '{"configuration":{"status":"ERROR","appenders":{"Console":{"name":"ConsoleAppender","PatternLayout":{"pattern":"%d{yyyy-MM-dd HH:mm:ss} %-5p %c{1}:%L - %m%n"}}},"loggers":{"logger":{"name":"org.opensearch.migrations","level":"trace","additivity":"false","AppenderRef":{"ref":"ConsoleAppender"}},"root":{"level":"warn","AppenderRef":{"ref":"ConsoleAppender"}}}}}'
           - name: otel-collector-endpoint
             value: "http://otel-collector:4317"
+          - name: use-localstack-aws-creds
+            value: "false"
           - name: target-host
           - name: snapshot-name
           - name: session-name
@@ -268,16 +278,6 @@ spec:
                       value: "{{inputs.parameters.doc-transformer-base64}}"
                     - name: INDEX_ALLOW_LIST
                       value: "{{inputs.parameters.index-allowlist}}"
-                    - name: AWS_ACCESS_KEY_ID
-                      value: "test"
-                    - name: AWS_SECRET_ACCESS_KEY
-                      value: "test"
-                    - name: AWS_SESSION_TOKEN
-                      value: "test"
-                    - name: AWS_REGION
-                      value: "us-east-1"
-                    - name: AWS_DEFAULT_REGION
-                      value: "us-east-1"
                     - name: OTEL_COLLECTOR_ENDPOINT
                       value: "{{inputs.parameters.otel-collector-endpoint}}"
                   command:
@@ -285,6 +285,13 @@ spec:
                     - "-c"
                     - |
                       set -e
+          
+                      if [ "{{inputs.parameters.use-localstack-aws-creds}}" = "true" ]; then
+                        export AWS_ACCESS_KEY_ID=test
+                        export AWS_SECRET_ACCESS_KEY=test
+                        export AWS_SESSION_TOKEN=test
+                        export AWS_REGION=us-east-2
+                      fi
 
                       ARGS=""
                       ARGS="${ARGS}${S3_REPO_URI:+ --s3-repo-uri $S3_REPO_URI --s3-local-dir /tmp}"

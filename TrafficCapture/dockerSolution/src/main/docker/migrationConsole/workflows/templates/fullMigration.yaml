@@ -141,6 +141,8 @@ spec:
                   value: "{{steps.get-configs-from-maps.outputs.parameters.s3-config}}"
                 - name: image-config
                   value: "{{steps.get-image-map.outputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{steps.get-configs-from-maps.outputs.parameters.is-localstack-endpoint}}"
 
 
     - name: get-configs-from-args
@@ -174,6 +176,10 @@ spec:
                   '"endpoint": "' + steps['resolve-s3-endpoint'].outputs.parameters['resolved-s3-endpoint'] + '", ' + 
                   '"repo_uri": "s3://' + inputs.parameters['bucket-name'] + '"' +
                 '}'
+          - name: is-localstack-endpoint
+            valueFrom:
+              expression: >-
+                steps['resolve-s3-endpoint'].outputs.parameters['is-localstack-endpoint']
 
     - name: get-image-map-from-args
       inputs:
@@ -228,6 +234,7 @@ spec:
             value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
           - name: s3-config
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: init
             templateRef:
@@ -261,6 +268,8 @@ spec:
                   value: "{{steps.init.outputs.parameters.prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
         - - name: cleanup
             templateRef:
@@ -285,6 +294,7 @@ spec:
           - name: s3-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: pipeline-snapshot
             template: pipeline-snapshot
@@ -305,6 +315,8 @@ spec:
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
     - name: pipeline-snapshot
       inputs:
@@ -316,6 +328,7 @@ spec:
           - name: s3-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: create-or-get-snapshot
             templateRef:
@@ -350,6 +363,8 @@ spec:
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
     - name: pipeline-snapshot-to-target
       inputs:
@@ -360,6 +375,7 @@ spec:
           - name: target-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: pipeline-migrate-from-snapshot
             template: pipeline-migrate-from-snapshot
@@ -378,6 +394,8 @@ spec:
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
     - name: pipeline-migrate-from-snapshot
       inputs:
@@ -388,6 +406,7 @@ spec:
           - name: target-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: id-generator
             template: do-nothing
@@ -410,6 +429,8 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
                 - name: migration-console-pull-policy
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 #        - - name: bulk-load-documents
 #            templateRef:
 #              name: bulk-load
@@ -427,6 +448,8 @@ spec:
 #                  value: "{{steps.id-generator.id}}"
 #                - name: image-config
 #                  value: "{{inputs.parameters.image-config}}"
+#                - name: localstack-enabled
+#                  value: "{{inputs.parameters.localstack-enabled}}"
 #        # Check target readiness after processing and bump it to the next phase if ready
 #        - - name: target-backfill-complete-check
 #            templateRef:

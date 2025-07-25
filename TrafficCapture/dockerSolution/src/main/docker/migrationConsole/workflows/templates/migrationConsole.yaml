@@ -42,6 +42,8 @@ spec:
           - name: config-contents
           - name: migration-console-image
           - name: migration-console-pull-policy
+          - name: use-localstack-aws-creds
+            value: "false"
       container:
         image: "{{inputs.parameters.migration-console-image}}"
         imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
@@ -50,6 +52,13 @@ spec:
           - |
             set -e
             
+            if [ "{{inputs.parameters.use-localstack-aws-creds}}" = "true" ]; then
+              export AWS_ACCESS_KEY_ID=test
+              export AWS_SECRET_ACCESS_KEY=test
+              export AWS_SESSION_TOKEN=test
+              export AWS_REGION=us-east-2
+            fi
+    
             # Save pod name to output path
             echo $HOSTNAME > /tmp/podname
             

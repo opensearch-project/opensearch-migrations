@@ -19,10 +19,11 @@ spec:
         command: [sh]
         source: |
           set -euo pipefail
-    
-          if [ -z "{{inputs.parameters.s3-endpoint}}" ]; then
-            echo "No S3 endpoint provided, skipping resolution"
+          
+          if [ -z "{{inputs.parameters.s3-endpoint}}" ] || ! echo "{{inputs.parameters.s3-endpoint}}" | grep -q "^http://localstack"; then
+            echo "No S3 endpoint provided or not using localstack, skipping resolution"
             echo "{{inputs.parameters.s3-endpoint}}" > /tmp/resolved
+            echo "false" > /tmp/isLocalstack
             exit 0
           fi
     
@@ -49,8 +50,12 @@ spec:
     
           echo "Final resolved S3 endpoint: $FINAL_ENDPOINT"
           echo "$FINAL_ENDPOINT" > /tmp/resolved
+          echo "true" > /tmp/isLocalstack
       outputs:
         parameters:
           - name: resolved-s3-endpoint
             valueFrom:
               path: /tmp/resolved
+          - name: is-localstack-endpoint
+            valueFrom:
+              path: /tmp/isLocalstack
