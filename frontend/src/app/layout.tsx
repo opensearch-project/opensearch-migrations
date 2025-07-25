@@ -6,7 +6,6 @@ import {
   SideNavigation,
 } from "@cloudscape-design/components";
 import { useState } from "react";
-import "@/lib/client-config";
 
 const sideNav = (
   <SideNavigation
