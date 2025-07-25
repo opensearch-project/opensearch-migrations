@@ -30,12 +30,18 @@ public class ClusterReaderExtractor {
         if (arguments.sourceArgs != null && arguments.sourceArgs.host != null) {
             return getRemoteReader(arguments.sourceArgs.toConnectionContext());
         }
+
+        // Get version-specific snapshot reader
+        var reader = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, null, arguments.versionStrictness.allowLooseVersionMatches);
+
+        // Get file finder
+        var fileFinder = reader.getSnapshotFileFinder();
         
         SourceRepo repo = null;
         if (arguments.fileSystemRepoPath != null) {
-            repo = new FileSystemRepo(Path.of(arguments.fileSystemRepoPath));
+            repo = new FileSystemRepo(Path.of(arguments.fileSystemRepoPath), fileFinder);
         } else if (arguments.s3LocalDirPath != null) {
-            repo = S3Repo.create(Path.of(arguments.s3LocalDirPath), new S3Uri(arguments.s3RepoUri), arguments.s3Region);
+            repo = S3Repo.create(Path.of(arguments.s3LocalDirPath), new S3Uri(arguments.s3RepoUri), arguments.s3Region, null, fileFinder);
         } else {
             throw new ParameterException("Unable to find valid resource provider");
         }

@@ -42,7 +42,7 @@ public class S3RepoTest {
 
     class TestableS3Repo extends S3Repo {
         public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client) {
-            super(s3LocalDir, s3RepoUri, s3Region, s3Client);
+            super(finder, s3LocalDir, s3RepoUri, s3Region, s3Client);
         }
 
         @Override
@@ -115,7 +115,7 @@ public class S3RepoTest {
 
         var nonExistentFileName = "does-not-exist";
         var bucket = new S3Uri("s3://bucket-name/directory" + nonExistentFileName);
-        var testRepo = spy(new S3Repo(testDir, bucket, testRegion, mockS3Client));
+        var testRepo = spy(new S3Repo(finder, testDir, bucket, testRegion, mockS3Client));
 
         // Run the test
         var thrown = assertThrows(CannotFindSnapshotRepoRoot.class, () -> testRepo.getSnapshotRepoDataFilePath());

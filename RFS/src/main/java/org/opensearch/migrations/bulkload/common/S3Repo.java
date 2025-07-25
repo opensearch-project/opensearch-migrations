@@ -33,6 +33,8 @@ public class S3Repo implements SourceRepo {
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
     public static final String INDICES_PREFIX_STR = "indices/";
 
+    private final SnapshotFileFinder fileFinder;
+
     private final Path s3LocalDir;
     @Getter
     @ToString.Include
@@ -93,25 +95,26 @@ public class S3Repo implements SourceRepo {
         s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
     }
 
-    public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region) {
-        return create(s3LocalDir, s3Uri, s3Region, null);
+    public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, SnapshotFileFinder finder) {
+        return create(s3LocalDir, s3Uri, s3Region, null, finder);
     }
 
-    public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint) {
+    public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint, SnapshotFileFinder finder) {
         S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
-            .region(Region.of(s3Region))
-            .credentialsProvider(DefaultCredentialsProvider.builder().build())
-            .retryConfiguration(r -> r.numRetries(3))
-            .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
-            .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
-            .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
-            .endpointOverride(s3Endpoint)
-            .build();
+                .region(Region.of(s3Region))
+                .credentialsProvider(DefaultCredentialsProvider.builder().build())
+                .retryConfiguration(r -> r.numRetries(3))
+                .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
+                .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
+                .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
+                .endpointOverride(s3Endpoint)
+                .build();
 
-        return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client);
+        return new S3Repo(finder, s3LocalDir, s3Uri, s3Region, s3Client);
     }
 
-    public S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client) {
+    public S3Repo(SnapshotFileFinder fileFinder, Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client) {
+        this.fileFinder = fileFinder;
         this.s3LocalDir = s3LocalDir;
         this.s3RepoUri = s3Uri;
         this.s3Region = s3Region;
@@ -125,65 +128,71 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getSnapshotRepoDataFilePath() {
-        S3Uri repoFileS3Uri = findRepoFileUri();
-
-        String relativeFileS3Uri = repoFileS3Uri.uri.substring(s3RepoUri.uri.length() + 1);
-
-        Path localFilePath = s3LocalDir.resolve(relativeFileS3Uri);
-        ensureFileExistsLocally(repoFileS3Uri, localFilePath);
-
-        return localFilePath;
+        Path relativePath = fileFinder.getSnapshotRepoDataFilePath();
+        if (relativePath == null) {
+            // fallback to listing S3
+            S3Uri repoFileS3Uri = findRepoFileUri();
+            String relativeFileS3Uri = repoFileS3Uri.uri.substring(s3RepoUri.uri.length() + 1);
+            Path localFilePath = s3LocalDir.resolve(relativeFileS3Uri);
+            ensureFileExistsLocally(repoFileS3Uri, localFilePath);
+            return localFilePath;
+        } else {
+            Path localFilePath = s3LocalDir.resolve(relativePath);
+            S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+            ensureFileExistsLocally(fileUri, localFilePath);
+            return localFilePath;
+        }
     }
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        String suffix = "meta-" + snapshotId + ".dat";
-        Path filePath = s3LocalDir.resolve(suffix);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
-        ensureFileExistsLocally(fileUri, filePath);
-        return filePath;
+        Path relativePath = fileFinder.getGlobalMetadataFilePath(snapshotId);
+        Path localFilePath = s3LocalDir.resolve(relativePath);
+        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+        ensureFileExistsLocally(fileUri, localFilePath);
+        return localFilePath;
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        String suffix = "snap-" + snapshotId + ".dat";
-        Path filePath = s3LocalDir.resolve(suffix);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
-        ensureFileExistsLocally(fileUri, filePath);
-        return filePath;
+        Path relativePath = fileFinder.getSnapshotMetadataFilePath(snapshotId);
+        Path localFilePath = s3LocalDir.resolve(relativePath);
+        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+        ensureFileExistsLocally(fileUri, localFilePath);
+        return localFilePath;
     }
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        String suffix = INDICES_PREFIX_STR + indexId + "/meta-" + indexFileId + ".dat";
-        Path filePath = s3LocalDir.resolve(suffix);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
-        ensureFileExistsLocally(fileUri, filePath);
-        return filePath;
+        Path relativePath = fileFinder.getIndexMetadataFilePath(indexId, indexFileId);
+        Path localFilePath = s3LocalDir.resolve(relativePath);
+        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+        ensureFileExistsLocally(fileUri, localFilePath);
+        return localFilePath;
     }
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        String suffix = INDICES_PREFIX_STR + indexId + "/" + shardId;
-        return s3LocalDir.resolve(suffix);
+        Path relativePath = fileFinder.getShardDirPath(indexId, shardId);
+        return s3LocalDir.resolve(relativePath);
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        String suffix = INDICES_PREFIX_STR + indexId + "/" + shardId + "/snap-" + snapshotId + ".dat";
-        Path filePath = s3LocalDir.resolve(suffix);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
-        ensureFileExistsLocally(fileUri, filePath);
-        return filePath;
+        Path relativePath = fileFinder.getShardMetadataFilePath(snapshotId, indexId, shardId);
+        Path localFilePath = s3LocalDir.resolve(relativePath);
+        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+        ensureFileExistsLocally(fileUri, localFilePath);
+        return localFilePath;
     }
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
-        String suffix = INDICES_PREFIX_STR + indexId + "/" + shardId + "/" + blobName;
-        Path filePath = s3LocalDir.resolve(suffix);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
-        ensureFileExistsLocally(fileUri, filePath);
-        return filePath;
+        Path relativePath = fileFinder.getBlobFilePath(indexId, shardId, blobName);
+        Path localFilePath = s3LocalDir.resolve(relativePath);
+        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+        ensureFileExistsLocally(fileUri, localFilePath);
+        return localFilePath;
     }
 
     @Override

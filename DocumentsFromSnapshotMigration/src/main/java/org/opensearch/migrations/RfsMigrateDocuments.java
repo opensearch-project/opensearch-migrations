@@ -24,6 +24,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -66,6 +67,8 @@ import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
+    private final SnapshotFileFinder fileFinder;
+
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
 
@@ -84,6 +87,10 @@ public class RfsMigrateDocuments {
             "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
             "  }" +
             "]";
+
+    public RfsMigrateDocuments(SnapshotFileFinder fileFinder) {
+        this.fileFinder = fileFinder;
+    }
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -400,20 +407,28 @@ public class RfsMigrateDocuments {
                 arguments.maxConnections,
                 docTransformerSupplier);
 
+            // Get fileFinder using SnapshotReader
+            var snapshotReader = ClusterProviderRegistry.getSnapshotReader(
+                    arguments.sourceVersion, null, arguments.versionStrictness.allowLooseVersionMatches);
+            var fileFinder = snapshotReader.getSnapshotFileFinder();
             SourceRepo sourceRepo;
+
             if (snapshotLocalDirPath == null) {
+                URI s3Endpoint = arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null;
                 sourceRepo = S3Repo.create(
                     Paths.get(arguments.s3LocalDir),
                     new S3Uri(arguments.s3RepoUri),
                     arguments.s3Region,
-                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
+                    s3Endpoint,
+                    fileFinder
                 );
             } else {
-                sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
+                sourceRepo = new FileSystemRepo(snapshotLocalDirPath, fileFinder);
             }
             var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
+            var sourceResourceProvider = snapshotReader;
+            sourceResourceProvider.initialize(sourceRepo);
 
             var unpackerFactory = new SnapshotShardUnpacker.Factory(
                 repoAccessor,

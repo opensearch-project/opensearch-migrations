@@ -14,6 +14,7 @@ import lombok.ToString;
 @ToString
 public class FileSystemRepo implements SourceRepo {
     private final Path repoRootDir;
+    private final SnapshotFileFinder fileFinder;
 
     private Path findRepoFile() {
         // The directory may contain multiple of these files, but we want the highest versioned one
@@ -44,8 +45,9 @@ public class FileSystemRepo implements SourceRepo {
         return highestVersionedFile;
     }
 
-    public FileSystemRepo(Path repoRootDir) {
+    public FileSystemRepo(Path repoRootDir, SnapshotFileFinder fileFinder) {
         this.repoRootDir = repoRootDir;
+        this.fileFinder = fileFinder;
     }
 
     @Override
@@ -55,42 +57,38 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public Path getSnapshotRepoDataFilePath() {
-        return findRepoFile();
+        Path relativePath = fileFinder.getSnapshotRepoDataFilePath();
+        return relativePath != null ? repoRootDir.resolve(relativePath) : findRepoFile(); // fallback
     }
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        return getRepoRootDir().resolve("meta-" + snapshotId + ".dat");
+        return repoRootDir.resolve(fileFinder.getGlobalMetadataFilePath(snapshotId));
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        return getRepoRootDir().resolve("snap-" + snapshotId + ".dat");
+        return repoRootDir.resolve(fileFinder.getSnapshotMetadataFilePath(snapshotId));
     }
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        return getRepoRootDir().resolve("indices").resolve(indexId).resolve("meta-" + indexFileId + ".dat");
+        return repoRootDir.resolve(fileFinder.getIndexMetadataFilePath(indexId, indexFileId));
     }
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        String shardDirPath = getRepoRootDir().resolve("indices")
-            .resolve(indexId)
-            .resolve(String.valueOf(shardId))
-            .toString();
-        return Path.of(shardDirPath);
+        return repoRootDir.resolve(fileFinder.getShardDirPath(indexId, shardId));
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        return getShardDirPath(indexId, shardId).resolve("snap-" + snapshotId + ".dat");
+        return repoRootDir.resolve(fileFinder.getShardMetadataFilePath(snapshotId, indexId, shardId));
     }
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
-        Path shardDirPath = getShardDirPath(indexId, shardId);
-        return shardDirPath.resolve(blobName);
+        return repoRootDir.resolve(fileFinder.getBlobFilePath(indexId, shardId, blobName));
     }
 
     @Override

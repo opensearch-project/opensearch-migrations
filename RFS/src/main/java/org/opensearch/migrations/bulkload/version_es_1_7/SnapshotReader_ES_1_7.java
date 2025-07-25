@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.version_es_1_7;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
@@ -27,6 +28,11 @@ public class SnapshotReader_ES_1_7 implements ClusterSnapshotReader {
     public boolean looseCompatibleWith(Version version) {
         return UnboundVersionMatchers.isBelowES_2_X
                 .test(version);
+    }
+
+    @Override
+    public SnapshotFileFinder getSnapshotFileFinder() {
+        return new SnapshotFileFinder_ES_1_7(); // or the appropriate version
     }
 
     @Override
