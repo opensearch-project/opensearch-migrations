@@ -118,7 +118,7 @@ public class EndToEndTest extends SourceTestBase {
                 "    \"completion\": \"bananas\" " +
                 "}";
                 String docType = sourceClusterOperations.defaultDocType();
-                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, "0", docType);
+                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
                 sourceClusterOperations.post("/_refresh", null);
             }
 

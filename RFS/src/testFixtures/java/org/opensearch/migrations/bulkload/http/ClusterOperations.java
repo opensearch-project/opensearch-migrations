@@ -74,7 +74,11 @@ public class ClusterOperations {
     }
 
     public void createDocument(final String index, final String docId, final String body, final String routing, final String type) {
-        var response = put("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing, body);
+        String path = "/" + index + "/" + docTypePathOrDefault(type) + docId;
+        if (routing != null) {
+            path += "?routing=" + routing;
+        }
+        var response = put(path, body);
         assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
