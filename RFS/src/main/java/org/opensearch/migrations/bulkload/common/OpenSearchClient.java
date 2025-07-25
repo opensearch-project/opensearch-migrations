@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -57,15 +58,17 @@ public abstract class OpenSearchClient {
     protected final RestClient client;
     protected final FailedRequestsLogger failedRequestsLogger;
     private final Version version;
+    private final CompressionMode compressionMode;
 
-    protected OpenSearchClient(ConnectionContext connectionContext, Version version) {
-        this(new RestClient(connectionContext), new FailedRequestsLogger(), version);
+    protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
+        this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
     }
 
-    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version) {
+    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
         this.client = client;
         this.failedRequestsLogger = failedRequestsLogger;
         this.version = version;
+        this.compressionMode = compressionMode;
     }
 
     public Version getClusterVersion() {
@@ -427,8 +430,7 @@ public abstract class OpenSearchClient {
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
             var additionalHeaders = new HashMap<String, List<String>>();
-            // Reduce network bandwidth by attempting request and response compression
-            if (client.supportsGzipCompression()) {
+            if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
                 RestClient.addGzipRequestHeaders(additionalHeaders);
                 RestClient.addGzipResponseHeaders(additionalHeaders);
             }
