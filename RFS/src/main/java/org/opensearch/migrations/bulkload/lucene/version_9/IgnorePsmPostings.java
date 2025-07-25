@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
-import java.util.Arrays;
 
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.codecs.FieldsConsumer;
@@ -9,7 +8,6 @@ import shadow.lucene9.org.apache.lucene.codecs.FieldsProducer;
 import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
 import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
-import shadow.lucene9.org.apache.lucene.store.Directory;
 
 /**
  * PostingsFormat fallback for Elasticsearch 8.12+ segment formats.
