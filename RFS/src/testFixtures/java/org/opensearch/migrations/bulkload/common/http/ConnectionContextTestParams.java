@@ -15,7 +15,8 @@ public class ConnectionContextTestParams implements ConnectionContext.IParams {
     private String awsServiceSigningName;
     @Builder.Default
     private boolean insecure = true;
-    private Boolean compressionEnabled;
+    @Builder.Default
+    private boolean forceDisableCompression = false;
 
     private Path caCert;
     private Path clientCert;

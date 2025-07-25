@@ -6,6 +6,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
@@ -25,6 +26,7 @@ import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -206,41 +208,45 @@ class OpenSearchClientFactoryTest {
 
     @Test
     void determineVersion_setsCompressionTrue() {
-        when(connectionContext.getCompressionSupported()).thenReturn(null);
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
                 CLUSTER_SETTINGS_COMPRESSION_ENABLED);
         openSearchClientFactory.determineVersionAndCreate();
-        verify(connectionContext).setCompressionSupported(true);
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
     }
 
     @Test
     void determineVersion_setsCompressionFalse() {
-        when(connectionContext.getCompressionSupported()).thenReturn(null);
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
                 CLUSTER_SETTINGS_COMPRESSION_DISABLED);
         openSearchClientFactory.determineVersionAndCreate();
-        verify(connectionContext).setCompressionSupported(false);
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
     }
 
     @Test
     void determineVersion_setsCompressionFalseWhenSettingMissing() {
-        when(connectionContext.getCompressionSupported()).thenReturn(null);
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
                 CLUSTER_SETTINGS_COMPRESSION_MISSING);
         openSearchClientFactory.determineVersionAndCreate();
-        verify(connectionContext).setCompressionSupported(false);
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
     }
 
     @Test
     void determineVersion_setsCompressionWhenTransient() {
-        when(connectionContext.getCompressionSupported()).thenReturn(null);
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
                 CLUSTER_SETTINGS_COMPRESSION_ENABLED_TRANSIENT);
         openSearchClientFactory.determineVersionAndCreate();
-        verify(connectionContext).setCompressionSupported(true);
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+    }
+
+    @Test
+    void determineVersion_setsCompressionFalseWhenForcedOff() {
+        when(connectionContext.isForceDisableCompression()).thenReturn(true);
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        openSearchClientFactory.determineVersionAndCreate();
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
     }
 }

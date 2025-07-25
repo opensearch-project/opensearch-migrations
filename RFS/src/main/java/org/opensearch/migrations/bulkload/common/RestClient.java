@@ -175,12 +175,6 @@ public class RestClient {
             .doOnTerminate(() -> contextCleanupRef.get().run());
     }
 
-
-    public boolean supportsGzipCompression() {
-        // Handle null -> false conversion
-        return Boolean.TRUE.equals(connectionContext.getCompressionSupported());
-    }
-
     public static void addGzipResponseHeaders(Map<String, List<String>> headers) {
         headers.put(ACCEPT_ENCODING_HEADER_NAME, List.of(GZIP_TYPE));
     }
@@ -190,10 +184,6 @@ public class RestClient {
     public static void addGzipRequestHeaders(Map<String, List<String>> headers) {
         headers.put(GzipPayloadRequestTransformer.CONTENT_ENCODING_HEADER_NAME,
             List.of(GzipPayloadRequestTransformer.GZIP_CONTENT_ENCODING_HEADER_VALUE));
-    }
-    public static boolean hasGzipRequestHeaders(Map<String, List<String>> headers) {
-        return headers.getOrDefault(GzipPayloadRequestTransformer.CONTENT_ENCODING_HEADER_NAME, List.of())
-            .contains(GzipPayloadRequestTransformer.GZIP_CONTENT_ENCODING_HEADER_VALUE);
     }
 
 

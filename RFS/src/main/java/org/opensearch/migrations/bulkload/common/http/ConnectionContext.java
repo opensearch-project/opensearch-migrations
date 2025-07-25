@@ -14,7 +14,6 @@ import com.beust.jcommander.ParametersDelegate;
 import com.beust.jcommander.converters.PathConverter;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.ToString;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
@@ -34,12 +33,8 @@ public class ConnectionContext {
     private final Protocol protocol;
     private final boolean insecure;
     private final RequestTransformer requestTransformer;
-
-    @Setter
-    // Null -> Auto detect
-    private Boolean compressionSupported;
-
     private final boolean awsSpecificAuthentication;
+    private final boolean forceDisableCompression;
 
     private TlsCredentialsProvider tlsCredentialsProvider;
 
@@ -93,7 +88,6 @@ public class ConnectionContext {
         else {
             requestTransformer = new NoAuthTransformer();
         }
-        compressionSupported = params.getCompressionEnabled();
 
         validateClientCertPairPresence(params);
 
@@ -103,6 +97,8 @@ public class ConnectionContext {
                 params.getClientCert(),
                 params.getClientCertKey());
         }
+
+        this.forceDisableCompression = params.isForceDisableCompression();
     }
 
     // Used for presentation to user facing output
@@ -142,7 +138,7 @@ public class ConnectionContext {
 
         Path getClientCertKey();
 
-        Boolean getCompressionEnabled();
+        boolean isForceDisableCompression();
 
         boolean isInsecure();
 
@@ -215,19 +211,18 @@ public class ConnectionContext {
         TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
 
         @Override
-        public Boolean getCompressionEnabled() {
-            return advancedArgs.getCompressionEnabled();
+        public boolean isForceDisableCompression() {
+            return advancedArgs.isForceDisableCompression();
         }
     }
 
     // Flags that require more testing and validation before recommendations are made
     @Getter
     public static class TargetAdvancedArgs {
-        @Parameter(names = {"--target-compression", "--targetCompression" },
-            description = "**Advanced**. Allow request compression to target.",
-            defaultValueDescription = "Autodetect based on target support"
+        @Parameter(names = {"--force-disable-compression", "--forceDisableCompression" },
+            description = "**Advanced**. Disable request body compression even if supported on the target cluster."
         )
-        public Boolean compressionEnabled = null;
+        public boolean isForceDisableCompression = false;
     }
 
     @Getter
@@ -292,8 +287,7 @@ public class ConnectionContext {
         public boolean insecure = false;
 
         @Override
-        public Boolean getCompressionEnabled() {
-            // No compression on source due to no ingestion
+        public boolean isForceDisableCompression() {
             return false;
         }
     }

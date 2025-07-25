@@ -8,6 +8,7 @@ import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.version_es_5_6.OpenSearchClient_ES_5_6;
@@ -26,8 +27,9 @@ import reactor.core.publisher.Mono;
 public class OpenSearchClientFactory {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    private ConnectionContext connectionContext;
+    private final ConnectionContext connectionContext;
     private Version version;
+    private CompressionMode compressionMode;
     RestClient client;
 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
@@ -46,18 +48,20 @@ public class OpenSearchClientFactory {
         if (version == null) {
             version = getClusterVersion();
         }
-        if (connectionContext.getCompressionSupported() == null) {
-            var compressionSupported = getCompressionEnabled();
-            connectionContext.setCompressionSupported(compressionSupported);
+
+        if (!connectionContext.isForceDisableCompression() && getCompressionEnabled()) {
+            compressionMode = CompressionMode.GZIP_BODY_COMPRESSION;
+        } else {
+            compressionMode = CompressionMode.UNCOMPRESSED;
         }
         var clientClass = getOpenSearchClientClass(version);
         try {
             if (restClient == null && failedRequestsLogger == null) {
-                return clientClass.getConstructor(ConnectionContext.class, Version.class)
-                        .newInstance(connectionContext, version);
+                return clientClass.getConstructor(ConnectionContext.class, Version.class, CompressionMode.class)
+                        .newInstance(connectionContext, version, compressionMode);
             }
-            return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class)
-                    .newInstance(restClient, failedRequestsLogger, version);
+            return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class, CompressionMode.class)
+                    .newInstance(restClient, failedRequestsLogger, version, compressionMode);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
             throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }
