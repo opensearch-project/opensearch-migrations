@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.VersionMatchers;
@@ -12,8 +13,9 @@ import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
 public interface LuceneIndexReader {
@@ -64,17 +66,45 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
+
+    Logger log = LoggerFactory.getLogger(LuceneIndexReader.class);
+
     default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
         return Flux.using(
             this::getReader,
-            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
+            reader -> {
+                log.atTrace()
+                    .setMessage("Opened Lucene DirectoryReader for reading docs from startDocIdx={}")
+                    .addArgument(startDocIdx)
+                    .log();
+                return Flux.from(LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx))
+                    .doOnNext(doc -> log.atTrace()
+                        .setMessage("LuceneIndexReader: Emitting docId={}")
+                        .addArgument(doc.getId())
+                        .log())
+                    .doOnComplete(() -> log.atTrace()
+                        .setMessage("LuceneIndexReader: Document stream completed")
+                        .log())
+                    .doOnError(err -> log.atError()
+                        .setMessage("LuceneIndexReader: Error while reading docs")
+                        .setCause(err)
+                        .log());
+            },
             reader -> {
                 try {
                     reader.close();
+                    log.atTrace()
+                        .setMessage("Lucene DirectoryReader closed successfully.")
+                        .log();
                 } catch (IOException e) {
-                    throw Lombok.sneakyThrow(e);
+                    String errorMsg = "Failed to close Lucene DirectoryReader";
+                    log.atError()
+                        .setMessage(errorMsg)
+                        .setCause(e)
+                        .log();
+                    throw new UncheckedIOException(errorMsg, e);
                 }
-        });
+            });
     }
 
     default Flux<RfsLuceneDocument> readDocuments() {
@@ -90,24 +120,24 @@ public interface LuceneIndexReader {
 
         public LuceneIndexReader getReader(Path path) {
             if (VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader5").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader5").log();
                 return new IndexReader5(
                     path
                 );
             } else if (VersionMatchers.isES_5_X.test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader6").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader6").log();
                 return new IndexReader6(
                         path
                 );
             } else if (VersionMatchers.isES_6_X.test(snapshotReader.getVersion())) {
-                log.atInfo().setMessage("Creating IndexReader7").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader7").log();
                 return new IndexReader7(
                     path,
                     snapshotReader.getSoftDeletesPossible(),
                     snapshotReader.getSoftDeletesFieldData()
                 );
             } else {
-                log.atInfo().setMessage("Creating IndexReader9").log();
+                Factory.log.atInfo().setMessage("Creating IndexReader9").log();
                 return new IndexReader9(
                     path,
                     snapshotReader.getSoftDeletesPossible(),
