@@ -83,16 +83,20 @@ dependencies {
 
     lucene5 libs.lucene.v5.core
     lucene5 libs.lucene.v5.backward.codecs
+    lucene5 libs.lucene.v5.suggest
 
     lucene6 libs.lucene.v6.core
     lucene6 libs.lucene.v6.backward.codecs
+    lucene6 libs.lucene.v6.suggest
 
     lucene7 libs.lucene.v7.core
     lucene7 libs.lucene.v7.backward.codecs
+    lucene7 libs.lucene.v7.suggest
 
     lucene9 libs.lucene.v9.core
     lucene9 libs.lucene.v9.analysis.common
     lucene9 libs.lucene.v9.backward.codecs
+    lucene9 libs.lucene.v9.suggest
 
     implementation shadowLucene5.outputs.files
     implementation shadowLucene6.outputs.files

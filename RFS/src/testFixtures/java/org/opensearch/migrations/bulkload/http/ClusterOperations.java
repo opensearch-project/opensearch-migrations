@@ -74,7 +74,11 @@ public class ClusterOperations {
     }
 
     public void createDocument(final String index, final String docId, final String body, final String routing, final String type) {
-        var response = put("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing, body);
+        String path = "/" + index + "/" + docTypePathOrDefault(type) + docId;
+        if (routing != null) {
+            path += "?routing=" + routing;
+        }
+        var response = put(path, body);
         assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
@@ -137,6 +141,63 @@ public class ClusterOperations {
             log.info("Cluster is ES 8.x — applying disableBloom setting on index: {}", index);
             disableBloom(index);
         }
+    }
+
+    @SneakyThrows
+    public void createIndexWithCompletionField(String indexName, int numberOfShards) {
+        boolean useTypedMappings = UnboundVersionMatchers.isBelowES_8_X.test(clusterVersion);
+        boolean needsTypeNameParam = (VersionMatchers.equalOrGreaterThanES_6_7
+                .or(VersionMatchers.isES_7_X))
+                .test(clusterVersion);
+
+        boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(clusterVersion);
+        String typeName = defaultDocType();
+
+        String mappingsSection = useTypedMappings
+            ? String.format(
+            "{\n" +
+            "  \"%s\": {\n" +
+            "    \"properties\": {\n" +
+            "      \"completion\": {\n" +
+            "        \"type\": \"completion\",\n" +
+            "        \"analyzer\": \"simple\",\n" +
+            "        \"preserve_separators\": true,\n" +
+            "        \"preserve_position_increments\": true,\n" +
+            "        \"max_input_length\": 50\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}", typeName)
+            : "{\n" +
+            "  \"properties\": {\n" +
+            "    \"completion\": {\n" +
+            "      \"type\": \"completion\",\n" +
+            "      \"analyzer\": \"simple\",\n" +
+            "      \"preserve_separators\": true,\n" +
+            "      \"preserve_position_increments\": true,\n" +
+            "      \"max_input_length\": 50\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        String body = String.format(
+            "{\n" +
+                    "  \"settings\": {\n" +
+                    "    \"number_of_shards\": %d,\n" +
+                    "    \"number_of_replicas\": 0,%s\n" +
+                    "    \"refresh_interval\": -1\n" +
+                    "  },\n" +
+                    "  \"mappings\": %s\n" +
+                    "}",
+            numberOfShards,
+            supportsSoftDeletes ? "\n    \"index.soft_deletes.enabled\": true," : "",
+            mappingsSection
+        );
+
+        String path = "/"+indexName + (needsTypeNameParam ? "?include_type_name=true" : "");
+        var response = put(path, body);
+
+        assertThat("Failed to create index with completion field", response.getKey(), equalTo(200));
     }
 
     @SneakyThrows
@@ -381,7 +442,7 @@ public class ClusterOperations {
         assertThat(response.getKey(), equalTo(200));
     }
 
-    private String defaultDocType() {
+    public String defaultDocType() {
         if (UnboundVersionMatchers.isBelowES_6_X
             .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_1)
             .test(clusterVersion)) {
