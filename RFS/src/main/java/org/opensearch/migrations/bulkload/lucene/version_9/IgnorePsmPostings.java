@@ -40,15 +40,7 @@ public class IgnorePsmPostings extends PostingsFormat {
 
     @Override
     public FieldsProducer fieldsProducer(SegmentReadState state) throws IOException {
-        Directory dir = state.directory;
-        String[] files = dir.listAll();
-
-        boolean foundPsm = Arrays.stream(files).anyMatch(f -> f.endsWith(".psm"));
-        if (foundPsm) {
-            log.warn("Ignoring .psm file(s) in segment [{}] — skipping proprietary ES812Postings data", state.segmentInfo.name);
-        }
-
-        // Return an empty reader that pretends the field has no terms/postings
+        // We do not check for .psm files explicitly and silently ignore them
         return FallbackLuceneComponents.EMPTY_FIELDS_PRODUCER;
     }
 }

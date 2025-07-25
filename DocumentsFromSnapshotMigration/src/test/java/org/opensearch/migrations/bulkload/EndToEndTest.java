@@ -91,8 +91,8 @@ public class EndToEndTest extends SourceTestBase {
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
-            var targetVersion = targetCluster.getContainerVersion().getVersion();
             boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(sourceVersion);
+            boolean supportsCompletion = sourceSupportsCompletionFields(sourceVersion);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
@@ -110,15 +110,15 @@ public class EndToEndTest extends SourceTestBase {
             targetClusterOperations.createIndex(indexName, body);
 
             // Create and verify a 'completion' index only for ES 5.x and above
-            if (sourceSupportsCompletionFields(sourceVersion, targetVersion)) {
+            if (supportsCompletion) {
                 String completionIndex = "completion_index";
                 sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
                 String completionDoc =
                 "{" +
-                "    \"completion\": \"openai\" " +
+                "    \"completion\": \"bananas\" " +
                 "}";
                 String docType = sourceClusterOperations.defaultDocType();
-                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
+                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, "0", docType);
                 sourceClusterOperations.post("/_refresh", null);
             }
 
@@ -186,7 +186,6 @@ public class EndToEndTest extends SourceTestBase {
                     transformationConfig
             ));
 
-            boolean supportsCompletion = sourceSupportsCompletionFields(sourceVersion, targetVersion);
             int totalShards = supportsCompletion ? 2 * numberOfShards : numberOfShards;
             Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
 
@@ -195,14 +194,8 @@ public class EndToEndTest extends SourceTestBase {
             boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
             boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
 
-            if (sourceSupportsCompletionFields(sourceVersion, targetVersion)) {
-                var res = targetClusterOperations.get("/completion_index/_doc/1");
-                ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
-                JsonNode doc = mapper.readTree(res.getValue());
-                JsonNode sourceNode = doc.path("_source").path("completion");
-
-                Assertions.assertTrue(sourceNode.isTextual() || sourceNode.isArray(),
-                        "Expected 'completion' field to be present and textual or array");
+            if (supportsCompletion) {
+                validateCompletionDoc(targetClusterOperations);
             }
 
             // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
@@ -213,9 +206,19 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
-    private boolean sourceSupportsCompletionFields(Version sourceVersion, Version targetVersion) {
-        return !UnboundVersionMatchers.isBelowES_2_X.test(sourceVersion)
-                && UnboundVersionMatchers.anyOS.test(targetVersion);
+    private boolean sourceSupportsCompletionFields(Version sourceVersion) {
+        return !UnboundVersionMatchers.isBelowES_2_X.test(sourceVersion);
+    }
+
+    @SneakyThrows
+    private void validateCompletionDoc(ClusterOperations targetClusterOperations) {
+        var res = targetClusterOperations.get("/completion_index/_doc/1");
+        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
+        JsonNode doc = mapper.readTree(res.getValue());
+        JsonNode sourceNode = doc.path("_source").path("completion");
+
+        Assertions.assertTrue(sourceNode.isTextual() || sourceNode.isArray(),
+                "Expected 'completion' field to be present and textual or array");
     }
 
     private String generateLargeDocJson(int sizeInMB) {
@@ -260,5 +263,4 @@ public class EndToEndTest extends SourceTestBase {
             }
         }
     }
-    
 }
