@@ -1,0 +1,59 @@
+HTTP_AUTH_BASIC: {
+  username: string
+  password: string
+}
+
+HTTP_AUTH_SIGV4: {
+  region:  string
+  service?: string | "es" // default
+}
+
+CLUSTER_CONFIG: {
+  name:            string
+  endpoint?:       string // optional for source and maybe metadata evaluate commands, but required for most others
+  allow_insecure?: bool
+  version?:        string // required in some contexts?
+  authConfig?:     HTTP_AUTH_BASIC | HTTP_AUTH_SIGV4
+}
+
+TARGET_CLUSTER_CONFIG: CLUSTER_CONFIG {
+  endpoint: string
+}
+
+SNAPSHOT_MIGRATION_CONFIG: {
+	indices: [string]
+	migrations: [{
+		metadata: {
+			mappings: {
+				properties: {...}
+			},
+			//
+			documentBackfillConfigs: {
+				indices: [...string],
+				config: {
+					batchSize: int,
+					initialReplicas: int
+				}
+			}
+		}
+	}]
+}
+
+REPLAYER_CONFIG: {
+	speedupFactor: float
+	initialReplicas: int
+}
+
+SOURCE_MIGRATION_CONFIG: {
+  source: #CLUSTER_CONFIG,
+  snapshotAndMigrationConfigs: [SNAPSHOT_MIGRATION_CONFIG],
+  replayerConfig: REPLAYER_CONFIG
+}
+
+MIGRATION_CONFIG: {
+  sessionName: string,
+  sourceMigrations: SOURCE_MIGRATION_CONFIG,
+  targets: [TARGET_CLUSTER_CONFIG]
+}
+
+
