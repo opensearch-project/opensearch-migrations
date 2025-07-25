@@ -109,7 +109,7 @@ public class EndToEndTest extends SourceTestBase {
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
 
-            // Create and verify a 'completion' index only for ES 5.x and above
+            // Create and verify a 'completion' index only for ES 2.x and above
             if (supportsCompletion) {
                 String completionIndex = "completion_index";
                 sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
