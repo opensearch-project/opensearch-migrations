@@ -1,7 +1,3 @@
-import {
-    OuterWorkflowTemplate, OuterWorkflowTemplateScope,
-    TemplateDef
-} from "@/schemas/workflowSchemas";
 import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 
@@ -24,13 +20,19 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
     }
 }
 
-export function renderWorkflowTemplate(wf: OuterWorkflowTemplateScope, name: string) {
+function formatTemplate(template: Record<string, any>) {
+    return {
+        inputs: formatParameters(template.inputs)
+    }
+}
+
+export function renderWorkflowTemplate(wf: Record<string, any>) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",
 
         metadata: {
-            name: name,
+            name: wf.name,
         },
         spec: {
             serviceAccountName: wf.serviceAccountName,
@@ -38,40 +40,10 @@ export function renderWorkflowTemplate(wf: OuterWorkflowTemplateScope, name: str
             parallelism: 100,
             ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
             templates: (() => {
-                const proto = Object.getPrototypeOf(wf);
                 const list = [];
-                for (const key of Object.getOwnPropertyNames(proto)) {
-                    console.log("key="+key);
-                    if (Object.getOwnPropertyDescriptor(proto, key)?.get) { // only check getters
-                        const val = (wf as any)[key];
-                        debugger
-                        list.push({
-                            name: key,
-                            inputs: formatParameters(val.inputs)
-                        });
-                    }
+                for (const k in wf.templates) {
+                    list.push({[k]: formatTemplate(wf.templates[k]) });
                 }
-
-                //
-                const ctor = wf.constructor  as Record<string, any>;
-                for (const staticKey of Object.getOwnPropertyNames(ctor)) {
-                    if (staticKey === "prototype" || staticKey === "length" || staticKey === "name") continue; // skip built-ins
-
-                    const staticDescriptor = Object.getOwnPropertyDescriptor(ctor, staticKey);
-                    if (staticDescriptor?.get) {
-                        const val = ctor[staticKey];
-                        list.push({
-                            name: staticKey,
-                            inputs: formatParameters(val.inputs)
-                        });
-                    } else if (typeof ctor[staticKey] === "object" && ctor[staticKey]?.inputs) {
-                        list.push({
-                            name: staticKey,
-                            inputs: formatParameters(ctor[staticKey].inputs)
-                        });
-                    }
-                }
-
                 return list;
             })()
         }
