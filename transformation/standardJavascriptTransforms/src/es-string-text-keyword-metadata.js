@@ -82,7 +82,7 @@ function transformMapping(es2Mapping) {
 
                 // Convert norms object → boolean
                 if (def.norms && typeof def.norms === 'object' &&
-                    Object.prototype.hasOwnProperty.call(def.norms, 'enabled')) {
+                    def.norms.has("enabled")) {
                     def.norms = !!def.norms.enabled;
                 }
 

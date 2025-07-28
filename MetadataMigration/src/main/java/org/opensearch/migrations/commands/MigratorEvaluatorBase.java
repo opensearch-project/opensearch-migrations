@@ -45,8 +45,8 @@ public abstract class MigratorEvaluatorBase {
             "  }" +
             "]";
 
-    public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-string-test-keyword-metadata.js";
-    public static final String DENSE_VECTOR_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es8-vector-metadata.js";
+    public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-string-text-keyword-metadata.js";
+    public static final String DENSE_VECTOR_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-vector-knn-metadata.js";
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
