@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import {
   usePlayground,
   OutputDocument,
@@ -36,7 +36,7 @@ export function useTransformationExecutor() {
         if (result.success) {
           // Create output document
           outputDocuments.push({
-            id: randomUUID(),
+            id: uuidv4(),
             name: inputDoc.name,
             content: JSON.stringify(result.document),
             sourceInputId: inputDoc.id,
