@@ -43,7 +43,6 @@ class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(false).stream()
-            .filter(pairs -> pairs.source().getVersion().getMajor() == 2)
             .flatMap(pair -> {
                 List<TemplateType> templateTypes = Stream.concat(
                             (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
@@ -82,8 +81,8 @@ class EndToEndTest extends BaseMigrationTest {
         return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
     }
 
-//    @ParameterizedTest(name = "From version {0} to version OS 2.19")
-//    @MethodSource(value = "extendedScenarios")
+    @ParameterizedTest(name = "From version {0} to version OS 2.19")
+    @MethodSource(value = "extendedScenarios")
     void extendedMetadata(SearchClusterContainer.ContainerVersion sourceVersion) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
