@@ -41,7 +41,7 @@ public class ClusterReaderExtractor {
         if (arguments.fileSystemRepoPath != null) {
             repo = new FileSystemRepo(Path.of(arguments.fileSystemRepoPath), fileFinder);
         } else if (arguments.s3LocalDirPath != null) {
-            repo = S3Repo.create(Path.of(arguments.s3LocalDirPath), new S3Uri(arguments.s3RepoUri), arguments.s3Region, null, fileFinder);
+            repo = S3Repo.create(Path.of(arguments.s3LocalDirPath), new S3Uri(arguments.s3RepoUri), arguments.s3Region, fileFinder);
         } else {
             throw new ParameterException("Unable to find valid resource provider");
         }
