@@ -44,7 +44,7 @@ public class S3RepoTest {
 
     class TestableS3Repo extends S3Repo {
         public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client) {
-            super(finder, s3LocalDir, s3RepoUri, s3Region, s3Client);
+            super(s3LocalDir, s3RepoUri, s3Region, s3Client, finder);
         }
 
         @Override
@@ -55,11 +55,6 @@ public class S3RepoTest {
         @Override
         protected boolean doesFileExistLocally(Path path) {
             return false;
-        }
-
-        @Override
-        protected S3Uri findRepoFileUri() {
-            return testRepoFileUri;
         }
     }
 
@@ -120,7 +115,7 @@ public class S3RepoTest {
         var bucket = new S3Uri("s3://bucket-name/directory" + nonExistentFileName);
         Path tempDir = Files.createTempDirectory("s3repo-test");
         var finder = new DummySnapshotFileFinder(nonExistentFileName);
-        var testRepo = spy(new S3Repo(finder, tempDir, bucket, testRegion, mockS3Client) {
+        var testRepo = spy(new S3Repo(tempDir, bucket, testRegion, mockS3Client, finder) {
             @Override
             protected void ensureS3LocalDirectoryExists(Path path) {
                 // skip
@@ -129,12 +124,6 @@ public class S3RepoTest {
             @Override
             protected boolean doesFileExistLocally(Path path) {
                 return false;
-            }
-
-            @Override
-            protected S3Uri findRepoFileUri() {
-                // This must return the same file the finder tries to resolve: "does-not-exist"
-                return new S3Uri("s3://bucket-name/directory/does-not-exist");
             }
         });
 

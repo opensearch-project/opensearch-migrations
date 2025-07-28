@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -17,9 +15,6 @@ import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
-import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
@@ -48,24 +43,6 @@ public class S3Repo implements SourceRepo {
         } catch (NumberFormatException e) {
             throw new CantExtractIndexFileVersion(key, e);
         }
-    }
-
-    protected S3Uri findRepoFileUri() {
-        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-            .bucket(s3RepoUri.bucketName)
-            .prefix(s3RepoUri.key)
-            .build();
-
-        ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
-
-        Optional<S3Object> highestVersionedIndexFile = listResponse.contents()
-            .stream()
-            .filter(s3Object -> s3Object.key().matches(".*index-\\d+$")) // Regex to match index files
-            .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key())));
-
-        String rawUri = highestVersionedIndexFile.map(s3Object -> "s3://" + s3RepoUri.bucketName + "/" + s3Object.key())
-            .orElseThrow(() -> new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, s3RepoUri.key));
-        return new S3Uri(rawUri);
     }
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {
@@ -101,24 +78,24 @@ public class S3Repo implements SourceRepo {
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint, SnapshotFileFinder finder) {
         S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
-                .region(Region.of(s3Region))
-                .credentialsProvider(DefaultCredentialsProvider.builder().build())
-                .retryConfiguration(r -> r.numRetries(3))
-                .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
-                .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
-                .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
-                .endpointOverride(s3Endpoint)
-                .build();
+            .region(Region.of(s3Region))
+            .credentialsProvider(DefaultCredentialsProvider.builder().build())
+            .retryConfiguration(r -> r.numRetries(3))
+            .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
+            .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
+            .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
+            .endpointOverride(s3Endpoint)
+            .build();
 
-        return new S3Repo(finder, s3LocalDir, s3Uri, s3Region, s3Client);
+        return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client, finder);
     }
 
-    public S3Repo(SnapshotFileFinder fileFinder, Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client) {
-        this.fileFinder = fileFinder;
+    public S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
         this.s3LocalDir = s3LocalDir;
         this.s3RepoUri = s3Uri;
         this.s3Region = s3Region;
         this.s3Client = s3Client;
+        this.fileFinder = fileFinder;
     }
 
     @Override
@@ -128,71 +105,40 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getSnapshotRepoDataFilePath() {
-        Path relativePath = fileFinder.getSnapshotRepoDataFilePath();
-        if (relativePath == null) {
-            // fallback to listing S3
-            S3Uri repoFileS3Uri = findRepoFileUri();
-            String relativeFileS3Uri = repoFileS3Uri.uri.substring(s3RepoUri.uri.length() + 1);
-            Path localFilePath = s3LocalDir.resolve(relativeFileS3Uri);
-            ensureFileExistsLocally(repoFileS3Uri, localFilePath);
-            return localFilePath;
-        } else {
-            Path localFilePath = s3LocalDir.resolve(relativePath);
-            S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
-            ensureFileExistsLocally(fileUri, localFilePath);
-            return localFilePath;
-        }
+
+        // assuming SnapshotFileFinder handles this correctly per version
+        // (ex. SnapshotFileFinder_ES_1_7 always knows to expect just `index` in ES 1.7)
+        return fetch(fileFinder.getSnapshotRepoDataFilePath());
     }
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        Path relativePath = fileFinder.getGlobalMetadataFilePath(snapshotId);
-        Path localFilePath = s3LocalDir.resolve(relativePath);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
-        ensureFileExistsLocally(fileUri, localFilePath);
-        return localFilePath;
+        return fetch(fileFinder.getGlobalMetadataFilePath(snapshotId));
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        Path relativePath = fileFinder.getSnapshotMetadataFilePath(snapshotId);
-        Path localFilePath = s3LocalDir.resolve(relativePath);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
-        ensureFileExistsLocally(fileUri, localFilePath);
-        return localFilePath;
+        return fetch(fileFinder.getSnapshotMetadataFilePath(snapshotId));
     }
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        Path relativePath = fileFinder.getIndexMetadataFilePath(indexId, indexFileId);
-        Path localFilePath = s3LocalDir.resolve(relativePath);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
-        ensureFileExistsLocally(fileUri, localFilePath);
-        return localFilePath;
+        return fetch(fileFinder.getIndexMetadataFilePath(indexId, indexFileId));
     }
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        Path relativePath = fileFinder.getShardDirPath(indexId, shardId);
-        return s3LocalDir.resolve(relativePath);
+        return fileFinder.getShardDirPath(indexId, shardId);
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        Path relativePath = fileFinder.getShardMetadataFilePath(snapshotId, indexId, shardId);
-        Path localFilePath = s3LocalDir.resolve(relativePath);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
-        ensureFileExistsLocally(fileUri, localFilePath);
-        return localFilePath;
+        return fetch(fileFinder.getShardMetadataFilePath(snapshotId, indexId, shardId));
     }
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
-        Path relativePath = fileFinder.getBlobFilePath(indexId, shardId, blobName);
-        Path localFilePath = s3LocalDir.resolve(relativePath);
-        S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
-        ensureFileExistsLocally(fileUri, localFilePath);
-        return localFilePath;
+        return fetch(fileFinder.getBlobFilePath(indexId, shardId, blobName));
     }
 
     @Override
@@ -247,5 +193,18 @@ public class S3Repo implements SourceRepo {
         public CantExtractIndexFileVersion(String key, Throwable cause) {
             super("Failed to extract the Index File version from S3 object key: " + key, cause);
         }
+    }
+
+    private Path fetch(Path path) {
+        ensureFileExistsLocally(makeS3Uri(path), path);
+        return path;
+    }
+
+    private S3Uri makeS3Uri(Path filePath) {
+        if (!filePath.startsWith(s3LocalDir)) {
+            throw new IllegalArgumentException("File path must be under s3LocalDir: " + filePath);
+        }
+        Path relativePath = s3LocalDir.relativize(filePath);
+        return new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
     }
 }
