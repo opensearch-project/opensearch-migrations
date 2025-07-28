@@ -12,7 +12,7 @@ import shadow.lucene9.org.apache.lucene.search.KnnCollector;
 import shadow.lucene9.org.apache.lucene.util.Bits;
 
 /**
- * Shared fallback implementations for Lucene codecs used in no-op PostingsFormat stubs.
+ * Shared fallback implementations for Lucene 9 codecs used in no-op PostingsFormat stubs.
  */
 public class FallbackLuceneComponents {
 
