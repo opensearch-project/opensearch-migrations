@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -127,7 +128,7 @@ public class EndToEndCompressionTest extends SourceTestBase {
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var sourceRepo = new FileSystemRepo(localDirectory.toPath());
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), new DummySnapshotFileFinder());
 
             // === ACTION: Migrate the documents ===
             var runCounter = new AtomicInteger();

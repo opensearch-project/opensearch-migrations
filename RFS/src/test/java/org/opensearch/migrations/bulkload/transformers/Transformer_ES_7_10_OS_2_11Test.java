@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.transformers;
 
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.TestResources;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
@@ -22,7 +23,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;
         Version version = Version.fromString("ES 7.10");
 
-        final var repo = new FileSystemRepo(snapshot.dir);
+        final var repo = new FileSystemRepo(snapshot.dir, new DummySnapshotFileFinder());
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);
@@ -45,7 +46,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;
         Version version = Version.fromString("ES 7.10");
 
-        final var repo = new FileSystemRepo(snapshot.dir);
+        final var repo = new FileSystemRepo(snapshot.dir, new DummySnapshotFileFinder());
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
         Transformer_ES_7_10_OS_2_11 transformer = new Transformer_ES_7_10_OS_2_11(2);

@@ -85,7 +85,7 @@ public class LuceneDocumentsReaderTest {
     @ParameterizedTest
     @MethodSource("provideSnapshots")
     public void ReadDocuments_AsExpected(TestResources.Snapshot snapshot, Version version) {
-        final var repo = new FileSystemRepo(snapshot.dir);
+        final var repo = new FileSystemRepo(snapshot.dir, new DummySnapshotFileFinder());
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
 
@@ -148,7 +148,7 @@ public class LuceneDocumentsReaderTest {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_6_8_MERGED;
         Version version = Version.fromString("ES 6.8");
 
-        final var repo = new FileSystemRepo(snapshot.dir);
+        final var repo = new FileSystemRepo(snapshot.dir, new DummySnapshotFileFinder());
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
 
@@ -301,7 +301,7 @@ public class LuceneDocumentsReaderTest {
                 List.of("unchangeddoc"));
         List<Integer> documentStartingIndices = List.of(0, 2, 5);
 
-        final var repo = new FileSystemRepo(snapshot.dir);
+        final var repo = new FileSystemRepo(snapshot.dir, new DummySnapshotFileFinder());
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
 
@@ -338,7 +338,7 @@ public class LuceneDocumentsReaderTest {
                 List.of("updateddoc", "unchangeddoc"),
                 List.of("unchangeddoc"));
 
-        final var repo = new FileSystemRepo(snapshot.dir);
+        final var repo = new FileSystemRepo(snapshot.dir, new DummySnapshotFileFinder());
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
 

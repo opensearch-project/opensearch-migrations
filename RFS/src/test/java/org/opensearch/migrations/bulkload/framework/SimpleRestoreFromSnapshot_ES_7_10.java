@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
+import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -36,7 +37,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     ) throws Exception {
         IOUtils.rm(unpackedShardDataDir);
 
-        final var repo = new FileSystemRepo(Path.of(localPath));
+        final var repo = new FileSystemRepo(Path.of(localPath), new DummySnapshotFileFinder());
         SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
         final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName).stream().map(index -> {
             try {

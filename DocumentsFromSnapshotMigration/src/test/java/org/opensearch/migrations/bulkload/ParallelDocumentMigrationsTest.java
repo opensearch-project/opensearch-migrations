@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -11,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -80,7 +82,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
-                var sourceRepo = new FileSystemRepo(tempDir);
+                File localDirectory = new File("src/test/resources/test-snapshot");
+                var sourceRepo = new FileSystemRepo(localDirectory.toPath(), new DummySnapshotFileFinder());
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);

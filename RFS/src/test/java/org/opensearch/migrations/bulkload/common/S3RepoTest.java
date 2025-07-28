@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -38,6 +39,7 @@ public class S3RepoTest {
     private String testRegion = "us-fake-1";
     private S3Uri testRepoUri = new S3Uri("s3://bucket-name/directory");
     private String testRepoFileName = "index-2";
+    private static final SnapshotFileFinder finder = new DummySnapshotFileFinder("index-2");
     private S3Uri testRepoFileUri = new S3Uri(testRepoUri.uri + "/" + testRepoFileName);
 
     class TestableS3Repo extends S3Repo {
@@ -114,8 +116,27 @@ public class S3RepoTest {
             .thenReturn(CompletableFuture.supplyAsync(() -> response));
 
         var nonExistentFileName = "does-not-exist";
+
         var bucket = new S3Uri("s3://bucket-name/directory" + nonExistentFileName);
-        var testRepo = spy(new S3Repo(finder, testDir, bucket, testRegion, mockS3Client));
+        Path tempDir = Files.createTempDirectory("s3repo-test");
+        var finder = new DummySnapshotFileFinder(nonExistentFileName);
+        var testRepo = spy(new S3Repo(finder, tempDir, bucket, testRegion, mockS3Client) {
+            @Override
+            protected void ensureS3LocalDirectoryExists(Path path) {
+                // skip
+            }
+
+            @Override
+            protected boolean doesFileExistLocally(Path path) {
+                return false;
+            }
+
+            @Override
+            protected S3Uri findRepoFileUri() {
+                // This must return the same file the finder tries to resolve: "does-not-exist"
+                return new S3Uri("s3://bucket-name/directory/does-not-exist");
+            }
+        });
 
         // Run the test
         var thrown = assertThrows(CannotFindSnapshotRepoRoot.class, () -> testRepo.getSnapshotRepoDataFilePath());
