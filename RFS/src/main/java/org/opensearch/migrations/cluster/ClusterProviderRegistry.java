@@ -86,7 +86,7 @@ public class ClusterProviderRegistry {
             .findFirst()
             .map(ClusterSnapshotReader::getSnapshotFileFinder)
             .orElseThrow(() -> {
-                var message = "No snapshot file finder found for version: " + version;
+                var message = "No SnapshotFileFinder found for version: " + version;
                 if (!looseMatch) {
                     message = message + " " + VersionStrictness.REMEDIATION_MESSAGE;
                 }
