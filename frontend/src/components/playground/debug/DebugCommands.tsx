@@ -9,6 +9,11 @@ interface DebugCommandProps {
   readonly children: ReactNode;
 }
 
+/**
+ * Container to keep commands for debugging/troubleshooting page experience, hidden by default.
+ * 
+ * These commands are visible when `?debug=true` is included in the query parameters.
+ **/
 export default function DebugCommands({ children }: DebugCommandProps) {
   return (
     <Suspense fallback={null}>
