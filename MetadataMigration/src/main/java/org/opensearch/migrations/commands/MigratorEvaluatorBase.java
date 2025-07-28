@@ -26,6 +26,8 @@ import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,7 +79,15 @@ public abstract class MigratorEvaluatorBase {
             log.atInfo().setMessage("Using version specific custom transformation config: {}")
                     .addArgument(sourceVersion).log();
         }
-        TRANSFORM_LOGGER.atInfo().setMessage("{}").addArgument(transformerConfig).log();
+        try {
+            var mapper = new ObjectMapper()
+                    .enable(SerializationFeature.INDENT_OUTPUT);
+            var jsonNode = mapper.readTree(transformerConfig);
+            var formattedTransformConfig = mapper.writeValueAsString(jsonNode);
+            TRANSFORM_LOGGER.atInfo().setMessage("{}").addArgument(formattedTransformConfig).log();
+        } catch (Exception e) {
+            TRANSFORM_LOGGER.atError().setMessage("Unable to format transform config").setCause(e).log();
+        }
         var transformer =  new TransformationLoader().getTransformerFactoryLoader(transformerConfig);
         return new TransformerToIJsonTransformerAdapter(transformer);
     }
