@@ -4,9 +4,9 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.version_es_7_10.ElasticsearchConstants
 import org.opensearch.migrations.bulkload.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import org.opensearch.migrations.bulkload.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import org.opensearch.migrations.bulkload.version_es_7_10.SnapshotRepoProvider_ES_7_10;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import org.apache.logging.log4j.LogManager;
@@ -29,6 +30,7 @@ import shadow.lucene9.org.apache.lucene.util.IOUtils;
 public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnapshot {
 
     private static final Logger logger = LogManager.getLogger(SimpleRestoreFromSnapshot_ES_7_10.class);
+    private static final Version version = Version.fromString("ES 7.10.2");
 
     public List<IndexMetadata> extractSnapshotIndexData(
         final String localPath,
@@ -37,7 +39,10 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     ) throws Exception {
         IOUtils.rm(unpackedShardDataDir);
 
-        final var repo = new FileSystemRepo(Path.of(localPath), new DummySnapshotFileFinder());
+        var fileFinder = ClusterProviderRegistry
+                .getSnapshotReader(version, null, false)
+                .getSnapshotFileFinder();
+        final var repo = new FileSystemRepo(Path.of(localPath), fileFinder);
         SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
         final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName).stream().map(index -> {
             try {

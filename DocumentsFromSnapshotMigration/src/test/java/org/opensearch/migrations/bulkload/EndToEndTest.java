@@ -9,7 +9,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
@@ -20,6 +19,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -164,7 +164,10 @@ public class EndToEndTest extends SourceTestBase {
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), new DummySnapshotFileFinder());
+            var fileFinder = ClusterProviderRegistry
+                    .getSnapshotReader(sourceCluster.getContainerVersion().getVersion(), null, true)
+                    .getSnapshotFileFinder();
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             // === ACTION: Migrate the documents ===
             var runCounter = new AtomicInteger();

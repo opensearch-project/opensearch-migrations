@@ -8,10 +8,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.bulkload.common.DummySnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -86,8 +86,10 @@ public class UpgradeTest extends SourceTestBase {
 
             sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
-            File localDirectory = new File("src/test/resources/test-snapshot");
-            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), new DummySnapshotFileFinder());
+            var fileFinder = ClusterProviderRegistry
+                    .getSnapshotReader(sourceVersion.getVersion(), null, true)
+                    .getSnapshotFileFinder();
+            var sourceRepo = new FileSystemRepo(sourceSnapshotDirectory.toPath(), fileFinder);
             var counter = new AtomicInteger();
             var clockJitter = new Random(1);
             var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
