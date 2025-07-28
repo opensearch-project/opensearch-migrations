@@ -6,38 +6,37 @@ import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 
 public class SnapshotFileFinder_ES_6_8 implements SnapshotFileFinder {
 
-    @Override
+    private final Path root;
+
+    public SnapshotFileFinder_ES_6_8(Path root) {
+        this.root = root;
+    }
+
     public Path getSnapshotRepoDataFilePath() {
-        return null;
+        return root.resolve("index-2");
     }
 
-    @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        return null;
+        return root.resolve("meta-" + snapshotId + ".dat");
     }
 
-    @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        return null;
+        return root.resolve("snap-" + snapshotId + ".dat");
     }
 
-    @Override
-    public Path getIndexMetadataFilePath(String indexUUID, String indexFileId) {
-        return null;
+    public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
+        return root.resolve("indices").resolve(indexId).resolve("meta-" + indexFileId + ".dat");
     }
 
-    @Override
-    public Path getShardDirPath(String indexUUID, int shardId) {
-        return null;
+    public Path getShardDirPath(String indexId, int shardId) {
+        return root.resolve("indices").resolve(indexId).resolve(String.valueOf(shardId));
     }
 
-    @Override
-    public Path getShardMetadataFilePath(String snapshotId, String indexUUID, int shardId) {
-        return null;
+    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
+        return getShardDirPath(indexId, shardId).resolve("snap-" + snapshotId + ".dat");
     }
 
-    @Override
-    public Path getBlobFilePath(String indexUUID, int shardId, String blobName) {
-        return null;
+    public Path getBlobFilePath(String indexId, int shardId, String blobName) {
+        return getShardDirPath(indexId, shardId).resolve(blobName);
     }
 }
