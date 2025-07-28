@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import {
   usePlayground,
   InputDocument,
@@ -31,7 +31,7 @@ export const usePlaygroundActions = () => {
       }
 
       const newDoc: InputDocument = {
-        id: uuidv4(),
+        id: randomUUID(),
         name,
         content,
       };
@@ -51,7 +51,7 @@ export const usePlaygroundActions = () => {
   const addTransformation = useCallback(
     (name: string, script: string) => {
       const newTransform: Transformation = {
-        id: uuidv4(),
+        id: randomUUID(),
         name,
         content: script,
       };
