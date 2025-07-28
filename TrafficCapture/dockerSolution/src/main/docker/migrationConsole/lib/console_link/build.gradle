@@ -30,64 +30,27 @@ tasks.register('preparePipenv') {
     }
 }
 
-tasks.register('startApiServer') {
-    dependsOn 'alsoStopApiServer'
+tasks.register('generateOpenApiSpec') {
     dependsOn 'preparePipenv'
-
     doLast {
-        def command = "pipenv run gunicorn console_link.api.main:app -k uvicorn.workers.UvicornWorker -w 1 -b 127.0.0.1:${apiPort}"
-        def stdout = new StringBuilder()
-        def stderr = new StringBuilder()
-        def proc = command.execute(null, projectDirRef)
+        def outputFile = openapiOutFile.get().asFile
+        outputFile.parentFile.mkdirs()
 
+        def proc = ['pipenv', 'run', 'python', "-m", 'console_link.scripts.generate_openapi'].execute(null, projectDirRef)
+        def stdout = new ByteArrayOutputStream()
+        def stderr = new ByteArrayOutputStream()
+
+        proc.waitFor()
         proc.consumeProcessOutput(stdout, stderr)
+        def exitCode = proc.waitFor()
 
-        sleep(2000)
-
-        if (!proc.alive) {
-            logger.error("Server failed to start. Command: ${command}")
-            logger.error("Standard Output:\n${stdout}")
-            logger.error("Standard Error:\n${stderr}")
-            throw new GradleException("Failed to start API server. See logs for details.")
+        if (exitCode != 0) {
+            logger.error("Failed to generate OpenAPI spec:\n${stderr.toString("UTF-8")}")
+            throw new GradleException("OpenAPI generation failed with exit code $exitCode")
         }
 
-        logger.info("Server started with ${command}, pid: ${proc.pid()}")
-        def pidFile = serverPidFile.get().asFile
-        pidFile.parentFile.mkdirs()
-        pidFile.text = "${proc.pid()}"
-    }
-}
-
-def createStopApiServerTask = { Task task ->
-    task.dependsOn 'preparePipenv'
-
-    task.doLast {
-        def pidFile = serverPidFile.get().asFile
-        if (pidFile.exists()) {
-            def pid = pidFile.text.trim()
-            logger.info("Killing FastAPI server with PID $pid")
-            ["kill", pid].execute().waitFor()
-            pidFile.delete()
-        }
-    }
-}
-
-tasks.register('stopApiServer') {
-    createStopApiServerTask(it)
-}
-
-tasks.register('alsoStopApiServer') {
-    createStopApiServerTask(it)
-}
-
-tasks.register('fetchOpenApiSpec', de.undercouch.gradle.tasks.download.Download) {
-    src openapiUrl
-    dest openapiOutFile
-    dependsOn 'startApiServer'
-    finalizedBy 'stopApiServer'
-
-    doLast {
-        logger.lifecycle("OpenAPI spec downloaded to ${openapiOutFile}")
+        outputFile.text = stdout.toString("UTF-8")
+        logger.lifecycle("OpenAPI spec generated at ${outputFile}")
     }
     inputs.files(pythonSources)
     inputs.files(dependencyFiles)

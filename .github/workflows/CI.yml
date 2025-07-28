@@ -62,13 +62,7 @@ jobs:
           - publishToMavenLocal
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: "corretto"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
+      - uses: ./.github/actions/setup-env
       - name: Run Gradle Build
         run: gradle ${{matrix.tasks}}
         env:
@@ -78,9 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
+      - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
@@ -106,9 +98,7 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
+      - uses: ./.github/actions/setup-env
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
@@ -151,14 +141,7 @@ jobs:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-          gradle-home-cache-cleanup: true
+      - uses: ./.github/actions/setup-env
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -216,14 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-
+      - uses: ./.github/actions/setup-env
       - name: Create clean .exec directory
         run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
 
@@ -251,16 +227,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
+      - uses: ./.github/actions/setup-env
       - name: Cache Docker Images
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -313,9 +280,7 @@ jobs:
         working-directory: ${{ matrix.npm-project }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.node-version }}
+      - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
       - name: Run CDK Jest Tests (using mocked images)
