@@ -22,14 +22,7 @@ jobs:
     outputs:
       dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-env
       - id: get_data
         run: |
           echo "approvers=$(cat .github/CODEOWNERS | grep @ | tr -d '*\n ' | sed 's/@/,/g' | sed 's/,//1')" >> $GITHUB_OUTPUT
