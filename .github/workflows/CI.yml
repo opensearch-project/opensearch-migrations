@@ -61,6 +61,7 @@ jobs:
           - spotlessCheck
           - publishToMavenLocal
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - name: Run Gradle Build
         run: gradle ${{matrix.tasks}}
@@ -70,6 +71,7 @@ jobs:
   python-lint:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
@@ -95,6 +97,7 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - run: |
           python3 -m pip install --upgrade pipenv
@@ -134,6 +137,7 @@ jobs:
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
@@ -191,6 +195,7 @@ jobs:
     needs: [ gradle-tests ]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - name: Create clean .exec directory
         run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
@@ -218,6 +223,7 @@ jobs:
     needs: [ generate-cache-key ]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - name: Cache Docker Images
         uses: AndreKurait/docker-cache@0.6.0
@@ -270,6 +276,7 @@ jobs:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
