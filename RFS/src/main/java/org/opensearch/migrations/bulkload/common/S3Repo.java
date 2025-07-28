@@ -4,6 +4,10 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -15,6 +19,9 @@ import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
@@ -37,12 +44,33 @@ public class S3Repo implements SourceRepo {
     private final String s3Region;
     private final S3AsyncClient s3Client;
 
-    private static int extractVersion(String key) {
-        try {
-            return Integer.parseInt(key.substring(key.lastIndexOf('-') + 1));
-        } catch (NumberFormatException e) {
-            throw new CantExtractIndexFileVersion(key, e);
+    private int extractVersion(String key, Pattern pattern) {
+        Matcher matcher = pattern.matcher(key);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
         }
+        return -1;
+    }
+
+    protected S3Uri findHighestIndexNInS3() {
+        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                .bucket(s3RepoUri.bucketName)
+                .prefix(s3RepoUri.key)
+                .build();
+
+        ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
+
+        Pattern indexPattern = Pattern.compile("index-(\\d+)$");
+
+        Optional<S3Object> highestVersionedIndexFile = listResponse.contents().stream()
+                .filter(s3Object -> indexPattern.matcher(s3Object.key()).find())
+                .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key(), indexPattern)));
+
+        String rawUri = highestVersionedIndexFile
+                .map(s3Object -> "s3://" + s3RepoUri.bucketName + "/" + s3Object.key())
+                .orElseThrow(() -> new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, s3RepoUri.key));
+
+        return new S3Uri(rawUri);
     }
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {
@@ -108,7 +136,11 @@ public class S3Repo implements SourceRepo {
 
         // assuming SnapshotFileFinder handles this correctly per version
         // (ex. SnapshotFileFinder_ES_1_7 always knows to expect just `index` in ES 1.7)
-        return fetch(fileFinder.getSnapshotRepoDataFilePath());
+        Path path = fileFinder.getSnapshotRepoDataFilePath();
+        if (path != null) {
+            return path;
+        }
+        return (Path) findHighestIndexNInS3();
     }
 
     @Override
