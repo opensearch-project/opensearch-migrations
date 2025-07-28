@@ -14,17 +14,28 @@ class ScopeBuilder<SigScope extends Scope = Scope, FullScope extends Scope = Sco
         protected readonly fullScope: FullScope
     ) {}
 
-    protected addWithCtor<
-        AddSig extends Scope,
-        AddFull extends Scope,
-        B extends ScopeBuilder<ExtendScope<SigScope, AddSig>, ExtendScope<FullScope, AddFull>>
+    addWithCtor<
+        AddSig extends Scope,//((keyof SigScope & keyof AddSig) extends never ? Scope : never),
+        AddFull extends Scope,//((keyof FullScope & keyof AddFull) extends never ? Scope : never),
+        B
     >(
         sigFn: ScopeFn<SigScope, AddSig>,
         fullFn: ScopeFn<FullScope, AddFull>,
-        builderCtor: (sigScope: Readonly<ExtendScope<SigScope, AddSig>>, fullScope: Readonly<ExtendScope<FullScope, AddFull>>) => B
+        builderCtor: (
+            sigScope: Readonly<ExtendScope<SigScope, AddSig>>,
+            fullScope: Readonly<ExtendScope<FullScope, AddFull>>
+        ) => B
     ): B {
-        const newSigScope = { ...this.sigScope, ...sigFn(this.sigScope) } as ExtendScope<SigScope, AddSig>;
-        const newFullScope = { ...this.fullScope, ...fullFn(this.fullScope) } as ExtendScope<FullScope, AddFull>;
+        const newSigScope = {
+            ...this.sigScope,
+            ...sigFn(this.sigScope)
+        } as ExtendScope<SigScope, AddSig>;
+
+        const newFullScope = {
+            ...this.fullScope,
+            ...fullFn(this.fullScope)
+        } as ExtendScope<FullScope, AddFull>;
+
         return builderCtor(newSigScope, newFullScope);
     }
 
@@ -41,9 +52,9 @@ class UnifiedScopeBuilder<SingleScope extends Scope = Scope> extends ScopeBuilde
         super(scope, scope);
     }
 
-    protected addToBothWithCtor<
+    addToBothWithCtor<
         Add extends Scope,
-        B extends ScopeBuilder<ExtendScope<SingleScope, Add>, ExtendScope<SingleScope, Add>>
+        B
     >(
         fn: ScopeFn<SingleScope, Add>,
         builderCtor: (scope: ExtendScope<SingleScope, Add>) => B
@@ -54,63 +65,104 @@ class UnifiedScopeBuilder<SingleScope extends Scope = Scope> extends ScopeBuilde
 }
 
 /**
- * Entry-point to build a top-level K8s resource.  Allows the addition of workflow parameters
- * and then transitions to the repeated addition of templates with the TemplateChainer
- */
-export class WFBuilder<S extends Scope = Scope> extends UnifiedScopeBuilder<S> {
-    static create(k8sResourceName: string) {
-        return new WFBuilder({name: k8sResourceName});
-    }
-
-    addParams<P extends InputParametersRecord>(params: P) {
-        const wfp = ({"workflowParams": params});
-        return super.addToBothWithCtor(
-            () => wfp,
-            ss => new TemplateChainer(ss,ss)
-        );
-    }
-}
-
-/**
  * Builds the top-level workflow one template at a time, via a TemplateBuilder instance. This implementation tracks two different scopes - a public one that is pushed down to all new Templates
  * to be constructed that includes previous template's inputs/outputs + workflow parameters as well as the
  * entire scope.  The first scope is passed to the TemplateBuilder so that it can be used to compile check
  * all the templates, asserting that they only use exposed variables.  The second scope is used to generate
  * the final resource.
  */
-export class TemplateChainer<SigScope extends Scope = Scope, FullScope extends Scope = Scope>
-    extends ScopeBuilder<SigScope, FullScope>
-{
-    addTemplate<
-        NSS extends Scope,
-        NFS extends Scope,
-        STB extends SpecificTemplateBuilder<NSS, NFS>
-    >(name: string, fn: (tb: TemplateBuilder<SigScope>) => STB) {
-        // Create a template-scoped builder that exposes workflowParams and inputs separately
-        const templateScope = {
-            ...this.sigScope,
-            inputs: {} // Start with empty inputs for the template
-        };
-        // start w/ the same public/full scope for a new TemplateBuilder
-        const templateResult = fn(new TemplateBuilder(templateScope));
 
-        return super.addWithCtor(() => ({
-                "templates": {
-                    ...((this.sigScope as any).templates || {}),
-                    [name]: {
-                        input: (templateResult.getSigScope().inputs || {})
-                    }
-                }
-            }),
-            () => ({
-                "templates": {
-                    ...((this.fullScope as any).templates || {}),
-                    [name]: templateResult.getFullScope()
-                }
-            }), (sigScope, fullScope) => new TemplateChainer(sigScope, fullScope));
+
+/**
+ * Entry-point to build a top-level K8s resource.  Allows the addition of workflow parameters
+ * and then transitions to the repeated addition of templates with the TemplateChainer
+ */
+export class WFBuilder<
+    MetadataScope extends Scope = Scope,
+    WorkflowInputsScope extends Scope = Scope,
+    TemplateSigScope extends Scope = Scope,
+    TemplateFullScope extends Scope = Scope
+> {
+    metadataScopeBuilder: UnifiedScopeBuilder<MetadataScope>;
+    inputsScopeBuilder: UnifiedScopeBuilder<WorkflowInputsScope>;
+    templateScopeBuilder: ScopeBuilder<TemplateSigScope, TemplateFullScope>;
+    constructor(metadataScope: MetadataScope,
+                inputsScope: WorkflowInputsScope,
+                templateSigScope: TemplateSigScope,
+                templateFullScope: TemplateFullScope)
+    {
+        this.metadataScopeBuilder = new UnifiedScopeBuilder(metadataScope);
+        this.inputsScopeBuilder = new UnifiedScopeBuilder(inputsScope);
+        this.templateScopeBuilder = new ScopeBuilder(templateSigScope, templateFullScope);
     }
 
+    static create(k8sResourceName: string) {
+        return new WFBuilder({name: k8sResourceName}, {}, {}, {});
+    }
 
+    addParams<P extends InputParametersRecord>(params: P) {
+        return this.inputsScopeBuilder.addToBothWithCtor(
+            () => params,
+            ss =>
+                new WFBuilder(
+                    this.metadataScopeBuilder.getFullScope(),
+                    ss,
+                    this.templateScopeBuilder.getSigScope(),
+                    this.templateScopeBuilder.getFullScope()));
+    }
+
+    addTemplate<
+        Name extends string,
+        TemplateInput extends Scope,
+        TemplateOutput extends Scope,
+        STB extends SpecificTemplateBuilder<TemplateInput, TemplateOutput>
+    >(
+        name: Name,
+        fn: (tb: TemplateBuilder<{
+            workflowParams: WorkflowInputsScope;
+            templates: TemplateSigScope;
+        }>) => STB
+    ): WFBuilder<
+        MetadataScope,
+        WorkflowInputsScope,
+        ExtendScope<TemplateSigScope, { [K in Name]: TemplateInput }>,
+        ExtendScope<TemplateFullScope, { [K in Name]: TemplateOutput }>
+    > {
+        const templateScope = {
+            workflowParams: this.inputsScopeBuilder.getSigScope(),
+            templates: this.templateScopeBuilder.getSigScope(),
+        };
+        // start w/ the same public/full scope for a new TemplateBuilder
+        const templateResult = fn(new TemplateBuilder(templateScope, {}));
+
+        return this.templateScopeBuilder.addWithCtor(() => ({
+                [name]: (templateResult.getFullScope().inputs || {})
+            }),
+            () => ({
+                [name]: templateResult.getFullScope()
+            }), (sigScope, fullScope) =>
+                new WFBuilder(this.metadataScopeBuilder.getFullScope(),
+                    this.inputsScopeBuilder.getFullScope(),
+                    sigScope,
+                    fullScope));
+    }
+
+    getSigScope() {
+        return {
+            workflowParams: this.inputsScopeBuilder.getSigScope(),
+            templates: {
+                ...this.templateScopeBuilder.getSigScope()
+            }
+        }
+    }
+
+    getFullScope() {
+        return {
+            metadata: this.metadataScopeBuilder.getFullScope(),
+            workflowParams: this.inputsScopeBuilder.getFullScope(),
+            templates: this.templateScopeBuilder.getFullScope()
+        }
+    }
 }
 
 /**
@@ -119,41 +171,64 @@ export class TemplateChainer<SigScope extends Scope = Scope, FullScope extends S
  * the builder methods, which, like `addTemplate` will return a new builder for that type of template
  * receives the specification up to that point.
  */
-export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedScopeBuilder<SingleScope> {
-    addOptional<T>(name: string,
-        defaultValueFromScopeFn: (scope: SingleScope) => T,
-        description?: string
-    ) {
+export class TemplateBuilder<ContextualScope extends Scope, SingleScope extends Scope = Scope> extends UnifiedScopeBuilder<SingleScope> {
+    contextualScope: ContextualScope;
+    constructor(contextualScope: ContextualScope, ss: SingleScope) {
+        super(ss);
+        this.contextualScope = contextualScope;
+    }
+
+    addOptional<
+        T,
+        Name extends string & keyof any = string
+    >(name: Name,
+      defaultValueFromScopeFn: (s: { context: ContextualScope, currentScope: SingleScope }) => T,
+      description?: string
+    ): TemplateBuilder<
+        ContextualScope,
+        ExtendScope<SingleScope, { [K in Name]: InputParamDef<T, false> }>
+    > {
         const param = defineParam({
-            defaultValue: defaultValueFromScopeFn(this.scope),
+            defaultValue: defaultValueFromScopeFn({ context: this.contextualScope, currentScope: this.scope }),
             description: description
         });
 
-        return super.addToBothWithCtor(() => ({
-            inputs: {
-                ...((this.sigScope as any).inputs || {}),
+        return super.addToBothWithCtor(
+            () => ({
                 [name]: param
-            }
-        }), (sigScope) => new TemplateBuilder(sigScope));
+            }) as { [K in Name]: InputParamDef<T, false> },
+            (sigScope) =>
+                new TemplateBuilder(this.contextualScope, sigScope)
+        );
     }
 
-    addRequired(name: string, type: any, description?: string) {
+    addRequired<Name extends string & keyof any>(
+        name: Name,
+        type: any,
+        description?: string
+    ): TemplateBuilder<
+        ContextualScope,
+        ExtendScope<SingleScope, { [K in Name]: InputParamDef<any, true> }>
+    > {
         const param: InputParamDef<any, true> = {
-            type: type as any,
-            description: description,
+            type: type,
+            description
         };
-        return super.addToBothWithCtor(() => ({
-            inputs: {
-                ...((this.sigScope as any).inputs || {}),
+
+        return super.addToBothWithCtor(
+            () => ({
                 [name]: param
-            }
-        }), (sigScope) => new TemplateBuilder(sigScope));
+            }) as { [K in Name]: InputParamDef<any, true> },
+            (sigScope) =>
+                new TemplateBuilder(this.contextualScope, sigScope)
+        );
     }
 
     // addSteps<
     //     NSS extends Scope,
-    //     NFS extends Scope
-    // >(fn: (tb: StepsTemplateBuilder<SingleScope, SingleScope>) => StepsTemplateBuilder<NSS, NFS>) {
+    //     NFS extends Scope,
+    //     STB extends SpecificTemplateBuilder<NSS, NFS>
+    // >(name: string, fn: (tb: StepsTemplateBuilder<SingleScope, SingleScope>) => STB) {
     //     const templateScope = {
     //         ...this.sigScope
     //     };
@@ -161,13 +236,10 @@ export class TemplateBuilder<SingleScope extends Scope = Scope> extends UnifiedS
     //     const templateResult = fn(new StepsTemplateBuilder(templateScope, templateScope));
     //
     //     return super.addWithCtor(() => (
-    //         // TODO - look this over = just copied from above
     //         {
-    //             "templates": {
+    //             steps: {
     //                 ...((this.sigScope as any).templates || {}),
-    //                 [name]: {
-    //                     input: (templateResult.getSigScope().inputs || {})
-    //                 }
+    //                 [name]: "add template ref so that outputs can be resolved!"
     //             }
     //         }),
     //         () => ({

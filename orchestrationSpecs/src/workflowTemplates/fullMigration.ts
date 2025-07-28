@@ -3,19 +3,21 @@ import {defineParam, defineRequiredParam, InputParametersRecord} from '@/schemas
 import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {getKeyAndValue} from "@/utils";
-import {WFBuilder} from "@/schemas/workflowSchemas";
+import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
-    .addParams(CommonWorkflowParameters)
-    .addTemplate("main", t=> t
-            .addOptional("good", (s=> ""+s.workflowParams.etcdUser.defaultValue), "no desc" )
-            //.addOptional("bad", (s=> ""+s.workflowParams.main), "no desc" )
+    // .addParams(CommonWorkflowParameters)
+    .addTemplate("init", t=> t
+            // .addOptional("prefix", (s=> ""+s.context.workflowParams.etcdUser.defaultValue), "no desc" )
+            .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
             .addRequired("next", z.string())
-            // .addSteps(sb => sb
+            .addOptional("bad", (s=> ""+s.currentScope.next), "no desc" )
+        // .addSteps("init", sb => sb
             //     //.getSigScope().inputs.main
             //     .addStep(/**/))
     )
-    .addTemplate("other", t => t)
+    .addTemplate("cleanup", t => t
+        .addOptional("t", c => c.context.templates.init))
     .getFullScope();
 // .
 // .add(s=> ({}))
@@ -28,7 +30,33 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 
 export const FullMigration = WFBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
-    // .build();
+    .addTemplate("main", t=> t
+            .addRequired("sourceMigrationConfigs",
+                SNAPSHOT_MIGRATION_CONFIG,
+                "List of server configurations to direct migrated traffic toward")
+        .addRequired("targets", z.array(CLUSTER_CONFIG),
+                     "List of server configurations to direct migrated traffic toward")
+        .addOptional("imageParams",
+            scope =>
+                Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
+                        .flatMap((k) => [
+                            [`${k}Image`, ""],
+                            [`${k}ImagePullPolicy`, ""]
+                        ])
+                ),
+            "OCI image locations and pull policies for required images")
+//         .addSteps("init", b => b
+// //            .addStep("name", s => callTemplate(s..., args...), s => whenConditionEval, s => withItemsPuller...)
+//         )
+// //        .addOutput("name", stepsSignatures => ...)
+
+    )
+//    .addWithCtor(s => ({ "main2": "more" }), s => ({ "main2": "more" }), (s,f) => new TemplateChainer(s,f) )
+    // .addTemplate("main2", t => t
+    //     //.addSteps("cleanup", b=>b)
+    // )
+    .getFullScope();
+
 ;
 //
 // export class FullMigration extends OuterWorkflowTemplateScope {
