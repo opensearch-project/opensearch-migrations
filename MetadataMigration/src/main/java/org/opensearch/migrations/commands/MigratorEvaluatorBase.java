@@ -27,10 +27,16 @@ import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Shared functionality between migration and evaluation commands */
 @Slf4j
 public abstract class MigratorEvaluatorBase {
+    // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
+    public static final String TRANSFORM_LOGGER_NAME = "TransformerRun";
+    private static final Logger TRANSFORM_LOGGER = LoggerFactory.getLogger(TRANSFORM_LOGGER_NAME);
+
     public static final String NOOP_TRANSFORMATION_CONFIG = "[" +
             "  {" +
             "    \"NoopTransformerProvider\":\"\"" +
@@ -71,6 +77,7 @@ public abstract class MigratorEvaluatorBase {
             log.atInfo().setMessage("Using version specific custom transformation config: {}")
                     .addArgument(sourceVersion).log();
         }
+        TRANSFORM_LOGGER.atInfo().setMessage("{}").addArgument(transformerConfig).log();
         var transformer =  new TransformationLoader().getTransformerFactoryLoader(transformerConfig);
         return new TransformerToIJsonTransformerAdapter(transformer);
     }

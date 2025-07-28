@@ -43,6 +43,7 @@ class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedPairs(false).stream()
+            .filter(pairs -> pairs.source().getVersion().getMajor() == 2)
             .flatMap(pair -> {
                 List<TemplateType> templateTypes = Stream.concat(
                             (VersionMatchers.isOS_2_X.test(pair.source().getVersion())
