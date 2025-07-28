@@ -32,6 +32,7 @@ import software.amazon.awssdk.utils.BinaryUtils;
  *  payload signing behavior.
  *  Also, think about signing all headers in the request
  */
+@SuppressWarnings("java:S1874") // Ignore deprecation notices for this class
 @Slf4j
 public class SigV4Signer {
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
