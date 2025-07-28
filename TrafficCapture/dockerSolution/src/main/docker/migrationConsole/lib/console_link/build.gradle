@@ -39,7 +39,7 @@ tasks.register('generateOpenApiSpec') {
         def proc = ['pipenv', 'run', 'python', "-m", 'console_link.scripts.generate_openapi'].execute(null, projectDirRef)
         def stdout = new ByteArrayOutputStream()
         def stderr = new ByteArrayOutputStream()
- 
+
         proc.waitFor()
         proc.consumeProcessOutput(stdout, stderr)
         def exitCode = proc.waitFor()
