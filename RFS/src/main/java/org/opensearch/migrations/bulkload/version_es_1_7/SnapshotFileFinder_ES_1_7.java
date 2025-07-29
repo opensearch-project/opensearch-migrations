@@ -1,54 +1,62 @@
 package org.opensearch.migrations.bulkload.version_es_1_7;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.regex.Pattern;
 
-import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
+import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
-public class SnapshotFileFinder_ES_1_7 implements SnapshotFileFinder {
+public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
+
+    // ES 1.7 uses a static "index" file (no version suffix)
+    private static final Pattern INDEX_PATTERN = Pattern.compile("^index$");
 
     @Override
-    public Path getSnapshotRepoDataFilePath(Path root) {
-        // top-level "index" file — contains array of snapshot names
-        return root.resolve("index");
+    public Pattern getSnapshotRepoDataIndexPattern() {
+        return INDEX_PATTERN;
+    }
+
+    @Override
+    public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
+        if (fileNames.contains("index")) {
+            return root.resolve("index");
+        }
+        throw new CantFindRepoIndexFile();
     }
 
     @Override
     public Path getGlobalMetadataFilePath(Path root, String snapshotId) {
-        // top-level metadata-<snapshotId>
+        // /repo/metadata-<snapshotId>
         return root.resolve("metadata-" + snapshotId);
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(Path root, String snapshotId) {
-        // top-level snapshot-<snapshotId>
+        // /repo/snapshot-<snapshotId>
         return root.resolve("snapshot-" + snapshotId);
     }
 
     @Override
-    public Path getIndexMetadataFilePath(Path root, String indexUUID, String indexFileId) {
-        // /indices/<indexName>/metadata-<snapshotId>
-        // treating indexUUID as the index name
-        return root.resolve("indices").resolve(indexUUID).resolve("metadata-" + indexFileId);
+    public Path getIndexMetadataFilePath(Path root, String indexName, String snapshotId) {
+        // /repo/indices/<indexName>/metadata-<snapshotId>
+        return root.resolve("indices").resolve(indexName).resolve("metadata-" + snapshotId);
     }
 
     @Override
-    public Path getShardDirPath(Path root, String indexUUID, int shardId) {
-        // /indices/<indexName>/<shardId>/
-        // treating indexUUID as the index name
-        return root.resolve("indices").resolve(indexUUID).resolve(Integer.toString(shardId));
+    public Path getShardDirPath(Path root, String indexName, int shardId) {
+        // /repo/indices/<indexName>/<shardId>/
+        return root.resolve("indices").resolve(indexName).resolve(Integer.toString(shardId));
     }
 
     @Override
-    public Path getShardMetadataFilePath(Path root, String snapshotId, String indexUUID, int shardId) {
-        // /indices/<indexName>/<shardId>/snapshot-<snapshotId>
-        // treating indexUUID as the index name
-        return getShardDirPath(root, indexUUID, shardId).resolve("snapshot-" + snapshotId);
+    public Path getShardMetadataFilePath(Path root, String snapshotId, String indexName, int shardId) {
+        // /repo/indices/<indexName>/<shardId>/snapshot-<snapshotId>
+        return getShardDirPath(root, indexName, shardId).resolve("snapshot-" + snapshotId);
     }
 
     @Override
-    public Path getBlobFilePath(Path root, String indexUUID, int shardId, String blobName) {
-        // /indices/<indexName>/<shardId>/__X
-        // treating indexUUID as the index name
-        return getShardDirPath(root, indexUUID, shardId).resolve(blobName);
+    public Path getBlobFilePath(Path root, String indexName, int shardId, String blobName) {
+        // /repo/indices/<indexName>/<shardId>/__X
+        return getShardDirPath(root, indexName, shardId).resolve(blobName);
     }
 }

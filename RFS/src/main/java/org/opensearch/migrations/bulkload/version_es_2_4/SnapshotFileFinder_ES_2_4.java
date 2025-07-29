@@ -1,32 +1,38 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.regex.Pattern;
 
-import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
+import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
-public class SnapshotFileFinder_ES_2_4 implements SnapshotFileFinder {
+public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
 
-    @Override
-    public Path getSnapshotRepoDataFilePath(Path root) {
-        // ES 2.4 uses a plain "index" file (no -N suffix)
-        return root.resolve("index");
-    }
-
-    @Override
-    public Path getGlobalMetadataFilePath(Path root, String snapshotId) {
-        // top-level global metadata
-        return root.resolve("meta-" + snapshotId + ".dat");
-    }
+    // ES 2.x uses a static "index" file (not index-N)
+    private static final Pattern STATIC_INDEX_PATTERN = Pattern.compile("^index$");
 
     @Override
-    public Path getSnapshotMetadataFilePath(Path root, String snapshotId) {
-        // top-level snapshot metadata
-        return root.resolve("snap-" + snapshotId + ".dat");
+    public Pattern getSnapshotRepoDataIndexPattern() {
+        return STATIC_INDEX_PATTERN;
     }
 
+    /**
+     * In ES 2.x, the snapshot repo metadata file is always called "index"
+     * and appears exactly once.
+     */
+    @Override
+    public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
+        if (fileNames.contains("index")) {
+            return root.resolve("index");
+        }
+        throw new CantFindRepoIndexFile();
+    }
+
+    /**
+     * In ES 2.x, index directories are named by index name (not UUID).
+     */
     @Override
     public Path getIndexMetadataFilePath(Path root, String indexName, String indexFileId) {
-        // /indices/<indexName>/meta-<snapshotName>.dat
         return root.resolve("indices").resolve(indexName).resolve("meta-" + indexFileId + ".dat");
     }
 

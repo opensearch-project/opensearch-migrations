@@ -4,8 +4,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.Optional;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -50,29 +49,6 @@ public class S3Repo implements SourceRepo {
             return Integer.parseInt(matcher.group(1));
         }
         return -1;
-    }
-
-    protected S3Uri findHighestIndexNInS3() {
-        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                .bucket(s3RepoUri.bucketName)
-                .prefix(s3RepoUri.key)
-                .build();
-
-        ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
-
-        Pattern indexPattern = Pattern.compile("index-(\\d+)$");
-//        Pattern indexPattern = fileFinder.getSnapshotRepoDataIndexPattern();
-
-        // index-9 < index-10
-        Optional<S3Object> highestVersionedIndexFile = listResponse.contents().stream()
-                .filter(s3Object -> indexPattern.matcher(s3Object.key()).find())
-                .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key(), indexPattern)));
-
-        String rawUri = highestVersionedIndexFile
-                .map(s3Object -> "s3://" + s3RepoUri.bucketName + "/" + s3Object.key())
-                .orElseThrow(() -> new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, s3RepoUri.key));
-
-        return new S3Uri(rawUri);
     }
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {
@@ -135,11 +111,8 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getSnapshotRepoDataFilePath() {
-        Path path = fileFinder.getSnapshotRepoDataFilePath(s3LocalDir);
-        if (path != null) {
-            return fetch(path);
-        }
-        return (Path) findHighestIndexNInS3();
+        List<String> filesInRoot = listFilesInS3Root(); // no dirs, only files
+        return fileFinder.getSnapshotRepoDataFilePath(s3LocalDir, filesInRoot);
     }
 
     @Override
@@ -237,5 +210,20 @@ public class S3Repo implements SourceRepo {
         }
         Path relativePath = s3LocalDir.relativize(filePath);
         return new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+    }
+
+    private List<String> listFilesInS3Root() {
+        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+            .bucket(s3RepoUri.bucketName)
+            .prefix(s3RepoUri.key)
+            .build();
+
+        ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
+
+        return listResponse.contents().stream()
+            .map(S3Object::key)
+            .map(key -> key.replaceFirst("^" + Pattern.quote(s3RepoUri.key + "/?"), "")) // relative to root
+            .filter(name -> !name.contains("/")) // only top-level files
+            .toList();
     }
 }

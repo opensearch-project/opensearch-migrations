@@ -72,8 +72,8 @@ public class S3RepoTest {
                 .thenReturn(noopFuture);
 
         // Repo Data File
-        when(mockFileFinder.getSnapshotRepoDataFilePath(any(Path.class)))
-                .thenReturn(testDir.resolve(testRepoFileName));
+//        when(mockFileFinder.getSnapshotRepoDataFilePath(any(Path.class)))
+//                .thenReturn(testDir.resolve(testRepoFileName));
 
         // Global Metadata
         when(mockFileFinder.getGlobalMetadataFilePath(eq(testDir), eq("snapshot1")))

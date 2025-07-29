@@ -1,9 +1,13 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.regex.Pattern;
 
 public interface SnapshotFileFinder {
-    Path getSnapshotRepoDataFilePath(Path root);
+    Pattern getSnapshotRepoDataIndexPattern();
+
+    Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames);
 
     Path getGlobalMetadataFilePath(Path root, String snapshotId);
 
