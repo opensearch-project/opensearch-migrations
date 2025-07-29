@@ -5,11 +5,12 @@ usage() {
   echo "Script to run initBootstrap.sh on Migration Assistant bootstrap box"
   echo ""
   echo "Usage: "
-  echo "  ./awsRunInitBootstrap.sh  [--stage] [--workflow]--"
+  echo "  ./awsRunInitBootstrap.sh  [--stage] [--workflow] [--log-group-name]"
   echo ""
   echo "Options:"
   echo "  --stage                                     Deployment stage name, e.g. sol-integ"
   echo "  --workflow                                  Workflow to execute, options include ALL(default)|INIT_BOOTSTRAP|VERIFY_INIT_BOOTSTRAP"
+  echo "  --log-group-name                            The CloudWatch log group name to produce logs into (Will create if doesn't exist)"
   echo ""
   exit 1
 }
@@ -17,6 +18,7 @@ usage() {
 STAGE="aws-integ"
 WORKFLOW="ALL"
 REGION="us-east-1"
+LOG_GROUP_NAME=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --stage)
@@ -26,6 +28,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --workflow)
       WORKFLOW="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --log-group-name)
+      LOG_GROUP_NAME="$2"
       shift # past argument
       shift # past value
       ;;
@@ -42,18 +49,50 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [ -z "${LOG_GROUP_NAME}" ]; then
+  echo "--log-group-name is a required parameter"
+  usage
+fi
+
 execute_command_and_wait_for_result() {
   local command="$1"
   local instance_id="$2"
   echo "Executing command: [$command] on node: $instance_id"
-  command_id=$(aws ssm send-command --instance-ids "$instance_id" --document-name "AWS-RunShellScript" --parameters commands="$command" --output text --query 'Command.CommandId')
+  command_id=$(aws ssm send-command \
+    --instance-ids "$instance_id" \
+    --document-name "AWS-RunShellScript" \
+    --parameters commands="$command" \
+    --cloud-watch-output-config "CloudWatchOutputEnabled=true,CloudWatchLogGroupName=$LOG_GROUP_NAME" \
+    --output text \
+    --query 'Command.CommandId')
   if [[ -z "$command_id" ]]; then
     echo "Error: Unable to retrieve command id from triggered SSM command"
     exit 1
   fi
   sleep 5
+
+  # Cleanup tail on completion/error/exit
+  cleanup_tail() {
+    echo "Cleaning up tail process..."
+    if [[ -n "$tail_pid" ]]; then
+      echo "Removing tail process"
+      kill "$tail_pid" 2>/dev/null || true
+      echo "Waiting for tail process"
+      wait "$tail_pid" 2>/dev/null || true
+    fi
+  }
+  trap 'cleanup_tail; exit 130' INT TERM
+  trap cleanup_tail EXIT
+
+  # Tail CW logs while command is running
+  echo "Producing logs in CloudWatch log group: $LOG_GROUP_NAME "
+  echo "----- Tailing logs from CloudWatch ------------"
+  aws logs tail "$LOG_GROUP_NAME" --follow --since 15s &
+  tail_pid=$!
+
+  # Watch command for terminal state or time exceeds limit
   command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'Status')
-  max_attempts=30
+  max_attempts=200
   attempt_count=0
   while [ "$command_status" != "Success" ] && [ "$command_status" != "Failed" ] && [ "$command_status" != "TimedOut" ]
   do
@@ -62,18 +101,20 @@ execute_command_and_wait_for_result() {
       echo "Error: Command did not complete within the maximum retry limit."
       exit 1
     fi
-    echo "Waiting for command to complete, current status is $command_status"
-    sleep 60
+    sleep 10
     command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'Status')
   done
-  echo "Command has completed with status: $command_status, appending output"
+  echo "-----------------------------------------------"
+  echo "Command has completed with status: $command_status, see full logs in CloudWatch log group $LOG_GROUP_NAME"
+  echo "----- Completed SSM Command Output ------------"
   echo "Standard Output:"
   aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'StandardOutputContent'
   echo "Standard Error:"
   aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'StandardErrorContent'
+  echo "-----------------------------------------------"
 
   if [[ "$command_status" != "Success" ]]; then
-    echo "Error: Command [$command] was not successful, see logs above"
+    echo "Error: Command [$command] was not successful, see full logs in CloudWatch log group $LOG_GROUP_NAME"
     exit 1
   fi
 }
