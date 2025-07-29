@@ -135,6 +135,9 @@ public class S3Repo implements SourceRepo {
     public Path getSnapshotRepoDataFilePath() {
         Path path = fileFinder.getSnapshotRepoDataFilePath(s3LocalDir);
         if (path != null) {
+            if (!path.normalize().startsWith(s3LocalDir.normalize())) {
+                throw new IllegalArgumentException("File path must be under s3LocalDir: " + s3LocalDir + ", but got: " + path);
+            }
             return path;
         }
         return (Path) findHighestIndexNInS3();

@@ -31,6 +31,10 @@ public class ClusterReaderExtractor {
             return getRemoteReader(arguments.sourceArgs.toConnectionContext());
         }
 
+        if (arguments.sourceVersion == null) {
+            throw new ParameterException("Unable to read from snapshot without --source-version parameter");
+        }
+
         // Get version-specific snapshot reader
         var reader = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, null, arguments.versionStrictness.allowLooseVersionMatches);
 
