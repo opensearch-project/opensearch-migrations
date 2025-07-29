@@ -15,17 +15,17 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addParams(CommonWorkflowParameters)
         // .addParams({foo: defineParam({ defaultValue: "foo" }),})
     .addTemplate("init", t=> t
-        // .addOptional("prefix", (s=> ""+s.context.workflowParams.etcdUser.defaultValue), "no desc" )
+        // .addOptional("prefix", (s=> ""+s.context.workflowParameters.etcdUser.defaultValue), "no desc" )
         .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
         .addRequired("next", z.string())
- //       .addOptional("bad", (s=> ""+s.currentScope.next), "no desc" )
+        .addOptional("bad", (s=> ""+s.currentScope.next), "no desc" )
         // .addSteps("init", sb => sb
             //     //.getSigScope().inputs.main
             //     .addStep(/**/))
     )
     .addTemplate("cleanup", t => t
-        .addOptional("t", c => c.context.templates.init)
-        .addOptional("t", c => c.context.workflowParams.etcdUser)
+        // .addOptional("t", c => c.context.templates.init.)
+        .addOptional("t2", c => c.context.workflowParameters.etcdUser)
     )
     .getFullScope();
 // .
@@ -60,10 +60,9 @@ export const FullMigration = WFBuilder.create("FullMigration")
 // //        .addOutput("name", stepsSignatures => ...)
 
     )
-//    .addWithCtor(s => ({ "main2": "more" }), s => ({ "main2": "more" }), (s,f) => new TemplateChainer(s,f) )
-    // .addTemplate("main2", t => t
-    //     //.addSteps("cleanup", b=>b)
-    // )
+    .addTemplate("main2", t => t
+        //.addSteps("cleanup", b=>b)
+    )
     .getFullScope();
 
 ;
