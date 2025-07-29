@@ -21,11 +21,11 @@ public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
      * and appears exactly once.
      */
     @Override
-    public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
+    public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) throws CannotFindRepoIndexFile {
         if (fileNames.contains("index")) {
             return root.resolve("index");
         }
-        throw new CantFindRepoIndexFile();
+        throw new CannotFindRepoIndexFile();
     }
 
     /**

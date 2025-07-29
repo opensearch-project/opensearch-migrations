@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 public interface SnapshotFileFinder {
     Pattern getSnapshotRepoDataIndexPattern();
 
-    Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames);
+    Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) throws BaseSnapshotFileFinder.CannotFindRepoIndexFile;
 
     Path getGlobalMetadataFilePath(Path root, String snapshotId);
 

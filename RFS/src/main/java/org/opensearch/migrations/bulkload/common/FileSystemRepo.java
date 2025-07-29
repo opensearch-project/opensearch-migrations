@@ -73,7 +73,7 @@ public class FileSystemRepo implements SourceRepo {
         }
     }
 
-    private List<String> listFilesInFsRoot() {
+    protected List<String> listFilesInFsRoot() {
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(repoRootDir)) {
             return StreamSupport.stream(stream.spliterator(), false)
                     .filter(Files::isRegularFile)

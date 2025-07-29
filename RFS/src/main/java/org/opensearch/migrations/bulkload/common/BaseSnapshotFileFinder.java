@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 
 /**
  * Base implementation of SnapshotFileFInder with default logic
- * based on Elasticsearch 7.10 snapshot layout:
+ * based on snapshot structure supported by ES 5x to OS 2x :
  *
  * <pre>
  * /repo/
@@ -42,11 +42,10 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
     @Override
     public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
         return fileNames.stream()
-            .filter(name -> INDEX_PATTERN.matcher(name).matches())
-            .map(name -> new AbstractMap.SimpleEntry<>(name, extractIndexVersion(name)))
-            .max(Comparator.comparingInt(Map.Entry::getValue))
-            .map(entry -> root.resolve(entry.getKey()))
-            .orElseThrow(CantFindRepoIndexFile::new);
+                .filter(name -> getSnapshotRepoDataIndexPattern().matcher(name).matches())
+                .max(Comparator.comparingInt(this::extractIndexVersion))
+                .map(root::resolve)
+                .orElseThrow(CannotFindRepoIndexFile::new);
     }
 
     /**
@@ -108,15 +107,16 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
      * Throws if the format is invalid.
      */
     protected int extractIndexVersion(String fileName) {
-        Matcher matcher = INDEX_PATTERN.matcher(fileName);
+        Matcher matcher = getSnapshotRepoDataIndexPattern().matcher(fileName);
         if (matcher.find()) {
             return Integer.parseInt(matcher.group(1));
         }
-        throw new IllegalArgumentException("Invalid index file name: " + fileName);
+        throw new IllegalArgumentException("Invalid index file name: " + fileName +
+            ". Expected pattern: " + getSnapshotRepoDataIndexPattern());
     }
 
-    public static class CantFindRepoIndexFile extends RfsException {
-        public CantFindRepoIndexFile() {
+    public static class CannotFindRepoIndexFile extends RfsException {
+        public CannotFindRepoIndexFile() {
             super("Can't find the repo index file in the repo directory");
         }
     }

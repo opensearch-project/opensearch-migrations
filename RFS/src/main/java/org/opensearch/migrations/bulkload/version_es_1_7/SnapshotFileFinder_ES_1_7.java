@@ -17,11 +17,16 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
     }
 
     @Override
-    public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
+    public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) throws CannotFindRepoIndexFile {
         if (fileNames.contains("index")) {
             return root.resolve("index");
         }
-        throw new CantFindRepoIndexFile();
+        throw new CannotFindRepoIndexFile();
+    }
+
+    @Override
+    protected int extractIndexVersion(String fileName) {
+        throw new UnsupportedOperationException("ES 1.x does not use index-N files.");
     }
 
     @Override

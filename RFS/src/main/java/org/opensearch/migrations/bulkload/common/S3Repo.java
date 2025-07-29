@@ -200,7 +200,8 @@ public class S3Repo implements SourceRepo {
     private List<String> listFilesInS3Root() {
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
             .bucket(s3RepoUri.bucketName)
-            .prefix(s3RepoUri.key)
+            .prefix(s3RepoUri.key.isEmpty() ? null : s3RepoUri.key)
+            .delimiter("/")
             .build();
 
         ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
@@ -208,7 +209,6 @@ public class S3Repo implements SourceRepo {
         return listResponse.contents().stream()
             .map(S3Object::key)
             .map(key -> key.replaceFirst("^" + Pattern.quote(s3RepoUri.key + "/?"), "")) // relative to root
-            .filter(name -> !name.contains("/")) // only top-level files
             .toList();
     }
 }
