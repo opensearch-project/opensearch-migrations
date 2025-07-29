@@ -14,6 +14,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -30,6 +32,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 public class S3RepoTest {
     @Mock
     private S3AsyncClient mockS3Client;
@@ -40,12 +43,15 @@ public class S3RepoTest {
     private String testRepoFileName = "index-2";
     private S3Uri testRepoFileUri = new S3Uri(testRepoUri.uri + "/" + testRepoFileName);
 
+    @Mock
+    private SnapshotFileFinder mockFileFinder;
+
     class TestableS3Repo extends S3Repo {
-        public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client) {
-            super(s3LocalDir, s3RepoUri, s3Region, s3Client);
+        public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
+            super(s3LocalDir, s3RepoUri, s3Region, s3Client, fileFinder);
         }
 
-        @Override
+//        @Override
         protected void ensureS3LocalDirectoryExists(Path path) {
             // Do nothing
         }
@@ -53,11 +59,6 @@ public class S3RepoTest {
         @Override
         protected boolean doesFileExistLocally(Path path) {
             return false;
-        }
-
-        @Override
-        protected S3Uri findRepoFileUri() {
-            return testRepoFileUri;
         }
     }
 
@@ -68,7 +69,35 @@ public class S3RepoTest {
         lenient().when(mockS3Client.getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class)))
                 .thenReturn(noopFuture);
 
-        testRepo = Mockito.spy(new TestableS3Repo(testDir, testRepoUri, testRegion, mockS3Client));
+        // Repo Data File
+        when(mockFileFinder.getSnapshotRepoDataFilePath(any(Path.class)))
+                .thenReturn(testDir.resolve(testRepoFileName));
+
+        // Global Metadata
+        when(mockFileFinder.getGlobalMetadataFilePath(eq(testDir), eq("snapshot1")))
+                .thenReturn(testDir.resolve("meta-snapshot1.dat"));
+
+        // Snapshot Metadata
+        when(mockFileFinder.getSnapshotMetadataFilePath(eq(testDir), eq("snapshot1")))
+                .thenReturn(testDir.resolve("snap-snapshot1.dat"));
+
+        // Index Metadata
+        when(mockFileFinder.getIndexMetadataFilePath(eq(testDir), eq("123abc"), eq("234bcd")))
+                .thenReturn(testDir.resolve("indices/123abc/meta-234bcd.dat"));
+
+        // Shard Metadata
+        when(mockFileFinder.getShardMetadataFilePath(eq(testDir), eq("snapshot1"), eq("123abc"), eq(7)))
+                .thenReturn(testDir.resolve("indices/123abc/7/snap-snapshot1.dat"));
+
+        // Blob
+        when(mockFileFinder.getBlobFilePath(eq(testDir), eq("123abc"), eq(7), eq("bobloblaw")))
+                .thenReturn(testDir.resolve("indices/123abc/7/bobloblaw"));
+
+        // Shard Dir (returns Path, not file, just Path)
+        when(mockFileFinder.getShardDirPath(eq(testDir), eq("123abc"), eq(7)))
+                .thenReturn(testDir.resolve("indices/123abc/7"));
+
+        testRepo = Mockito.spy(new TestableS3Repo(testDir, testRepoUri, testRegion, mockS3Client, mockFileFinder));
     }
 
     @Test
@@ -115,7 +144,7 @@ public class S3RepoTest {
 
         var nonExistentFileName = "does-not-exist";
         var bucket = new S3Uri("s3://bucket-name/directory" + nonExistentFileName);
-        var testRepo = spy(new S3Repo(testDir, bucket, testRegion, mockS3Client));
+        var testRepo = spy(new S3Repo(testDir, bucket, testRegion, mockS3Client, mock(SnapshotFileFinder.class)));
 
         // Run the test
         var thrown = assertThrows(CannotFindSnapshotRepoRoot.class, () -> testRepo.getSnapshotRepoDataFilePath());
@@ -132,6 +161,8 @@ public class S3RepoTest {
         Path expectedPath = testDir.resolve(metadataFileName);
         String expectedBucketName = testRepoUri.bucketName;
         String expectedKey = testRepoUri.key + "/" + metadataFileName;
+
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
 
         // Run the test
         Path filePath = testRepo.getGlobalMetadataFilePath(snapshotId);
