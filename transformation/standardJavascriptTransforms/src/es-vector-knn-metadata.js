@@ -1,4 +1,4 @@
-export function main(context) {
+function main(context) {
     /**
      * Recursively find any `{ type: 'dense_vector' }` field definitions and
      * rewrite them in-place to the new `knn_vector` format.  A single loop
