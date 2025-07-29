@@ -36,7 +36,7 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
 
     @Override
     public SnapshotFileFinder getSnapshotFileFinder() {
-        return new SnapshotFileFinder_ES_6_8(sourceRepo.getRepoRootDir());
+        return new SnapshotFileFinder_ES_6_8();
     }
 
     @Override

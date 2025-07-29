@@ -7,37 +7,41 @@ import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 public class SnapshotFileFinder_ES_2_4 implements SnapshotFileFinder {
 
     @Override
-    public Path getSnapshotRepoDataFilePath() {
-        return null;
+    public Path getSnapshotRepoDataFilePath(Path root) {
+        // ES 2.4 uses a plain "index" file (no -N suffix)
+        return root.resolve("index");
     }
 
     @Override
-    public Path getGlobalMetadataFilePath(String snapshotId) {
-        return null;
+    public Path getGlobalMetadataFilePath(Path root, String snapshotId) {
+        // top-level global metadata
+        return root.resolve("meta-" + snapshotId + ".dat");
     }
 
     @Override
-    public Path getSnapshotMetadataFilePath(String snapshotId) {
-        return null;
+    public Path getSnapshotMetadataFilePath(Path root, String snapshotId) {
+        // top-level snapshot metadata
+        return root.resolve("snap-" + snapshotId + ".dat");
     }
 
     @Override
-    public Path getIndexMetadataFilePath(String indexUUID, String indexFileId) {
-        return null;
+    public Path getIndexMetadataFilePath(Path root, String indexName, String indexFileId) {
+        // /indices/<indexName>/meta-<snapshotName>.dat
+        return root.resolve("indices").resolve(indexName).resolve("meta-" + indexFileId + ".dat");
     }
 
     @Override
-    public Path getShardDirPath(String indexUUID, int shardId) {
-        return null;
+    public Path getShardDirPath(Path root, String indexName, int shardId) {
+        return root.resolve("indices").resolve(indexName).resolve(Integer.toString(shardId));
     }
 
     @Override
-    public Path getShardMetadataFilePath(String snapshotId, String indexUUID, int shardId) {
-        return null;
+    public Path getShardMetadataFilePath(Path root, String snapshotId, String indexName, int shardId) {
+        return getShardDirPath(root, indexName, shardId).resolve("snap-" + snapshotId + ".dat");
     }
 
     @Override
-    public Path getBlobFilePath(String indexUUID, int shardId, String blobName) {
-        return null;
+    public Path getBlobFilePath(Path root, String indexName, int shardId, String blobName) {
+        return getShardDirPath(root, indexName, shardId).resolve(blobName);
     }
 }

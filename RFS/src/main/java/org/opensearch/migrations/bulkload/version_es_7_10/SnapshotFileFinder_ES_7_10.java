@@ -7,42 +7,38 @@ import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 public class SnapshotFileFinder_ES_7_10 implements SnapshotFileFinder {
 
     @Override
-    public Path getSnapshotRepoDataFilePath() {
-        // This returns "index-N", but since "N" is variable,
-        // the repo implementation must enumerate and choose the highest.
-        // So return null — FileSystemRepo/S3Repo should handle it.
+    public Path getSnapshotRepoDataFilePath(Path root) {
+        // FileSystemRepo/S3Repo is responsible for scanning index-N files
         return null;
     }
 
     @Override
-    public Path getGlobalMetadataFilePath(String snapshotId) {
-        return Path.of("meta-" + snapshotId + ".dat");
+    public Path getGlobalMetadataFilePath(Path root, String snapshotId) {
+        return root.resolve("meta-" + snapshotId + ".dat");
     }
 
     @Override
-    public Path getSnapshotMetadataFilePath(String snapshotId) {
-        return Path.of("snap-" + snapshotId + ".dat");
+    public Path getSnapshotMetadataFilePath(Path root, String snapshotId) {
+        return root.resolve("snap-" + snapshotId + ".dat");
     }
 
     @Override
-    public Path getIndexMetadataFilePath(String indexUUID, String indexFileId) {
-        return Path.of("indices", indexUUID, "meta-" + indexFileId + ".dat");
+    public Path getIndexMetadataFilePath(Path root, String indexUUID, String indexFileId) {
+        return root.resolve("indices").resolve(indexUUID).resolve("meta-" + indexFileId + ".dat");
     }
 
     @Override
-    public Path getShardDirPath(String indexUUID, int shardId) {
-        return Path.of("indices", indexUUID, Integer.toString(shardId));
+    public Path getShardDirPath(Path root, String indexUUID, int shardId) {
+        return root.resolve("indices").resolve(indexUUID).resolve(Integer.toString(shardId));
     }
 
     @Override
-    public Path getShardMetadataFilePath(String snapshotId, String indexUUID, int shardId) {
-        return getShardDirPath(indexUUID, shardId)
-                .resolve("snap-" + snapshotId + ".dat");
+    public Path getShardMetadataFilePath(Path root, String snapshotId, String indexUUID, int shardId) {
+        return getShardDirPath(root, indexUUID, shardId).resolve("snap-" + snapshotId + ".dat");
     }
 
     @Override
-    public Path getBlobFilePath(String indexUUID, int shardId, String blobName) {
-        return getShardDirPath(indexUUID, shardId)
-                .resolve(blobName);
+    public Path getBlobFilePath(Path root, String indexUUID, int shardId, String blobName) {
+        return getShardDirPath(root, indexUUID, shardId).resolve(blobName);
     }
 }
