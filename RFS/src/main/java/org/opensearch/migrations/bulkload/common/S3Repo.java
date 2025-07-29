@@ -61,7 +61,9 @@ public class S3Repo implements SourceRepo {
         ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
 
         Pattern indexPattern = Pattern.compile("index-(\\d+)$");
+//        Pattern indexPattern = fileFinder.getSnapshotRepoDataIndexPattern();
 
+        // index-9 < index-10
         Optional<S3Object> highestVersionedIndexFile = listResponse.contents().stream()
                 .filter(s3Object -> indexPattern.matcher(s3Object.key()).find())
                 .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key(), indexPattern)));
@@ -118,7 +120,7 @@ public class S3Repo implements SourceRepo {
         return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client, finder);
     }
 
-    public S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
+    protected S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
         this.s3LocalDir = s3LocalDir;
         this.s3RepoUri = s3Uri;
         this.s3Region = s3Region;
@@ -135,10 +137,7 @@ public class S3Repo implements SourceRepo {
     public Path getSnapshotRepoDataFilePath() {
         Path path = fileFinder.getSnapshotRepoDataFilePath(s3LocalDir);
         if (path != null) {
-            if (!path.normalize().startsWith(s3LocalDir.normalize())) {
-                throw new IllegalArgumentException("File path must be under s3LocalDir: " + s3LocalDir + ", but got: " + path);
-            }
-            return path;
+            return fetch(path);
         }
         return (Path) findHighestIndexNInS3();
     }
