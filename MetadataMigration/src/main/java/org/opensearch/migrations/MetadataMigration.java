@@ -147,7 +147,7 @@ public class MetadataMigration {
         try {
             var loggingContext = (LoggerContext) LogManager.getContext(false);
             var loggingConfig = loggingContext.getConfiguration();
-            var metadataLogAppender = (FileAppender) loggingConfig.getAppender(MigratorEvaluatorBase.TRANSFORM_LOGGER_NAME);
+            var metadataLogAppender = (FileAppender) loggingConfig.getAppender(MetadataTransformationRegistry.TRANSFORM_LOGGER_NAME);
             if (metadataLogAppender != null) {
                 var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
                 log.atInfo()

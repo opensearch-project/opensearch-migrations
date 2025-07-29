@@ -5,14 +5,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.MetadataTransformationRegistry;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
-import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
-import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
 import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
 import org.opensearch.migrations.bulkload.worker.IndexRunner;
 import org.opensearch.migrations.bulkload.worker.MetadataRunner;
@@ -24,30 +23,13 @@ import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
-import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** Shared functionality between migration and evaluation commands */
 @Slf4j
 public abstract class MigratorEvaluatorBase {
-    // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
-    public static final String TRANSFORM_LOGGER_NAME = "TransformerRun";
-    private static final Logger TRANSFORM_LOGGER = LoggerFactory.getLogger(TRANSFORM_LOGGER_NAME);
-
-    public static final String NOOP_TRANSFORMATION_CONFIG = "[" +
-            "  {" +
-            "    \"NoopTransformerProvider\":\"\"" +
-            "  }" +
-            "]";
-
-    public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-string-text-keyword-metadata.js";
-    public static final String DENSE_VECTOR_KNN_TRANSFORMATION_FILE = "js/es-vector-knn-metadata.js";
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
@@ -71,10 +53,10 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformers getCustomTransformer(Version sourceVersion) {
-        var versionSpecificCustomTransforms = getCustomTransformationBySourceVersion(sourceVersion);
+        var versionSpecificCustomTransforms = MetadataTransformationRegistry.getCustomTransformationBySourceVersion(sourceVersion);
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
-            logTransformerConfig("User supplied custom transform", transformerConfig);
+            MetadataTransformationRegistry.logTransformerConfig("User supplied custom transform", transformerConfig);
             var customTransformInfoBuilder = Transformers.TransformerInfo
                     .builder()
                     .name("User Supplied Custom Transform")
@@ -86,70 +68,11 @@ public abstract class MigratorEvaluatorBase {
                             .map(Transformers.TransformerInfo::getName).collect(Collectors.joining(", ")) + ")") ;
                 }
                 return Transformers.builder()
-                    .transformer(configToTransformer(transformerConfig))
+                    .transformer(MetadataTransformationRegistry.configToTransformer(transformerConfig))
                     .transformerInfo(customTransformInfoBuilder.build())
                     .build();
         }
         return versionSpecificCustomTransforms;
-    }
-
-    protected void logTransformerConfig(String title, String transformerConfig) {
-        log.atInfo().setMessage("{}:\n{}")
-            .addArgument(title)
-            .addArgument(transformerConfig).log();
-        try {
-            var mapper = new ObjectMapper()
-                    .enable(SerializationFeature.INDENT_OUTPUT);
-            var jsonNode = mapper.readTree(transformerConfig);
-            var formattedTransformConfig = mapper.writeValueAsString(jsonNode);
-            TRANSFORM_LOGGER.atInfo().setMessage("{}\n{}")
-                    .addArgument(title)
-                    .addArgument(formattedTransformConfig).log();
-        } catch (Exception e) {
-            TRANSFORM_LOGGER.atError().setMessage("Unable to format transform config").setCause(e).log();
-        }
-    }
-
-    protected Transformers getCustomTransformationBySourceVersion(Version sourceVersion) {
-        List<String> jsTransformationFiles = new ArrayList<>();
-        var transformersBuilder = Transformers.builder();
-        if (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)) {
-            // ES 1-5 can have indexes with `string` type
-            jsTransformationFiles.add(STRING_TEXT_KEYWORD_TRANSFORMATION_FILE);
-            transformersBuilder.transformerInfo(Transformers.TransformerInfo
-                    .builder()
-                    .name("Field Data Type Deprecation - string")
-                    .descriptionLine("Convert mapping type string to text/keyword based on field data mappings.")
-                    .build());
-        }
-        if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceVersion)) {
-            // dense_vector introduced in ES 7.0
-            jsTransformationFiles.add(DENSE_VECTOR_KNN_TRANSFORMATION_FILE);
-            transformersBuilder.transformerInfo(Transformers.TransformerInfo
-                    .builder()
-                    .name("dense_vector to knn_vector")
-                    .descriptionLine("Convert mapping type dense_vector to OpenSearch knn_vector.")
-                    .build());
-        }
-
-        var config = jsTransformationFiles.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
-                jsTransformationFiles.stream()
-                .map(path ->
-                        "{" +
-                        "  \"JsonJSTransformerProvider\":{" +
-                        "    \"initializationResourcePath\":\"" + path + "\"," +
-                        "    \"bindingsObject\":\"{}\"" +
-                        "  }" +
-                        "}")
-                .collect(Collectors.joining(",", "[", "]"));
-        logTransformerConfig("Default breaking changes transform config", config);
-        transformersBuilder.transformer(configToTransformer(config));
-        return transformersBuilder.build();
-    }
-
-    private Transformer configToTransformer(String config) {
-        var transformer =  new TransformationLoader().getTransformerFactoryLoader(config);
-        return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
     protected Transformers selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches) {
