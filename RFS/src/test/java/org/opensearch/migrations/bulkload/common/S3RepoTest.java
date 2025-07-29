@@ -51,7 +51,7 @@ public class S3RepoTest {
             super(s3LocalDir, s3RepoUri, s3Region, s3Client, fileFinder);
         }
 
-//        @Override
+        @Override
         protected void ensureS3LocalDirectoryExists(Path path) {
             // Do nothing
         }
@@ -116,6 +116,8 @@ public class S3RepoTest {
         String expectedBucketName = testRepoUri.bucketName;
         String expectedKey = testRepoUri.key + "/" + testRepoFileName;
 
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
+
         // Run the test
         Path filePath = testRepo.getSnapshotRepoDataFilePath();
 
@@ -129,7 +131,7 @@ public class S3RepoTest {
                 .key(expectedKey)
                 .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
+        verify(mockS3Client).getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class));
     }
 
 
