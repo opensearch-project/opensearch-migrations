@@ -206,9 +206,13 @@ public class S3Repo implements SourceRepo {
 
         ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
 
-        return listResponse.contents().stream()
+        List<String> relativePaths = listResponse.contents().stream()
             .map(S3Object::key)
-            .map(key -> key.replaceFirst("^" + Pattern.quote(s3RepoUri.key + "/?"), "")) // relative to root
+            .map(key -> key.replaceFirst("^" + Pattern.quote(s3RepoUri.key + "/?"), ""))
             .toList();
+
+        log.atInfo().setMessage("S3Repo: Files in root directory = {}").addArgument(relativePaths).log();
+
+        return relativePaths;
     }
 }

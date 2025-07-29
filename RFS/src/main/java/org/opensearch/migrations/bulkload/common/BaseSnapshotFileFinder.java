@@ -1,12 +1,12 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.nio.file.Path;
-import java.util.AbstractMap;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Base implementation of SnapshotFileFInder with default logic
@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
  *               └── ...
  * </pre>
  */
+@Slf4j
 public class BaseSnapshotFileFinder implements SnapshotFileFinder {
 
     // Example: index-0, index-9
@@ -41,11 +42,26 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
      */
     @Override
     public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
+        log.atInfo().setMessage("BaseSnapshotFileFinder: Inspecting files to match index pattern {}: {}")
+            .addArgument(getSnapshotRepoDataIndexPattern())
+            .addArgument(fileNames)
+            .log();
+
         return fileNames.stream()
-                .filter(name -> getSnapshotRepoDataIndexPattern().matcher(name).matches())
-                .max(Comparator.comparingInt(this::extractIndexVersion))
-                .map(root::resolve)
-                .orElseThrow(CannotFindRepoIndexFile::new);
+            .filter(name -> getSnapshotRepoDataIndexPattern().matcher(name).matches())
+            .max(Comparator.comparingInt(this::extractIndexVersion))
+            .map(entry -> {
+                log.atInfo().setMessage("BaseSnapshotFileFinder: Selected snapshot repo index file = {}")
+                    .addArgument(entry)
+                    .log();
+                return root.resolve(entry);
+            })
+            .orElseThrow(() -> {
+                log.atWarn().setMessage("BaseSnapshotFileFinder: Could not find a matching index file. Checked: {}")
+                    .addArgument(fileNames)
+                    .log();
+                return new CannotFindRepoIndexFile();
+            });
     }
 
     /**
@@ -109,8 +125,22 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
     protected int extractIndexVersion(String fileName) {
         Matcher matcher = getSnapshotRepoDataIndexPattern().matcher(fileName);
         if (matcher.find()) {
-            return Integer.parseInt(matcher.group(1));
+            try {
+                int version = Integer.parseInt(matcher.group(1));
+                log.atDebug().setMessage("Parsed index version {} from file: {}")
+                        .addArgument(version)
+                        .addArgument(fileName)
+                        .log();
+                return version;
+            } catch (NumberFormatException e) {
+                log.atWarn().setMessage("Failed to parse numeric suffix from file: {}").addArgument(fileName).log();
+                throw e;
+            }
         }
+        log.atWarn().setMessage("File {} did not match expected pattern: {}")
+            .addArgument(fileName)
+            .addArgument(getSnapshotRepoDataIndexPattern())
+            .log();
         throw new IllegalArgumentException("Invalid index file name: " + fileName +
             ". Expected pattern: " + getSnapshotRepoDataIndexPattern());
     }
