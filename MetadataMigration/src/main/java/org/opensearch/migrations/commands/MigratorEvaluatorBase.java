@@ -19,6 +19,7 @@ import org.opensearch.migrations.bulkload.worker.MetadataRunner;
 import org.opensearch.migrations.cli.ClusterReaderExtractor;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Items;
+import org.opensearch.migrations.cli.Transformers;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
@@ -46,7 +47,9 @@ public abstract class MigratorEvaluatorBase {
             "]";
 
     public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-string-text-keyword-metadata.js";
-    public static final String DENSE_VECTOR_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-vector-knn-metadata.js";
+    public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_URL = "https://placeholder.com";
+    public static final String DENSE_VECTOR_KNN_TRANSFORMATION_FILE = "js/es-vector-knn-metadata.js";
+    public static final String DENSE_VECTOR_KNN_TRANSFORMATION_URL = "https://placeholder.com";
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
@@ -69,16 +72,25 @@ public abstract class MigratorEvaluatorBase {
         return clusters.build();
     }
 
-    protected Transformer getCustomTransformer(Version sourceVersion) {
+    protected Transformers getCustomTransformer(Version sourceVersion) {
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
-            log.atInfo().setMessage("Metadata Transformations config string: {}")
-                    .addArgument(transformerConfig).log();
-        } else {
-            transformerConfig = getCustomTranformationConfigBySourceVersion(sourceVersion);
-            log.atInfo().setMessage("Using version specific custom transformation config: {}")
-                    .addArgument(sourceVersion).log();
+            logTransformerConfig(transformerConfig);
+            return Transformers.builder()
+                .transformer(configToTransformer(transformerConfig))
+                .transformerInfo(Transformers.TransformerInfo
+                    .builder()
+                    .name("Custom Transform")
+                    .description("Custom transformation applied from supplied argument, default version-specific transformations skipped.")
+                    .build())
+                .build();
         }
+        return getCustomTransformationBySourceVersion(sourceVersion);
+    }
+
+    protected void logTransformerConfig(String transformerConfig) {
+        log.atInfo().setMessage("Metadata Transformations config: {}")
+                .addArgument(transformerConfig).log();
         try {
             var mapper = new ObjectMapper()
                     .enable(SerializationFeature.INDENT_OUTPUT);
@@ -88,27 +100,34 @@ public abstract class MigratorEvaluatorBase {
         } catch (Exception e) {
             TRANSFORM_LOGGER.atError().setMessage("Unable to format transform config").setCause(e).log();
         }
-        var transformer =  new TransformationLoader().getTransformerFactoryLoader(transformerConfig);
-        return new TransformerToIJsonTransformerAdapter(transformer);
     }
 
-
-    protected String getCustomTranformationConfigBySourceVersion(Version sourceVersion) {
+    protected Transformers getCustomTransformationBySourceVersion(Version sourceVersion) {
         List<String> jsTransformationFiles = new ArrayList<>();
+        var transformersBuilder = Transformers.builder();
         if (UnboundVersionMatchers.isBelowES_6_X.test(sourceVersion)) {
             // ES 1-5 can have indexes with `string` type
             jsTransformationFiles.add(STRING_TEXT_KEYWORD_TRANSFORMATION_FILE);
+            transformersBuilder.transformerInfo(Transformers.TransformerInfo
+                    .builder()
+                    .name("Field Data Type Deprecation - string")
+                    .description("Convert mapping type string to text/keyword based on field data mappings.")
+                    .url(STRING_TEXT_KEYWORD_TRANSFORMATION_FILE)
+                    .build());
         }
         if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceVersion)) {
             // dense_vector introduced in ES 7.0
-            jsTransformationFiles.add(DENSE_VECTOR_TEXT_KEYWORD_TRANSFORMATION_FILE);
+            jsTransformationFiles.add(DENSE_VECTOR_KNN_TRANSFORMATION_FILE);
+            transformersBuilder.transformerInfo(Transformers.TransformerInfo
+                    .builder()
+                    .name("X-Pack Conversion - dense_vector")
+                    .description("Convert mapping type dense_vector to OpenSearch knn_vector.")
+                    .url(DENSE_VECTOR_KNN_TRANSFORMATION_URL)
+                    .build());
         }
 
-        if (jsTransformationFiles.isEmpty()) {
-            return NOOP_TRANSFORMATION_CONFIG;
-        }
-
-        return jsTransformationFiles.stream()
+        var config = jsTransformationFiles.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
+                jsTransformationFiles.stream()
                 .map(path ->
                         "{" +
                         "  \"JsonJSTransformerProvider\":{" +
@@ -117,9 +136,17 @@ public abstract class MigratorEvaluatorBase {
                         "  }" +
                         "}")
                 .collect(Collectors.joining(",", "[", "]"));
+        logTransformerConfig(config);
+        transformersBuilder.transformer(configToTransformer(config));
+        return transformersBuilder.build();
     }
 
-    protected Transformer selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches) {
+    private Transformer configToTransformer(String config) {
+        var transformer =  new TransformationLoader().getTransformerFactoryLoader(config);
+        return new TransformerToIJsonTransformerAdapter(transformer);
+    }
+
+    protected Transformers selectTransformer(Clusters clusters, int awarenessAttributes, boolean allowLooseVersionMatches) {
         var mapper = new TransformerMapper(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
         var versionTransformer = mapper.getTransformer(
                 awarenessAttributes,
@@ -127,15 +154,21 @@ public abstract class MigratorEvaluatorBase {
                 allowLooseVersionMatches
         );
         var customTransformer = getCustomTransformer(clusters.getSource().getVersion());
-        var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
         log.atInfo().setMessage("Selected transformer composite: custom = {}, version = {}")
-            .addArgument(customTransformer.getClass().getSimpleName())
-            .addArgument(versionTransformer.getClass().getSimpleName())
-            .log();
-        return compositeTransformer;
+                .addArgument(customTransformer.getClass().getSimpleName())
+                .addArgument(versionTransformer.getClass().getSimpleName())
+                .log();
+        return Transformers.builder()
+                .transformer(new FanOutCompositeTransformer(customTransformer.getTransformer(), versionTransformer))
+                .transformerInfos(customTransformer.getTransformerInfos())
+                .transformerInfo(Transformers.TransformerInfo.builder()
+                    .name("Version Transform")
+                    .description("Other transforms for source to target conversion")
+                    .build())
+                .build();
     }
 
-    protected Transformer selectTransformer(Clusters clusters) {
+    protected Transformers selectTransformer(Clusters clusters) {
         return selectTransformer(clusters, arguments.clusterAwarenessAttributes, arguments.versionStrictness.allowLooseVersionMatches);
     }
 
