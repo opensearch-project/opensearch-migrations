@@ -65,7 +65,7 @@ public abstract class MetadataTransformationRegistry {
                 config.getIsRelevantForSourceVersion().test(sourceVersion))
             .toList();
         transformersBuilder.transformerInfos(bakedInTransformers.stream().map(TransformerConfigs::getTransformerInfo).collect(Collectors.toList()));
-        var config = getAggregateJSTransformer(bakedInTransformers.stream().map(TransformerConfigs::getFilename).toList())
+        var config = getAggregateJSTransformer(bakedInTransformers.stream().map(TransformerConfigs::getFilename).toList());
         logTransformerConfig("Default breaking changes transform config", config);
         transformersBuilder.transformer(configToTransformer(config));
         return transformersBuilder.build();
