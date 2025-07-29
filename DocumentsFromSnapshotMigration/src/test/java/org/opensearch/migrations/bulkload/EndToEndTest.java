@@ -164,9 +164,8 @@ public class EndToEndTest extends SourceTestBase {
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var fileFinder = ClusterProviderRegistry
-                    .getSnapshotReader(sourceCluster.getContainerVersion().getVersion(), null, true)
-                    .getSnapshotFileFinder();
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             // === ACTION: Migrate the documents ===

@@ -86,9 +86,8 @@ public class UpgradeTest extends SourceTestBase {
 
             sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
-            var fileFinder = ClusterProviderRegistry
-                    .getSnapshotReader(sourceVersion.getVersion(), null, true)
-                    .getSnapshotFileFinder();
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(sourceSnapshotDirectory.toPath(), fileFinder);
             var counter = new AtomicInteger();
             var clockJitter = new Random(1);

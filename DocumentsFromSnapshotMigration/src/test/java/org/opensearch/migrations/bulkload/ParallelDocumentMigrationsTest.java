@@ -81,9 +81,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
-                var fileFinder = ClusterProviderRegistry
-                        .getSnapshotReader(sourceVersion.getVersion(), null, true)
-                        .getSnapshotFileFinder();
+                var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                        sourceVersion.getVersion(), true);
                 var sourceRepo = new FileSystemRepo(tempDir, fileFinder);
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();

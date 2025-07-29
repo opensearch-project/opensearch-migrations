@@ -39,9 +39,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     ) throws Exception {
         IOUtils.rm(unpackedShardDataDir);
 
-        var fileFinder = ClusterProviderRegistry
-                .getSnapshotReader(version, null, false)
-                .getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(Path.of(localPath), fileFinder);
         SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
         final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName).stream().map(index -> {

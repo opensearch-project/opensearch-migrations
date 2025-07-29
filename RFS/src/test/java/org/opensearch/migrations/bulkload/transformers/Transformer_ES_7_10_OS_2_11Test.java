@@ -22,9 +22,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;
         Version version = Version.fromString("ES 7.10");
 
-        var fileFinder = ClusterProviderRegistry
-                .getSnapshotReader(version, null, false)
-                .getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
@@ -48,9 +46,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_7_10_BWC_CHECK;
         Version version = Version.fromString("ES 7.10");
 
-        var fileFinder = ClusterProviderRegistry
-                .getSnapshotReader(version, null, false)
-                .getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
 
