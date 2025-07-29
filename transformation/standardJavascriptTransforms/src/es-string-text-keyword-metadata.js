@@ -1,24 +1,10 @@
-// src/transformMapping.js
-// --------------------------------------------
-// Convert an ES 2.x-style string mapping (nested Maps) so that
-//     { type: 'string', index: 'analyzed' | 'not_analyzed' | 'no' }
-// becomes the modern { type: 'text' | 'keyword' } form, while also
-// cleaning up legacy properties.  All inputs are treated as immutable –
-// the function returns freshly-cloned Maps.
-//
-// Public API: `transformMapping(mapping: Map | Map[] | any) => same shape`
-// --------------------------------------------
-
 /**
  * Transform an entire mapping (or an array of mappings) so that legacy
  * "string" field definitions are replaced with modern "text" / "keyword"
  * equivalents.  Works recursively on nested `properties` and `fields`, all
  * represented as `Map` instances.
- *
- * @param {*} es2Mapping – a Map (or array of Maps) in ES 2.x format.
- * @returns {*} A new mapping structure with the same overall shape.
  */
-function transformMapping(es2Mapping) {
+function transformMapping(mappings) {
     // ────────────────────────────────────────────────────────────────────
     // Helpers (Map-centric versions of the original object functions)
     // ────────────────────────────────────────────────────────────────────
@@ -62,21 +48,20 @@ function transformMapping(es2Mapping) {
     };
 
     const transformString = fieldDef => {
-        const out = new Map(fieldDef);          // shallow clone
-        const idx = out.get("index");
+        const idx = fieldDef.get("index");
         const isKeyword = ["not_analyzed", "no", false].includes(idx);
-        out.set("type", isKeyword ? "keyword" : "text");
+        fieldDef.set("type", isKeyword ? "keyword" : "text");
 
-        cleanIndex(out);
-        convertNorms(out);
-        cleanByType(out);
+        cleanIndex(fieldDef);
+        convertNorms(fieldDef);
+        cleanByType(fieldDef);
 
         // Recurse into multi-fields
-        if (out.has("fields")) {
-            const fieldsMap = out.get("fields");
-            out.set("fields", transformMapping(fieldsMap));
+        if (fieldDef.has("fields")) {
+            const fieldsMap = fieldDef.get("fields");
+            fieldDef.set("fields", transformMapping(fieldsMap));
         }
-        return out;
+        return fieldDef;
     };
 
     const transformDef = def => {
@@ -84,19 +69,19 @@ function transformMapping(es2Mapping) {
         return def;
     };
     // Handle arrays (e.g., dynamic templates list) first.
-    if (Array.isArray(es2Mapping)) {
-        return es2Mapping.map(transformMapping);
+    if (Array.isArray(mappings)) {
+        return mappings.map(transformMapping);
     }
 
-    if (es2Mapping instanceof Map) {
-        es2Mapping = transformDef(es2Mapping);
+    if (mappings instanceof Map) {
+        mappings = transformDef(mappings);
 
-        for (const [name, def] of es2Mapping) {
-            es2Mapping.set(name, transformMapping(def));
+        for (const [name, def] of mappings) {
+            mappings.set(name, transformMapping(def));
         }
     }
 
-    return es2Mapping;
+    return mappings;
 }
 
 function main(ignoredContext) {
