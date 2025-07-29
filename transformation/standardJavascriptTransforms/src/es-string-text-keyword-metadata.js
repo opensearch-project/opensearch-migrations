@@ -1,103 +1,116 @@
+// src/transformMapping.js
+// --------------------------------------------
+// Convert an ES 2.x-style string mapping (nested Maps) so that
+//     { type: 'string', index: 'analyzed' | 'not_analyzed' | 'no' }
+// becomes the modern { type: 'text' | 'keyword' } form, while also
+// cleaning up legacy properties.  All inputs are treated as immutable –
+// the function returns freshly-cloned Maps.
+//
+// Public API: `transformMapping(mapping: Map | Map[] | any) => same shape`
+// --------------------------------------------
+
 /**
- * Converts Elasticsearch 1.x/2.x “string” mappings to Elasticsearch 5+ “text/keyword”.
+ * Transform an entire mapping (or an array of mappings) so that legacy
+ * "string" field definitions are replaced with modern "text" / "keyword"
+ * equivalents.  Works recursively on nested `properties` and `fields`, all
+ * represented as `Map` instances.
  *
- * - Walks mappings recursively, including multi-fields and nested/object `properties`.
- * - Chooses `text` vs `keyword` from the historic `index` value.
- * - Adjusts/deletes settings that became invalid (e.g. `analyzer` on keyword, `doc_values` on text).
- * - Converts legacy `norms:{enabled:…}` objects to the ES5 boolean `norms` flag.
- * - Returns a **new** mapping; the original input object is left untouched.
- *
+ * @param {*} es2Mapping – a Map (or array of Maps) in ES 2.x format.
+ * @returns {*} A new mapping structure with the same overall shape.
  */
 function transformMapping(es2Mapping) {
-    const isString  = d => d && d.type === 'string';
-    const clone     = o => ({ ...o });
+    // ────────────────────────────────────────────────────────────────────
+    // Helpers (Map-centric versions of the original object functions)
+    // ────────────────────────────────────────────────────────────────────
+
+    const isString = d => d instanceof Map && d.get("type") === "string";
 
     const convertNorms = def => {
-        if (def.norms && typeof def.norms === 'object' && 'enabled' in def.norms) {
-            def.norms = !!def.norms.enabled;
+        const norms = def.get("norms");
+        if (norms instanceof Map && norms.has("enabled")) {
+            def.set("norms", !!norms.get("enabled"));
         }
     };
 
     const cleanIndex = def => {
-        switch (def.index) {
-            case 'analyzed':
-            case 'not_analyzed':
-                delete def.index;            // ES5 default is `true`
+        const idx = def.get("index");
+        switch (idx) {
+            case "analyzed":
+            case "not_analyzed":
+                def.delete("index"); // ES5 default is `true`
                 break;
-            case 'no':
-                def.index = false;
+            case "no":
+                def.set("index", false);
                 break;
         }
     };
 
     const cleanByType = def => {
-        if (def.type === 'keyword') {
+        const type = def.get("type");
+        if (type === "keyword") {
             [
-                'analyzer',
-                'search_analyzer',
-                'position_increment_gap',
-                'term_vector',
-                'fielddata'
-            ].forEach(k => delete def[k]);
-        } else {                         // text field
-            delete def.doc_values;
-            if ('null_value' in def) delete def.null_value;
+                "analyzer",
+                "search_analyzer",
+                "position_increment_gap",
+                "term_vector",
+                "fielddata"
+            ].forEach(k => def.delete(k));
+        } else { // text field
+            def.delete("doc_values");
+            if (def.has("null_value")) def.delete("null_value");
         }
     };
 
     const transformString = fieldDef => {
-        const out = clone(fieldDef);
-        const idx = out.index;
-        out.type  = ['not_analyzed', 'no', false].includes(idx) ? 'keyword' : 'text';
+        const out = new Map(fieldDef);          // shallow clone
+        const idx = out.get("index");
+        const isKeyword = ["not_analyzed", "no", false].includes(idx);
+        out.set("type", isKeyword ? "keyword" : "text");
 
         cleanIndex(out);
         convertNorms(out);
         cleanByType(out);
 
-        if (out.fields) out.fields = transformProps(out.fields);
+        // Recurse into multi-fields
+        if (out.has("fields")) {
+            const fieldsMap = out.get("fields");
+            out.set("fields", transformMapping(fieldsMap));
+        }
         return out;
     };
 
     const transformDef = def => {
-        if (isString(def))          return transformString(def);
-        if (def && def.properties)  return { ...def, properties: transformProps(def.properties) };
-        if (def && def.fields)      return { ...def, fields: transformProps(def.fields) };
-        return def;                 // leave unchanged
+        if (isString(def)) return transformString(def);
+        return def;
     };
-
-    function transformProps(props) {
-        return Object.entries(props).reduce(
-            (acc, [name, def]) => (acc[name] = transformDef(def), acc), {}
-        );
-    }
-
+    // Handle arrays (e.g., dynamic templates list) first.
     if (Array.isArray(es2Mapping)) {
         return es2Mapping.map(transformMapping);
     }
 
-    if (es2Mapping && es2Mapping.properties) {
-        return { ...es2Mapping, properties: transformProps(es2Mapping.properties) };
+    if (es2Mapping instanceof Map) {
+        es2Mapping = transformDef(es2Mapping);
+
+        for (const [name, def] of es2Mapping) {
+            es2Mapping.set(name, transformMapping(def));
+        }
     }
 
-    return Object.entries(es2Mapping).reduce((acc, [typeName, typeMapping]) => {
-        acc[typeName] = typeMapping && typeMapping.properties
-            ? { ...typeMapping, properties: transformProps(typeMapping.properties) }
-            : typeMapping;
-        return acc;
-    }, {});
+    return es2Mapping;
 }
 
 function main(ignoredContext) {
-    return metadata =>
-        metadata && metadata.body && metadata.body.mappings
-            ? {
-                ...metadata,
-                body: {
-                    ...metadata.body,
-                    mappings: transformMapping(metadata.body.mappings)
-                }
-            }
-            : metadata;
+    return metadata => {
+        if (metadata?.get("body")?.has("mappings")) {
+            metadata.get("body").set("mappings", transformMapping(metadata.get("body").get("mappings")));
+        }
+        return metadata;
+    }
+}
+
+// Visibility for testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = main;
 }
 
 (() => main)();

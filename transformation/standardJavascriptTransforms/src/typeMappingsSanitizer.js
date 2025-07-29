@@ -486,5 +486,10 @@ function main(context) {
     };
 }
 
+// Visibility for testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = main;
+}
+
 // Entrypoint function
-(() => main)()
+(() => main)();
