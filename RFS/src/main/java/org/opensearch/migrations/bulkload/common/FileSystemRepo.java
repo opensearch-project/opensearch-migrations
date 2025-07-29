@@ -57,8 +57,7 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public Path getSnapshotRepoDataFilePath() {
-        // delegate to version-specific if defined
-        Path path = fileFinder.getSnapshotRepoDataFilePath();
+        Path path = fileFinder.getSnapshotRepoDataFilePath(repoRootDir);
         if (path != null) {
             return path;
         }
@@ -67,32 +66,32 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        return fileFinder.getGlobalMetadataFilePath(snapshotId);
+        return fileFinder.getGlobalMetadataFilePath(repoRootDir, snapshotId);
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        return fileFinder.getSnapshotMetadataFilePath(snapshotId);
+        return fileFinder.getSnapshotMetadataFilePath(repoRootDir, snapshotId);
     }
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        return fileFinder.getIndexMetadataFilePath(indexId, indexFileId);
+        return fileFinder.getIndexMetadataFilePath(repoRootDir, indexId, indexFileId);
     }
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        return fileFinder.getShardDirPath(indexId, shardId);
+        return fileFinder.getShardDirPath(repoRootDir, indexId, shardId);
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        return fileFinder.getShardMetadataFilePath(snapshotId, indexId, shardId);
+        return fileFinder.getShardMetadataFilePath(repoRootDir, snapshotId, indexId, shardId);
     }
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
-        return fileFinder.getBlobFilePath(indexId, shardId, blobName);
+        return fileFinder.getBlobFilePath(repoRootDir, indexId, shardId, blobName);
     }
 
     @Override

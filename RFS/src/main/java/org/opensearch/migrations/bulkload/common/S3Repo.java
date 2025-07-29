@@ -133,10 +133,7 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getSnapshotRepoDataFilePath() {
-
-        // assuming SnapshotFileFinder handles this correctly per version
-        // (ex. SnapshotFileFinder_ES_1_7 always knows to expect just `index` in ES 1.7)
-        Path path = fileFinder.getSnapshotRepoDataFilePath();
+        Path path = fileFinder.getSnapshotRepoDataFilePath(s3LocalDir);
         if (path != null) {
             return path;
         }
@@ -145,32 +142,32 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        return fetch(fileFinder.getGlobalMetadataFilePath(snapshotId));
+        return fetch(fileFinder.getGlobalMetadataFilePath(s3LocalDir, snapshotId));
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        return fetch(fileFinder.getSnapshotMetadataFilePath(snapshotId));
+        return fetch(fileFinder.getSnapshotMetadataFilePath(s3LocalDir, snapshotId));
     }
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        return fetch(fileFinder.getIndexMetadataFilePath(indexId, indexFileId));
+        return fetch(fileFinder.getIndexMetadataFilePath(s3LocalDir, indexId, indexFileId));
     }
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        return fileFinder.getShardDirPath(indexId, shardId);
+        return fileFinder.getShardDirPath(s3LocalDir, indexId, shardId);
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        return fetch(fileFinder.getShardMetadataFilePath(snapshotId, indexId, shardId));
+        return fetch(fileFinder.getShardMetadataFilePath(s3LocalDir, snapshotId, indexId, shardId));
     }
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
-        return fetch(fileFinder.getBlobFilePath(indexId, shardId, blobName));
+        return fetch(fileFinder.getBlobFilePath(s3LocalDir, indexId, shardId, blobName));
     }
 
     @Override
