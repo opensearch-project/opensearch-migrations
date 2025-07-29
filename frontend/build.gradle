@@ -55,7 +55,6 @@ tasks.register('generateBackendClient', NpmTask) {
 
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
-    dependsOn 'generateBackendClient'
     group = 'build'
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
