@@ -43,14 +43,6 @@ public class S3Repo implements SourceRepo {
     private final String s3Region;
     private final S3AsyncClient s3Client;
 
-    private int extractVersion(String key, Pattern pattern) {
-        Matcher matcher = pattern.matcher(key);
-        if (matcher.find()) {
-            return Integer.parseInt(matcher.group(1));
-        }
-        return -1;
-    }
-
     protected void ensureS3LocalDirectoryExists(Path localPath) {
         try {
             Files.createDirectories(localPath);
@@ -190,12 +182,6 @@ public class S3Repo implements SourceRepo {
     public static class CantCreateS3LocalDir extends RfsException {
         public CantCreateS3LocalDir(Path localPath, Throwable cause) {
             super("Failed to create the S3 local download directory: " + localPath, cause);
-        }
-    }
-
-    public static class CantExtractIndexFileVersion extends RfsException {
-        public CantExtractIndexFileVersion(String key, Throwable cause) {
-            super("Failed to extract the Index File version from S3 object key: " + key, cause);
         }
     }
 
