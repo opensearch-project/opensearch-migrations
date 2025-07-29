@@ -38,7 +38,7 @@ class Context(object):
         self.json = False
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--config-file", default="/config/migration_services.yaml", help="Path to config file")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
@@ -48,6 +48,13 @@ def cli(ctx, config_file, json, verbose, version):
     if version:
         click.echo(get_version_str())
         ctx.exit(0)
+
+    # Enforce command required unless --version was passed
+    if ctx.invoked_subcommand is None:
+        click.echo("Error: Missing command.", err=True)
+        click.echo(cli.get_help(ctx))
+        ctx.exit(2)
+
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
     ctx.obj = Context(config_file)
