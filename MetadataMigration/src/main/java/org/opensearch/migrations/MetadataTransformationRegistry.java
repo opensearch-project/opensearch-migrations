@@ -65,19 +65,23 @@ public abstract class MetadataTransformationRegistry {
                 config.getIsRelevantForSourceVersion().test(sourceVersion))
             .toList();
         transformersBuilder.transformerInfos(bakedInTransformers.stream().map(TransformerConfigs::getTransformerInfo).collect(Collectors.toList()));
-        var config = bakedInTransformers.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
-            bakedInTransformers.stream()
-                .map(transformerConfigs ->
+        var config = getAggregateJSTransformer(bakedInTransformers.stream().map(TransformerConfigs::getFilename).toList())
+        logTransformerConfig("Default breaking changes transform config", config);
+        transformersBuilder.transformer(configToTransformer(config));
+        return transformersBuilder.build();
+    }
+
+    private static String getAggregateJSTransformer(List<String> jsFilenames) {
+        return jsFilenames.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
+            jsFilenames.stream()
+                .map(filename ->
                     "{" +
                         "  \"JsonJSTransformerProvider\":{" +
-                        "    \"initializationResourcePath\":\"" + transformerConfigs.getFilename() + "\"," +
+                        "    \"initializationResourcePath\":\"" + filename + "\"," +
                         "    \"bindingsObject\":\"{}\"" +
                         "  }" +
                         "}")
                 .collect(Collectors.joining(",", "[", "]"));
-        logTransformerConfig("Default breaking changes transform config", config);
-        transformersBuilder.transformer(configToTransformer(config));
-        return transformersBuilder.build();
     }
 
     public static Transformer configToTransformer(String config) {
