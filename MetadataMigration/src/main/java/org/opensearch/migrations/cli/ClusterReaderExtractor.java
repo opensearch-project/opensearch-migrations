@@ -35,11 +35,8 @@ public class ClusterReaderExtractor {
             throw new ParameterException("Unable to read from snapshot without --source-version parameter");
         }
 
-        // Get version-specific snapshot reader
-        var reader = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, null, arguments.versionStrictness.allowLooseVersionMatches);
-
         // Get file finder
-        var fileFinder = reader.getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(arguments.sourceVersion, true);
         
         SourceRepo repo = null;
         if (arguments.fileSystemRepoPath != null) {
