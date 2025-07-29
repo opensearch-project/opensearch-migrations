@@ -5,19 +5,28 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {getKeyAndValue} from "@/utils";
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 
+
+const test = new TemplateBuilder({a: true}, {b: 2})
+    .addOptional("prefix", (s=> ""), "no desc" )
+    .addOptional("n2", (s=> s.currentScope.prefix.defaultValue), "no desc" )
+    .getFullTemplateScope();
+
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
-    // .addParams(CommonWorkflowParameters)
+        .addParams(CommonWorkflowParameters)
+        // .addParams({foo: defineParam({ defaultValue: "foo" }),})
     .addTemplate("init", t=> t
-            // .addOptional("prefix", (s=> ""+s.context.workflowParams.etcdUser.defaultValue), "no desc" )
-            .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
-            .addRequired("next", z.string())
-            .addOptional("bad", (s=> ""+s.currentScope.next), "no desc" )
+        // .addOptional("prefix", (s=> ""+s.context.workflowParams.etcdUser.defaultValue), "no desc" )
+        .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
+        .addRequired("next", z.string())
+ //       .addOptional("bad", (s=> ""+s.currentScope.next), "no desc" )
         // .addSteps("init", sb => sb
             //     //.getSigScope().inputs.main
             //     .addStep(/**/))
     )
     .addTemplate("cleanup", t => t
-        .addOptional("t", c => c.context.templates.init))
+        .addOptional("t", c => c.context.templates.init)
+        .addOptional("t", c => c.context.workflowParams.etcdUser)
+    )
     .getFullScope();
 // .
 // .add(s=> ({}))

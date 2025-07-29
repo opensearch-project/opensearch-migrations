@@ -9,7 +9,7 @@ function formatParameterDefinition<P extends InputParamDef<ZodTypeAny, boolean>>
 }
 
 function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
-    return {
+    return inputs == undefined ? [] : {
         parameters:
             Object.entries(inputs).map(([fieldName, definition]) => {
                 return {
@@ -38,7 +38,7 @@ export function renderWorkflowTemplate(wf: Record<string, any>) {
             serviceAccountName: wf.serviceAccountName,
             entrypoint: "main",
             parallelism: 100,
-            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
+            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParams) }),
             templates: (() => {
                 const list = [];
                 for (const k in wf.templates) {
