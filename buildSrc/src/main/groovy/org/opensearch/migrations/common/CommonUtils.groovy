@@ -1,6 +1,7 @@
 package org.opensearch.migrations.common
 
 import org.gradle.api.GradleException
+import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
@@ -24,7 +25,7 @@ class CommonUtils {
     static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project project,
                                                               String dockerImageName) {
         def destBuildDir = "build/docker/${dockerImageName}_${project.name}"
-        def destDir = "${destBuildDir}/jars"
+        def destDir = "${destBuildDir}"
         copyArtifactFromProjectToProjectsDockerStaging(dockerBuildProject, project, dockerImageName, destDir)
     }
     static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project sourceArtifactProject,
@@ -32,14 +33,32 @@ class CommonUtils {
         // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
         // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
         var dstCopyTask = dockerBuildProject.task("copyArtifact_${destProjectName}", type: Sync) {
-            from { sourceArtifactProject.configurations.findByName("runtimeClasspath").files }
-            from { sourceArtifactProject.tasks.getByName('jar') }
             into destDir
-            include "*.jar"
             duplicatesStrategy = 'WARN'
+
+            // Copy VERSION file
+            from(dockerBuildProject.rootProject.layout.projectDirectory.file("VERSION"))
+
+            // Copy jars
+            // Lazily evaluate this runtimeClasspath
+            from(project.provider { sourceArtifactProject.configurations.runtimeClasspath }) {
+                include "*.jar"
+                into("jars")
+            }
+            from(sourceArtifactProject.tasks.named('jar')) {
+                include "*.jar"
+                into("jars")
+            }
         }
         dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
         dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("build"))
+    }
+
+    static def copyVersionFileToDockerStaging(Project project, String destProjectName, String destDir) {
+        return project.tasks.register("copyVersionFile_${destProjectName}", Copy) {
+            from(project.rootProject.layout.projectDirectory.file("VERSION"))
+            into(project.layout.projectDirectory.dir(destDir))
+        }
     }
 
     static def createDockerfile(Project dockerBuildProject, Project sourceArtifactProject,
@@ -72,6 +91,7 @@ class CommonUtils {
             }
 
             copyFile("jars", "/jars")
+            copyFile("VERSION", "VERSION")
             def jvmParams = "-XX:MaxRAMPercentage=80.0 -XX:+ExitOnOutOfMemoryError"
             // can't set the environment variable from the runtimeClasspath because the Dockerfile is
             // constructed in the configuration phase and the classpath won't be realized until the

@@ -25,6 +25,9 @@ def jibProjects = [
                 baseImageTag  : "17-al2023-headless",
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
+                requiredDependencies: [
+                    ":TrafficCapture:trafficReplayer": ["copyVersionFile_traffic_replayer"]
+                ]
         ],
         "TrafficCapture:trafficCaptureProxyServer": [
                 baseImageRegistryEndpoint: rootProject.ext.registryEndpoint,
@@ -33,7 +36,10 @@ def jibProjects = [
                 baseImageTag   : "latest",
                 imageName      : "capture_proxy",
                 imageTag       : "latest",
-                requiredDependencies: ["buildKit_captureProxyBase"]
+                requiredDependencies: [
+                    "": ["buildKit_captureProxyBase"],
+                    ":TrafficCapture:trafficCaptureProxyServer": ["copyVersionFile_capture_proxy"]
+                ]
         ]
 ]
 
@@ -58,7 +64,8 @@ def buildKitProjects = [
                 imageName:  "reindex_from_snapshot",
                 imageTag:   "latest",
                 requiredDependencies: [
-                        ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars"
+                        ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",
+                        ":DocumentsFromSnapshotMigration:copyVersionFile_reindexFromSnapshot"
                 ]
         ],
         [

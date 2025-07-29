@@ -13,6 +13,7 @@ import console_link.middleware.replay as replay_
 import console_link.middleware.kafka as kafka_
 import console_link.middleware.tuples as tuples_
 
+from console_link.models.container_utils import get_version_str
 from console_link.models.cluster import HttpMethod
 from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
@@ -41,8 +42,12 @@ class Context(object):
 @click.option("--config-file", default="/config/migration_services.yaml", help="Path to config file")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
+@click.option("--version", is_flag=True, is_eager=True, help="Show the Migration Assistant version.")
 @click.pass_context
-def cli(ctx, config_file, json, verbose):
+def cli(ctx, config_file, json, verbose, version):
+    if version:
+        click.echo(get_version_str())
+        ctx.exit(0)
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
     ctx.obj = Context(config_file)

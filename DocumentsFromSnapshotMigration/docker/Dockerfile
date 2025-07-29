@@ -8,6 +8,7 @@ RUN dnf install -y procps && \
 
 # Requires Gradle to genearte runtime jars initially
 COPY ./build/runtimeJars /rfs-app/jars
+COPY ./build/VERSION /rfs-app/VERSION
 WORKDIR /rfs-app
 RUN printf "#!/bin/sh\nexec java -XX:MaxRAMPercentage=80.0 -cp /rfs-app/jars/*:. \"\$@\" " > /rfs-app/runJavaWithClasspath.sh
 RUN chmod +x /rfs-app/runJavaWithClasspath.sh
