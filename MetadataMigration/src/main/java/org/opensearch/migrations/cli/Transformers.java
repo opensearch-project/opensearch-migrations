@@ -26,11 +26,9 @@ public class Transformers {
                 .append(transformer.name)
                 .append(":")
                 .append(System.lineSeparator());
-            if (transformer.description != null) {
-                sb.append(Format.indentToLevel(2))
-                    .append(transformer.description)
-                    .append(System.lineSeparator());
-            }
+            transformer.descriptionLines.forEach(line -> {
+                sb.append(Format.indentToLevel(2)).append(line).append(System.lineSeparator());
+            });
             if (transformer.url != null) {
                 sb.append(Format.indentToLevel(2))
                     .append("Learn more at ")
@@ -50,7 +48,8 @@ public class Transformers {
     @Value
     public static class TransformerInfo {
         public String name;
-        public String description;
+        @Singular
+        public List<String> descriptionLines;
         public String url;
     }
 }

@@ -73,30 +73,40 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformers getCustomTransformer(Version sourceVersion) {
+        var versionSpecificCustomTransforms = getCustomTransformationBySourceVersion(sourceVersion);
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
-            logTransformerConfig(transformerConfig);
-            return Transformers.builder()
-                .transformer(configToTransformer(transformerConfig))
-                .transformerInfo(Transformers.TransformerInfo
+            logTransformerConfig("User supplied custom transform", transformerConfig);
+            var customTransformInfoBuilder = Transformers.TransformerInfo
                     .builder()
-                    .name("Custom Transform")
-                    .description("Custom transformation applied from supplied argument, default version-specific transformations skipped.")
-                    .build())
-                .build();
+                    .name("User Supplied Custom Transform")
+                    .descriptionLine("Custom transformation applied from supplied arguments.");
+                if (!versionSpecificCustomTransforms.getTransformerInfos().isEmpty()) {
+                    customTransformInfoBuilder
+                        .descriptionLine("Skipped default version-specific transformations:")
+                        .descriptionLine("(" + versionSpecificCustomTransforms.getTransformerInfos().stream()
+                            .map(Transformers.TransformerInfo::getName).collect(Collectors.joining(", ")) + ")") ;
+                }
+                return Transformers.builder()
+                    .transformer(configToTransformer(transformerConfig))
+                    .transformerInfo(customTransformInfoBuilder.build())
+                    .build();
         }
-        return getCustomTransformationBySourceVersion(sourceVersion);
+        return versionSpecificCustomTransforms;
     }
 
-    protected void logTransformerConfig(String transformerConfig) {
-        log.atInfo().setMessage("Metadata Transformations config: {}")
-                .addArgument(transformerConfig).log();
+    protected void logTransformerConfig(String title, String transformerConfig) {
+        log.atInfo().setMessage("{}:\n{}")
+            .addArgument(title)
+            .addArgument(transformerConfig).log();
         try {
             var mapper = new ObjectMapper()
                     .enable(SerializationFeature.INDENT_OUTPUT);
             var jsonNode = mapper.readTree(transformerConfig);
             var formattedTransformConfig = mapper.writeValueAsString(jsonNode);
-            TRANSFORM_LOGGER.atInfo().setMessage("{}").addArgument(formattedTransformConfig).log();
+            TRANSFORM_LOGGER.atInfo().setMessage("{}\n{}")
+                    .addArgument(title)
+                    .addArgument(formattedTransformConfig).log();
         } catch (Exception e) {
             TRANSFORM_LOGGER.atError().setMessage("Unable to format transform config").setCause(e).log();
         }
@@ -111,8 +121,8 @@ public abstract class MigratorEvaluatorBase {
             transformersBuilder.transformerInfo(Transformers.TransformerInfo
                     .builder()
                     .name("Field Data Type Deprecation - string")
-                    .description("Convert mapping type string to text/keyword based on field data mappings.")
-                    .url(STRING_TEXT_KEYWORD_TRANSFORMATION_FILE)
+                    .descriptionLine("Convert mapping type string to text/keyword based on field data mappings.")
+                    .url(STRING_TEXT_KEYWORD_TRANSFORMATION_URL)
                     .build());
         }
         if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceVersion)) {
@@ -121,7 +131,7 @@ public abstract class MigratorEvaluatorBase {
             transformersBuilder.transformerInfo(Transformers.TransformerInfo
                     .builder()
                     .name("X-Pack Conversion - dense_vector")
-                    .description("Convert mapping type dense_vector to OpenSearch knn_vector.")
+                    .descriptionLine("Convert mapping type dense_vector to OpenSearch knn_vector.")
                     .url(DENSE_VECTOR_KNN_TRANSFORMATION_URL)
                     .build());
         }
@@ -136,7 +146,7 @@ public abstract class MigratorEvaluatorBase {
                         "  }" +
                         "}")
                 .collect(Collectors.joining(",", "[", "]"));
-        logTransformerConfig(config);
+        logTransformerConfig("Default breaking changes transform config", config);
         transformersBuilder.transformer(configToTransformer(config));
         return transformersBuilder.build();
     }
@@ -163,7 +173,7 @@ public abstract class MigratorEvaluatorBase {
                 .transformerInfos(customTransformer.getTransformerInfos())
                 .transformerInfo(Transformers.TransformerInfo.builder()
                     .name("Version Transform")
-                    .description("Other transforms for source to target conversion")
+                    .descriptionLine("Other transforms for source to target shape conversion")
                     .build())
                 .build();
     }
