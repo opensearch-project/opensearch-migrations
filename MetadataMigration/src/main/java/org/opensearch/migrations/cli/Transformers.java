@@ -21,18 +21,18 @@ public class Transformers {
     public String asCliOutput() {
         var sb = new StringBuilder();
         sb.append("Transformations:").append(System.lineSeparator());
-        transformerInfos.forEach(transformer -> {
+        transformerInfos.forEach(transform -> {
             sb.append(Format.indentToLevel(1))
-                .append(transformer.name)
+                .append(transform.name)
                 .append(":")
                 .append(System.lineSeparator());
-            transformer.descriptionLines.forEach(line -> {
+            transform.descriptionLines.forEach(line -> {
                 sb.append(Format.indentToLevel(2)).append(line).append(System.lineSeparator());
             });
-            if (transformer.url != null) {
+            if (transform.url != null) {
                 sb.append(Format.indentToLevel(2))
                     .append("Learn more at ")
-                    .append(transformer.url)
+                    .append(transform.url)
                     .append(System.lineSeparator());
             }
         });
@@ -47,9 +47,9 @@ public class Transformers {
     @Builder
     @Value
     public static class TransformerInfo {
-        public String name;
+        String name;
         @Singular
-        public List<String> descriptionLines;
-        public String url;
+        List<String> descriptionLines;
+        String url;
     }
 }

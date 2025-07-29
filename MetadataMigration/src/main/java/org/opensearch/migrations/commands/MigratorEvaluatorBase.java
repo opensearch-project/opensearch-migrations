@@ -47,9 +47,7 @@ public abstract class MigratorEvaluatorBase {
             "]";
 
     public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_FILE = "js/es-string-text-keyword-metadata.js";
-    public static final String STRING_TEXT_KEYWORD_TRANSFORMATION_URL = "https://placeholder.com";
     public static final String DENSE_VECTOR_KNN_TRANSFORMATION_FILE = "js/es-vector-knn-metadata.js";
-    public static final String DENSE_VECTOR_KNN_TRANSFORMATION_URL = "https://placeholder.com";
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
@@ -122,7 +120,6 @@ public abstract class MigratorEvaluatorBase {
                     .builder()
                     .name("Field Data Type Deprecation - string")
                     .descriptionLine("Convert mapping type string to text/keyword based on field data mappings.")
-                    .url(STRING_TEXT_KEYWORD_TRANSFORMATION_URL)
                     .build());
         }
         if (UnboundVersionMatchers.isGreaterOrEqualES_7_X.test(sourceVersion)) {
@@ -130,9 +127,8 @@ public abstract class MigratorEvaluatorBase {
             jsTransformationFiles.add(DENSE_VECTOR_KNN_TRANSFORMATION_FILE);
             transformersBuilder.transformerInfo(Transformers.TransformerInfo
                     .builder()
-                    .name("X-Pack Conversion - dense_vector")
+                    .name("dense_vector to knn_vector")
                     .descriptionLine("Convert mapping type dense_vector to OpenSearch knn_vector.")
-                    .url(DENSE_VECTOR_KNN_TRANSFORMATION_URL)
                     .build());
         }
 
