@@ -63,7 +63,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --workflow INIT_BOOTSTRAP"
+                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --log-group-name solutions-deployment-jenkins-pipeline-${stage} --workflow INIT_BOOTSTRAP"
                                     }
                                 }
                             }
@@ -79,7 +79,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --workflow VERIFY_INIT_BOOTSTRAP"
+                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --log-group-name solutions-deployment-jenkins-pipeline-${stage} --workflow VERIFY_INIT_BOOTSTRAP"
                                     }
                                 }
                             }
