@@ -149,9 +149,7 @@ public class LuceneDocumentsReaderTest {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_6_8_MERGED;
         Version version = Version.fromString("ES 6.8");
 
-        var fileFinder = ClusterProviderRegistry
-                .getSnapshotReader(version, null, false)
-                .getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
@@ -305,9 +303,7 @@ public class LuceneDocumentsReaderTest {
                 List.of("unchangeddoc"));
         List<Integer> documentStartingIndices = List.of(0, 2, 5);
 
-        var fileFinder = ClusterProviderRegistry
-                .getSnapshotReader(version, null, false)
-                .getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
@@ -345,9 +341,7 @@ public class LuceneDocumentsReaderTest {
                 List.of("updateddoc", "unchangeddoc"),
                 List.of("unchangeddoc"));
 
-        var fileFinder = ClusterProviderRegistry
-                .getSnapshotReader(version, null, false)
-                .getSnapshotFileFinder();
+        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(version, true);
         final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo, false);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);

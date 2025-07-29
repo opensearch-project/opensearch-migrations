@@ -50,7 +50,7 @@ public class S3RepoTest {
         Files.createFile(tempDir.resolve("indices/123abc/7/snap-snapshot1.dat"));
         Files.createFile(tempDir.resolve("indices/123abc/7/bobloblaw"));
 
-        SnapshotFileFinder finder = new SnapshotFileFinder_ES_6_8(tempDir);
+        SnapshotFileFinder finder = new SnapshotFileFinder_ES_6_8();
 
         GetObjectResponse mockResponse = GetObjectResponse.builder().build();
         CompletableFuture<GetObjectResponse> noopFuture = CompletableFuture.completedFuture(mockResponse);
