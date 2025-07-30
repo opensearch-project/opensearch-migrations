@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Callable, Dict
 import os
 
+from console_link.models.container_utils import get_version_str
+
 system_router = APIRouter(
     prefix="/system",
     tags=["system"],
@@ -24,6 +26,10 @@ class HealthApiResponse(BaseModel):
     status: HealthStatus
 
 
+class VersionApiResponse(BaseModel):
+    version: str
+
+
 def check_shared_logs_config() -> str:
     path = "/shared-logs-output"
     if not os.path.exists(path):
@@ -36,7 +42,7 @@ HEALTH_CHECKS: Dict[str, Callable[[], str]] = {
 }
 
 
-@system_router.get("/health", response_model=HealthApiResponse)
+@system_router.get("/health", response_model=HealthApiResponse, operation_id="systemHealth")
 def health():
     results = {}
     status = HealthStatus.ok
@@ -49,3 +55,9 @@ def health():
     if status != HealthStatus.ok:
         raise HTTPException(status_code=503, detail=results)
     return HealthApiResponse(checks=results, status=status)
+
+
+@system_router.get("/version", response_model=VersionApiResponse)
+def version():
+    version_str = get_version_str()
+    return VersionApiResponse(version=version_str)

@@ -13,8 +13,8 @@ const TEST_UUID = "test-uuid";
 const TEST_DOC_NAME = "Test Document";
 const TEST_DOC_CONTENT = "Test content";
 
-jest.mock("uuid", () => ({
-  v4: jest.fn(() => TEST_UUID),
+jest.mock("crypto", () => ({
+  randomUUID: jest.fn(() => TEST_UUID),
 }));
 
 // Mock the getJsonSizeInBytes function

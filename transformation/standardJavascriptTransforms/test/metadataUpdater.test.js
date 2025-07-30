@@ -1,4 +1,4 @@
-const { main } = require("../src/metadataUpdater.js");
+const main = require("../src/metadataUpdater");
 
 let templateDescription = {
   template: {
