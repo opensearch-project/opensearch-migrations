@@ -43,8 +43,12 @@ public class S3Repo implements SourceRepo {
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {
         try {
-            Files.createDirectories(localPath);
+            if (localPath != null) {
+                Files.createDirectories(localPath);
+                log.atDebug().setMessage("Ensured local directory exists: {}").addArgument(localPath).log();
+            }
         } catch (IOException e) {
+            log.atError().setMessage("Failed to create local directory: {}").addArgument(localPath).setCause(e).log();
             throw new CantCreateS3LocalDir(localPath, e);
         }
     }
@@ -63,9 +67,20 @@ public class S3Repo implements SourceRepo {
 
         log.atInfo()
             .setMessage("Downloading file from S3: {} to {}").addArgument(s3Uri.uri).addArgument(localPath).log();
+
         GetObjectRequest getObjectRequest = GetObjectRequest.builder().bucket(s3Uri.bucketName).key(s3Uri.key).build();
 
-        s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
+        try {
+            s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
+            log.atInfo().setMessage("Successfully downloaded file: {}").addArgument(localPath).log();
+        } catch (Exception e) {
+            log.atError().setMessage("Failed to download file from S3: {} to {}")
+                .addArgument(s3Uri.uri)
+                .addArgument(localPath)
+                .setCause(e)
+                .log();
+            throw e;
+        }
     }
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, SnapshotFileFinder finder) {
@@ -201,9 +216,15 @@ public class S3Repo implements SourceRepo {
         String baseUri = s3RepoUri.uri.endsWith("/") ?
                 s3RepoUri.uri.substring(0, s3RepoUri.uri.length() - 1) :
                 s3RepoUri.uri;
-        String fullUri = relativePath.toString().isEmpty()
+        String relativePathStr = relativePath.toString().replace('\\', '/');
+        String fullUri = relativePathStr.isEmpty()
                 ? baseUri
-                : baseUri + "/" + relativePath.toString().replace('\\', '/');
+                : baseUri + "/" + relativePathStr;
+        log.atInfo()
+                .setMessage("Failed to download file from S3: {} to {}")
+                .addArgument(s3RepoUri.uri)
+                .addArgument(relativePath)
+                .log();
         return new S3Uri(fullUri);
     }
 
