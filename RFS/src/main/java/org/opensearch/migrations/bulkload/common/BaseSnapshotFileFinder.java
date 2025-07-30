@@ -43,36 +43,16 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
     @Override
     public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
         Pattern indexPattern = getSnapshotRepoDataIndexPattern();
-        log.atInfo().setMessage("BaseSnapshotFileFinder: Look for files to match index pattern {}: {}")
-            .addArgument(indexPattern)
-            .addArgument(fileNames)
-            .log();
 
         List<String> matchingFiles = fileNames.stream()
             .filter(name -> indexPattern.matcher(name).matches())
             .toList();
-        if (!matchingFiles.isEmpty()) {
-            log.atInfo().setMessage("BaseSnapshotFileFinder: Matching index files: {}")
-                .addArgument(matchingFiles)
-                .log();
-        }
 
         return matchingFiles.stream()
             .max(Comparator.comparingInt(this::extractIndexVersion))
-            .map(name -> {
-                log.atInfo().setMessage("BaseSnapshotFileFinder: Selected snapshot repo index file = {}")
-                    .addArgument(name)
-                    .log();
-                return root.resolve(name);
-            })
-            .orElseThrow(() -> {
-                log.atError().setMessage("BaseSnapshotFileFinder: No matching index-N file found. Pattern: {}, All files: {}, Matching candidates: {}")
-                    .addArgument(indexPattern)
-                    .addArgument(fileNames)
-                    .addArgument(matchingFiles)
-                    .log();
-                return new CannotFindRepoIndexFile("No matching index-N file found in repo. Matching candidates: " + matchingFiles);
-            });
+            .map(root::resolve)
+            .orElseThrow(() -> new CannotFindRepoIndexFile(
+                "No matching index-N file found in repo. Matching candidates: " + matchingFiles));
     }
 
     /**
@@ -133,25 +113,11 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
      * Extracts the numeric N from "index-N".
      * Throws if the format is invalid.
      */
-    protected int extractIndexVersion(String fileName) {
+    protected int extractIndexVersion(String fileName) throws NumberFormatException {
         Matcher matcher = getSnapshotRepoDataIndexPattern().matcher(fileName);
         if (matcher.find()) {
-            try {
-                int version = Integer.parseInt(matcher.group(1));
-                log.atDebug().setMessage("Parsed index version {} from file: {}")
-                        .addArgument(version)
-                        .addArgument(fileName)
-                        .log();
-                return version;
-            } catch (NumberFormatException e) {
-                log.atWarn().setMessage("Failed to parse numeric suffix from file: {}").addArgument(fileName).log();
-                throw e;
-            }
+            return Integer.parseInt(matcher.group(1));
         }
-        log.atWarn().setMessage("File {} did not match expected pattern: {}")
-            .addArgument(fileName)
-            .addArgument(getSnapshotRepoDataIndexPattern())
-            .log();
         throw new IllegalArgumentException("Invalid index file name: " + fileName +
             ". Expected pattern: " + getSnapshotRepoDataIndexPattern());
     }

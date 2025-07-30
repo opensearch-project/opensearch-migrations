@@ -17,7 +17,6 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
@@ -45,10 +44,8 @@ public class S3Repo implements SourceRepo {
         try {
             if (localPath != null) {
                 Files.createDirectories(localPath);
-                log.atDebug().setMessage("Ensured local directory exists: {}").addArgument(localPath).log();
             }
         } catch (IOException e) {
-            log.atError().setMessage("Failed to create local directory: {}").addArgument(localPath).setCause(e).log();
             throw new CantCreateS3LocalDir(localPath, e);
         }
     }
@@ -68,19 +65,12 @@ public class S3Repo implements SourceRepo {
         log.atInfo()
             .setMessage("Downloading file from S3: {} to {}").addArgument(s3Uri.uri).addArgument(localPath).log();
 
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder().bucket(s3Uri.bucketName).key(s3Uri.key).build();
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(s3Uri.bucketName)
+                .key(s3Uri.key)
+                .build();
 
-        try {
-            s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
-            log.atInfo().setMessage("Successfully downloaded file: {}").addArgument(localPath).log();
-        } catch (Exception e) {
-            log.atError().setMessage("Failed to download file from S3: {} to {}")
-                .addArgument(s3Uri.uri)
-                .addArgument(localPath)
-                .setCause(e)
-                .log();
-            throw e;
-        }
+        s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
     }
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, SnapshotFileFinder finder) {
@@ -213,65 +203,43 @@ public class S3Repo implements SourceRepo {
             throw new IllegalArgumentException("File path must be under s3LocalDir: " + filePath);
         }
         Path relativePath = s3LocalDir.relativize(filePath);
-        String baseUri = s3RepoUri.uri.endsWith("/") ?
-                s3RepoUri.uri.substring(0, s3RepoUri.uri.length() - 1) :
-                s3RepoUri.uri;
+        String baseUri = s3RepoUri.uri.endsWith("/")
+            ? s3RepoUri.uri.substring(0, s3RepoUri.uri.length() - 1)
+            : s3RepoUri.uri;
         String relativePathStr = relativePath.toString().replace('\\', '/');
         String fullUri = relativePathStr.isEmpty()
-                ? baseUri
-                : baseUri + "/" + relativePathStr;
-        log.atInfo()
-                .setMessage("Failed to download file from S3: {} to {}")
-                .addArgument(s3RepoUri.uri)
-                .addArgument(relativePath)
-                .log();
+            ? baseUri
+            : baseUri + "/" + relativePathStr;
         return new S3Uri(fullUri);
     }
 
     protected List<String> listFilesInS3Root() {
-        String debugprefixKey = s3RepoUri.key;
-        if (debugprefixKey.endsWith("/")) {
-            debugprefixKey = debugprefixKey.substring(0, debugprefixKey.length() - 1);
-        }
-        System.out.println("DEBUG: s3RepoUri.key (normalized) = >" + debugprefixKey + "<");
+        // Normalise the repository prefix and remove trailing “/” if present
+        String prefixKey = s3RepoUri.key.endsWith("/")
+                ? s3RepoUri.key.substring(0, s3RepoUri.key.length() - 1)
+                : s3RepoUri.key;
 
-        String prefix = s3RepoUri.key;
-        if (!prefix.isEmpty() && !prefix.endsWith("/")) {
-            prefix += "/";
-        }
+        String listPrefix = prefixKey.isEmpty() ? null : prefixKey + "/";
 
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-            .bucket(s3RepoUri.bucketName)
-            .prefix(prefix.isEmpty() ? null : prefix)
-            .delimiter("/")
-            .build();
+                .bucket(s3RepoUri.bucketName)
+                .prefix(listPrefix)   // null = list the whole bucket
+                .delimiter("/")       // keep only the top-level objects
+                .build();
 
-        ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
-
-        List<String> rawKeys = listResponse.contents().stream()
+        List<String> strippedKeys = s3Client.listObjectsV2(listRequest).join()
+                .contents().stream()
                 .map(S3Object::key)
+                .map(key -> {
+                    if (!prefixKey.isEmpty() && key.startsWith(prefixKey + "/")) {
+                        key = key.substring(prefixKey.length() + 1);
+                    }
+                    return key.startsWith("/") ? key.substring(1) : key;
+                })
                 .toList();
-        System.out.println("======= S3Repo: Raw S3 keys from prefix: " + s3RepoUri + " =======");
-        rawKeys.forEach(System.out::println);
-        System.out.println("======= END RAW S3 KEYS =======");
 
-        final String stripPrefix = (debugprefixKey == null || debugprefixKey.isEmpty()) ? "" : debugprefixKey + "/";
-        List<String> strippedKeys = rawKeys.stream()
-            .map(key -> {
-                String out = key;
-                if (!stripPrefix.isEmpty() && out.startsWith(stripPrefix)) {
-                    out = out.substring(stripPrefix.length());
-                }
-                // Remove leading slash if one somehow remains
-                if (out.startsWith("/")) {
-                    out = out.substring(1);
-                }
-                System.out.println("DEBUG: after strip = '" + out + "'");
-                return out;
-            })
-            .toList();
-
-        log.atInfo().setMessage("S3Repo: Full file list under S3 prefix '{}': {}")
+        log.atDebug()
+            .setMessage("From S3Repo: top-level files under {} -> {}")
             .addArgument(s3RepoUri)
             .addArgument(strippedKeys)
             .log();
