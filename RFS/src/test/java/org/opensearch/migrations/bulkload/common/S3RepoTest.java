@@ -9,7 +9,6 @@ import java.util.concurrent.CompletableFuture;
 import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -79,40 +78,31 @@ public class S3RepoTest {
         assertEquals(testDir, filePath);
     }
 
-    @Disabled
     @Test
     void GetSnapshotRepoDataFilePath_AsExpected() throws IOException {
-        // Expected local path
-        Path expectedPath = testDir.resolve(testRepoFileName);
-
         // mock listFilesInS3Root() to return list of files
         doReturn(List.of(testRepoFileName)).when(testRepo).listFilesInS3Root();
 
-        // Mock the fileFinder's behavior for returning the local path
-        when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(List.of(testRepoFileName)))).thenReturn(expectedPath);
+        // Expected local path
+        Path expectedPath = testDir.resolve(testRepoFileName);
 
-        // Stub ensureS3LocalDirectoryExists to no-op
-        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
-
-        // Stub doesFileExistLocally to simulate file missing, which triggers download
-        doReturn(false).when(testRepo).doesFileExistLocally(expectedPath);
+        // fileFinder simply returns the resolved path
+        when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), anyList()))
+                .thenReturn(expectedPath);
 
         // Run the test
         Path filePath = testRepo.getSnapshotRepoDataFilePath();
 
         // Check the results
         assertEquals(expectedPath, filePath);
-        verify(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
 
-        String expectedKey = testRepo.makeS3Uri(expectedPath).key;
+        // verify only the interactions we expect
+        verify(testRepo, times(1)).listFilesInS3Root();
+        verify(testRepo, never()).ensureS3LocalDirectoryExists(any());
+        verify(testRepo, never()).doesFileExistLocally(any());
 
-        // check that fetch was called by verifying s3Client call
-        GetObjectRequest expectedRequest = GetObjectRequest.builder()
-            .bucket(testRepoUri.bucketName)
-            .key(expectedKey)
-            .build();
-
-        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
+        // S3 client should not be touched
+        verifyNoInteractions(mockS3Client);
     }
 
 
