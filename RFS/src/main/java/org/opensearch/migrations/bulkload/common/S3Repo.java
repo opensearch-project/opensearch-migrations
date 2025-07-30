@@ -213,9 +213,14 @@ public class S3Repo implements SourceRepo {
         }
         System.out.println("DEBUG: s3RepoUri.key (normalized) = >" + debugprefixKey + "<");
 
+        String prefix = s3RepoUri.key;
+        if (!prefix.isEmpty() && !prefix.endsWith("/")) {
+            prefix += "/";
+        }
+
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
             .bucket(s3RepoUri.bucketName)
-            .prefix(s3RepoUri.key.isEmpty() ? null : s3RepoUri.key)
+            .prefix(prefix.isEmpty() ? null : prefix)
             .delimiter("/")
             .build();
 
