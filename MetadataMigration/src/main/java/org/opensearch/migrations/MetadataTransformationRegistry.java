@@ -14,12 +14,14 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Slf4j
-public abstract class MetadataTransformationRegistry {
+@UtilityClass
+public class MetadataTransformationRegistry {
     // Log appender name is in from the MetadataMigration/src/main/resources/log4j2.properties
     public static final String TRANSFORM_LOGGER_NAME = "TransformerRun";
     private static final Logger TRANSFORM_LOGGER = LoggerFactory.getLogger(TRANSFORM_LOGGER_NAME);
