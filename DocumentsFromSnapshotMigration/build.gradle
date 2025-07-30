@@ -63,6 +63,9 @@ application {
     mainClass.set('org.opensearch.migrations.RfsMigrateDocuments')
 }
 
+// Register copy version file task
+CommonUtils.copyVersionFileToDockerStaging(project, "reindexFromSnapshot", "docker/build")
+
 // Cleanup additional docker build directory
 def dockerBuildDir = file("./docker/build")
 clean.doFirst {
@@ -87,7 +90,7 @@ DockerServiceProps[] dockerServices = [
         new DockerServiceProps([projectName:"reindexFromSnapshot",
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
-                                taskDependencies:["copyDockerRuntimeJars"]]),
+                                taskDependencies:["copyDockerRuntimeJars", "copyVersionFile_reindexFromSnapshot"]]),
         new DockerServiceProps([projectName:"emptyElasticsearchSource_5_6",
                                 dockerImageName:"empty_elasticsearch_source_5_6",
                                 inputDir:"./docker/TestSource_ES_5_6"]),

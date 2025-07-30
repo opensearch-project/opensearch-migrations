@@ -33,6 +33,9 @@ def buildOutputs = [
     'out'
 ]
 
+// Register copy version file task
+CommonUtils.copyVersionFileToDockerStaging(project, "frontend", "build/")
+
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
     args = ['run', 'build']
@@ -52,6 +55,7 @@ tasks.register('cleanFrontend', Delete) {
 
 tasks.register('buildDockerImage', DockerBuildImage) {
     dependsOn 'buildFrontend'
+    dependsOn 'copyVersionFile_frontend'
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.file(imageIdFile)
 
