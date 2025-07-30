@@ -34,7 +34,7 @@ def buildOutputs = [
 ]
 
 def backendApiProject = project(':console_link')
-tasks.register('syncBackendClientDefinition', Copy) {
+tasks.register('syncBackendClientDefinition', Sync) {
     dependsOn backendApiProject.tasks.named('generateOpenApiSpec')
     from backendApiProject.layout.buildDirectory.file('openapi.json')
     into layout.buildDirectory.dir('openapi')
