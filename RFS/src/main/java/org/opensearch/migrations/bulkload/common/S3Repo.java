@@ -198,6 +198,12 @@ public class S3Repo implements SourceRepo {
     }
 
     private List<String> listFilesInS3Root() {
+        String debugprefixKey = s3RepoUri.key;
+        if (debugprefixKey.endsWith("/")) {
+            debugprefixKey = debugprefixKey.substring(0, debugprefixKey.length() - 1);
+        }
+        System.out.println("DEBUG: s3RepoUri.key (normalized) = >" + debugprefixKey + "<");
+
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
             .bucket(s3RepoUri.bucketName)
             .prefix(s3RepoUri.key.isEmpty() ? null : s3RepoUri.key)
@@ -209,22 +215,31 @@ public class S3Repo implements SourceRepo {
         List<String> rawKeys = listResponse.contents().stream()
                 .map(S3Object::key)
                 .toList();
-
         System.out.println("======= S3Repo: Raw S3 keys from prefix: " + s3RepoUri + " =======");
         rawKeys.forEach(System.out::println);
         System.out.println("======= END RAW S3 KEYS =======");
 
-        List<String> allKeys = listResponse.contents().stream()
-            .map(S3Object::key)
+        final String stripPrefix = (debugprefixKey == null || debugprefixKey.isEmpty()) ? "" : debugprefixKey + "/";
+        List<String> strippedKeys = rawKeys.stream()
+            .map(key -> {
+                String out = key;
+                if (!stripPrefix.isEmpty() && out.startsWith(stripPrefix)) {
+                    out = out.substring(stripPrefix.length());
+                }
+                // Remove leading slash if one somehow remains
+                if (out.startsWith("/")) {
+                    out = out.substring(1);
+                }
+                System.out.println("DEBUG: after strip = '" + out + "'");
+                return out;
+            })
             .toList();
 
         log.atInfo().setMessage("S3Repo: Full file list under S3 prefix '{}': {}")
             .addArgument(s3RepoUri)
-            .addArgument(allKeys)
+            .addArgument(strippedKeys)
             .log();
 
-        return allKeys.stream()
-            .map(key -> key.replaceFirst("^" + Pattern.quote(s3RepoUri.key + "/?"), ""))
-            .toList();
+        return strippedKeys;
     }
 }
