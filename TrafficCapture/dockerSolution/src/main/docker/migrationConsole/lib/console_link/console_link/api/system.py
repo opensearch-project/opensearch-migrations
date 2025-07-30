@@ -42,7 +42,7 @@ HEALTH_CHECKS: Dict[str, Callable[[], str]] = {
 }
 
 
-@system_router.get("/health", response_model=HealthApiResponse)
+@system_router.get("/health", response_model=HealthApiResponse, operation_id="systemHealth")
 def health():
     results = {}
     status = HealthStatus.ok
