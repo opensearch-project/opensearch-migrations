@@ -103,7 +103,8 @@ public class S3Repo implements SourceRepo {
     public Path getSnapshotRepoDataFilePath() {
         List<String> filesInRoot = listFilesInS3Root(); // no dirs, only files
         try {
-            return fileFinder.getSnapshotRepoDataFilePath(s3LocalDir, filesInRoot);
+            Path repoDataPath = fileFinder.getSnapshotRepoDataFilePath(s3LocalDir, filesInRoot);
+            return fetch(repoDataPath);
         } catch (BaseSnapshotFileFinder.CannotFindRepoIndexFile e) {
             throw new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, s3RepoUri.key);
         }

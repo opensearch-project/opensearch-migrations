@@ -90,19 +90,27 @@ public class S3RepoTest {
         when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), anyList()))
                 .thenReturn(expectedPath);
 
+        // file does not exist locally, so fetch() will download it
+        doReturn(false).when(testRepo).doesFileExistLocally(expectedPath);
+
+        // allow directory creation
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
+
         // Run the test
         Path filePath = testRepo.getSnapshotRepoDataFilePath();
 
         // Check the results
         assertEquals(expectedPath, filePath);
+        verify(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
 
-        // verify only the interactions we expect
-        verify(testRepo, times(1)).listFilesInS3Root();
-        verify(testRepo, never()).ensureS3LocalDirectoryExists(any());
-        verify(testRepo, never()).doesFileExistLocally(any());
+        String expectedKey = testRepo.makeS3Uri(expectedPath).key;
 
-        // S3 client should not be touched
-        verifyNoInteractions(mockS3Client);
+        GetObjectRequest expectedRequest = GetObjectRequest.builder()
+                .bucket(testRepoUri.bucketName)
+                .key(expectedKey)
+                .build();
+
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 
 
