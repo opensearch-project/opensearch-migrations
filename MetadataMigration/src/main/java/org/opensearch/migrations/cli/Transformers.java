@@ -1,9 +1,15 @@
 package org.opensearch.migrations.cli;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.transformers.Transformer;
+import org.opensearch.migrations.commands.JsonOutput;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Singular;
@@ -13,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Getter
 @Builder
-public class Transformers {
+public class Transformers implements JsonOutput {
     @Singular
     private List<TransformerInfo> transformerInfos;
     private Transformer transformer;
@@ -42,6 +48,33 @@ public class Transformers {
                 .append(System.lineSeparator());
         }
         return sb.toString();
+    }
+    
+    @Override
+    public String asJsonOutput() {
+        Map<String, Object> json = new HashMap<>();
+        List<Map<String, Object>> transformersList = new ArrayList<>();
+        
+        if (transformerInfos != null) {
+            for (TransformerInfo info : transformerInfos) {
+                Map<String, Object> transformerMap = new HashMap<>();
+                transformerMap.put("name", info.getName());
+                transformerMap.put("description", info.getDescriptionLines());
+                if (info.getUrl() != null) {
+                    transformerMap.put("url", info.getUrl());
+                }
+                transformersList.add(transformerMap);
+            }
+        }
+        
+        json.put("transformers", transformersList);
+        
+        try {
+            return new ObjectMapper().writeValueAsString(json);
+        } catch (JsonProcessingException e) {
+            log.error("Error converting transformers to JSON", e);
+            return "{ \"error\": \"Failed to convert transformers to JSON\" }";
+        }
     }
 
     @Builder

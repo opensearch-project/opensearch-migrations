@@ -1,5 +1,7 @@
 package org.opensearch.migrations;
 
+import org.opensearch.migrations.cli.OutputFormat;
+
 import com.beust.jcommander.Parameter;
 
 public class MetadataArgs {
@@ -9,4 +11,8 @@ public class MetadataArgs {
     @Parameter(names = { "--otel-collector-endpoint" }, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
             + "forwarded. If no value is provided, metrics will not be forwarded.")
     public String otelCollectorEndpoint;
+    
+    @Parameter(names = { "--output" }, description = "Output format: human-readable (default) or json", 
+            converter = OutputFormat.OutputFormatConverter.class)
+    public OutputFormat outputFormat = OutputFormat.HUMAN_READABLE;
 }

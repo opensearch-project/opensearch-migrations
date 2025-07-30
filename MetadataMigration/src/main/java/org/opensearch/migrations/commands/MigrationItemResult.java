@@ -1,14 +1,20 @@
 package org.opensearch.migrations.commands;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
 import org.opensearch.migrations.cli.Transformers;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.logging.log4j.util.Strings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** All shared cli result information */
 public interface MigrationItemResult extends Result {
@@ -57,5 +63,53 @@ public interface MigrationItemResult extends Result {
             sb.append(Format.indentToLevel(1) + getExitCode() + " issue(s) detected" + System.lineSeparator());
         }
         return sb.toString();
+    }
+    
+    @Override
+    default String asJsonOutput() {
+        Map<String, Object> json = new HashMap<>();
+        
+        if (getClusters() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                json.put("clusters", mapper.readTree(getClusters().asJsonOutput()));
+            } catch (Exception e) {
+                json.put("clusters", "Error parsing clusters JSON");
+            }
+        }
+        
+        if (getItems() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                json.put("items", mapper.readTree(getItems().asJsonOutput()));
+            } catch (Exception e) {
+                json.put("items", "Error parsing items JSON");
+            }
+        }
+        
+        if (getTransformations() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                json.put("transformations", mapper.readTree(getTransformations().asJsonOutput()));
+            } catch (Exception e) {
+                json.put("transformations", "Error parsing transformations JSON");
+            }
+        }
+        
+        List<String> errors = collectErrors();
+        json.put("errors", errors);
+        json.put("errorCount", getExitCode());
+        
+        if (Strings.isNotBlank(getErrorMessage())) {
+            json.put("errorMessage", getErrorMessage());
+        }
+        
+        try {
+            return new ObjectMapper().writeValueAsString(json);
+        } catch (JsonProcessingException e) {
+            Logger logger = LoggerFactory.getLogger(MigrationItemResult.class);
+            logger.error("Error converting result to JSON", e);
+            return "{ \"error\": \"Failed to convert result to JSON\" }";
+        }
     }
 }

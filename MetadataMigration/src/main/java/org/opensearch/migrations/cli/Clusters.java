@@ -1,5 +1,8 @@
 package org.opensearch.migrations.cli;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -7,7 +10,10 @@ import org.opensearch.migrations.cluster.ClusterReader;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterWriter;
 import org.opensearch.migrations.cluster.RemoteCluster;
+import org.opensearch.migrations.commands.JsonOutput;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Getter
 @Builder
-public class Clusters {
+public class Clusters implements JsonOutput {
     private ClusterReader source;
     private ClusterWriter target;
 
@@ -67,5 +73,55 @@ public class Clusters {
         connection.toUserFacingData().forEach((key, value) -> {
             sb.append(Format.indentToLevel(2) + key + ": " + value + System.lineSeparator());
         });
+    }
+    
+    @Override
+    public String asJsonOutput() {
+        Map<String, Object> json = new HashMap<>();
+        
+        if (source != null) {
+            Map<String, Object> sourceMap = new HashMap<>();
+            sourceMap.put("type", source.getFriendlyTypeName());
+            sourceMap.put("version", source.getVersion().toString());
+            
+            if (source instanceof ClusterSnapshotReader) {
+                var reader = (ClusterSnapshotReader) source;
+                var sourceRepo = reader.getSourceRepo();
+                if (sourceRepo instanceof S3Repo) {
+                    var s3Repo = (S3Repo)sourceRepo;
+                    sourceMap.put("s3Repository", s3Repo.getS3RepoUri().uri);
+                }
+                if (sourceRepo instanceof FileSystemRepo) {
+                    sourceMap.put("localRepository", sourceRepo.getRepoRootDir());
+                }
+            }
+            
+            if (source instanceof RemoteCluster) {
+                var remoteCluster = (RemoteCluster) source;
+                sourceMap.putAll(remoteCluster.getConnection().toUserFacingData());
+            }
+            
+            json.put("source", sourceMap);
+        }
+        
+        if (target != null) {
+            Map<String, Object> targetMap = new HashMap<>();
+            targetMap.put("type", target.getFriendlyTypeName());
+            targetMap.put("version", target.getVersion().toString());
+            
+            if (target instanceof RemoteCluster) {
+                var remoteCluster = (RemoteCluster) target;
+                targetMap.putAll(remoteCluster.getConnection().toUserFacingData());
+            }
+            
+            json.put("target", targetMap);
+        }
+        
+        try {
+            return new ObjectMapper().writeValueAsString(json);
+        } catch (JsonProcessingException e) {
+            log.error("Error converting clusters to JSON", e);
+            return "{ \"error\": \"Failed to convert clusters to JSON\" }";
+        }
     }
 }

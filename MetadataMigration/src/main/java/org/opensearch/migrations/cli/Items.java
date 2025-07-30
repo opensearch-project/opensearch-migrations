@@ -2,23 +2,30 @@ package org.opensearch.migrations.cli;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.commands.JsonOutput;
 import org.opensearch.migrations.metadata.CreationResult;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Either items that are candidates for migration or have been migrated;
  */
 @Builder
 @Data
-public class Items {
+@Slf4j
+public class Items implements JsonOutput {
     static final String NONE_FOUND_MARKER = "<NONE FOUND>";
     private final boolean dryRun;
     @NonNull
@@ -129,5 +136,59 @@ public class Items {
         }
 
         return sb.toString();
+    }
+    
+    @Override
+    public String asJsonOutput() {
+        Map<String, Object> json = new HashMap<>();
+        json.put("dryRun", dryRun);
+        
+        // Process successful and failed items
+        json.put("indexTemplates", processItems(indexTemplates));
+        json.put("componentTemplates", processItems(componentTemplates));
+        json.put("indexes", processItems(indexes));
+        json.put("aliases", processItems(aliases));
+        
+        if (failureMessage != null) {
+            json.put("failureMessage", failureMessage);
+        }
+        
+        json.put("errors", getAllErrors());
+        
+        try {
+            return new ObjectMapper().writeValueAsString(json);
+        } catch (JsonProcessingException e) {
+            log.error("Error converting items to JSON", e);
+            return "{ \"error\": \"Failed to convert items to JSON\" }";
+        }
+    }
+    
+    private List<Map<String, Object>> processItems(List<CreationResult> items) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        
+        for (CreationResult item : items) {
+            Map<String, Object> itemMap = new HashMap<>();
+            itemMap.put("name", item.getName());
+            itemMap.put("successful", item.wasSuccessful());
+            
+            if (!item.wasSuccessful() && item.getFailureType() != null) {
+                Map<String, Object> failure = new HashMap<>();
+                failure.put("type", item.getFailureType().name());
+                failure.put("message", item.getFailureType().getMessage());
+                failure.put("fatal", item.getFailureType().isFatal());
+                
+                if (item.getFailureType().isFatal() && item.getException() != null) {
+                    failure.put("exception", item.getException().getMessage() != null 
+                        ? item.getException().getMessage() 
+                        : item.getException().toString());
+                }
+                
+                itemMap.put("failure", failure);
+            }
+            
+            result.add(itemMap);
+        }
+        
+        return result;
     }
 }

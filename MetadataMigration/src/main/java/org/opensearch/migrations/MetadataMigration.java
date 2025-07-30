@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -82,7 +83,12 @@ public class MetadataMigration {
                 result = meta.evaluate(evaluateArgs).execute(context);
                 break;
         }
-        log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
+        // Choose the output format based on the command-line argument
+        if (metadataArgs.outputFormat == OutputFormat.JSON) {
+            log.atInfo().setMessage("{}").addArgument(result::asJsonOutput).log();
+        } else {
+            log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
+        }
 
         reportLogPath();
         reportTransformationPath();
@@ -147,7 +153,7 @@ public class MetadataMigration {
         try {
             var loggingContext = (LoggerContext) LogManager.getContext(false);
             var loggingConfig = loggingContext.getConfiguration();
-            var metadataLogAppender = (FileAppender) loggingConfig.getAppender(MetadataTransformationRegistry.TRANSFORM_LOGGER_NAME);
+            var metadataLogAppender = (FileAppender) loggingConfig.getAppender("TransformerRun");
             if (metadataLogAppender != null) {
                 var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
                 log.atInfo()
