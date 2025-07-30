@@ -2,6 +2,8 @@ opensearch:
   extraEnvs:
     - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
       value: myStrongPassword123!
+    - name: OPENSEARCH_JAVA_OPTS
+      value: "-Xms512m -Xmx512m"
   singleNode: true
   persistence:
     enabled: false

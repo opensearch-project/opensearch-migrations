@@ -3,7 +3,7 @@ elasticsearch:
   imageTag: "2.4.5"
   image: "elasticsearch"
   antiAffinity: "soft"
-  esJavaOpts: "-Xmx128m -Xms128m"
+  esJavaOpts: "-Xms512m -Xmx512m"
   protocol: http
   replicas: 1 # Set replicas to the number of nodes you want in the cluster (e.g., 3)
   createCert: false

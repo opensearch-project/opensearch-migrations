@@ -127,7 +127,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "path.repo", CLUSTER_SNAPSHOT_DIR,
             "index.store.type", "mmapfs",
             "bootstrap.system_call_filter", "false",
-            "ES_JAVA_OPTS", "-Xms2g -Xmx2g"
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
+            "OPENSEARCH_JAVA_OPTS", "-Xms2g -Xmx2g"
         )),
         ELASTICSEARCH(
             overrideAndRemoveEnv(
