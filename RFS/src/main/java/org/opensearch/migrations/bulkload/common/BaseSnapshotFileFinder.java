@@ -42,25 +42,36 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
      */
     @Override
     public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
-        log.atInfo().setMessage("BaseSnapshotFileFinder: Inspecting files to match index pattern {}: {}")
-            .addArgument(getSnapshotRepoDataIndexPattern())
+        Pattern indexPattern = getSnapshotRepoDataIndexPattern();
+        log.atInfo().setMessage("BaseSnapshotFileFinder: Look for files to match index pattern {}: {}")
+            .addArgument(indexPattern)
             .addArgument(fileNames)
             .log();
 
-        return fileNames.stream()
-            .filter(name -> getSnapshotRepoDataIndexPattern().matcher(name).matches())
+        List<String> matchingFiles = fileNames.stream()
+            .filter(name -> indexPattern.matcher(name).matches())
+            .toList();
+        if (!matchingFiles.isEmpty()) {
+            log.atInfo().setMessage("BaseSnapshotFileFinder: Matching index files: {}")
+                .addArgument(matchingFiles)
+                .log();
+        }
+
+        return matchingFiles.stream()
             .max(Comparator.comparingInt(this::extractIndexVersion))
-            .map(entry -> {
+            .map(name -> {
                 log.atInfo().setMessage("BaseSnapshotFileFinder: Selected snapshot repo index file = {}")
-                    .addArgument(entry)
+                    .addArgument(name)
                     .log();
-                return root.resolve(entry);
+                return root.resolve(name);
             })
             .orElseThrow(() -> {
-                log.atWarn().setMessage("BaseSnapshotFileFinder: Could not find a matching index file. Checked: {}")
+                log.atError().setMessage("BaseSnapshotFileFinder: No matching index-N file found. Pattern: {}, All files: {}, Matching candidates: {}")
+                    .addArgument(indexPattern)
                     .addArgument(fileNames)
+                    .addArgument(matchingFiles)
                     .log();
-                return new CannotFindRepoIndexFile();
+                return new CannotFindRepoIndexFile("No matching index-N file found in repo. Matching candidates: " + matchingFiles);
             });
     }
 
@@ -148,6 +159,9 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
     public static class CannotFindRepoIndexFile extends RfsException {
         public CannotFindRepoIndexFile() {
             super("Can't find the repo index file in the repo directory");
+        }
+        public CannotFindRepoIndexFile(String message) {
+            super(message);
         }
     }
 }
