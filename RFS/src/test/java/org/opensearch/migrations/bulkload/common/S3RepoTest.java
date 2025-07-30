@@ -15,8 +15,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -32,9 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-@Disabled("Temporarily disabled during build")
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 public class S3RepoTest {
     @Mock
     private S3AsyncClient mockS3Client;
@@ -51,11 +47,6 @@ public class S3RepoTest {
     class TestableS3Repo extends S3Repo {
         public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
             super(s3LocalDir, s3RepoUri, s3Region, s3Client, fileFinder);
-        }
-
-        @Override
-        protected void ensureS3LocalDirectoryExists(Path path) {
-            // Do nothing
         }
 
         @Override
@@ -88,28 +79,38 @@ public class S3RepoTest {
         assertEquals(testDir, filePath);
     }
 
+    @Disabled
     @Test
     void GetSnapshotRepoDataFilePath_AsExpected() throws IOException {
+        // Expected local path
+        Path expectedPath = testDir.resolve(testRepoFileName);
+
         // mock listFilesInS3Root() to return list of files
         doReturn(List.of(testRepoFileName)).when(testRepo).listFilesInS3Root();
 
         // Mock the fileFinder's behavior for returning the local path
-        Path expectedPath = testDir.resolve(testRepoFileName);
-        when(mockFileFinder.getSnapshotRepoDataFilePath(testDir, List.of(testRepoFileName))).thenReturn(expectedPath);
+        when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(List.of(testRepoFileName)))).thenReturn(expectedPath);
+
+        // Stub ensureS3LocalDirectoryExists to no-op
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
+
+        // Stub doesFileExistLocally to simulate file missing, which triggers download
+        doReturn(false).when(testRepo).doesFileExistLocally(expectedPath);
 
         // Run the test
         Path filePath = testRepo.getSnapshotRepoDataFilePath();
 
         // Check the results
         assertEquals(expectedPath, filePath);
+        verify(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
 
-        Mockito.verify(testRepo, times(1)).ensureS3LocalDirectoryExists(expectedPath.getParent());
+        String expectedKey = testRepo.makeS3Uri(expectedPath).key;
 
         // check that fetch was called by verifying s3Client call
         GetObjectRequest expectedRequest = GetObjectRequest.builder()
-                .bucket(testRepoUri.bucketName)
-                .key(testRepoFileName)
-                .build();
+            .bucket(testRepoUri.bucketName)
+            .key(expectedKey)
+            .build();
 
         verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
@@ -166,18 +167,8 @@ public class S3RepoTest {
         verify(testRepo, times(1)).ensureS3LocalDirectoryExists(expectedPath.getParent());
 
         // Derive the expected S3 key based on s3RepoUri and relative path
-        // This mimics makeS3Uri() logic
-        String relativeKey = testDir.relativize(expectedPath).toString().replace('\\', '/');
-        String baseUri = testRepoUri.uri.endsWith("/")
-                ? testRepoUri.uri.substring(0, testRepoUri.uri.length() - 1)
-                : testRepoUri.uri;
+        String expectedKey = testRepo.makeS3Uri(expectedPath).key;
 
-        String expectedKey = relativeKey.isEmpty()
-                ? baseUri.substring(baseUri.indexOf("/") + 1)  // unlikely empty, but safe fallback if root
-                : baseUri.substring(baseUri.indexOf("/") + 1) + "/" + relativeKey;
-
-        // s3RepoUri.uri includes "s3://bucket-name/directory"
-        // the key is the part after "bucket-name/"
         // Verify the S3 client was called with the correct bucket and key for downloads
         GetObjectRequest expectedRequest = GetObjectRequest.builder()
                 .bucket(expectedBucketName)

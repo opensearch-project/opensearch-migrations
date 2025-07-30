@@ -192,7 +192,7 @@ public class S3Repo implements SourceRepo {
         return path;
     }
 
-    private S3Uri makeS3Uri(Path filePath) {
+    protected S3Uri makeS3Uri(Path filePath) {
         if (!filePath.startsWith(s3LocalDir)) {
             throw new IllegalArgumentException("File path must be under s3LocalDir: " + filePath);
         }
