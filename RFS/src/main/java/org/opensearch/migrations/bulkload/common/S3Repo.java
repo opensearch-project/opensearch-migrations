@@ -194,7 +194,13 @@ public class S3Repo implements SourceRepo {
             throw new IllegalArgumentException("File path must be under s3LocalDir: " + filePath);
         }
         Path relativePath = s3LocalDir.relativize(filePath);
-        return new S3Uri(s3RepoUri.uri + "/" + relativePath.toString().replace('\\', '/'));
+        String baseUri = s3RepoUri.uri.endsWith("/") ?
+                s3RepoUri.uri.substring(0, s3RepoUri.uri.length() - 1) :
+                s3RepoUri.uri;
+        String fullUri = relativePath.toString().isEmpty()
+                ? baseUri
+                : baseUri + "/" + relativePath.toString().replace('\\', '/');
+        return new S3Uri(fullUri);
     }
 
     private List<String> listFilesInS3Root() {
