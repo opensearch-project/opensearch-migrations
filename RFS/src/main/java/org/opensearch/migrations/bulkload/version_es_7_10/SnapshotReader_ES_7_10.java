@@ -50,7 +50,7 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
 
     @Override
     public SnapshotFileFinder getSnapshotFileFinder() {
-        return new SnapshotFileFinder_ES_7_10(); // or the appropriate version
+        return new SnapshotFileFinder_ES_7_10();
     }
 
     @Override

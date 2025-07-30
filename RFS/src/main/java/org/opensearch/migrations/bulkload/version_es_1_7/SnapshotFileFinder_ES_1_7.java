@@ -24,6 +24,7 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
         throw new CannotFindRepoIndexFile();
     }
 
+    /** ES 1.x never has “index-N” */
     @Override
     protected int extractIndexVersion(String fileName) {
         throw new UnsupportedOperationException("ES 1.x does not use index-N files.");
@@ -48,20 +49,8 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
     }
 
     @Override
-    public Path getShardDirPath(Path root, String indexName, int shardId) {
-        // /repo/indices/<indexName>/<shardId>/
-        return root.resolve("indices").resolve(indexName).resolve(Integer.toString(shardId));
-    }
-
-    @Override
     public Path getShardMetadataFilePath(Path root, String snapshotId, String indexName, int shardId) {
         // /repo/indices/<indexName>/<shardId>/snapshot-<snapshotId>
         return getShardDirPath(root, indexName, shardId).resolve("snapshot-" + snapshotId);
-    }
-
-    @Override
-    public Path getBlobFilePath(Path root, String indexName, int shardId, String blobName) {
-        // /repo/indices/<indexName>/<shardId>/__X
-        return getShardDirPath(root, indexName, shardId).resolve(blobName);
     }
 }

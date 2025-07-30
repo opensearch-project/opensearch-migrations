@@ -25,29 +25,12 @@ public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
         if (fileNames.contains("index")) {
             return root.resolve("index");
         }
-        throw new CannotFindRepoIndexFile();
+        throw new CannotFindRepoIndexFile("ES 2.x repo is expected to contain a single 'index' file but none was found");
     }
 
-    /**
-     * In ES 2.x, index directories are named by index name (not UUID).
-     */
+    /** ES 2.x never has “index-N” */
     @Override
-    public Path getIndexMetadataFilePath(Path root, String indexName, String indexFileId) {
-        return root.resolve("indices").resolve(indexName).resolve("meta-" + indexFileId + ".dat");
-    }
-
-    @Override
-    public Path getShardDirPath(Path root, String indexName, int shardId) {
-        return root.resolve("indices").resolve(indexName).resolve(Integer.toString(shardId));
-    }
-
-    @Override
-    public Path getShardMetadataFilePath(Path root, String snapshotId, String indexName, int shardId) {
-        return getShardDirPath(root, indexName, shardId).resolve("snap-" + snapshotId + ".dat");
-    }
-
-    @Override
-    public Path getBlobFilePath(Path root, String indexName, int shardId, String blobName) {
-        return getShardDirPath(root, indexName, shardId).resolve(blobName);
+    protected int extractIndexVersion(String fileName) {
+        throw new UnsupportedOperationException("ES 2.x uses a static 'index' file with no version");
     }
 }

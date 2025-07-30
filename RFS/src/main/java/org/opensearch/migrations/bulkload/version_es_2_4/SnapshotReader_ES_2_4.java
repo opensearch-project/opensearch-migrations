@@ -33,7 +33,7 @@ public class SnapshotReader_ES_2_4 implements ClusterSnapshotReader {
 
     @Override
     public SnapshotFileFinder getSnapshotFileFinder() {
-        return new SnapshotFileFinder_ES_2_4(); // or the appropriate version
+        return new SnapshotFileFinder_ES_2_4();
     }
 
     @Override
