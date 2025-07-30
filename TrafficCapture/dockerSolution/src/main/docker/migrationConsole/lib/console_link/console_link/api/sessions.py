@@ -72,7 +72,7 @@ def single_session(session_name: str):
     return find_session(session_name, SessionExistence.MUST_EXIST)
 
 
-@session_router.post("/", response_model=Session, operation_id="sessionCreate")
+@session_router.post("/", response_model=Session, status_code=201, operation_id="sessionCreate")
 def create_session(session: SessionBase):
     if not is_url_safe(session.name):
         raise HTTPException(status_code=400, detail="Session name must be URL-safe (letters, numbers, '_', '-').")
