@@ -57,11 +57,12 @@ fi
 execute_command_and_wait_for_result() {
   local command="$1"
   local instance_id="$2"
-  echo "Executing command: [$command] on node: $instance_id"
+  local timeout="$3"
+  echo "Executing command: [$command] on node: $instance_id with timeout of $timeout seconds"
   command_id=$(aws ssm send-command \
     --instance-ids "$instance_id" \
     --document-name "AWS-RunShellScript" \
-    --parameters commands="$command" \
+    --parameters "{\"commands\":[\"$command\"],\"executionTimeout\":[\"$timeout\"]}" \
     --cloud-watch-output-config "CloudWatchOutputEnabled=true,CloudWatchLogGroupName=$LOG_GROUP_NAME" \
     --output text \
     --query 'Command.CommandId')
@@ -90,18 +91,11 @@ execute_command_and_wait_for_result() {
   aws logs tail "$LOG_GROUP_NAME" --follow --since 15s &
   tail_pid=$!
 
-  # Watch command for terminal state or time exceeds limit
+  # Watch command for terminal state
   command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'Status')
-  max_attempts=200
-  attempt_count=0
   while [ "$command_status" != "Success" ] && [ "$command_status" != "Failed" ] && [ "$command_status" != "TimedOut" ]
   do
-    ((attempt_count++))
-    if [[ $attempt_count -ge $max_attempts ]]; then
-      echo "Error: Command did not complete within the maximum retry limit."
-      exit 1
-    fi
-    sleep 10
+    sleep 5
     command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'Status')
   done
   echo "-----------------------------------------------"
@@ -114,7 +108,7 @@ execute_command_and_wait_for_result() {
   echo "-----------------------------------------------"
 
   if [[ "$command_status" != "Success" ]]; then
-    echo "Error: Command [$command] was not successful, see full logs in CloudWatch log group $LOG_GROUP_NAME"
+    echo "Error: Command [$command] was not successful and ended with status $command_status, see full logs in CloudWatch log group $LOG_GROUP_NAME"
     exit 1
   fi
 }
@@ -168,13 +162,15 @@ instance_id=$(get_instance_id)
 check_ssm_ready "$instance_id"
 init_command="cd /opensearch-migrations && ./initBootstrap.sh"
 verify_command="cdk --version && docker --version && java --version && python3 --version"
+init_command_timeout="2100" # 35 minutes
+verify_command_timeout="300" # 5 minutes
 if [ "$WORKFLOW" = "ALL" ]; then
-  execute_command_and_wait_for_result "$init_command" "$instance_id"
-  execute_command_and_wait_for_result "$verify_command" "$instance_id"
+  execute_command_and_wait_for_result "$init_command" "$instance_id" "$init_command_timeout"
+  execute_command_and_wait_for_result "$verify_command" "$instance_id" "$verify_command_timeout"
 elif [ "$WORKFLOW" = "INIT_BOOTSTRAP" ]; then
-  execute_command_and_wait_for_result "$init_command" "$instance_id"
+  execute_command_and_wait_for_result "$init_command" "$instance_id" "$init_command_timeout"
 elif [ "$WORKFLOW" = "VERIFY_INIT_BOOTSTRAP" ]; then
-  execute_command_and_wait_for_result "$verify_command" "$instance_id"
+  execute_command_and_wait_for_result "$verify_command" "$instance_id" "$verify_command_timeout"
 else
   echo "Error: Unknown workflow: ${WORKFLOW} specified"
 fi
