@@ -58,12 +58,12 @@ def call(Map config = [:]) {
 
             stage('Init Bootstrap') {
                 steps {
-                    timeout(time: 30, unit: 'MINUTES') {
+                    timeout(time: 1, unit: 'HOURS') {
                         dir('test') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --workflow INIT_BOOTSTRAP"
+                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --log-group-name solutions-deployment-jenkins-pipeline-${stage} --workflow INIT_BOOTSTRAP"
                                     }
                                 }
                             }
@@ -74,12 +74,12 @@ def call(Map config = [:]) {
 
             stage('Verify Bootstrap Instance') {
                 steps {
-                    timeout(time: 5, unit: 'MINUTES') {
+                    timeout(time: 30, unit: 'MINUTES') {
                         dir('test') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --workflow VERIFY_INIT_BOOTSTRAP"
+                                        sh "./awsRunInitBootstrap.sh --stage ${stage} --log-group-name solutions-deployment-jenkins-pipeline-${stage} --workflow VERIFY_INIT_BOOTSTRAP"
                                     }
                                 }
                             }

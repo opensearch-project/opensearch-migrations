@@ -183,6 +183,18 @@ def test_cli_cluster_connection_check(runner, mocker):
     api_mock.assert_called()
 
 
+def test_cli_version_check(runner, mocker):
+    result = runner.invoke(cli, ["--version"], catch_exceptions=True)
+    assert result.exit_code == 0
+    assert "Migration Assistant" in result.output
+
+
+def test_missing_command(runner, mocker):
+    result = runner.invoke(cli, [], catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "Error: Missing command" in result.output
+
+
 def test_cli_cluster_cat_indices_and_connection_check_with_one_cluster(runner, mocker,
                                                                        target_cluster_only_yaml_path,
                                                                        source_cluster_only_yaml_path):
