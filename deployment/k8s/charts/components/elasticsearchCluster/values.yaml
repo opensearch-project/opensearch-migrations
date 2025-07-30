@@ -3,7 +3,7 @@ elasticsearch:
   image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
   roles: [ master, data, ingest ]
   antiAffinity: "soft"
-  esJavaOpts: "-Xmx128m -Xms128m"
+  esJavaOpts: "-Xms512m -Xmx512m"
   protocol: http
   # for simplest dev testing
   replicas: 2 # k8s replica count, not ES shard replicas

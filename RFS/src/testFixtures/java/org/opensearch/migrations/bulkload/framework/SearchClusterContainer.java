@@ -125,10 +125,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
             "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "index.store.type", "mmapfs",
-            "bootstrap.system_call_filter", "false",
-            "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
-            "OPENSEARCH_JAVA_OPTS", "-Xms2g -Xmx2g"
+            "bootstrap.memory_lock", "true",
+            "bootstrap.system_call_filter", "false", // Don't use Secure Computing Mode
+            "JDK_JAVA_OPTIONS", "-Xms2g -Xmx2g"
         )),
         ELASTICSEARCH(
             overrideAndRemoveEnv(
@@ -147,15 +146,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         ELASTICSEARCH_5(
                 overrideAndRemoveEnv(
                         BASE.getEnvVariables(),
-                        Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
-                        Set.of("discovery.type","ES_JAVA_OPTS")
+                        Map.of(),
+                        Set.of("discovery.type")
                 )),
-        ELASTICSEARCH_6(
-            overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
-                Map.of("ES_JAVA_OPTS", "-Xms2g -Xmx2g -Des.bootstrap.system_call_filter=false"),
-                Set.of("bootstrap.system_call_filter", "ES_JAVA_OPTS") // don't set it for older ES 6x
-            )),
+        ELASTICSEARCH_6(BASE.getEnvVariables()),
         ELASTICSEARCH_8(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
@@ -172,7 +166,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                     Map.entry("cluster.routing.allocation.disk.watermark.high", "98%"),
                     Map.entry("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
                 ),
-                Set.of("bootstrap.system_call_filter")  // don't set it for ES 8x
+                Set.of("bootstrap.system_call_filter")  // deprecated in ES 8
             )),
         OPENSEARCH(
             overrideAndRemoveEnv(
@@ -189,9 +183,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 Map.of(
                     "plugins.security.disabled", "true",
                     "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
-                    "search.insights.top_queries.exporter.type", "debug"
+                    "search.insights.top_queries.exporter.type", "debug",
+                    "JDK_JAVA_OPTIONS", BASE.getEnvVariables().get("JDK_JAVA_OPTIONS")
+                        .concat(" --enable-native-access=ALL-UNNAMED")
                 ),
-                Set.of()  // No keys to remove from BASE
+                Set.of("JDK_JAVA_OPTIONS")
             ));
 
         @Getter
