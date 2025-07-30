@@ -180,7 +180,13 @@ public class OpenSearchClientFactory {
                 resp,
                 "http_compression",
                 "enabled",
-                "Unable to determine if compression is supported");
+                "Unable to determine if compression is supported")
+            .or(checkBooleanSettingFromResponse(
+                    resp,
+                    "http",
+                    "compression",
+                    "Unable to determine if compression is supported")
+            );
     }
 
     private Mono<Boolean> checkBooleanSettingFromResponse(
@@ -196,7 +202,8 @@ public class OpenSearchClientFactory {
             var body = Optional.of(objectMapper.readTree(resp.body));
             var persistentEnabled = isSettingEnabled(body.map(n -> n.get("persistent")), primaryKey, secondaryKey);
             var transientEnabled = isSettingEnabled(body.map(n -> n.get("transient")), primaryKey, secondaryKey);
-            return Mono.just(persistentEnabled || transientEnabled);
+            var defaultsEnabled = isSettingEnabled(body.map(n -> n.get("defaults")), primaryKey, secondaryKey);
+            return Mono.just(persistentEnabled || transientEnabled || defaultsEnabled);
         } catch (Exception e) {
             log.error(errorLogMessage, e);
             return Mono.error(new OpenSearchClient.OperationFailed(errorLogMessage + " from response: " + e.getMessage(), resp));
@@ -205,12 +212,20 @@ public class OpenSearchClientFactory {
 
     private boolean isSettingEnabled(Optional<JsonNode> node, String primaryKey, String secondaryKey) {
         return node.filter(n -> !n.isNull())
-                .map(n -> n.get(primaryKey))
-                .filter(n -> !n.isNull())
-                .map(n -> n.get(secondaryKey))
-                .filter(n -> !n.isNull())
-                .map(JsonNode::asBoolean)
-                .orElse(false);
+            .map(n -> n.get(primaryKey))
+            .filter(n -> !n.isNull())
+            .map(n -> n.get(secondaryKey))
+            .filter(n -> !n.isNull())
+            .map(n -> {
+                if (n.isBoolean()) {
+                    return n.asBoolean();
+                } else if (n.isTextual()) {
+                    return Boolean.parseBoolean(n.asText());
+                } else {
+                    return false;
+                }
+            })
+            .orElse(false);
     }
 
     private Mono<Version> getVersionFromNodes(HttpResponse resp) {
