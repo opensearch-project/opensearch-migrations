@@ -1,16 +1,5 @@
-import {
-    defineParam,
-    InputParamDef,
-    InputParametersRecord,
-} from "@/schemas/parameterSchemas";
-
-export type Scope = Record<string, any>;
-export type ExtendScope<S extends Scope, ADDITIONS extends Scope> = S & ADDITIONS;
-export type ScopeFn<S extends Scope, ADDITIONS extends Scope> = (scope: Readonly<S>) => ADDITIONS;
-type TemplateSigEntry<T extends { inputs: any }> = {
-    input: T["inputs"];
-    output?: T extends { outputs: infer O } ? O : never;
-};
+import {defineParam, InputParamDef, InputParametersRecord,} from "@/schemas/parameterSchemas";
+import {Scope, ScopeFn, ExtendScope, TemplateSigEntry, DuplicateTemplateError, DuplicateParamError} from "@/schemas/workflowTypes";
 
 class ScopeBuilder<SigScope extends Scope = Scope> {
     constructor(protected readonly sigScope: SigScope) {}
@@ -76,7 +65,7 @@ export class WFBuilder<
         TB extends TemplateBuilder<any, any>,
         FullTemplate extends ReturnType<TB["getFullTemplateScope"]>
     >(
-        name: Name,
+        name: Name extends keyof TemplateSigScope ? never : Name,
         fn: (tb: TemplateBuilder<{
             workflowParameters: WorkflowInputsScope;
             templates: TemplateSigScope;
@@ -102,15 +91,13 @@ export class WFBuilder<
             }
         } as { [K in Name]: TemplateSigEntry<FullTemplate> };
 
-        const newFull = {
-            [name]: fullTemplate
-        } as { [K in Name]: FullTemplate };
+        const newFull = {[name]: fullTemplate} as { [K in Name]: FullTemplate };
 
         return new WFBuilder(
             this.metadataScope,
             this.inputsScope,
-            { ...this.templateSigScope, ...newSig },
-            { ...this.templateFullScope, ...newFull }
+            {...this.templateSigScope, ...newSig},
+            {...this.templateFullScope, ...newFull}
         );
     }
 
@@ -143,7 +130,7 @@ export class TemplateBuilder<
 
     private extendWithParam<
         T,
-        Name extends string & keyof any,
+        Name extends string,
         R extends boolean
     >(
         name: Name,
@@ -152,18 +139,15 @@ export class TemplateBuilder<
         ContextualScope,
         ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, R> }>
     > {
-        const newScope = this.scopeBuilder.extendScope(() =>
-                ({ [name]: param }) as { [K in Name]: InputParamDef<T, R> }
+        const newScope = this.scopeBuilder.extendScope(s =>
+            ({ [name]: param })// as { [K in Name]: InputParamDef<T, R> }
         );
 
         return new TemplateBuilder(this.contextualScope, newScope);
     }
 
-    addOptional<
-        T,
-        Name extends string & keyof any = string
-    >(
-        name: Name,
+    addOptional<T, Name extends string>(
+        name: Name extends keyof InputParamsScope ? never : Name,
         defaultValueFromScopeFn: (s: { context: ContextualScope; currentScope: InputParamsScope }) => T,
         description?: string
     ): TemplateBuilder<
@@ -184,7 +168,7 @@ export class TemplateBuilder<
     addRequired<
         Name extends string & keyof any
     >(
-        name: Name,
+        name: Name extends keyof InputParamsScope ? never : Name,
         type: any,
         description?: string
     ): TemplateBuilder<

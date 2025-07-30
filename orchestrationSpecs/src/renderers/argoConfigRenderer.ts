@@ -38,7 +38,7 @@ export function renderWorkflowTemplate(wf: Record<string, any>) {
             serviceAccountName: wf.serviceAccountName,
             entrypoint: "main",
             parallelism: 100,
-            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParams) }),
+            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
             templates: (() => {
                 const list = [];
                 for (const k in wf.templates) {

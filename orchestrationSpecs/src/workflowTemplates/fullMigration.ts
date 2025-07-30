@@ -12,21 +12,20 @@ const test = new TemplateBuilder({a: true}, {b: 2})
     .getFullTemplateScope();
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
-        .addParams(CommonWorkflowParameters)
+    .addParams(CommonWorkflowParameters)
         // .addParams({foo: defineParam({ defaultValue: "foo" }),})
     .addTemplate("init", t=> t
         // .addOptional("prefix", (s=> ""+s.context.workflowParameters.etcdUser.defaultValue), "no desc" )
         .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
-        .addRequired("next", z.string())
-        .addOptional("bad", (s=> ""+s.currentScope.next), "no desc" )
+        // .addRequired("bad", z.string())
         // .addSteps("init", sb => sb
             //     //.getSigScope().inputs.main
             //     .addStep(/**/))
     )
-    .addTemplate("cleanup", t => t
-        // .addOptional("t", c => c.context.templates.init.)
-        .addOptional("t2", c => c.context.workflowParameters.etcdUser)
-    )
+    // .addTemplate("init", t => t
+    //     .addOptional("t", c => c.context.templates.init.input.next)
+    //     // .addOptional("t2", c => c.context.workflowParameters.etcdUser)
+    // )
     .getFullScope();
 // .
 // .add(s=> ({}))
