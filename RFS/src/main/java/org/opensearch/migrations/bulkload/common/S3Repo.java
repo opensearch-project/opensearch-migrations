@@ -206,6 +206,14 @@ public class S3Repo implements SourceRepo {
 
         ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
 
+        List<String> rawKeys = listResponse.contents().stream()
+                .map(S3Object::key)
+                .toList();
+
+        System.out.println("======= S3Repo: Raw S3 keys from prefix: " + s3RepoUri + " =======");
+        rawKeys.forEach(System.out::println);
+        System.out.println("======= END RAW S3 KEYS =======");
+
         List<String> allKeys = listResponse.contents().stream()
             .map(S3Object::key)
             .toList();
