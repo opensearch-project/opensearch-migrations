@@ -5,7 +5,6 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -103,7 +102,11 @@ public class S3Repo implements SourceRepo {
     @Override
     public Path getSnapshotRepoDataFilePath() {
         List<String> filesInRoot = listFilesInS3Root(); // no dirs, only files
-        return fileFinder.getSnapshotRepoDataFilePath(s3LocalDir, filesInRoot);
+        try {
+            return fileFinder.getSnapshotRepoDataFilePath(s3LocalDir, filesInRoot);
+        } catch (BaseSnapshotFileFinder.CannotFindRepoIndexFile e) {
+            throw new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, s3RepoUri.key);
+        }
     }
 
     @Override
@@ -203,7 +206,7 @@ public class S3Repo implements SourceRepo {
         return new S3Uri(fullUri);
     }
 
-    private List<String> listFilesInS3Root() {
+    protected List<String> listFilesInS3Root() {
         String debugprefixKey = s3RepoUri.key;
         if (debugprefixKey.endsWith("/")) {
             debugprefixKey = debugprefixKey.substring(0, debugprefixKey.length() - 1);
