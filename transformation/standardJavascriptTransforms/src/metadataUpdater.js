@@ -54,4 +54,10 @@ function main(context) {
   };
 }
 
-module.exports = { main };
+// Visibility for testing
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = main;
+}
+
+// Entrypoint function
+(() => main)();
