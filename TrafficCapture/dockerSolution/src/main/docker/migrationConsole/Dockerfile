@@ -77,6 +77,8 @@ RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 COPY start-console.sh /root/
 RUN chmod +x /root/start-console.sh
 
+COPY VERSION /root/VERSION
+
 WORKDIR /root
 COPY lib /root/lib
 WORKDIR /root/lib/console_link

@@ -4,6 +4,8 @@ import type { Options as ClientOptions, TDataShape, Client } from "./client";
 import type {
   SystemHealthData,
   SystemHealthResponses,
+  VersionSystemVersionGetData,
+  VersionSystemVersionGetResponses,
   SessionsListData,
   SessionsListResponses,
   SessionCreateData,
@@ -50,6 +52,22 @@ export const systemHealth = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/system/health",
+    ...options,
+  });
+};
+
+/**
+ * Version
+ */
+export const versionSystemVersionGet = <ThrowOnError extends boolean = false>(
+  options?: Options<VersionSystemVersionGetData, ThrowOnError>,
+) => {
+  return (options?.client ?? _heyApiClient).get<
+    VersionSystemVersionGetResponses,
+    unknown,
+    ThrowOnError
+  >({
+    url: "/system/version",
     ...options,
   });
 };

@@ -1,7 +1,7 @@
-const sanitizer = require('../src/typeMappingsSanitizer.js');
+const main = require("../src/typeMappingsSanitizer");
 
 describe('TypeMappingsSanitizer', () => {
     test('null context throws', () => {
-        expect(() => sanitizer.main(null)).toThrow();
+        expect(() => main(null)).toThrow();
     });
 });

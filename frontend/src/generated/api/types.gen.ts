@@ -74,6 +74,16 @@ export type ValidationError = {
   type: string;
 };
 
+/**
+ * VersionApiResponse
+ */
+export type VersionApiResponse = {
+  /**
+   * Version
+   */
+  version: string;
+};
+
 export type SystemHealthData = {
   body?: never;
   path?: never;
@@ -90,6 +100,23 @@ export type SystemHealthResponses = {
 
 export type SystemHealthResponse =
   SystemHealthResponses[keyof SystemHealthResponses];
+
+export type VersionSystemVersionGetData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/system/version";
+};
+
+export type VersionSystemVersionGetResponses = {
+  /**
+   * Successful Response
+   */
+  200: VersionApiResponse;
+};
+
+export type VersionSystemVersionGetResponse =
+  VersionSystemVersionGetResponses[keyof VersionSystemVersionGetResponses];
 
 export type SessionsListData = {
   body?: never;
