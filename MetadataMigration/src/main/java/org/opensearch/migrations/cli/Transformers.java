@@ -48,6 +48,7 @@ public class Transformers implements JsonOutput {
     }
     
     @Override
+    @SuppressWarnings("java:S1874") // False positive on overload of ObjectNode.put(...)
     public JsonNode asJsonOutput() {
         var root = JsonNodeFactory.instance.objectNode();
         var transformersArray = root.putArray("transformers");

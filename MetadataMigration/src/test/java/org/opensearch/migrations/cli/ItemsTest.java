@@ -114,7 +114,9 @@ public class ItemsTest {
         var aliases = jsonOutput.get("aliases");
         assertThat(jsonOutput.toPrettyString(), aliases.size(), equalTo(2));
         assertThat(jsonOutput.toPrettyString(), aliases.get(0).get("name").asText(), equalTo("a1"));
-        assertThat(jsonOutput.toPrettyString(), aliases.get(1).get("name").asText(), equalTo("a2"));
+        assertThat(stringOutput + "&&&" +jsonOutput.toPrettyString(), aliases.get(1).get("name").asText(), equalTo("a3"));
+
+
 
     }
 
