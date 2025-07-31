@@ -61,7 +61,13 @@ public class DocumentReindexer {
             60 // shutdown threads after N seconds of inactivity
             );
         var rfsDocs = documentStream
-            .publishOn(transformationScheduler, 1)
+            .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
+            .flatMapSequential(docList ->
+                Mono.fromSupplier(() ->
+                    transformDocumentBatch(threadSafeTransformer, docList, indexName)
+                ).subscribeOn(transformationScheduler)
+            , transformationParallelizationFactor, 1)
+            .concatMapIterable(docList -> docList) // flatten
             .doFinally(signalType -> {
                 log.atInfo().setMessage("Scheduling scheduler dispose for {}. isDisposed: {}. ")
                     .addArgument(transformationScheduler)
@@ -76,17 +82,15 @@ public class DocumentReindexer {
                         }
                     )
                     .doOnSuccess(aVoid -> log.atInfo().setMessage("Finished disposing scheduler for {}")
-                            .addArgument(transformationScheduler)
-                            .log()
+                        .addArgument(transformationScheduler)
+                        .log()
                     )
                     .doOnCancel( () -> log.atWarn().setMessage("Scheduler dispose cancelled for {}")
-                            .addArgument(transformationScheduler)
-                            .log()
+                        .addArgument(transformationScheduler)
+                        .log()
                     )
                     .subscribe();
-            })
-            .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
-            .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
+            });
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context);
     }
 
