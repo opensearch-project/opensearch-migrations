@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,6 +9,10 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     private static final String INDICES_DIR_NAME = "indices";
@@ -36,21 +41,26 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getSnapshotRepoDataFilePath().getParent().resolve(INDICES_DIR_NAME);
-        File[] indexDirs = indicesRoot.toFile().listFiles();
-        if (indexDirs == null) {
+        Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
+        ObjectMapper smileMapper = new ObjectMapper(new SmileFactory());
+
+        JsonNode node;
+        try {
+            // ES 2x snap-<>.dat file is SMILE encoded JSON
+            node = smileMapper.readTree(snapshotMetaFile.toFile());
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not parse SMILE file: " + snapshotMetaFile, e);
+        }
+
+        JsonNode indicesNode = node.get("indices");
+        if (indicesNode == null || !indicesNode.isObject()) {
             return Collections.emptyList();
         }
-        for (File indexDir : indexDirs) {
-            if (!indexDir.isDirectory()) {
-                continue;
-            }
 
-            if (containsMetaFile(indexDir, snapshotName)) {
-                result.add(new SimpleIndex(indexDir.getName(), snapshotName));
-            }
-        }
+        List<SnapshotRepo.Index> result = new ArrayList<>();
+        indicesNode.fieldNames().forEachRemaining(indexName ->
+                result.add(new SimpleIndex(indexName, snapshotName))
+        );
         return result;
     }
 

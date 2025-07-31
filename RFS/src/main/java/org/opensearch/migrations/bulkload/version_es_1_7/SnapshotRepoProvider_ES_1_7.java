@@ -8,8 +8,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
+
 
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     private static final String SNAPSHOT_PREFIX = "snapshot-";
@@ -53,22 +56,24 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        // Very similar logic as SnapshotRepoProvider_ES_2_4 but different file name
+        Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
         List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getSnapshotRepoDataFilePath().getParent().resolve(INDICES_DIR_NAME);
-        File[] indexDirs = indicesRoot.toFile().listFiles();
-        if (indexDirs == null) {
-            return Collections.emptyList();
-        }
-        for (File indexDir : indexDirs) {
-            if (!indexDir.isDirectory()) {
-                continue;
-            }
 
-            if (containsSnapshotFile(indexDir, snapshotName)) {
-                result.add(new SimpleIndex(indexDir.getName(), snapshotName));
+        try {
+            var node = ObjectMapperFactory.createDefaultMapper().readTree(snapshotMetaFile.toFile());
+
+            // ES 1x snap-<>.dat file is plain JSON
+            JsonNode indicesNode = node.get("indices");
+            if (indicesNode == null || !indicesNode.isObject()) {
+                return Collections.emptyList();
             }
+            indicesNode.fieldNames().forEachRemaining(indexName ->
+                    result.add(new SimpleIndex(indexName, snapshotName))
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read snapshot metadata for snapshot=" + snapshotName, e);
         }
+
         return result;
     }
 

@@ -21,7 +21,7 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
         if (fileNames.contains("index")) {
             return root.resolve("index");
         }
-        throw new CannotFindRepoIndexFile();
+        throw new CannotFindRepoIndexFile("ES 1.x repo is expected to contain a single 'index' file but none was found");
     }
 
     /** ES 1.x never has “index-N” */
