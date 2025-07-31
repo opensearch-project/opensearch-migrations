@@ -109,27 +109,33 @@ Output comparison:
 Starting Metadata Evaluation
 Clusters:
    Source:
-   Type: On-disk Snapshot (2.0.0)
-   Local repository: ./src/test/resources
+      Type: MockRemoteReader (OPENSEARCH 54.0.0)
+      Uri: http://remote.source
+      Protocol: HTTP
+      TLS Verification: Disabled
 
    Target:
-   Type: Remote Cluster (2.0.0)
-   Host: http://fake-target:9200
+      Type: MockClusterWriter (OPENSEARCH 2000.0.0)
+      Uri: http://remote.target
+      Protocol: HTTP
+      TLS Verification: Enabled
 
 Migration Candidates:
    Index Templates:
-   - template1
-   - template2
+      - it1
+      - it2
 
    Component Templates:
-   <NONE FOUND>
+      - ct1
+      - ct2
 
    Indexes:
-   - index1
-   - index2
+      - i1
+      - i2
 
    Aliases:
-   <NONE FOUND>
+      - a1
+      - a2
 
 Transformations:
    <None Found>
@@ -145,37 +151,51 @@ See transformations applied for this run at /home/ubuntu/git/opensearch-migratio
 **JSON format**:
 ```json
 {
-  "clusters": {
-    "source": {
-      "type": "On-disk Snapshot",
-      "version": "2.0.0",
-      "localRepository": "./src/test/resources"
+    "clusters": {
+        "source": {
+            "type": "MockRemoteReader",
+            "version": "OPENSEARCH 54.0.0",
+            "uri": "http://remote.source",
+            "protocol": "HTTP",
+            "insecure": true,
+            "compressionSupported": false,
+            "awsSpecificAuthentication": false
+        },
+        "target": {
+            "type": "MockClusterWriter",
+            "version": "OPENSEARCH 2000.0.0",
+            "uri": "http://remote.target",
+            "protocol": "HTTP",
+            "insecure": false,
+            "compressionSupported": false,
+            "awsSpecificAuthentication": false
+        }
     },
-    "target": {
-      "type": "Remote Cluster",
-      "version": "2.0.0",
-      "host": "http://fake-target:9200"
-    }
-  },
-  "items": {
-    "dryRun": true,
-    "indexTemplates": [
-      {"name": "template1", "successful": true},
-      {"name": "template2", "successful": true}
-    ],
-    "componentTemplates": [],
-    "indexes": [
-      {"name": "index1", "successful": true},
-      {"name": "index2", "successful": true}
-    ],
-    "aliases": [],
-    "errors": []
-  },
-  "transformations": {
-    "transformers": []
-  },
-  "errors": [],
-  "errorCount": 0
+    "items": {
+        "dryRun": true,
+        "indexTemplates": [
+           { "name": "it1", "successful": true },
+           { "name": "it2", "successful": true }
+        ],
+        "componentTemplates": [
+           { "name": "ct1", "successful": true },
+           { "name": "ct2", "successful": true }
+        ],
+        "indexes": [
+           { "name": "i1", "successful": true },
+           { "name": "i2", "successful": true }
+        ],
+        "aliases": [
+           { "name": "a1", "successful": true },
+           { "name": "a2", "successful": true }
+        ],
+        "errors": []
+    },
+    "transformations": {
+        "transformers": []
+    },
+    "errors": [],
+    "errorCount": 0
 }
 ```
 
