@@ -9,12 +9,9 @@ import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
 import org.opensearch.migrations.cli.Transformers;
+import org.opensearch.migrations.utils.JsonUtils;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.logging.log4j.util.Strings;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** All shared cli result information */
 public interface MigrationItemResult extends Result {
@@ -71,8 +68,7 @@ public interface MigrationItemResult extends Result {
         
         if (getClusters() != null) {
             try {
-                ObjectMapper mapper = new ObjectMapper();
-                json.put("clusters", mapper.readTree(getClusters().asJsonOutput()));
+                json.put("clusters", JsonUtils.getObjectMapper().readTree(getClusters().asJsonOutput()));
             } catch (Exception e) {
                 json.put("clusters", "Error parsing clusters JSON");
             }
@@ -80,8 +76,7 @@ public interface MigrationItemResult extends Result {
         
         if (getItems() != null) {
             try {
-                ObjectMapper mapper = new ObjectMapper();
-                json.put("items", mapper.readTree(getItems().asJsonOutput()));
+                json.put("items", JsonUtils.getObjectMapper().readTree(getItems().asJsonOutput()));
             } catch (Exception e) {
                 json.put("items", "Error parsing items JSON");
             }
@@ -89,8 +84,7 @@ public interface MigrationItemResult extends Result {
         
         if (getTransformations() != null) {
             try {
-                ObjectMapper mapper = new ObjectMapper();
-                json.put("transformations", mapper.readTree(getTransformations().asJsonOutput()));
+                json.put("transformations", JsonUtils.getObjectMapper().readTree(getTransformations().asJsonOutput()));
             } catch (Exception e) {
                 json.put("transformations", "Error parsing transformations JSON");
             }
@@ -104,12 +98,6 @@ public interface MigrationItemResult extends Result {
             json.put("errorMessage", getErrorMessage());
         }
         
-        try {
-            return new ObjectMapper().writeValueAsString(json);
-        } catch (JsonProcessingException e) {
-            Logger logger = LoggerFactory.getLogger(MigrationItemResult.class);
-            logger.error("Error converting result to JSON", e);
-            return "{ \"error\": \"Failed to convert result to JSON\" }";
-        }
+        return JsonUtils.toJson(json, "MigrationItemResult");
     }
 }

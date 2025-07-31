@@ -11,9 +11,8 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.commands.JsonOutput;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.utils.JsonUtils;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NonNull;
@@ -155,12 +154,7 @@ public class Items implements JsonOutput {
         
         json.put("errors", getAllErrors());
         
-        try {
-            return new ObjectMapper().writeValueAsString(json);
-        } catch (JsonProcessingException e) {
-            log.error("Error converting items to JSON", e);
-            return "{ \"error\": \"Failed to convert items to JSON\" }";
-        }
+        return JsonUtils.toJson(json, "Items");
     }
     
     private List<Map<String, Object>> processItems(List<CreationResult> items) {

@@ -3,21 +3,22 @@ package org.opensearch.migrations.commands;
 import java.util.HashMap;
 import java.util.Map;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.opensearch.migrations.utils.JsonUtils;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @AllArgsConstructor
 @ToString
 public class ConfigureResult implements Result {
     @Getter
+    @JsonProperty
     private final int exitCode;
 
     @Getter
+    @JsonProperty
     private final String errorMessage;
 
     public String asCliOutput() {
@@ -32,12 +33,6 @@ public class ConfigureResult implements Result {
             json.put("errorMessage", errorMessage);
         }
         
-        try {
-            return new ObjectMapper().writeValueAsString(json);
-        } catch (JsonProcessingException e) {
-            Logger logger = LoggerFactory.getLogger(ConfigureResult.class);
-            logger.error("Error converting ConfigureResult to JSON", e);
-            return "{ \"error\": \"Failed to convert result to JSON\" }";
-        }
+        return JsonUtils.toJson(json, "ConfigureResult");
     }
 }

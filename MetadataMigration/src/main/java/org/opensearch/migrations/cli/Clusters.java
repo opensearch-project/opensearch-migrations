@@ -11,9 +11,8 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterWriter;
 import org.opensearch.migrations.cluster.RemoteCluster;
 import org.opensearch.migrations.commands.JsonOutput;
+import org.opensearch.migrations.utils.JsonUtils;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -117,11 +116,6 @@ public class Clusters implements JsonOutput {
             json.put("target", targetMap);
         }
         
-        try {
-            return new ObjectMapper().writeValueAsString(json);
-        } catch (JsonProcessingException e) {
-            log.error("Error converting clusters to JSON", e);
-            return "{ \"error\": \"Failed to convert clusters to JSON\" }";
-        }
+        return JsonUtils.toJson(json, "Clusters");
     }
 }

@@ -7,9 +7,8 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.commands.JsonOutput;
+import org.opensearch.migrations.utils.JsonUtils;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Singular;
@@ -69,12 +68,7 @@ public class Transformers implements JsonOutput {
         
         json.put("transformers", transformersList);
         
-        try {
-            return new ObjectMapper().writeValueAsString(json);
-        } catch (JsonProcessingException e) {
-            log.error("Error converting transformers to JSON", e);
-            return "{ \"error\": \"Failed to convert transformers to JSON\" }";
-        }
+        return JsonUtils.toJson(json, "Transformers");
     }
 
     @Builder
