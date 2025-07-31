@@ -6,19 +6,15 @@ import org.opensearch.migrations.cli.Items.ItemsBuilder;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.opensearch.migrations.matchers.ContainsStringCount.containsStringCount;
 import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
 import static org.opensearch.migrations.metadata.CreationResult.CreationFailureType.TARGET_CLUSTER_FAILURE;
@@ -30,7 +26,6 @@ public class ItemsTest {
      */
 
     @Test
-    @DisplayName("Empty Items - Both Output Formats")
     void testEmpty() throws Exception {
         var items = createEmptyItemsBuilder()
             .build();
@@ -39,7 +34,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output
-        var jsonNode = items.asJsonOutput();
+        var jsonOutput = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
@@ -51,19 +46,18 @@ public class ItemsTest {
         assertThat(stringOutput, hasLineCount(12));
         
         // JSON output assertions
-        assertThat(jsonNode, is(notNullValue()));
-        assertTrue(jsonNode.has("dryRun"), "JSON should contain dryRun field");
-        assertFalse(jsonNode.get("dryRun").asBoolean(), "dryRun should be false by default");
-        assertTrue(jsonNode.has("indexTemplates"), "JSON should contain indexTemplates field");
-        assertTrue(jsonNode.has("componentTemplates"), "JSON should contain componentTemplates field");
-        assertTrue(jsonNode.has("indexes"), "JSON should contain indexes field");
-        assertTrue(jsonNode.has("aliases"), "JSON should contain aliases field");
-        assertTrue(jsonNode.has("errors"), "JSON should contain errors field");
-        assertEquals(0, jsonNode.get("errors").size(), "errors should be empty");
+        assertThat(jsonOutput.toPrettyString(), jsonOutput, is(notNullValue()));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("dryRun"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("dryRun").asBoolean(), is(false));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("indexTemplates"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("componentTemplates"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("indexes"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("aliases"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(0));
     }
 
     @Test
-    @DisplayName("Items with Full Data - Both Output Formats")
     void testFull() throws Exception {
         var items = Items.builder()
             .dryRun(true)
@@ -88,9 +82,6 @@ public class ItemsTest {
         // Test String Output
         var stringOutput = items.asCliOutput();
         
-        // Test JSON Output
-        var jsonNode = items.asJsonOutput();
-        
         // String output assertions
         assertThat(stringOutput, containsString("Migration Candidates:"));
         assertThat(stringOutput, containsString("Index Templates:"));
@@ -105,36 +96,29 @@ public class ItemsTest {
         assertThat(stringOutput, hasLineCount(16));
         
         // JSON output assertions
-        assertTrue(jsonNode.get("dryRun").asBoolean(), "dryRun should be true");
-        
-        // Check indexTemplates
-        JsonNode indexTemplates = jsonNode.get("indexTemplates");
-        assertEquals(2, indexTemplates.size());
-        assertEquals("it1", indexTemplates.get(0).get("name").asText());
-        assertEquals("it2", indexTemplates.get(1).get("name").asText());
-        assertTrue(indexTemplates.get(0).get("successful").asBoolean());
-        
-        // Check componentTemplates
-        JsonNode componentTemplates = jsonNode.get("componentTemplates");
-        assertEquals(2, componentTemplates.size());
-        assertEquals("ct1", componentTemplates.get(0).get("name").asText());
-        assertEquals("ct2", componentTemplates.get(1).get("name").asText());
-        
-        // Check indexes
-        JsonNode indexes = jsonNode.get("indexes");
-        assertEquals(2, indexes.size());
-        assertEquals("i1", indexes.get(0).get("name").asText());
-        assertEquals("i2", indexes.get(1).get("name").asText());
-        
-        // Check aliases
-        JsonNode aliases = jsonNode.get("aliases");
-        assertEquals(2, aliases.size());
-        assertEquals("a1", aliases.get(0).get("name").asText());
-        assertEquals("a2", aliases.get(1).get("name").asText());
+        var jsonOutput = items.asJsonOutput();
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("dryRun").asBoolean(), is(true));
+        var indexTemplates = jsonOutput.get("indexTemplates");
+        assertThat(jsonOutput.toPrettyString(), indexTemplates.size(), equalTo(2));
+        assertThat(jsonOutput.toPrettyString(), indexTemplates.get(0).get("name").asText(), equalTo("it1"));
+        assertThat(jsonOutput.toPrettyString(), indexTemplates.get(1).get("name").asText(), equalTo("it2"));
+        assertThat(jsonOutput.toPrettyString(), indexTemplates.get(0).get("successful").asBoolean(), is(true));
+        var componentTemplates = jsonOutput.get("componentTemplates");
+        assertThat(jsonOutput.toPrettyString(), componentTemplates.size(), equalTo(2));
+        assertThat(jsonOutput.toPrettyString(), componentTemplates.get(0).get("name").asText(), equalTo("ct1"));
+        assertThat(jsonOutput.toPrettyString(), componentTemplates.get(1).get("name").asText(), equalTo("ct2"));
+        var indexes = jsonOutput.get("indexes");
+        assertThat(jsonOutput.toPrettyString(), indexes.size(), equalTo(2));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("name").asText(), equalTo("i1"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(1).get("name").asText(), equalTo("i2"));
+        var aliases = jsonOutput.get("aliases");
+        assertThat(jsonOutput.toPrettyString(), aliases.size(), equalTo(2));
+        assertThat(jsonOutput.toPrettyString(), aliases.get(0).get("name").asText(), equalTo("a1"));
+        assertThat(jsonOutput.toPrettyString(), aliases.get(1).get("name").asText(), equalTo("a2"));
+
     }
 
     @Test
-    @DisplayName("Items with Index Template Failures - Both Output Formats")
     void testIndexTemplatesFailures() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexTemplates(List.of(
@@ -146,10 +130,6 @@ public class ItemsTest {
         // Test String Output
         var stringOutput = items.asCliOutput();
         
-        // Test JSON Output
-        var jsonNode = items.asJsonOutput();
-        
-        // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
         assertThat(stringOutput, containsString("ERROR - it2 failed on target cluster: 403 Forbidden"));
         assertThat(stringOutput, containsString("WARN - it1 already exists"));
@@ -160,31 +140,27 @@ public class ItemsTest {
         assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 3));
         assertThat(stringOutput, hasLineCount(13));
         
-        // JSON output assertions
-        // Check indexTemplates with failures
-        JsonNode indexTemplates = jsonNode.get("indexTemplates");
-        assertEquals(2, indexTemplates.size());
-        
-        // Check first item with non-fatal failure
-        JsonNode it1 = indexTemplates.get(0);
-        assertEquals("it1", it1.get("name").asText());
-        assertFalse(it1.get("successful").asBoolean());
-        JsonNode failure1 = it1.get("failure");
-        assertEquals("ALREADY_EXISTS", failure1.get("type").asText());
-        assertFalse(failure1.get("fatal").asBoolean());
-        
-        // Check second item with fatal failure
-        JsonNode it2 = indexTemplates.get(1);
-        assertEquals("it2", it2.get("name").asText());
-        assertFalse(it2.get("successful").asBoolean());
-        JsonNode failure2 = it2.get("failure");
-        assertEquals("TARGET_CLUSTER_FAILURE", failure2.get("type").asText());
-        assertTrue(failure2.get("fatal").asBoolean());
-        assertEquals("403 Forbidden", failure2.get("exception").asText());
+        // Test JSON Output
+        var jsonOutput = items.asJsonOutput();
+        var indexTemplates = jsonOutput.get("indexTemplates");
+        assertThat(jsonOutput.toPrettyString(), indexTemplates.size(), equalTo(2));
+        var it1 = indexTemplates.get(0);
+        assertThat(jsonOutput.toPrettyString(), it1.get("name").asText(), equalTo("it1"));
+        assertThat(jsonOutput.toPrettyString(), it1.get("successful").asBoolean(), is(false));
+        var failure1 = it1.get("failure");
+        assertThat(jsonOutput.toPrettyString(), failure1.get("type").asText(), equalTo("ALREADY_EXISTS"));
+        assertThat(jsonOutput.toPrettyString(), failure1.get("fatal").asBoolean(), is(false));
+        var it2 = indexTemplates.get(1);
+        assertThat(jsonOutput.toPrettyString(), it2.get("name").asText(), equalTo("it2"));
+        assertThat(jsonOutput.toPrettyString(), it2.get("successful").asBoolean(), is(false));
+        var failure2 = it2.get("failure");
+        assertThat(jsonOutput.toPrettyString(), failure2.get("type").asText(), equalTo("TARGET_CLUSTER_FAILURE"));
+        assertThat(jsonOutput.toPrettyString(), failure2.get("fatal").asBoolean(), is(true));
+        assertThat(jsonOutput.toPrettyString(), failure2.get("exception").asText(), equalTo("403 Forbidden"));
+
     }
 
     @Test
-    @DisplayName("Items with Ordering - Both Output Formats")
     void testItemOrdering() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexes(List.of(
@@ -198,11 +174,6 @@ public class ItemsTest {
 
         // Test String Output
         var stringOutput = items.asCliOutput();
-        
-        // Test JSON Output
-        var jsonNode = items.asJsonOutput();
-        
-        // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
         assertThat(stringOutput, containsString("Index Templates:"));
         assertThat(stringOutput, stringContainsInOrder("i1", "i2", "i3", "i4","i5"));
@@ -212,19 +183,18 @@ public class ItemsTest {
         assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 3));
         assertThat(stringOutput, hasLineCount(16));
         
-        // JSON output assertions
-        JsonNode indexes = jsonNode.get("indexes");
-        assertEquals(5, indexes.size());
-        // Verify ordering (should maintain original order in JSON)
-        assertEquals("i1", indexes.get(0).get("name").asText());
-        assertEquals("i2", indexes.get(1).get("name").asText());
-        assertEquals("i5", indexes.get(2).get("name").asText());
-        assertEquals("i3", indexes.get(3).get("name").asText());
-        assertEquals("i4", indexes.get(4).get("name").asText());
+        // Test JSON Output
+        var jsonOutput = items.asJsonOutput();
+        var indexes = jsonOutput.get("indexes");
+        assertThat(jsonOutput.toPrettyString(), indexes.size(), equalTo(5));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("name").asText(), equalTo("i1"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(1).get("name").asText(), equalTo("i2"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(2).get("name").asText(), equalTo("i5"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(3).get("name").asText(), equalTo("i3"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(4).get("name").asText(), equalTo("i4"));
     }
 
     @Test
-    @DisplayName("Items with Failure Types - Both Output Formats")
     void testFailureTypes() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexes(List.of(
@@ -239,35 +209,27 @@ public class ItemsTest {
 
         // Test String Output
         var stringOutput = items.asCliOutput();
-        
-        // Test JSON Output
-        var jsonNode = items.asJsonOutput();
-        
-        // String output assertions
         assertThat(stringOutput, stringContainsInOrder("i1", "i2", "i3"));
         assertThat("Results with no errors do not print exception info", stringOutput, not(containsString("exception-without-failure-type")));
         assertThat(stringOutput, stringContainsInOrder("i4 failed on target cluster", "i5 failed on target cluster: re1"));
         assertThat("Expect an exception's toString() if there was no message in the exception", stringOutput, containsString("i6 failed on target cluster: java.lang.RuntimeException"));
         assertThat(stringOutput, hasLineCount(17));
         
-        // JSON output assertions
-        JsonNode indexes = jsonNode.get("indexes");
-        assertEquals(6, indexes.size());
-        
-        // Verify successful items
-        assertTrue(indexes.get(0).get("successful").asBoolean(), "i1 should be successful");
-        
-        // Verify failure items
-        JsonNode i5 = indexes.get(4);
-        assertFalse(i5.get("successful").asBoolean(), "i5 should not be successful");
-        JsonNode failure5 = i5.get("failure");
-        assertEquals("TARGET_CLUSTER_FAILURE", failure5.get("type").asText());
-        assertTrue(failure5.get("fatal").asBoolean());
-        assertEquals("re1", failure5.get("exception").asText());
+        // Test JSON Output
+        var jsonOutput = items.asJsonOutput();
+        var indexes = jsonOutput.get("indexes");
+        assertThat(jsonOutput.toPrettyString(), indexes.size(), equalTo(6));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("successful").asBoolean(), is(true));
+        var i5 = indexes.get(4);
+        assertThat(jsonOutput.toPrettyString(), i5.get("successful").asBoolean(), is(false));
+        var failure5 = i5.get("failure");
+        assertThat(jsonOutput.toPrettyString(), failure5.get("type").asText(), equalTo("TARGET_CLUSTER_FAILURE"));
+        assertThat(jsonOutput.toPrettyString(), failure5.get("fatal").asBoolean(), is(true));
+        assertThat(jsonOutput.toPrettyString(), failure5.get("exception").asText(), equalTo("re1"));
+
     }
 
     @Test
-    @DisplayName("Items with Overall Failure Message - Both Output Formats")
     void testWithFailures() throws Exception {
         var items = createEmptyItemsBuilder()
             .failureMessage("Overall failure message")
@@ -279,24 +241,17 @@ public class ItemsTest {
 
         // Test String Output
         var stringOutput = items.asCliOutput();
-        
-        // Test JSON Output  
-        var jsonNode = items.asJsonOutput();
-        
-        // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
         // Note: The failure message is not actually displayed in the CLI output, only in the JSON
         
-        // JSON output assertions
-        // Check failure message
-        assertEquals("Overall failure message", jsonNode.get("failureMessage").asText());
-        
-        // Check errors array
-        JsonNode errors = jsonNode.get("errors");
-        assertTrue(errors.isArray());
-        // Errors array contains both the failureMessage and the fatal error from it2
-        assertEquals(2, errors.size());  
-        assertEquals("Overall failure message", errors.get(0).asText());
+        // Test JSON Output  
+        var jsonNode = items.asJsonOutput();
+        assertThat(jsonNode.toPrettyString(), jsonNode.get("failureMessage").asText(), equalTo("Overall failure message"));
+        var errors = jsonNode.get("errors");
+        assertThat(jsonNode.toPrettyString(), errors.isArray(), is(true));
+        assertThat(jsonNode.toPrettyString(), errors.size(), equalTo(2));
+        assertThat(jsonNode.toPrettyString(), errors.get(0).asText(), equalTo("Overall failure message"));
+
     }
 
     private ItemsBuilder createEmptyItemsBuilder() {

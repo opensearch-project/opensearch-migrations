@@ -61,6 +61,8 @@ public class MetadataMigration {
         var command = Optional.ofNullable(jCommander.getParsedCommand())
             .map(MetadataCommands::fromString)
             .orElse(MetadataCommands.MIGRATE);
+
+        var humanReadableOutput = migrateArgs.outputFormat == OutputFormat.HUMAN_READABLE && evaluateArgs.outputFormat == OutputFormat.HUMAN_READABLE;
         Result result;
         switch (command) {
             default:
@@ -70,7 +72,9 @@ public class MetadataMigration {
                     return;
                 }
 
-                log.info("Starting Metadata Migration");
+                if (humanReadableOutput) {
+                    log.atInfo().setMessage("Starting Metadata Migration").log();
+                }
                 result = meta.migrate(migrateArgs).execute(context);
                 break;
             case EVALUATE:
@@ -79,19 +83,20 @@ public class MetadataMigration {
                     return;
                 }
 
-                log.info("Starting Metadata Evaluation");
+                if (humanReadableOutput) {
+                    log.atInfo().setMessage("Starting Metadata Evaluation").log();
+                }
                 result = meta.evaluate(evaluateArgs).execute(context);
                 break;
         }
         // Choose the output format based on the command-line argument
-        if (migrateArgs.outputFormat == OutputFormat.JSON || evaluateArgs.outputFormat == OutputFormat.JSON) {
-            log.atInfo().setMessage("{}").addArgument(() -> result.asJsonOutput().toPrettyString()).log();
-        } else {
+        if (humanReadableOutput) {
             log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
+            reportLogPath();
+            reportTransformationPath();
+        } else {
+            log.atInfo().setMessage("{}").addArgument(() -> result.asJsonOutput().toPrettyString()).log();
         }
-
-        reportLogPath();
-        reportTransformationPath();
 
         System.exit(result.getExitCode());
     }

@@ -15,7 +15,7 @@ public enum OutputFormat {
             try {
                 return OutputFormat.valueOf(value.toUpperCase());
             } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("Invalid output format: " + value + ". Valid values are: human-readable, json");
+                throw new IllegalArgumentException("Invalid output format: " + value + ".");
             }
         }
     }

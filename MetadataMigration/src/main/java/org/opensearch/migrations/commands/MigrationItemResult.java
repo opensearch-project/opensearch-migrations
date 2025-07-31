@@ -66,33 +66,15 @@ public interface MigrationItemResult extends Result {
         var root = JsonNodeFactory.instance.objectNode();
 
         if (getClusters() != null) {
-            try {
-                root.set("clusters", getClusters().asJsonOutput());
-            } catch (Exception e) {
-                var errorNode = JsonNodeFactory.instance.objectNode();
-                errorNode.put("error", "Error parsing clusters JSON");
-                root.set("clusters", errorNode);
-            }
+            root.set("clusters", getClusters().asJsonOutput());
         }
 
         if (getItems() != null) {
-            try {
-                root.set("items", getItems().asJsonOutput());
-            } catch (Exception e) {
-                var errorNode = JsonNodeFactory.instance.objectNode();
-                errorNode.put("error", "Error parsing items JSON");
-                root.set("items", errorNode);
-            }
+            root.set("items", getItems().asJsonOutput());
         }
 
         if (getTransformations() != null) {
-            try {
-                root.set("transformations", getTransformations().asJsonOutput());
-            } catch (Exception e) {
-                var errorNode = JsonNodeFactory.instance.objectNode();
-                errorNode.put("error", "Error parsing transformations JSON");
-                root.set("transformations", errorNode);
-            }
+            root.set("transformations", getTransformations().asJsonOutput());
         }
 
         var errors = collectErrors();
@@ -101,7 +83,7 @@ public interface MigrationItemResult extends Result {
             errorsArray.add(err);
         }
 
-        root.put("errorCount", getExitCode());
+        root.put("errorCode", getExitCode());
         if (Strings.isNotBlank(getErrorMessage())) {
             root.put("errorMessage", getErrorMessage());
         }

@@ -106,6 +106,7 @@ Output comparison:
 
 **Human-readable format**:
 ```
+Starting Metadata Evaluation
 Clusters:
    Source:
    Type: On-disk Snapshot (2.0.0)
@@ -135,6 +136,10 @@ Transformations:
 
 Results:
    0 issue(s) detected
+
+
+Consult /home/ubuntu/git/opensearch-migrations/MetadataMigration/logs/ip-172-31-18-157/metadata/metadata2025-07-31_19-44-03.log to see detailed logs for this run
+See transformations applied for this run at /home/ubuntu/git/opensearch-migrations/MetadataMigration/logs/ip-172-31-18-157/metadata/metadata2025-07-31_19-44-03-transforms.log
 ```
 
 **JSON format**:
