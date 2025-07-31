@@ -6,6 +6,23 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
+/**
+ * SnapshotFileFInder based on snapshot structure of ES 2x
+ *
+ * <pre>
+ * /repo/
+ *   ├── index                                  ----[repo metadata]
+ *   ├── meta-<snapshotName>.dat                ----[cluster metadata]
+ *   ├── snap-<snapshotName>.dat                ----[snapshot metadata]
+ *   └── indices/                               ----[index directory]
+ *       └── <indexName>/                       ----[unique directory per each index]
+ *           └── meta-<snapshotName>.dat        ----[index metadata]
+ *           └── <shardId>/                     ----[shard directory]
+ *               ├── __<segmentIds>             ----[lucene blob file]
+ *               ├── snap-<snapshotName>.dat    ----[shard metadata]
+ *               └── ...
+ * </pre>
+ */
 public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
     private static final String INDICES_DIR_NAME = "indices";
 

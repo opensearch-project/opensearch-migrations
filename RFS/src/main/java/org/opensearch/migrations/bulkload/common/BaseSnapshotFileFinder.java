@@ -14,26 +14,26 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <pre>
  * /repo/
- *   ├── index-9
- *   ├── meta-<snapshotId>.dat
- *   ├── snap-<snapshotId>.dat
- *   └── indices/
- *       └── <indexUUID>/
- *           └── <shardId>/
- *               ├── __<blobFiles>
- *               ├── snap-<snapshotId>.dat
+ *   ├── index-9                              ----[repo metadata]
+ *   ├── index.latest
+ *   ├── meta-<snapshotId>.dat                ----[cluster metadata]
+ *   ├── snap-<snapshotId>.dat                ----[snapshot metadata]
+ *   └── indices/                             ----[index directory]
+ *       └── <indexUUID>/                     ----[unique indexUUID per each index]
+ *           └── meta-<snapshotId>.dat        ----[index metadata]
+ *           └── <shardId>/                   ----[shard directory]
+ *               ├── __<segmentIds>           ----[lucene blob file]
+ *               ├── snap-<snapshotId>.dat    ----[shard metadata]
  *               └── ...
  * </pre>
  */
 @Slf4j
 public class BaseSnapshotFileFinder implements SnapshotFileFinder {
 
-    // Example: index-0, index-9
     private static final Pattern INDEX_PATTERN = Pattern.compile("^index-(\\d+)$");
 
     @Override
     public Pattern getSnapshotRepoDataIndexPattern() {
-        // Example path : /repo/index-9
         return INDEX_PATTERN;
     }
 
@@ -42,6 +42,7 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
      */
     @Override
     public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) {
+        // Example path : /repo/index-9
         Pattern indexPattern = getSnapshotRepoDataIndexPattern();
 
         List<String> matchingFiles = fileNames.stream()
@@ -78,7 +79,7 @@ public class BaseSnapshotFileFinder implements SnapshotFileFinder {
      */
     @Override
     public Path getIndexMetadataFilePath(Path root, String indexUUID, String indexFileId) {
-        // Example path : /repo/indices/<indexUUID>/meta-<indexFileId>.dat
+        // Example path : /repo/indices/<indexUUID>/meta-<snapshotId>.dat
         return root.resolve("indices").resolve(indexUUID).resolve("meta-" + indexFileId + ".dat");
     }
 

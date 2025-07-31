@@ -6,10 +6,27 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
-import static org.opensearch.migrations.bulkload.version_es_1_7.SnapshotRepoProvider_ES_1_7.INDICES_DIR_NAME;
-import static org.opensearch.migrations.bulkload.version_es_1_7.SnapshotRepoProvider_ES_1_7.METADATA_PREFIX;
-import static org.opensearch.migrations.bulkload.version_es_1_7.SnapshotRepoProvider_ES_1_7.SNAPSHOT_PREFIX;
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.INDICES_DIR_NAME;
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.METADATA_PREFIX;
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.SNAPSHOT_PREFIX;
 
+/**
+ * SnapshotFileFInder based on snapshot structure of ES 1x
+ *
+ * <pre>
+ * /repo/
+ *   ├── index                                  ----[repo metadata]
+ *   ├── metadata-<snapshotName>                ----[cluster metadata]
+ *   ├── snapshot-<snapshotName>                ----[snapshot metadata]
+ *   └── indices/                               ----[index directory]
+ *       └── <indexName>/                       ----[unique directory per each index]
+ *           └── snapshot-<snapshotName>        ----[index metadata]
+ *           └── <shardId>/                     ----[shard directory]
+ *               ├── __<segmentIds>             ----[lucene blob file]
+ *               ├── snapshot-<snapshotName>    ----[shard metadata]
+ *               └── ...
+ * </pre>
+ */
 public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
 
     // ES 1.7 uses a static "index" file (no version suffix)
@@ -36,13 +53,13 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
 
     @Override
     public Path getGlobalMetadataFilePath(Path root, String snapshotId) {
-        // /repo/metadata-<snapshotId>
+        // /repo/metadata-<snapshotName>
         return root.resolve(METADATA_PREFIX + snapshotId);
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(Path root, String snapshotId) {
-        // /repo/snapshot-<snapshotId>
+        // /repo/snapshot-<snapshotName>
         return root.resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 
@@ -54,7 +71,7 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
 
     @Override
     public Path getShardMetadataFilePath(Path root, String snapshotId, String indexName, int shardId) {
-        // /repo/indices/<indexName>/<shardId>/snapshot-<snapshotId>
+        // /repo/indices/<indexName>/<shardId>/snapshot-<snapshotName>
         return getShardDirPath(root, indexName, shardId).resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 }
