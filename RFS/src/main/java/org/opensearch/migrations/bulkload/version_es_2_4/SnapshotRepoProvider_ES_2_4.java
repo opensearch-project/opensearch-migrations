@@ -45,20 +45,9 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
         ObjectMapper smileMapper = new ObjectMapper(ElasticsearchConstants_ES_2_4.SMILE_FACTORY);
-        log.atInfo()
-            .setMessage("Reading SMILE snapshot metadata file [{}] for snapshot [{}]")
-            .addArgument(snapshotMetaFile)
-            .addArgument(snapshotName)
-            .log();
 
         try {
             byte[] allBytes = Files.readAllBytes(snapshotMetaFile);
-            // Print all bytes as hex for debugging
-            System.out.print("Snapshot metadata bytes (hex): ");
-            for (byte b : allBytes) {
-                System.out.printf("%02X ", b);
-            }
-            System.out.println();
 
             // Find the offset of the SMILE header sequence 0x3A 0x29 0x0A (':)\n')
             int smileStart = -1;
@@ -76,10 +65,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
             try (InputStream in = new ByteArrayInputStream(allBytes, smileStart, allBytes.length - smileStart)) {
                 JsonNode rootNode = smileMapper.readTree(in);
-                log.atInfo()
-                    .setMessage("Successfully parsed SMILE snapshot metadata for [{}]")
-                    .addArgument(snapshotName)
-                    .log();
 
                 // Get the 'snapshot' node
                 JsonNode snapshotNode = rootNode.get("snapshot");
@@ -95,9 +80,9 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
                 JsonNode indicesNode = snapshotNode.get("indices");
                 if (indicesNode == null || !indicesNode.isArray()) {
                     log.atWarn()
-                            .setMessage("No 'indices' array found in snapshot metadata for [{}]")
-                            .addArgument(snapshotName)
-                            .log();
+                        .setMessage("No 'indices' array found in snapshot metadata for [{}]")
+                        .addArgument(snapshotName)
+                        .log();
                     return Collections.emptyList();
                 }
 

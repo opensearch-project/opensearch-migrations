@@ -6,6 +6,8 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
+import static org.opensearch.migrations.bulkload.version_es_2_4.ElasticsearchConstants_ES_2_4.INDICES_DIR_NAME;
+
 /**
  * SnapshotFileFInder based on snapshot structure of ES 2x
  *
@@ -24,8 +26,6 @@ import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
  * </pre>
  */
 public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
-    private static final String INDICES_DIR_NAME = "indices";
-
     // ES 2.x uses a static "index" file (not index-N)
     private static final Pattern STATIC_INDEX_PATTERN = Pattern.compile("^index$");
 
@@ -40,6 +40,7 @@ public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
      */
     @Override
     public Path getSnapshotRepoDataFilePath(Path root, List<String> fileNames) throws CannotFindRepoIndexFile {
+        // Example: /repo/index
         if (fileNames.contains("index")) {
             return root.resolve("index");
         }
@@ -54,7 +55,7 @@ public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
 
     @Override
     public Path getIndexMetadataFilePath(Path root, String indexName, String snapshotId) {
-        // /repo/indices/<indexName>/meta-<snapshotName>.dat
+        // Example: /repo/indices/<indexName>/meta-<snapshotName>.dat
         return root.resolve(INDICES_DIR_NAME).resolve(indexName).resolve("meta-" + snapshotId + ".dat");
     }
 }

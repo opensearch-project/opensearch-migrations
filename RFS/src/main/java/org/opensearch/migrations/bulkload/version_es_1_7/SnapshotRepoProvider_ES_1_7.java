@@ -13,10 +13,9 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.INDICES_DIR_NAME;
+
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
-    protected static final String SNAPSHOT_PREFIX = "snapshot-";
-    protected static final String METADATA_PREFIX = "metadata-";
-    protected static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
     private SnapshotRepoData_ES_1_7 repoData;
 
@@ -34,7 +33,6 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     @Override
     public byte[] getIndexMetadataFile(String indexName, String snapshotName) {
         Path metaFile = repo.getIndexMetadataFilePath(indexName, snapshotName);
-
         try {
             return Files.readAllBytes(metaFile);
         } catch (IOException e) {
@@ -62,7 +60,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
             // ES 1x SnapMetadata file snap-<> is plain JSON
             // This file has a nested JSON structure where top level field is "snapshot"
             // and the nested field is "indices" which holds the list of indices in snapshot
-            JsonNode indicesArray = node.path("snapshot").path("indices");
+            JsonNode indicesArray = node.path("snapshot").path(INDICES_DIR_NAME);
             if (indicesArray == null || !indicesArray.isArray()) {
                 return Collections.emptyList();
             }
