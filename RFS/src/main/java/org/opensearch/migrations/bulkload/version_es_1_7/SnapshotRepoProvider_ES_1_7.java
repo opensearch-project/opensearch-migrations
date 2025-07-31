@@ -62,14 +62,16 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         try {
             var node = ObjectMapperFactory.createDefaultMapper().readTree(snapshotMetaFile.toFile());
 
-            // ES 1x snap-<>.dat file is plain JSON
-            JsonNode indicesNode = node.get(INDICES_DIR_NAME);
-            if (indicesNode == null || !indicesNode.isObject()) {
+            // ES 1x SnapMetadata file snap-<> is plain JSON
+            // This file has a nested JSON structure where top level field is "snapshot"
+            // and the nested field is "indices" which holds the list of indices in snapshot
+            JsonNode indicesArray = node.path("snapshot").path(INDICES_DIR_NAME);
+            if (indicesArray == null || !indicesArray.isArray()) {
                 return Collections.emptyList();
             }
-            indicesNode.fieldNames().forEachRemaining(indexName ->
-                    result.add(new SimpleIndex(indexName, snapshotName))
-            );
+            for (JsonNode indexNode : indicesArray) {
+                result.add(new SimpleIndex(indexNode.asText(), snapshotName));
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read snapshot metadata for snapshot=" + snapshotName, e);
         }
