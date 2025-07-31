@@ -38,6 +38,7 @@ This Next.js project is integrated with Gradle through a custom plugin. You can 
 - `./gradlew :frontend:lintFrontend` - Run linters
 - `./gradlew :frontend:testFrontend` - Run test cases with coverage
 - `./gradlew :frontend:helpFrontend` - Show all of the scripts available for local development with npm
+- `./gradlew :frontend:generateBackendClient` - Generates an OpenAPI spec from the backend project and generates updated client sdk
 
 ### Project Structure
 

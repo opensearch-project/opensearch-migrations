@@ -85,6 +85,7 @@ public class MetadataMigration {
         log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
 
         reportLogPath();
+        reportTransformationPath();
 
         System.exit(result.getExitCode());
     }
@@ -141,4 +142,22 @@ public class MetadataMigration {
             // Ignore any exceptions if we are unable to get the log configuration
         }
     }
+
+    private static void reportTransformationPath() {
+        try {
+            var loggingContext = (LoggerContext) LogManager.getContext(false);
+            var loggingConfig = loggingContext.getConfiguration();
+            var metadataLogAppender = (FileAppender) loggingConfig.getAppender(MetadataTransformationRegistry.TRANSFORM_LOGGER_NAME);
+            if (metadataLogAppender != null) {
+                var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
+                log.atInfo()
+                        .setMessage("See transformations applied for this run at {}")
+                        .addArgument(logFilePath.toAbsolutePath())
+                        .log();
+            }
+        } catch (Exception e) {
+            // Ignore any exceptions if we are unable to get the log configuration
+        }
+    }
+
 }

@@ -77,6 +77,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         super.handlerRemoved(ctx);
     }
 
+    @SuppressWarnings("java:S6541") // TODO: Refactor this 'brain method' to be smaller pieces
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {

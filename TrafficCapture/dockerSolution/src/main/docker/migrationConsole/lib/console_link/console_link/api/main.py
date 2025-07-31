@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from console_link.api.system import system_router
+from console_link.api.sessions import session_router
 
 app = FastAPI(
     title="Migration Assistant API",
@@ -27,3 +28,4 @@ app.add_middleware(
 )
 
 app.include_router(system_router)
+app.include_router(session_router)

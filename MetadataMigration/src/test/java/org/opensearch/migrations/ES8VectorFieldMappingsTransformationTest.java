@@ -6,10 +6,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.transform.TransformerParams;
 
-import lombok.Builder;
-import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
@@ -91,24 +88,11 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         var indexName = "vector";
         sourceOperations.createIndex(indexName, requestBody);
 
-
-        String customTransformationJson = "[{\n" +
-            "    \"JsonJSTransformerProvider\": {\n" +
-            "      \"initializationResourcePath\": \"js/es8-vector-metadata.js\",\n" +
-            "      \"bindingsObject\": \"{}\"\n" +
-            "    }\n" +
-            "  }]";
-
         var snapshotName = "custom_transformation_snap";
         var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
         sourceCluster.copySnapshotData(localDirectory.toString());
         var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
-
-        // Set up transformation parameters
-        arguments.metadataCustomTransformationParams = TestCustomTransformationParams.builder()
-                .transformerConfig(customTransformationJson)
-                .build();
 
         // Execute migration
         MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
@@ -117,19 +101,12 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         log.info(result.asCliOutput());
         assertThat(result.getExitCode(), equalTo(0));
 
+        assertThat(result.getTransformations().getTransformerInfos().size(), equalTo(2));
+        assertThat(result.getTransformations().getTransformerInfos().get(0).getName(), equalTo("dense_vector to knn_vector"));
+
         // Verify that the transformed index exists on the target cluster
         var res = targetOperations.get("/" + indexName);
         assertThat(res.getKey(), equalTo(200));
         assertThat(res.getValue(), containsString(indexName));
-    }
-
-    @Data
-    @Builder
-    private static class TestCustomTransformationParams implements TransformerParams {
-        @Builder.Default
-        private String transformerConfigParameterArgPrefix = "";
-        private String transformerConfigEncoded;
-        private String transformerConfig;
-        private String transformerConfigFile;
     }
 }
