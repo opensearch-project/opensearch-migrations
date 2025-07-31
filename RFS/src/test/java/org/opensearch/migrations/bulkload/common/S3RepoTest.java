@@ -16,10 +16,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.*;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -315,6 +312,68 @@ public class S3RepoTest {
 
         GetObjectRequest expectedRequest = GetObjectRequest.builder()
                 .bucket(expectedBucketName)
+                .key(expectedKey)
+                .build();
+
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
+    }
+
+    @Test
+    void listFilesInS3Root_ReturnsStrippedKeys() throws IOException {
+        // Mock S3 response with some keys under the prefix "directory/"
+        ListObjectsV2Response response = ListObjectsV2Response.builder()
+            .contents(List.of(
+                S3Object.builder().key("directory/file1.txt").build(),
+                S3Object.builder().key("directory/file2.txt").build(),
+                // Adding a file outside prefix to verify filtering logic
+                S3Object.builder().key("other/file3.txt").build()
+            ))
+            .build();
+
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        // Assuming TestableS3Repo should have s3RepoUri.key = "directory" for this to work properly
+        List<String> files = testRepo.listFilesInS3Root();
+
+        // only files under that prefix returned, others excluded
+        assertEquals(List.of("file1.txt", "file2.txt"), files);
+    }
+
+    @Test
+    void getSnapshotRepoDataFilePath_WithEmptyFileName() throws IOException {
+        // Create empty file name so no file in the root prefix
+        String emptyFileName = "";
+
+        // Mock listFilesInS3Root to return one file which is empty string
+        doReturn(List.of(emptyFileName)).when(testRepo).listFilesInS3Root();
+
+        // The expected path is just the local directory root
+        Path expectedPath = testDir.resolve(emptyFileName);
+
+        // Mock fileFinder to return the root path for empty file name
+        when(mockFileFinder.getSnapshotRepoDataFilePath(testDir, List.of(emptyFileName)))
+                .thenReturn(expectedPath);
+
+        // Assume file does not exist locally, so fetch will attempt download
+        doReturn(false).when(testRepo).doesFileExistLocally(expectedPath);
+
+        // Stub directory creation as no-op
+        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
+
+        // Run the test
+        Path filePath = testRepo.getSnapshotRepoDataFilePath();
+
+        // Assertions
+        assertEquals(expectedPath, filePath);
+        verify(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
+
+        // Expected key from makeS3Uri - since empty filename, key is repo prefix itself without trailing slash
+        String expectedKey = testRepo.makeS3Uri(expectedPath).key;
+
+        // Verify that S3 client invoked with bucket and correct key for download
+        GetObjectRequest expectedRequest = GetObjectRequest.builder()
+                .bucket(testRepoUri.bucketName)
                 .key(expectedKey)
                 .build();
 
