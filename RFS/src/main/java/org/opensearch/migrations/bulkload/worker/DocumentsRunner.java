@@ -73,23 +73,34 @@ public class DocumentsRunner {
                     log.info("Acquired work item: {}", workItem.getWorkItem());
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
-                    var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
+                    var finishScheduler = Schedulers.newBoundedElastic(1, Integer.MAX_VALUE, "workFinishScheduler");
                     var disposable = docMigrationCursors
-                        .subscribeOn(finishScheduler)
+                        .last()
+                        .publishOn(finishScheduler)
                         .doFinally(s -> finishScheduler.dispose())
-                        .takeLast(1)
-                        .subscribe(lastItem -> {},
-                            error -> log.atError()
+                        .doOnCancel(() ->
+                            log.atInfo()
+                                .setMessage("Shard migration cancelled, may be due to process termination or lease expiration." +
+                                    "index={}, shard={} ")
+                                .addArgument(workItem.getWorkItem().getIndexName())
+                                .addArgument(workItem.getWorkItem().getShardNumber())
+                                .log())
+                        .subscribe(
+                            last -> {
+                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}, Final work checkpoint: {}")
+                                    .addArgument(workItem.getWorkItem().getIndexName())
+                                    .addArgument(workItem.getWorkItem().getShardNumber())
+                                    .addArgument(last.getProgressCheckpointNum())
+                                    .log();
+                                latch.countDown();
+                            },
+                            error -> {
+                                log.atError()
                                     .setCause(error)
                                     .setMessage("Error prevented some batches from being processed")
-                                    .log(),
-                            () ->  {
-                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
-                                        .addArgument(workItem.getWorkItem().getIndexName())
-                                        .addArgument(workItem.getWorkItem().getShardNumber())
-                                        .log();
-                                latch.countDown();
-                            });
+                                    .log();
+                            }
+                        );
                     // This allows us to cancel the subscription to stop sending new docs
                     // when the lease expires and a successor work item is made.
                     // There may be in-flight requests that are not reflected in the progress cursor
@@ -155,6 +166,7 @@ public class DocumentsRunner {
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
+            .publishOn(Schedulers.parallel())
             .doOnSubscribe(s -> log.info("Subscribed to docMigrationCursors for index={}, shard={}",
                                          workItem.getIndexName(), workItem.getShardNumber()))
             .doOnNext(cursor -> log.debug("Cursor emitted for index={}, shard={}: {}",
