@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -12,7 +11,6 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     private static final String INDICES_DIR_NAME = "indices";
@@ -42,7 +40,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
-        ObjectMapper smileMapper = new ObjectMapper(new SmileFactory());
+        ObjectMapper smileMapper = new ObjectMapper(ElasticsearchConstants_ES_2_4.SMILE_FACTORY);
 
         JsonNode node;
         try {
@@ -52,7 +50,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
             throw new IllegalStateException("Could not parse SMILE file: " + snapshotMetaFile, e);
         }
 
-        JsonNode indicesNode = node.get("indices");
+        JsonNode indicesNode = node.get(INDICES_DIR_NAME);
         if (indicesNode == null || !indicesNode.isObject()) {
             return Collections.emptyList();
         }
@@ -82,19 +80,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     @Override
     public SourceRepo getRepo() {
         return repo;
-    }
-
-    private boolean containsMetaFile(File dir, String snapshotName) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return false;
-        }
-        for (File f : files) {
-            if (f.getName().equals("meta-" + snapshotName + ".dat")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public static class SimpleSnapshot implements SnapshotRepo.Snapshot {

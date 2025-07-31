@@ -6,6 +6,10 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
+import static org.opensearch.migrations.bulkload.version_es_1_7.SnapshotRepoProvider_ES_1_7.INDICES_DIR_NAME;
+import static org.opensearch.migrations.bulkload.version_es_1_7.SnapshotRepoProvider_ES_1_7.METADATA_PREFIX;
+import static org.opensearch.migrations.bulkload.version_es_1_7.SnapshotRepoProvider_ES_1_7.SNAPSHOT_PREFIX;
+
 public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
 
     // ES 1.7 uses a static "index" file (no version suffix)
@@ -33,24 +37,24 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
     @Override
     public Path getGlobalMetadataFilePath(Path root, String snapshotId) {
         // /repo/metadata-<snapshotId>
-        return root.resolve("metadata-" + snapshotId);
+        return root.resolve(METADATA_PREFIX + snapshotId);
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(Path root, String snapshotId) {
         // /repo/snapshot-<snapshotId>
-        return root.resolve("snapshot-" + snapshotId);
+        return root.resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 
     @Override
     public Path getIndexMetadataFilePath(Path root, String indexName, String snapshotId) {
         // /repo/indices/<indexName>/metadata-<snapshotId>
-        return root.resolve("indices").resolve(indexName).resolve("metadata-" + snapshotId);
+        return root.resolve(INDICES_DIR_NAME).resolve(indexName).resolve(METADATA_PREFIX + snapshotId);
     }
 
     @Override
     public Path getShardMetadataFilePath(Path root, String snapshotId, String indexName, int shardId) {
         // /repo/indices/<indexName>/<shardId>/snapshot-<snapshotId>
-        return getShardDirPath(root, indexName, shardId).resolve("snapshot-" + snapshotId);
+        return getShardDirPath(root, indexName, shardId).resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 }

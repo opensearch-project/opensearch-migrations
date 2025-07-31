@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_es_1_7;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,15 +7,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
+import com.fasterxml.jackson.databind.JsonNode;
 
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
-    private static final String SNAPSHOT_PREFIX = "snapshot-";
-    private static final String INDICES_DIR_NAME = "indices";
+    protected static final String SNAPSHOT_PREFIX = "snapshot-";
+    protected static final String METADATA_PREFIX = "metadata-";
+    protected static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
     private SnapshotRepoData_ES_1_7 repoData;
 
@@ -63,7 +63,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
             var node = ObjectMapperFactory.createDefaultMapper().readTree(snapshotMetaFile.toFile());
 
             // ES 1x snap-<>.dat file is plain JSON
-            JsonNode indicesNode = node.get("indices");
+            JsonNode indicesNode = node.get(INDICES_DIR_NAME);
             if (indicesNode == null || !indicesNode.isObject()) {
                 return Collections.emptyList();
             }
@@ -86,21 +86,8 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
                 .resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 
-    public Path getSnapshotMetadataFile(String snapshotName) {
-        return repo.getSnapshotRepoDataFilePath().getParent().resolve("metadata-" + snapshotName);
-    }
-
-    private boolean containsSnapshotFile(File dir, String snapshotName) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return false;
-        }
-        for (File f : files) {
-            if (f.getName().equals(SNAPSHOT_PREFIX + snapshotName)) {
-                return true;
-            }
-        }
-        return false;
+    public Path getGlobalMetadataFile(String snapshotName) {
+        return repo.getSnapshotRepoDataFilePath().getParent().resolve(METADATA_PREFIX + snapshotName);
     }
 
     @Override
