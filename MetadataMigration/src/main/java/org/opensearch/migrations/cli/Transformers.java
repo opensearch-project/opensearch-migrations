@@ -1,14 +1,11 @@
 package org.opensearch.migrations.cli;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.commands.JsonOutput;
-import org.opensearch.migrations.utils.JsonUtils;
-
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Singular;
@@ -50,25 +47,27 @@ public class Transformers implements JsonOutput {
     }
     
     @Override
-    public String asJsonOutput() {
-        Map<String, Object> json = new HashMap<>();
-        List<Map<String, Object>> transformersList = new ArrayList<>();
-        
+    public JsonNode asJsonOutput() {
+        var root = JsonNodeFactory.instance.objectNode();
+        var transformersArray = root.putArray("transformers");
+
         if (transformerInfos != null) {
-            for (TransformerInfo info : transformerInfos) {
-                Map<String, Object> transformerMap = new HashMap<>();
-                transformerMap.put("name", info.getName());
-                transformerMap.put("description", info.getDescriptionLines());
-                if (info.getUrl() != null) {
-                    transformerMap.put("url", info.getUrl());
+            for (var info : transformerInfos) {
+                var tNode = transformersArray.addObject();
+                tNode.put("name", info.getName());
+
+                var descArray = tNode.putArray("description");
+                for (var line : info.getDescriptionLines()) {
+                    descArray.add(line);
                 }
-                transformersList.add(transformerMap);
+
+                if (info.getUrl() != null) {
+                    tNode.put("url", info.getUrl());
+                }
             }
         }
-        
-        json.put("transformers", transformersList);
-        
-        return JsonUtils.toJson(json, "Transformers");
+
+        return root;
     }
 
     @Builder

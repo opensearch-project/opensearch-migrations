@@ -1,16 +1,13 @@
 package org.opensearch.migrations.commands;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
 import org.opensearch.migrations.cli.Transformers;
-import org.opensearch.migrations.utils.JsonUtils;
-
 import org.apache.logging.log4j.util.Strings;
 
 /** All shared cli result information */
@@ -63,41 +60,50 @@ public interface MigrationItemResult extends Result {
     }
     
     @Override
-    default String asJsonOutput() {
-        Map<String, Object> json = new HashMap<>();
-        
+    default JsonNode asJsonOutput() {
+        var root = JsonNodeFactory.instance.objectNode();
+
         if (getClusters() != null) {
             try {
-                json.put("clusters", JsonUtils.getObjectMapper().readTree(getClusters().asJsonOutput()));
+                root.set("clusters", getClusters().asJsonOutput());
             } catch (Exception e) {
-                json.put("clusters", "Error parsing clusters JSON");
+                var errorNode = JsonNodeFactory.instance.objectNode();
+                errorNode.put("error", "Error parsing clusters JSON");
+                root.set("clusters", errorNode);
             }
         }
-        
+
         if (getItems() != null) {
             try {
-                json.put("items", JsonUtils.getObjectMapper().readTree(getItems().asJsonOutput()));
+                root.set("items", getItems().asJsonOutput());
             } catch (Exception e) {
-                json.put("items", "Error parsing items JSON");
+                var errorNode = JsonNodeFactory.instance.objectNode();
+                errorNode.put("error", "Error parsing items JSON");
+                root.set("items", errorNode);
             }
         }
-        
+
         if (getTransformations() != null) {
             try {
-                json.put("transformations", JsonUtils.getObjectMapper().readTree(getTransformations().asJsonOutput()));
+                root.set("transformations", getTransformations().asJsonOutput());
             } catch (Exception e) {
-                json.put("transformations", "Error parsing transformations JSON");
+                var errorNode = JsonNodeFactory.instance.objectNode();
+                errorNode.put("error", "Error parsing transformations JSON");
+                root.set("transformations", errorNode);
             }
         }
-        
-        List<String> errors = collectErrors();
-        json.put("errors", errors);
-        json.put("errorCount", getExitCode());
-        
-        if (Strings.isNotBlank(getErrorMessage())) {
-            json.put("errorMessage", getErrorMessage());
+
+        var errors = collectErrors();
+        var errorsArray = root.putArray("errors");
+        for (var err : errors) {
+            errorsArray.add(err);
         }
-        
-        return JsonUtils.toJson(json, "MigrationItemResult");
+
+        root.put("errorCount", getExitCode());
+        if (Strings.isNotBlank(getErrorMessage())) {
+            root.put("errorMessage", getErrorMessage());
+        }
+
+        return root;
     }
 }

@@ -1,7 +1,7 @@
 package org.opensearch.migrations.cli;
 
-import java.util.HashMap;
-import java.util.Map;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.S3Repo;
@@ -11,8 +11,6 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterWriter;
 import org.opensearch.migrations.cluster.RemoteCluster;
 import org.opensearch.migrations.commands.JsonOutput;
-import org.opensearch.migrations.utils.JsonUtils;
-
 import lombok.Builder;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -75,47 +73,46 @@ public class Clusters implements JsonOutput {
     }
     
     @Override
-    public String asJsonOutput() {
-        Map<String, Object> json = new HashMap<>();
-        
+    public JsonNode asJsonOutput() {
+        var root = JsonNodeFactory.instance.objectNode();
+
         if (source != null) {
-            Map<String, Object> sourceMap = new HashMap<>();
-            sourceMap.put("type", source.getFriendlyTypeName());
-            sourceMap.put("version", source.getVersion().toString());
-            
+            var src = root.putObject("source");
+            src.put("type", source.getFriendlyTypeName());
+            src.put("version", source.getVersion().toString());
+
             if (source instanceof ClusterSnapshotReader) {
                 var reader = (ClusterSnapshotReader) source;
                 var sourceRepo = reader.getSourceRepo();
                 if (sourceRepo instanceof S3Repo) {
-                    var s3Repo = (S3Repo)sourceRepo;
-                    sourceMap.put("s3Repository", s3Repo.getS3RepoUri().uri);
-                }
-                if (sourceRepo instanceof FileSystemRepo) {
-                    sourceMap.put("localRepository", sourceRepo.getRepoRootDir());
+                    var s3Repo = (S3Repo) sourceRepo;
+                    src.put("s3Repository", s3Repo.getS3RepoUri().uri);
+                } else if (sourceRepo instanceof FileSystemRepo) {
+                    src.put("localRepository", sourceRepo.getRepoRootDir().toString());
                 }
             }
-            
+
             if (source instanceof RemoteCluster) {
                 var remoteCluster = (RemoteCluster) source;
-                sourceMap.putAll(remoteCluster.getConnection().toUserFacingData());
+                remoteCluster.getConnection()
+                            .toUserFacingData()
+                            .forEach((k, v) -> src.put(k, v.toString()));
             }
-            
-            json.put("source", sourceMap);
         }
-        
+
         if (target != null) {
-            Map<String, Object> targetMap = new HashMap<>();
-            targetMap.put("type", target.getFriendlyTypeName());
-            targetMap.put("version", target.getVersion().toString());
-            
+            var tgt = root.putObject("target");
+            tgt.put("type", target.getFriendlyTypeName());
+            tgt.put("version", target.getVersion().toString());
+
             if (target instanceof RemoteCluster) {
                 var remoteCluster = (RemoteCluster) target;
-                targetMap.putAll(remoteCluster.getConnection().toUserFacingData());
+                remoteCluster.getConnection()
+                            .toUserFacingData()
+                            .forEach((k, v) -> tgt.put(k, v.toString()));
             }
-            
-            json.put("target", targetMap);
         }
-        
-        return JsonUtils.toJson(json, "Clusters");
+
+        return root;
     }
 }

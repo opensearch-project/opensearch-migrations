@@ -5,7 +5,6 @@ import java.util.List;
 import org.opensearch.migrations.cli.Items.ItemsBuilder;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
-import org.opensearch.migrations.utils.JsonUtils;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.DisplayName;
@@ -40,8 +39,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output
-        String jsonOutput = items.asJsonOutput();
-        JsonNode jsonNode = JsonUtils.getObjectMapper().readTree(jsonOutput);
+        var jsonNode = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
@@ -91,8 +89,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output
-        String jsonOutput = items.asJsonOutput();
-        JsonNode jsonNode = JsonUtils.getObjectMapper().readTree(jsonOutput);
+        var jsonNode = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, containsString("Migration Candidates:"));
@@ -150,8 +147,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output
-        String jsonOutput = items.asJsonOutput();
-        JsonNode jsonNode = JsonUtils.getObjectMapper().readTree(jsonOutput);
+        var jsonNode = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
@@ -204,8 +200,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output
-        String jsonOutput = items.asJsonOutput();
-        JsonNode jsonNode = JsonUtils.getObjectMapper().readTree(jsonOutput);
+        var jsonNode = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));
@@ -246,8 +241,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output
-        String jsonOutput = items.asJsonOutput();
-        JsonNode jsonNode = JsonUtils.getObjectMapper().readTree(jsonOutput);
+        var jsonNode = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, stringContainsInOrder("i1", "i2", "i3"));
@@ -287,8 +281,7 @@ public class ItemsTest {
         var stringOutput = items.asCliOutput();
         
         // Test JSON Output  
-        String jsonOutput = items.asJsonOutput();
-        JsonNode jsonNode = JsonUtils.getObjectMapper().readTree(jsonOutput);
+        var jsonNode = items.asJsonOutput();
         
         // String output assertions
         assertThat(stringOutput, containsString("Migrated Items:"));

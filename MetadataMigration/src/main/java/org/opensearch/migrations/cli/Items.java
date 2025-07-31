@@ -2,17 +2,17 @@ package org.opensearch.migrations.cli;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import org.opensearch.migrations.commands.JsonOutput;
 import org.opensearch.migrations.metadata.CreationResult;
-import org.opensearch.migrations.utils.JsonUtils;
-
 import lombok.Builder;
 import lombok.Data;
 import lombok.NonNull;
@@ -138,51 +138,50 @@ public class Items implements JsonOutput {
     }
     
     @Override
-    public String asJsonOutput() {
-        Map<String, Object> json = new HashMap<>();
-        json.put("dryRun", dryRun);
-        
-        // Process successful and failed items
-        json.put("indexTemplates", processItems(indexTemplates));
-        json.put("componentTemplates", processItems(componentTemplates));
-        json.put("indexes", processItems(indexes));
-        json.put("aliases", processItems(aliases));
-        
+    public JsonNode asJsonOutput() {
+        var root = JsonNodeFactory.instance.objectNode();
+
+        root.put("dryRun", dryRun);
+
+        buildArray("indexTemplates", indexTemplates, root);
+        buildArray("componentTemplates", componentTemplates, root);
+        buildArray("indexes",          indexes,          root);
+        buildArray("aliases",          aliases,          root);
+
         if (failureMessage != null) {
-            json.put("failureMessage", failureMessage);
+            root.put("failureMessage", failureMessage);
         }
-        
-        json.put("errors", getAllErrors());
-        
-        return JsonUtils.toJson(json, "Items");
+
+        var errorsNode = root.putArray("errors");
+        for (var err : getAllErrors()) {
+            errorsNode.add(err);
+        }
+
+        return root;
     }
-    
-    private List<Map<String, Object>> processItems(List<CreationResult> items) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        
-        for (CreationResult item : items) {
-            Map<String, Object> itemMap = new HashMap<>();
-            itemMap.put("name", item.getName());
-            itemMap.put("successful", item.wasSuccessful());
-            
+
+    /**
+     * Helper to convert a List<CreationResult> into a JSON array under `fieldName` on `parent`.
+     */
+    private void buildArray(String fieldName, List<CreationResult> items, ObjectNode parent) {
+        var array = parent.putArray(fieldName);
+        for (var item : items) {
+            var obj = array.addObject();
+            obj.put("name",       item.getName());
+            obj.put("successful", item.wasSuccessful());
+
             if (!item.wasSuccessful() && item.getFailureType() != null) {
-                Map<String, Object> failure = new HashMap<>();
-                failure.put("type", item.getFailureType().name());
-                failure.put("message", item.getFailureType().getMessage());
-                failure.put("fatal", item.getFailureType().isFatal());
-                
-                if (item.getFailureType().isFatal() && item.getException() != null) {
-                    failure.put("exception", item.getException().getMessage() != null 
-                        ? item.getException().getMessage() 
-                        : item.getException().toString());
+                var failure = obj.putObject("failure");
+                var ft = item.getFailureType();
+                failure.put("type",    ft.name());
+                failure.put("message", ft.getMessage());
+                failure.put("fatal",   ft.isFatal());
+
+                if (ft.isFatal() && item.getException() != null) {
+                    var exMsg = item.getException().getMessage();
+                    failure.put("exception", exMsg != null ? exMsg : item.getException().toString());
                 }
-                
-                itemMap.put("failure", failure);
             }
-            
-            result.add(itemMap);
         }
-        
-        return result;
     }
 }

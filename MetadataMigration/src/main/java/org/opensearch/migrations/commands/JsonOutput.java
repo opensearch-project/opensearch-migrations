@@ -1,21 +1,15 @@
 package org.opensearch.migrations.commands;
 
-import org.opensearch.migrations.utils.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * Interface for classes that can output their state as JSON.
  */
 public interface JsonOutput {
     /**
-     * Return a JSON representation of this object.
+     * Return a JSON representation of this object as a JsonNode.
+     * Using JsonNode instead of String makes chaining operations more efficient 
+     * and prevents unnecessary serialization/deserialization cycles.
      */
-    String asJsonOutput();
-    
-    /**
-     * Default implementation that can be used by simple classes that can be 
-     * directly serialized to JSON by Jackson.
-     */
-    default String toJsonString() {
-        return JsonUtils.toJson(this, this.getClass().getSimpleName());
-    }
+    JsonNode asJsonOutput();
 }

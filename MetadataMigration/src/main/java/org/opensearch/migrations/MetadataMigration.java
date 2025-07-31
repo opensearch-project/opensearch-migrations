@@ -85,7 +85,7 @@ public class MetadataMigration {
         }
         // Choose the output format based on the command-line argument
         if (metadataArgs.outputFormat == OutputFormat.JSON) {
-            log.atInfo().setMessage("{}").addArgument(result::asJsonOutput).log();
+            log.atInfo().setMessage("{}").addArgument(() -> result.asJsonOutput().toPrettyString()).log();
         } else {
             log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
         }
@@ -153,7 +153,7 @@ public class MetadataMigration {
         try {
             var loggingContext = (LoggerContext) LogManager.getContext(false);
             var loggingConfig = loggingContext.getConfiguration();
-            var metadataLogAppender = (FileAppender) loggingConfig.getAppender("TransformerRun");
+            var metadataLogAppender = (FileAppender) loggingConfig.getAppender(MetadataTransformationRegistry.TRANSFORM_LOGGER_NAME);
             if (metadataLogAppender != null) {
                 var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
                 log.atInfo()

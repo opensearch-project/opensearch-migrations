@@ -1,11 +1,8 @@
 package org.opensearch.migrations.commands;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import org.opensearch.migrations.utils.JsonUtils;
-
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
@@ -26,13 +23,14 @@ public class ConfigureResult implements Result {
     }
     
     @Override
-    public String asJsonOutput() {
-        Map<String, Object> json = new HashMap<>();
-        json.put("exitCode", exitCode);
+    public JsonNode asJsonOutput() {
+        var root = JsonNodeFactory.instance.objectNode();
+        root.put("exitCode", exitCode);
+
         if (errorMessage != null && !errorMessage.isEmpty()) {
-            json.put("errorMessage", errorMessage);
+            root.put("errorMessage", errorMessage);
         }
-        
-        return JsonUtils.toJson(json, "ConfigureResult");
+
+        return root;
     }
 }
