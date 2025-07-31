@@ -49,7 +49,7 @@ public class OpenSearchClientFactory {
             version = getClusterVersion();
         }
 
-        if (!connectionContext.isForceDisableCompression() && getCompressionEnabled()) {
+        if (!connectionContext.isForceDisableCompression() && Boolean.TRUE.equals(getCompressionEnabled())) {
             compressionMode = CompressionMode.GZIP_BODY_COMPRESSION;
         } else {
             compressionMode = CompressionMode.UNCOMPRESSED;
