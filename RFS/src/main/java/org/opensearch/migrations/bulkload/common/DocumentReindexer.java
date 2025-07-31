@@ -62,12 +62,13 @@ public class DocumentReindexer {
             );
         var rfsDocs = documentStream
             .publishOn(transformationScheduler, 1)
+            .doFinally(signalType -> {
+                log.atInfo().setMessage("Closing transformation scheduler").log();
+                transformationScheduler.dispose();
+            })
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
             .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
-        return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
-            .doFinally(signalType -> {
-                transformationScheduler.dispose();
-            });
+        return this.reindexDocsInParallelBatches(rfsDocs, indexName, context);
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
