@@ -74,8 +74,19 @@ public class DocumentsRunner {
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
                     var disposable = docMigrationCursors
+                        .doOnError(
+                            error -> {
+                                log.atError()
+                                    .setMessage("Unhandled error during shard migration of {}")
+                                    .addArgument(workItem.getWorkItem())
+                                    .setCause(error)
+                                    .log();
+                            }
+                        )
                         .last(new WorkItemCursor(-1))
-                        .subscribeOn(Schedulers.parallel())
+                        // This will be the default ThreadPool for the entire subscription chain (where unspecified)
+                        // Use elastic scheduler for high fault tolerance and isolation
+                        .subscribeOn(Schedulers.boundedElastic())
                         .doOnCancel(() ->
                             log.atInfo()
                                 .setMessage("Shard migration cancelled, may be due to process termination or lease expiration." +
@@ -95,7 +106,7 @@ public class DocumentsRunner {
                             error -> {
                                 log.atError()
                                     .setCause(error)
-                                    .setMessage("Error prevented some batches from being processed")
+                                    .setMessage("Final error prevented some batches from being processed")
                                     .log();
                             }
                         );
