@@ -73,11 +73,9 @@ public class DocumentsRunner {
                     log.info("Acquired work item: {}", workItem.getWorkItem());
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
-                    var finishScheduler = Schedulers.newBoundedElastic(1, Integer.MAX_VALUE, "workFinishScheduler");
                     var disposable = docMigrationCursors
-                        .last()
-                        .publishOn(finishScheduler)
-                        .doFinally(s -> finishScheduler.dispose())
+                        .last(new WorkItemCursor(-1))
+                        .subscribeOn(Schedulers.parallel())
                         .doOnCancel(() ->
                             log.atInfo()
                                 .setMessage("Shard migration cancelled, may be due to process termination or lease expiration." +
@@ -166,7 +164,6 @@ public class DocumentsRunner {
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
-            .publishOn(Schedulers.parallel())
             .doOnSubscribe(s -> log.info("Subscribed to docMigrationCursors for index={}, shard={}",
                                          workItem.getIndexName(), workItem.getShardNumber()))
             .doOnNext(cursor -> log.debug("Cursor emitted for index={}, shard={}: {}",
