@@ -73,10 +73,8 @@ public class DocumentsRunner {
                     log.info("Acquired work item: {}", workItem.getWorkItem());
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
-                    var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
                     var disposable = docMigrationCursors
-                        .subscribeOn(finishScheduler)
-                        .doFinally(s -> finishScheduler.dispose())
+                        .subscribeOn(Schedulers.boundedElastic())
                         .takeLast(1)
                         .subscribe(lastItem -> {},
                             error -> log.atError()
