@@ -63,8 +63,27 @@ public class DocumentReindexer {
         var rfsDocs = documentStream
             .publishOn(transformationScheduler, 1)
             .doFinally(signalType -> {
-                log.atInfo().setMessage("Closing transformation scheduler").log();
-                transformationScheduler.dispose();
+                log.atInfo().setMessage("Scheduling scheduler dispose for {}. isDisposed: {}. ")
+                    .addArgument(transformationScheduler)
+                    .addArgument(transformationScheduler.isDisposed()).log();
+                transformationScheduler.disposeGracefully()
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .doOnError(error -> {
+                            log.atError().setMessage("Error during scheduler dispose for {}")
+                                .addArgument(transformationScheduler)
+                                .setCause(error)
+                                .log();
+                        }
+                    )
+                    .doOnSuccess(aVoid -> log.atInfo().setMessage("Finished disposing scheduler for {}")
+                            .addArgument(transformationScheduler)
+                            .log()
+                    )
+                    .doOnCancel( () -> log.atWarn().setMessage("Scheduler dispose cancelled for {}")
+                            .addArgument(transformationScheduler)
+                            .log()
+                    )
+                    .subscribe();
             })
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
             .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
