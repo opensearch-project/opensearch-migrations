@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.version_es_6_8;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
@@ -32,11 +33,6 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
             .or(VersionMatchers.isES_6_X)
             .or(VersionMatchers.equalOrBetween_ES_7_0_and_7_8)
             .test(version);
-    }
-
-    @Override
-    public SnapshotFileFinder getSnapshotFileFinder() {
-        return new SnapshotFileFinder_ES_6_8();
     }
 
     @Override
@@ -73,6 +69,11 @@ public class SnapshotReader_ES_6_8 implements ClusterSnapshotReader {
     @Override
     public String getSoftDeletesFieldData() {
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD;
+    }
+
+    @Override
+    public SnapshotFileFinder getSnapshotFileFinder() {
+        return new BaseSnapshotFileFinder();
     }
 
     @Override

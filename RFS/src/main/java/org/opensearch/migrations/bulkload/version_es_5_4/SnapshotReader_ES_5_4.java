@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.version_es_5_4;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
@@ -34,7 +35,7 @@ public class SnapshotReader_ES_5_4 implements ClusterSnapshotReader {
 
     @Override
     public SnapshotFileFinder getSnapshotFileFinder() {
-        return new SnapshotFileFinder_ES_5_4();
+        return new BaseSnapshotFileFinder();
     }
 
     @Override
