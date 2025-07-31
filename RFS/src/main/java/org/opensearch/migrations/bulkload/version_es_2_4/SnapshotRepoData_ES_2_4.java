@@ -38,9 +38,9 @@ public class SnapshotRepoData_ES_2_4 {
      * This is the entry point for reading the snapshot list.
      */
     public static SnapshotRepoData_ES_2_4 fromRepo(SourceRepo repo) {
-        Path indexFile = repo.getRepoRootDir().resolve("index");
+        Path indexFile = repo.getSnapshotRepoDataFilePath();
         if (!indexFile.toFile().exists()) {
-            throw new CantParseRepoFile("No 'index' file found in " + repo.getRepoRootDir());
+            throw new CantParseRepoFile("No 'index' file found in " + repo.getSnapshotRepoDataFilePath().getParent());
         }
         return fromRepoFile(indexFile);
     }

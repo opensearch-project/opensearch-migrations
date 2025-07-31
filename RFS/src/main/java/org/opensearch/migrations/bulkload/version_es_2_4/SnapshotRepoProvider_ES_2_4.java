@@ -37,7 +37,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
+        Path indicesRoot = repo.getSnapshotRepoDataFilePath().getParent().resolve(INDICES_DIR_NAME);
         File[] indexDirs = indicesRoot.toFile().listFiles();
         if (indexDirs == null) {
             return Collections.emptyList();

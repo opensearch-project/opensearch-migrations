@@ -28,23 +28,9 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         return repoData;
     }
 
-    public List<String> listIndices() {
-        List<String> indexNames = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-        File[] children = indicesRoot.toFile().listFiles();
-        if (children != null) {
-            for (File f : children) {
-                if (f.isDirectory()) {
-                    indexNames.add(f.getName());
-                }
-            }
-        }
-        return indexNames;
-    }
-
     @Override
     public byte[] getIndexMetadataFile(String indexName, String snapshotName) {
-        Path metaFile = repo.getRepoRootDir()
+        Path metaFile = repo.getSnapshotRepoDataFilePath().getParent()
                 .resolve(INDICES_DIR_NAME)
                 .resolve(indexName)
                 .resolve(SNAPSHOT_PREFIX + snapshotName);
@@ -69,7 +55,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         // Very similar logic as SnapshotRepoProvider_ES_2_4 but different file name
         List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
+        Path indicesRoot = repo.getSnapshotRepoDataFilePath().getParent().resolve(INDICES_DIR_NAME);
         File[] indexDirs = indicesRoot.toFile().listFiles();
         if (indexDirs == null) {
             return Collections.emptyList();
@@ -88,7 +74,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        return repo.getRepoRootDir()
+        return repo.getSnapshotRepoDataFilePath().getParent()
                 .resolve(INDICES_DIR_NAME)
                 .resolve(indexId)
                 .resolve(String.valueOf(shardId))
@@ -96,7 +82,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     }
 
     public Path getSnapshotMetadataFile(String snapshotName) {
-        return repo.getRepoRootDir().resolve("metadata-" + snapshotName);
+        return repo.getSnapshotRepoDataFilePath().getParent().resolve("metadata-" + snapshotName);
     }
 
     private boolean containsSnapshotFile(File dir, String snapshotName) {
