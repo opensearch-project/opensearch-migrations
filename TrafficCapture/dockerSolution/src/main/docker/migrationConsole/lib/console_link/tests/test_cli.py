@@ -33,7 +33,7 @@ def runner():
 @pytest.fixture
 def env():
     """A valid Environment for the given VALID_SERVICES_YAML file"""
-    return Environment(VALID_SERVICES_YAML)
+    return Environment(config_file=VALID_SERVICES_YAML)
 
 
 @pytest.fixture(autouse=True)

@@ -32,7 +32,7 @@ class Context(object):
     def __init__(self, config_file) -> None:
         self.config_file = config_file
         try:
-            self.env = Environment(config_file)
+            self.env = Environment(config_file=config_file)
         except Exception as e:
             raise click.ClickException(str(e))
         self.json = False
