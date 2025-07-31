@@ -1,18 +1,6 @@
 package org.opensearch.migrations.cli;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
-
 import java.nio.file.Path;
-import org.junit.jupiter.api.Test;
-
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.not;
-import static org.hamcrest.CoreMatchers.notNullValue;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -24,6 +12,18 @@ import org.opensearch.migrations.bulkload.version_universal.RemoteReader;
 import org.opensearch.migrations.cluster.ClusterReader;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterWriter;
+
+import org.junit.jupiter.api.Test;
+
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.notNullValue;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
 
 public class ClustersTest {
     @Test

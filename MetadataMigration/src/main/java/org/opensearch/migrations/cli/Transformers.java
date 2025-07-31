@@ -1,11 +1,12 @@
 package org.opensearch.migrations.cli;
 
 import java.util.List;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.commands.JsonOutput;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Singular;

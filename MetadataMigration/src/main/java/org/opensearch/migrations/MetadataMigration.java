@@ -84,7 +84,7 @@ public class MetadataMigration {
                 break;
         }
         // Choose the output format based on the command-line argument
-        if (metadataArgs.outputFormat == OutputFormat.JSON) {
+        if (migrateArgs.outputFormat == OutputFormat.JSON || evaluateArgs.outputFormat == OutputFormat.JSON) {
             log.atInfo().setMessage("{}").addArgument(() -> result.asJsonOutput().toPrettyString()).log();
         } else {
             log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();

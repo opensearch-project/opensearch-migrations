@@ -1,11 +1,12 @@
 package org.opensearch.migrations.cli;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.bulkload.transformers.Transformer;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import org.opensearch.migrations.bulkload.transformers.Transformer;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
