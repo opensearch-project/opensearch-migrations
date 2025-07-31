@@ -230,6 +230,7 @@ public class S3Repo implements SourceRepo {
         List<String> strippedKeys = s3Client.listObjectsV2(listRequest).join()
                 .contents().stream()
                 .map(S3Object::key)
+                .filter(key -> prefixKey.isEmpty() || key.startsWith(prefixKey + "/"))
                 .map(key -> {
                     if (!prefixKey.isEmpty() && key.startsWith(prefixKey + "/")) {
                         key = key.substring(prefixKey.length() + 1);

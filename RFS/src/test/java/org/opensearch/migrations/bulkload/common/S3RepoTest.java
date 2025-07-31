@@ -336,7 +336,7 @@ public class S3RepoTest {
         // Assuming TestableS3Repo should have s3RepoUri.key = "directory" for this to work properly
         List<String> files = testRepo.listFilesInS3Root();
 
-        // only files under that prefix returned, others excluded
+        // Only files under that prefix returned, others excluded
         assertEquals(List.of("file1.txt", "file2.txt"), files);
     }
 
