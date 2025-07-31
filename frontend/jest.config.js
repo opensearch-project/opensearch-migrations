@@ -10,4 +10,14 @@ module.exports = createJestConfig({
     "^@tests/(.*)$": "<rootDir>/__tests__/$1",
     "^@/(.*)$": "<rootDir>/src/$1"
   },
+  reporters: [
+    "default",
+    [
+      "jest-stare",
+      {
+        "resultDir": "build/test-results/jest",
+        "reportTitle": "jest-test-results"
+      }
+    ]
+  ]
 });
