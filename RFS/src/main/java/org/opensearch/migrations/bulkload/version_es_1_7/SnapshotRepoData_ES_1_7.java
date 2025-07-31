@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo.CantParseRepoFile;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo.CannotParseRepoFile;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -40,7 +40,7 @@ public class SnapshotRepoData_ES_1_7 {
     public static SnapshotRepoData_ES_1_7 fromRepo(SourceRepo repo) {
         Path indexFile = repo.getSnapshotRepoDataFilePath();
         if (!indexFile.toFile().exists()) {
-            throw new CantParseRepoFile("No 'index' file found in " + repo.getSnapshotRepoDataFilePath().getParent());
+            throw new CannotParseRepoFile("No 'index' file found in " + repo.getSnapshotRepoDataFilePath().getParent());
         }
         return fromRepoFile(indexFile);
     }
@@ -56,7 +56,7 @@ public class SnapshotRepoData_ES_1_7 {
             data.filePath = filePath;
             return data;
         } catch (IOException e) {
-            throw new CantParseRepoFile("Can't read or parse the ES 1.7 repo metadata file: " + filePath, e);
+            throw new CannotParseRepoFile("Can't read or parse the ES 1.7 repo metadata file: " + filePath, e);
         }
     }
 
