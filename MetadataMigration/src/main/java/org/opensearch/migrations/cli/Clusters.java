@@ -1,6 +1,7 @@
 package org.opensearch.migrations.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -76,6 +77,7 @@ public class Clusters implements JsonOutput {
     public JsonNode asJsonOutput() {
         var root = JsonNodeFactory.instance.objectNode();
 
+        var mapper = new ObjectMapper();
         if (source != null) {
             var src = root.putObject("source");
             src.put("type", source.getFriendlyTypeName());
@@ -93,10 +95,9 @@ public class Clusters implements JsonOutput {
             }
 
             if (source instanceof RemoteCluster) {
-                var remoteCluster = (RemoteCluster) source;
-                remoteCluster.getConnection()
-                            .toUserFacingData()
-                            .forEach((k, v) -> src.put(k, v.toString()));
+                var connection = ((RemoteCluster) source).getConnection();
+                var connNode = mapper.valueToTree(connection);
+                connNode.properties().forEach(entry -> src.set(entry.getKey(), entry.getValue()));
             }
         }
 
@@ -106,10 +107,9 @@ public class Clusters implements JsonOutput {
             tgt.put("version", target.getVersion().toString());
 
             if (target instanceof RemoteCluster) {
-                var remoteCluster = (RemoteCluster) target;
-                remoteCluster.getConnection()
-                            .toUserFacingData()
-                            .forEach((k, v) -> tgt.put(k, v.toString()));
+                var connection = ((RemoteCluster) target).getConnection();
+                var connNode = mapper.valueToTree(connection);
+                connNode.properties().forEach(entry -> tgt.set(entry.getKey(), entry.getValue()));
             }
         }
 

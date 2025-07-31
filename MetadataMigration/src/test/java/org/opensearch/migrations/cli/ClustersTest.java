@@ -1,6 +1,5 @@
 package org.opensearch.migrations.cli;
 
-import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
@@ -9,7 +8,9 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 
@@ -33,9 +34,11 @@ public class ClustersTest {
         assertThat(strResult, not(containsString("Source:")));
         assertThat(strResult, not(containsString("Target:")));
         assertThat(strResult, hasLineCount(1));
-  
-        var jsonNode = clusters.asJsonOutput();
-        assertNotNull(jsonNode);
+
+        var json = clusters.asJsonOutput();
+        assertThat(json, notNullValue());
+        assertThat(json.has("source"), equalTo(false));
+        assertThat(json.has("target"), equalTo(false));
     }
 
     @Test
@@ -52,14 +55,14 @@ public class ClustersTest {
         assertThat(strResult, not(containsString("Target:")));
         assertThat(strResult, hasLineCount(4));
 
-        var jsonNode = clusters.asJsonOutput();
-        assertTrue(jsonNode.has("source"));
-        assertTrue(jsonNode.has("target"));
-        assertEquals("TestSource", jsonNode.get("source").get("type").asText());
-        assertEquals("TestTarget", jsonNode.get("target").get("type").asText());
-        assertEquals("1.0", jsonNode.get("source").get("version").asText());
-        assertEquals("2.0", jsonNode.get("target").get("version").asText());
+        var json = clusters.asJsonOutput();
+        assertThat(json.has("source"), equalTo(true));
+        assertThat(json.has("target"), equalTo(false));
 
+        var src = json.get("source");
+        assertThat(src.get("type").asText(), equalTo("MockS3SnapshotReader"));
+        assertThat(src.get("version").asText(), equalTo("OPENSEARCH 78.0.0"));
+        assertThat(src.get("s3Repository").asText(), equalTo("s3://s3.aws.com/repo"));
     }
 
     @Test
@@ -76,13 +79,15 @@ public class ClustersTest {
         assertThat(strResult, not(containsString("Target:")));
         assertThat(strResult, hasLineCount(4));
 
-        var jsonNode = clusters.asJsonOutput();
-        assertTrue(jsonNode.has("source"));
-        assertEquals("SnapshotReader", jsonNode.get("source").get("type").asText());
-        assertEquals("1.0", jsonNode.get("source").get("version").asText());
-        assertEquals("s3://test-bucket", jsonNode.get("source").get("s3Repository").asText());
-    }
+        var json = clusters.asJsonOutput();
+        assertThat(json.has("source"), equalTo(true));
+        assertThat(json.has("target"), equalTo(false));
 
+        var src = json.get("source");
+        assertThat(src.get("type").asText(), equalTo("MockSnapshotReader"));
+        assertThat(src.get("version").asText(), equalTo("OPENSEARCH 87.0.0"));
+        assertThat(src.get("localRepository").asText(), equalTo("/tmp/snapshots"));
+    }
 
     @Test
     void testAsString_withRemoteSourceAndTarget() {
@@ -94,7 +99,6 @@ public class ClustersTest {
         var strResult = clusters.asCliOutput();
         assertThat(strResult, containsString("Clusters:"));
         assertThat(strResult, containsString("Source:"));
-        assertThat(strResult, containsString("Source:"));
         assertThat(strResult, stringContainsInOrder("Type: MockRemoteReader (OPENSEARCH 54.0.0)",
                                                  "Uri: http://remote.source",
                                                  "TLS Verification: Disabled"));
@@ -104,15 +108,18 @@ public class ClustersTest {
                                                  "TLS Verification: Enabled"));
         assertThat(strResult, hasLineCount(12));
 
-        var jsonNode = clusters.asJsonOutput();
-        assertTrue(jsonNode.has("source"));
-        assertTrue(jsonNode.has("target"));
-        assertEquals("source-host", jsonNode.get("source").get("host").asText());
-        assertEquals("9200", jsonNode.get("source").get("port").asText());
-        assertEquals("target-host", jsonNode.get("target").get("host").asText());
-        assertEquals("9201", jsonNode.get("target").get("port").asText());
-    }
+        var json = clusters.asJsonOutput();
+        assertThat(json.has("source"), equalTo(true));
+        assertThat(json.has("target"), equalTo(true));
 
+        var src = json.get("source");
+        assertThat(src.get("uri").asText(), equalTo("http://remote.source"));
+        assertThat(src.get("insecure").asBoolean(), equalTo(true));
+
+        var tgt = json.get("target");
+        assertThat(tgt.get("uri").asText(), equalTo("http://remote.target"));
+        assertThat(tgt.get("insecure").asBoolean(), equalTo(false));
+    }
 
     private ClusterReader mockS3SnapshotReaderOS78() {
         var clusterReader = mock(ClusterSnapshotReader.class);
