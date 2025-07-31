@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -46,18 +45,21 @@ public class DocumentReindexer {
 
     public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
         // Create custom scheduler for transformations with hook for threadSafeTransformer closing
-        AtomicInteger id = new AtomicInteger();
         int transformationParallelizationFactor = Math.max(Runtime.getRuntime().availableProcessors(), 1);
         var transformationScheduler = Schedulers.newBoundedElastic(
             transformationParallelizationFactor,
             Integer.MAX_VALUE,
-            r -> new Thread(() -> {
-                try {
-                    r.run();
-                } finally {
-                    threadSafeTransformer.close();
-                }
-            }, "transformationThread-" + id.incrementAndGet()),
+            r -> {
+                log.info("Creating thread for transformation");
+                return new Thread(() -> {
+                    try {
+                        r.run();
+                    } finally {
+                        log.info("Closing thread for transformation");
+                        threadSafeTransformer.close();
+                    }
+                }, "transformationThread");
+            },
             60 // shutdown threads after N seconds of inactivity
             );
         var rfsDocs = documentStream
