@@ -646,6 +646,10 @@ public class RfsMigrateDocuments {
             scopedWorkCoordinator,
             rootDocumentContext
         );
+        log.atInfo()
+            .setMessage("Confirmed shard preparation complete for snapshot {}")
+            .addArgument(snapshotName)
+            .log();
         if (!workCoordinator.workItemsNotYetComplete(
             rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
         )) {
@@ -653,7 +657,12 @@ public class RfsMigrateDocuments {
         }
         BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
             var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+            log.atInfo()
+                .setMessage("Shard size for index {} shard {}: {} bytes")
+                .addArgument(name)
+                .addArgument(shard)
+                .addArgument(shardMetadata.getTotalSizeBytes())
+                .log();
             if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
                 throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
             }
