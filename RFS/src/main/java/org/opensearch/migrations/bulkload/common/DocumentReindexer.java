@@ -2,8 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -47,28 +45,28 @@ public class DocumentReindexer {
     }
 
     public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
-        // Create executor with hook for threadSafeTransformer cleaner
+        // Create custom scheduler for transformations with hook for threadSafeTransformer closing
         AtomicInteger id = new AtomicInteger();
-        int transformationParallelizationFactor = Runtime.getRuntime().availableProcessors();
-        ExecutorService executor = Executors.newFixedThreadPool(transformationParallelizationFactor, r -> {
-            int threadNum = id.incrementAndGet();
-            return new Thread(() -> {
+        int transformationParallelizationFactor = Math.max(Runtime.getRuntime().availableProcessors(), 1);
+        var transformationScheduler = Schedulers.newBoundedElastic(
+            transformationParallelizationFactor,
+            Integer.MAX_VALUE,
+            r -> new Thread(() -> {
                 try {
                     r.run();
                 } finally {
                     threadSafeTransformer.close();
                 }
-            }, "DocumentBulkAggregator-" + threadNum);
-        });
-        Scheduler scheduler = Schedulers.fromExecutor(executor);
+            }, "transformationThread-" + id.incrementAndGet()),
+            60 // shutdown threads after N seconds of inactivity
+            );
         var rfsDocs = documentStream
-            .publishOn(scheduler, 1)
+            .publishOn(transformationScheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
             .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
             .doFinally(signalType -> {
-                scheduler.dispose();
-                executor.shutdown();
+                transformationScheduler.dispose();
             });
     }
 
