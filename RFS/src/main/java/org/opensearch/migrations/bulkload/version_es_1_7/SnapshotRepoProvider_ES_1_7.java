@@ -33,10 +33,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public byte[] getIndexMetadataFile(String indexName, String snapshotName) {
-        Path metaFile = repo.getSnapshotRepoDataFilePath().getParent()
-                .resolve(INDICES_DIR_NAME)
-                .resolve(indexName)
-                .resolve(SNAPSHOT_PREFIX + snapshotName);
+        Path metaFile = repo.getIndexMetadataFilePath(indexName, snapshotName);
 
         try {
             return Files.readAllBytes(metaFile);
@@ -65,7 +62,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
             // ES 1x SnapMetadata file snap-<> is plain JSON
             // This file has a nested JSON structure where top level field is "snapshot"
             // and the nested field is "indices" which holds the list of indices in snapshot
-            JsonNode indicesArray = node.path("snapshot").path(INDICES_DIR_NAME);
+            JsonNode indicesArray = node.path("snapshot").path("indices");
             if (indicesArray == null || !indicesArray.isArray()) {
                 return Collections.emptyList();
             }
@@ -73,7 +70,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
                 result.add(new SimpleIndex(indexNode.asText(), snapshotName));
             }
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to read snapshot metadata for snapshot=" + snapshotName, e);
+            throw new IllegalStateException("Failed to read snap metadata for snapshot=" + snapshotName, e);
         }
 
         return result;
@@ -81,15 +78,11 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        return repo.getSnapshotRepoDataFilePath().getParent()
-                .resolve(INDICES_DIR_NAME)
-                .resolve(indexId)
-                .resolve(String.valueOf(shardId))
-                .resolve(SNAPSHOT_PREFIX + snapshotId);
+        return repo.getShardMetadataFilePath(snapshotId, indexId, shardId);
     }
 
     public Path getGlobalMetadataFile(String snapshotName) {
-        return repo.getSnapshotRepoDataFilePath().getParent().resolve(METADATA_PREFIX + snapshotName);
+        return repo.getGlobalMetadataFilePath(snapshotName);
     }
 
     @Override

@@ -48,8 +48,8 @@ public class SnapshotFileFinder_ES_1_7 extends BaseSnapshotFileFinder {
 
     @Override
     public Path getIndexMetadataFilePath(Path root, String indexName, String snapshotId) {
-        // /repo/indices/<indexName>/metadata-<snapshotId>
-        return root.resolve(INDICES_DIR_NAME).resolve(indexName).resolve(METADATA_PREFIX + snapshotId);
+        // /repo/indices/<indexName>/snap-<snapshotName>
+        return root.resolve(INDICES_DIR_NAME).resolve(indexName).resolve(SNAPSHOT_PREFIX + snapshotId);
     }
 
     @Override

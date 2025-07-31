@@ -1,6 +1,9 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -11,9 +14,10 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
-    private static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
     private SnapshotRepoData_ES_2_4 repoData;
 
@@ -41,25 +45,77 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
         ObjectMapper smileMapper = new ObjectMapper(ElasticsearchConstants_ES_2_4.SMILE_FACTORY);
+        log.atInfo()
+            .setMessage("Reading SMILE snapshot metadata file [{}] for snapshot [{}]")
+            .addArgument(snapshotMetaFile)
+            .addArgument(snapshotName)
+            .log();
 
-        JsonNode node;
         try {
-            // ES 2x snap-<>.dat file is SMILE encoded JSON
-            node = smileMapper.readTree(snapshotMetaFile.toFile());
+            byte[] allBytes = Files.readAllBytes(snapshotMetaFile);
+            // Print all bytes as hex for debugging
+            System.out.print("Snapshot metadata bytes (hex): ");
+            for (byte b : allBytes) {
+                System.out.printf("%02X ", b);
+            }
+            System.out.println();
+
+            // Find the offset of the SMILE header sequence 0x3A 0x29 0x0A (':)\n')
+            int smileStart = -1;
+            for (int i = 0; i < allBytes.length - 2; i++) {
+                if ((allBytes[i] & 0xFF) == 0x3A &&
+                        (allBytes[i + 1] & 0xFF) == 0x29 &&
+                        (allBytes[i + 2] & 0xFF) == 0x0A) {
+                    smileStart = i;
+                    break;
+                }
+            }
+            if (smileStart < 0) {
+                throw new IllegalStateException("SMILE header not found in snapshot metadata file: " + snapshotMetaFile);
+            }
+
+            try (InputStream in = new ByteArrayInputStream(allBytes, smileStart, allBytes.length - smileStart)) {
+                JsonNode rootNode = smileMapper.readTree(in);
+                log.atInfo()
+                    .setMessage("Successfully parsed SMILE snapshot metadata for [{}]")
+                    .addArgument(snapshotName)
+                    .log();
+
+                // Get the 'snapshot' node
+                JsonNode snapshotNode = rootNode.get("snapshot");
+                if (snapshotNode == null || !snapshotNode.isObject()) {
+                    log.atWarn()
+                        .setMessage("No 'snapshot' object found in snapshot metadata for [{}]")
+                        .addArgument(snapshotName)
+                        .log();
+                    return Collections.emptyList();
+                }
+
+                // Get the 'indices' array inside 'snapshot'
+                JsonNode indicesNode = snapshotNode.get("indices");
+                if (indicesNode == null || !indicesNode.isArray()) {
+                    log.atWarn()
+                            .setMessage("No 'indices' array found in snapshot metadata for [{}]")
+                            .addArgument(snapshotName)
+                            .log();
+                    return Collections.emptyList();
+                }
+
+                List<SnapshotRepo.Index> result = new ArrayList<>();
+                for (JsonNode indexNameNode : indicesNode) {
+                    String indexName = indexNameNode.asText();
+                    log.atInfo()
+                        .setMessage("Found index [{}] in snapshot [{}]")
+                        .addArgument(indexName)
+                        .addArgument(snapshotName)
+                        .log();
+                    result.add(new SimpleIndex(indexName, snapshotName));
+                }
+                return result;
+            }
         } catch (IOException e) {
-            throw new IllegalStateException("Could not parse SMILE file: " + snapshotMetaFile, e);
+            throw new IllegalStateException("Failed to read SMILE snapshot metadata for snapshot=" + snapshotName, e);
         }
-
-        JsonNode indicesNode = node.get(INDICES_DIR_NAME);
-        if (indicesNode == null || !indicesNode.isObject()) {
-            return Collections.emptyList();
-        }
-
-        List<SnapshotRepo.Index> result = new ArrayList<>();
-        indicesNode.fieldNames().forEachRemaining(indexName ->
-                result.add(new SimpleIndex(indexName, snapshotName))
-        );
-        return result;
     }
 
     @Override

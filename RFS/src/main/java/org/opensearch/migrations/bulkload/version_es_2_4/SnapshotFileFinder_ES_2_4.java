@@ -7,6 +7,7 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
 
 public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
+    private static final String INDICES_DIR_NAME = "indices";
 
     // ES 2.x uses a static "index" file (not index-N)
     private static final Pattern STATIC_INDEX_PATTERN = Pattern.compile("^index$");
@@ -32,5 +33,11 @@ public class SnapshotFileFinder_ES_2_4 extends BaseSnapshotFileFinder {
     @Override
     protected int extractIndexVersion(String fileName) {
         throw new UnsupportedOperationException("ES 2.x uses a static 'index' file with no version");
+    }
+
+    @Override
+    public Path getIndexMetadataFilePath(Path root, String indexName, String snapshotId) {
+        // /repo/indices/<indexName>/meta-<snapshotName>.dat
+        return root.resolve(INDICES_DIR_NAME).resolve(indexName).resolve("meta-" + snapshotId + ".dat");
     }
 }
