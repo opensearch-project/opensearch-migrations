@@ -55,11 +55,22 @@ public class DocumentsRunner {
                 try {
                     var workAcquisitionOutcome = wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
                     timeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+                    log.atInfo()
+                        .setMessage("Acquired work acquisition outcome: {}")
+                        .addArgument(workAcquisitionOutcome)
+                        .log();
                     return workAcquisitionOutcome;
                 } catch (InterruptedException e) {
+                    log.atInfo()
+                        .setMessage("Interrupted while acquiring next work item")
+                        .log();
                     Thread.currentThread().interrupt();
                     throw Lombok.sneakyThrow(e);
                 } catch (IOException e) {
+                    log.atInfo()
+                        .setMessage("IOException while acquiring next work item: {}")
+                        .addArgument(e.toString())
+                        .log();
                     throw Lombok.sneakyThrow(e);
                 }
             }, new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
@@ -76,9 +87,20 @@ public class DocumentsRunner {
                     var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
                     var disposable = docMigrationCursors
                         .subscribeOn(finishScheduler)
-                        .doFinally(s -> finishScheduler.dispose())
+                        .doFinally(s -> {
+                            log.atTrace()
+                                .setMessage("Disposing finishScheduler for index=%s, shard=%d")
+                                .addArgument(workItem.getWorkItem().getIndexName())
+                                .addArgument(workItem.getWorkItem().getShardNumber())
+                                .log();
+                            finishScheduler.dispose();
+                        })
                         .takeLast(1)
-                        .subscribe(lastItem -> {},
+                        .subscribe(lastItem -> log.atTrace()
+                                        .setMessage("Processed last migration item for index=%s, shard=%d")
+                                        .addArgument(workItem.getWorkItem().getIndexName())
+                                        .addArgument(workItem.getWorkItem().getShardNumber())
+                                        .log(),
                             error -> log.atError()
                                     .setCause(error)
                                     .setMessage("Error prevented some batches from being processed")
