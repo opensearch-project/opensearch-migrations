@@ -2,9 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -48,28 +45,30 @@ public class DocumentReindexer {
 
     public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
         // Create executor with hook for threadSafeTransformer cleaner
-        AtomicInteger id = new AtomicInteger();
         int transformationParallelizationFactor = Runtime.getRuntime().availableProcessors();
-        ExecutorService executor = Executors.newFixedThreadPool(transformationParallelizationFactor, r -> {
-            int threadNum = id.incrementAndGet();
-            return new Thread(() -> {
+        var transformScheduler = Schedulers.newBoundedElastic(
+            transformationParallelizationFactor,
+            Integer.MAX_VALUE,
+            r -> new Thread(() -> {
                 try {
                     r.run();
                 } finally {
                     threadSafeTransformer.close();
                 }
-            }, "DocumentBulkAggregator-" + threadNum);
-        });
-        Scheduler scheduler = Schedulers.fromExecutor(executor);
+            }, "DocumentBulkAggregator"),
+            60 // TTL on threads
+        );
         var rfsDocs = documentStream
-            .publishOn(scheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
-            .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
-        return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
-            .doFinally(signalType -> {
-                scheduler.dispose();
-                executor.shutdown();
-            });
+            .doFinally(signalType -> transformScheduler.dispose())
+            .flatMapSequential(docList ->
+                Mono.<List<RfsDocument>>fromRunnable(
+                        () -> transformDocumentBatch(threadSafeTransformer, docList, indexName)
+                ).subscribeOn(transformScheduler),
+                transformationParallelizationFactor, 1 )
+            .publishOn(Schedulers.boundedElastic(), 1) // Switch off of transformScheduler to limit scope
+            .concatMapIterable(s -> s); // flatten flux
+        return this.reindexDocsInParallelBatches(rfsDocs, indexName, context);
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
