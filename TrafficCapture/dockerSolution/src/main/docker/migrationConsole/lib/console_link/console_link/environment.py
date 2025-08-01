@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from tkinter import N
 from typing import Dict, Optional
 from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
     get_metrics_source
