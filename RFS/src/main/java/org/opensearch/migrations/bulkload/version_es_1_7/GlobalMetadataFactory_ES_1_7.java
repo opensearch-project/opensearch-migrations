@@ -24,7 +24,7 @@ public class GlobalMetadataFactory_ES_1_7 implements GlobalMetadata.Factory {
     public GlobalMetadata fromRepo(String snapshotName) {
         try {
             SnapshotRepoES17 realProvider = (SnapshotRepoES17) repoDataProvider;
-            Path filePath = realProvider.getSnapshotMetadataFile(snapshotName);
+            Path filePath = realProvider.getGlobalMetadataFile(snapshotName);
             try (InputStream inputStream = Files.newInputStream(filePath)) {
                 JsonNode root = objectMapper.readTree(inputStream);
                 return fromJsonNode(root);

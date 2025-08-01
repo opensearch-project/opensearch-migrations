@@ -46,12 +46,12 @@ public class SnapshotRepo {
         List<String> getSnapshots();
     }
 
-    public static class CantParseRepoFile extends RfsException {
-        public CantParseRepoFile(String message) {
+    public static class CannotParseRepoFile extends RfsException {
+        public CannotParseRepoFile(String message) {
             super(message);
         }
 
-        public CantParseRepoFile(String message, Throwable cause) {
+        public CannotParseRepoFile(String message, Throwable cause) {
             super(message, cause);
         }
     }

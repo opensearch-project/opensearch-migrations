@@ -16,11 +16,8 @@ public final class ElasticsearchConstants_ES_2_4 {
     public static final String SOFT_DELETES_FIELD = null;
     public static final boolean SOFT_DELETES_POSSIBLE = false;
     public static final String FIELD_SETTINGS = "settings";
-    public static final String FIELD_PRIMARY_TERMS = "primary_terms";
     public static final String FIELD_MAPPINGS = "mappings";
-    public static final String FIELD_COMPRESSED = "compressed";
-    public static final String FIELD_ALIASES = "aliases";
-    public static final String FIELD_ROUTING_NUM_SHARDS = "routing_num_shards";
+    public static final String INDICES_DIR_NAME = "indices";
 
     static {
         // Taken from : https://github.com/opensearch-project/OpenSearch/blob/e41ae25b1e4ce15e2281de4f8699beea09584ec2/core/src/main/java/org/elasticsearch/common/blobstore/fs/FsBlobStore.java#L49

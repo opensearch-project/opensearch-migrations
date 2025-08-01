@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.version_es_1_7;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,12 +7,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.INDICES_DIR_NAME;
+
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
-    private static final String SNAPSHOT_PREFIX = "snapshot-";
-    private static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
     private SnapshotRepoData_ES_1_7 repoData;
 
@@ -28,27 +30,9 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
         return repoData;
     }
 
-    public List<String> listIndices() {
-        List<String> indexNames = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-        File[] children = indicesRoot.toFile().listFiles();
-        if (children != null) {
-            for (File f : children) {
-                if (f.isDirectory()) {
-                    indexNames.add(f.getName());
-                }
-            }
-        }
-        return indexNames;
-    }
-
     @Override
     public byte[] getIndexMetadataFile(String indexName, String snapshotName) {
-        Path metaFile = repo.getRepoRootDir()
-                .resolve(INDICES_DIR_NAME)
-                .resolve(indexName)
-                .resolve(SNAPSHOT_PREFIX + snapshotName);
-
+        Path metaFile = repo.getIndexMetadataFilePath(indexName, snapshotName);
         try {
             return Files.readAllBytes(metaFile);
         } catch (IOException e) {
@@ -67,49 +51,36 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        // Very similar logic as SnapshotRepoProvider_ES_2_4 but different file name
+        Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
         List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-        File[] indexDirs = indicesRoot.toFile().listFiles();
-        if (indexDirs == null) {
-            return Collections.emptyList();
-        }
-        for (File indexDir : indexDirs) {
-            if (!indexDir.isDirectory()) {
-                continue;
-            }
 
-            if (containsSnapshotFile(indexDir, snapshotName)) {
-                result.add(new SimpleIndex(indexDir.getName(), snapshotName));
+        try {
+            var node = ObjectMapperFactory.createDefaultMapper().readTree(snapshotMetaFile.toFile());
+
+            // ES 1x SnapMetadata file snap-<> is plain JSON
+            // This file has a nested JSON structure where top level field is "snapshot"
+            // and the nested field is "indices" which holds the list of indices in snapshot
+            JsonNode indicesArray = node.path("snapshot").path(INDICES_DIR_NAME);
+            if (indicesArray == null || !indicesArray.isArray()) {
+                return Collections.emptyList();
             }
+            for (JsonNode indexNode : indicesArray) {
+                result.add(new SimpleIndex(indexNode.asText(), snapshotName));
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read snap metadata for snapshot=" + snapshotName, e);
         }
+
         return result;
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        return repo.getRepoRootDir()
-                .resolve(INDICES_DIR_NAME)
-                .resolve(indexId)
-                .resolve(String.valueOf(shardId))
-                .resolve(SNAPSHOT_PREFIX + snapshotId);
+        return repo.getShardMetadataFilePath(snapshotId, indexId, shardId);
     }
 
-    public Path getSnapshotMetadataFile(String snapshotName) {
-        return repo.getRepoRootDir().resolve("metadata-" + snapshotName);
-    }
-
-    private boolean containsSnapshotFile(File dir, String snapshotName) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return false;
-        }
-        for (File f : files) {
-            if (f.getName().equals(SNAPSHOT_PREFIX + snapshotName)) {
-                return true;
-            }
-        }
-        return false;
+    public Path getGlobalMetadataFile(String snapshotName) {
+        return repo.getGlobalMetadataFilePath(snapshotName);
     }
 
     @Override

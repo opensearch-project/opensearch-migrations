@@ -400,17 +400,19 @@ public class RfsMigrateDocuments {
                 arguments.maxConnections,
                 docTransformerSupplier);
 
-            SourceRepo sourceRepo;
-            if (snapshotLocalDirPath == null) {
-                sourceRepo = S3Repo.create(
+            var finder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    arguments.sourceVersion,
+                    arguments.versionStrictness.allowLooseVersionMatches);
+
+            SourceRepo sourceRepo = (snapshotLocalDirPath == null)
+                ? S3Repo.create(
                     Paths.get(arguments.s3LocalDir),
                     new S3Uri(arguments.s3RepoUri),
                     arguments.s3Region,
-                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
-                );
-            } else {
-                sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
-            }
+                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                    finder)
+                : new FileSystemRepo(snapshotLocalDirPath, finder);
+
             var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
             var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
