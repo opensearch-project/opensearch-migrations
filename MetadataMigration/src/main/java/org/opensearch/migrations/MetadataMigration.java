@@ -131,7 +131,7 @@ public class MetadataMigration {
 
     protected void writeOutput(JsonNode output) {
         if (outputFormat.get() == OutputFormat.JSON) {
-            log.atInfo().setMessage(output.toPrettyString()).log();
+            log.atInfo().setMessage("{}").addArgument(output::toPrettyString).log();
         }
     }
 
