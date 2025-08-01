@@ -25,7 +25,7 @@ import org.apache.logging.log4j.core.appender.FileAppender;
 @Slf4j
 public class MetadataMigration {
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         new MetadataMigration().run(args);
     }
 
