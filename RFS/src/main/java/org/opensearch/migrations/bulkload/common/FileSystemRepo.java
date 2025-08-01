@@ -28,9 +28,8 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public String getRepoDetails() {
-        return String.format("FileSystemRepo [path=%s, fileFinder=%s]",
-            repoRootDir.toAbsolutePath(),
-            fileFinder.getClass().getSimpleName());
+        return String.format("FileSystemRepo [path=%s]",
+            repoRootDir.toAbsolutePath());
     }
 
     @Override

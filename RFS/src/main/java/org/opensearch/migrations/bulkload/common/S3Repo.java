@@ -107,10 +107,9 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public String getRepoDetails() {
-        return String.format("S3Repo [uri=%s, region=%s, fileFinder=%s]",
+        return String.format("S3Repo [uri=%s, region=%s]",
             s3RepoUri.uri,
-            s3Region,
-            fileFinder.getClass().getSimpleName());
+            s3Region);
     }
 
     @Override
@@ -241,7 +240,7 @@ public class S3Repo implements SourceRepo {
         try {
             response = s3Client.listObjectsV2(listRequest).join();
         } catch (CompletionException e) {
-            throw new RuntimeException("Failed to list objects in bucket " + s3RepoUri.bucketName + " with prefix " + listPrefix, e);
+            throw new CannotListObjectsInS3(s3RepoUri.bucketName, prefixKey, e);
         }
 
         if (response.contents().isEmpty()) {
@@ -264,4 +263,11 @@ public class S3Repo implements SourceRepo {
 
         return strippedKeys;
     }
+
+    public static class CannotListObjectsInS3 extends RfsException {
+        public CannotListObjectsInS3(String bucket, String prefix, Throwable cause) {
+            super("Failed to list objects in S3 bucket: " + bucket + ", prefix: " + prefix, cause);
+        }
+    }
+
 }
