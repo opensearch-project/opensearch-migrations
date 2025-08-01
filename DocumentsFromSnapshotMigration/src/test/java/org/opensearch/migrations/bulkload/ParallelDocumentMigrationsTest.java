@@ -8,6 +8,7 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -106,7 +107,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 }
                 var thrownException = Assertions.assertThrows(
                     ExecutionException.class,
-                    () -> CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get()
+                    () -> CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get(120, TimeUnit.SECONDS)
                 );
                 var numTotalRuns = workerFutures.stream().mapToInt(cf -> {
                     try {

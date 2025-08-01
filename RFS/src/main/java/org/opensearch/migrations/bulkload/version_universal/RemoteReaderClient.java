@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
@@ -18,7 +19,7 @@ import reactor.core.publisher.Mono;
 public class RemoteReaderClient extends OpenSearchClient {
 
     public RemoteReaderClient(ConnectionContext connection) {
-        super(connection, null);
+        super(connection, null, CompressionMode.UNCOMPRESSED);
     }
 
     @Override
