@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from tkinter import N
 from typing import Dict, Optional
 from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
     get_metrics_source
@@ -79,7 +80,7 @@ class Environment:
 
         # At some point, target and replayers should be stored as pairs, but for the time being
         # we can probably assume one target cluster.
-        if 'target_cluster' in self.config and self.client_options:
+        if 'target_cluster' in self.config:
             self.target_cluster = Cluster(config=self.config["target_cluster"],
                                           client_options=self.client_options)
             logger.info(f"Target cluster initialized: {self.target_cluster.endpoint}")
@@ -96,6 +97,8 @@ class Environment:
             logger.info("No metrics source provided")
 
         if 'backfill' in self.config:
+            if self.target_cluster is None:
+                raise ValueError("target_cluster must be provided for RFS backfill")
             self.backfill = get_backfill(self.config["backfill"],
                                          target_cluster=self.target_cluster,
                                          client_options=self.client_options)
@@ -107,7 +110,9 @@ class Environment:
             self.replay = get_replayer(self.config["replay"], client_options=self.client_options)
             logger.info(f"Replay initialized: {self.replay}")
 
-        if 'snapshot' in self.config and self.source_cluster:
+        if 'snapshot' in self.config:
+            if self.source_cluster is None:
+                raise ValueError("Snapshot commands require a source cluster to be defined")
             self.snapshot = get_snapshot(self.config["snapshot"],
                                          source_cluster=self.source_cluster)
             logger.info(f"Snapshot initialized: {self.snapshot}")

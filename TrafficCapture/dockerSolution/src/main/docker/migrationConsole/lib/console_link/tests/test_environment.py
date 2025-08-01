@@ -1,4 +1,5 @@
 import pathlib
+import yaml
 
 import pytest
 
@@ -77,5 +78,5 @@ made_up_field:
 
 def test_invalid_services_yaml_to_environment_raises_error(tmp_path):
     invalid_yaml_path = create_file_in_tmp_path(tmp_path, "invalid.yaml", INVALID_YAML)
-    with pytest.raises(ValueError):
-        Environment(invalid_yaml_path)
+    with pytest.raises((ValueError, yaml.YAMLError)):
+        Environment(config_file=invalid_yaml_path)

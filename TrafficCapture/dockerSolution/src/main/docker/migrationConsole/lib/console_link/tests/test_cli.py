@@ -137,7 +137,7 @@ snapshot:
 
     result = runner.invoke(cli, ['--config-file', str(yaml_path), 'snapshot', 'create'],
                            catch_exceptions=True)
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert "Snapshot commands require a source cluster to be defined" in result.output
 
 # The following tests are mostly smoke-tests with a goal of covering every CLI command and option.

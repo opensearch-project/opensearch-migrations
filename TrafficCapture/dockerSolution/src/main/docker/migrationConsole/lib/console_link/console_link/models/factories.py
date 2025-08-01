@@ -77,12 +77,9 @@ def get_kafka(config: Dict):
     raise UnsupportedKafkaError(', '.join(config.keys()))
 
 
-def get_backfill(config: Dict, target_cluster: Optional[Cluster],
+def get_backfill(config: Dict, target_cluster: Cluster,
                  client_options: Optional[ClientOptions] = None) -> Backfill:
     if BackfillType.reindex_from_snapshot.name in config:
-        if target_cluster is None:
-            raise ValueError("target_cluster must be provided for RFS backfill")
-
         if 'docker' in config[BackfillType.reindex_from_snapshot.name]:
             logger.debug("Creating Docker RFS backfill instance")
             return DockerRFSBackfill(config=config,
