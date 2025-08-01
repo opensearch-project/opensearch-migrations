@@ -75,8 +75,8 @@ public class FileSystemRepo implements SourceRepo {
     }
 
     public static class CantOpenRepoDirectory extends RfsException {
-        public CantOpenRepoDirectory(Throwable cause) {
-            super("Couldn't open the repo directory for some reason", cause);
+        public CantOpenRepoDirectory(Path repoRootDir, Throwable cause) {
+            super("Failed to open repository directory: " + repoRootDir.toAbsolutePath(), cause);
         }
     }
 
@@ -87,7 +87,7 @@ public class FileSystemRepo implements SourceRepo {
                     .map(path -> path.getFileName().toString())
                     .toList();
         } catch (IOException e) {
-            throw new CantOpenRepoDirectory(e);
+            throw new CantOpenRepoDirectory(repoRootDir, e);
         }
     }
 }

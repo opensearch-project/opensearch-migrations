@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -17,6 +18,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
@@ -222,29 +224,37 @@ public class S3Repo implements SourceRepo {
 
     protected List<String> listFilesInS3Root() {
         // Normalise the repository prefix and remove trailing “/” if present
-        String prefixKey = s3RepoUri.key.endsWith("/")
-                ? s3RepoUri.key.substring(0, s3RepoUri.key.length() - 1)
-                : s3RepoUri.key;
+        String prefixKey = s3RepoUri.key;
+        if (prefixKey.endsWith("/")) {
+            prefixKey = prefixKey.substring(0, prefixKey.length() - 1);
+        }
 
         String listPrefix = prefixKey.isEmpty() ? null : prefixKey + "/";
 
-        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                .bucket(s3RepoUri.bucketName)
-                .prefix(listPrefix)   // null = list the whole bucket
-                .delimiter("/")       // keep only the top-level objects
-                .build();
+        var listRequest = ListObjectsV2Request.builder()
+            .bucket(s3RepoUri.bucketName)
+            .prefix(listPrefix)   // null = list files from whole bucket
+            .delimiter("/")       // keep only the top-level objects
+            .build();
+
+        ListObjectsV2Response response;
+        try {
+            response = s3Client.listObjectsV2(listRequest).join();
+        } catch (CompletionException e) {
+            throw new RuntimeException("Failed to list objects in bucket " + s3RepoUri.bucketName + " with prefix " + listPrefix, e);
+        }
+
+        if (response.contents().isEmpty()) {
+            throw new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, prefixKey);
+        }
 
         List<String> strippedKeys = s3Client.listObjectsV2(listRequest).join()
-                .contents().stream()
-                .map(S3Object::key)
-                .filter(key -> prefixKey.isEmpty() || key.startsWith(prefixKey + "/"))
-                .map(key -> {
-                    if (!prefixKey.isEmpty() && key.startsWith(prefixKey + "/")) {
-                        key = key.substring(prefixKey.length() + 1);
-                    }
-                    return key.startsWith("/") ? key.substring(1) : key;
-                })
-                .toList();
+            .contents().stream()
+            .map(S3Object::key)
+            .map(key -> key.substring((listPrefix == null ? 0 : listPrefix.length())))
+            .map(k -> k.startsWith("/") ? k.substring(1) : k)
+            .filter(k -> !k.isEmpty())
+            .toList();
 
         log.atDebug()
             .setMessage("From S3Repo: top-level files under {} -> {}")
