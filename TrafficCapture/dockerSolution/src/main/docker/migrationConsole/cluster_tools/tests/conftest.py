@@ -81,7 +81,7 @@ def env(request):
     temp_config_path = create_environment_config(clusters)
 
     # Create the environment
-    env = Environment(temp_config_path)
+    env = Environment(config_file=temp_config_path)
 
     yield env
 

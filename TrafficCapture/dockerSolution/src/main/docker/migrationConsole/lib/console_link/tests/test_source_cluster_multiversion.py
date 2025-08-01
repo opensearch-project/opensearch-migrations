@@ -87,7 +87,7 @@ def env_with_source_container(request):
 
     logging.basicConfig(level=logging.INFO)
 
-    env = Environment(temp_config_path)
+    env = Environment(config_file=temp_config_path)
     if version.flavor == "ELASTICSEARCH" and version.major_version == 5:
         seed_data_with_types(env.source_cluster, DOC_COUNT)
     else:

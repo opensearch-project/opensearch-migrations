@@ -98,7 +98,7 @@ def main(args=None):
     else:
         # Setup file logging for tool execution
         file_handler = setup_file_logging(args.tool)
-        env = Environment(args.config_file)
+        env = Environment(config_file=args.config_file)
         try:
             args.func(env, args)
         except Exception as e:

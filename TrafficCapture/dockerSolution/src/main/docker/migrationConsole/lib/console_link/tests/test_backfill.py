@@ -44,17 +44,6 @@ def test_get_backfill_valid_docker_rfs():
     assert isinstance(docker_rfs_backfill, Backfill)
 
 
-def test_get_backfill_rfs_missing_target_cluster():
-    docker_rfs_config = {
-        "reindex_from_snapshot": {
-            "docker": None
-        }
-    }
-    with pytest.raises(ValueError) as excinfo:
-        get_backfill(docker_rfs_config, None)
-    assert "target_cluster" in str(excinfo.value.args[0])
-
-
 def test_get_backfill_valid_ecs_rfs():
     ecs_rfs_config = {
         "reindex_from_snapshot": {

@@ -44,7 +44,7 @@ def check_env_config() -> str:
         raise FileNotFoundError(f"Environment config not found: {env_config}")
     
     try:
-        Environment(env_config)
+        Environment(config_file=env_config)
     except Exception as e:
         raise ValueError(f"Unable to load environment configuration due to issue: {e}")
 

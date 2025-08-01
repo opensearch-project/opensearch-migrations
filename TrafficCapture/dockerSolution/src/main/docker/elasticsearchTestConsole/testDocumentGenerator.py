@@ -123,7 +123,7 @@ def calculate_sleep_time(request_timestamps, target_requests_per_sec):
 
 
 def get_cluster_and_auth(config_file, cluster_type):
-    env = Environment(config_file)
+    env = Environment(config_file=config_file)
     cluster: Cluster = env.source_cluster if cluster_type == "source" else env.target_cluster
     auth = cluster._generate_auth_object()
     return cluster.endpoint, auth

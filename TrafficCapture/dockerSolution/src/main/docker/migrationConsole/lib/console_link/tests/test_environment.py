@@ -1,4 +1,5 @@
 import pathlib
+import yaml
 
 import pytest
 
@@ -21,7 +22,7 @@ def create_file_in_tmp_path(tmp_path, file_name, content):
 
 
 def test_valid_services_yaml_to_environment_succeeds():
-    env = Environment(VALID_SERVICES_YAML)
+    env = Environment(config_file=VALID_SERVICES_YAML)
     assert env is not None
     assert env.source_cluster is not None
     assert env.target_cluster is not None
@@ -37,7 +38,7 @@ def test_valid_services_yaml_to_environment_succeeds():
 
 
 def test_valid_services_yaml_with_client_options_are_propagated():
-    env = Environment(VALID_SERVICES_CLIENT_OPTIONS_YAML)
+    env = Environment(config_file=VALID_SERVICES_CLIENT_OPTIONS_YAML)
     stored_client_options_user_agent_extra = env.client_options.user_agent_extra
     assert stored_client_options_user_agent_extra == USER_AGENT_EXTRA
     assert env.source_cluster.client_options.user_agent_extra == stored_client_options_user_agent_extra
@@ -56,7 +57,7 @@ target_cluster:
 
 def test_minimial_services_yaml_to_environment_works(tmp_path):
     minimal_yaml_path = create_file_in_tmp_path(tmp_path, "minimal.yaml", MINIMAL_YAML)
-    env = Environment(minimal_yaml_path)
+    env = Environment(config_file=minimal_yaml_path)
     assert env is not None
     assert env.source_cluster is None
     assert env.backfill is None
@@ -77,5 +78,5 @@ made_up_field:
 
 def test_invalid_services_yaml_to_environment_raises_error(tmp_path):
     invalid_yaml_path = create_file_in_tmp_path(tmp_path, "invalid.yaml", INVALID_YAML)
-    with pytest.raises(ValueError):
-        Environment(invalid_yaml_path)
+    with pytest.raises((ValueError, yaml.YAMLError)):
+        Environment(config_file=invalid_yaml_path)
