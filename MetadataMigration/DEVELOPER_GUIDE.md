@@ -8,6 +8,7 @@
   - [On-Disk Snapshot](#on-disk-snapshot)
   - [Handling Auth](#handling-auth)
   - [Allowlisting the templates and indices to migrate](#allowlisting-the-templates-and-indices-to-migrate)
+  - [Output Formats](#output-formats)
 
 ## Architecture
 
@@ -81,3 +82,121 @@ In the above example, the tool will migrate the following items from the snapsho
 * The indices `Index1`, `.my_system_index`, and `logs-2023`
 * The index template `logs_template`
 * The component templates `component2` and `component7`
+
+### Output Formats
+
+You can specify the desired output format using the `--output` parameter. The tool supports two output formats:
+
+* `human-readable`: (Default) Displays results in a human-readable format with clear indentation and sections
+* `json`: Outputs results as JSON, which is useful for programmatic consumption or post-processing
+
+Example with human-readable output:
+
+```shell
+./gradlew MetadataMigration:run --args='evaluate --snapshot-name test-snapshot --file-system-repo-path ./src/test/resources --target-host http://fake-target:9200'
+```
+
+The same command with JSON output:
+
+```shell
+./gradlew MetadataMigration:run --args='evaluate --snapshot-name test-snapshot --file-system-repo-path ./src/test/resources --target-host http://fake-target:9200 --output json'
+```
+
+Output comparison:
+
+**Human-readable format**:
+```
+Starting Metadata Evaluation
+Clusters:
+   Source:
+      Type: MockRemoteReader (OPENSEARCH 54.0.0)
+      Uri: http://remote.source
+      Protocol: HTTP
+      TLS Verification: Disabled
+
+   Target:
+      Type: MockClusterWriter (OPENSEARCH 2000.0.0)
+      Uri: http://remote.target
+      Protocol: HTTP
+      TLS Verification: Enabled
+
+Migration Candidates:
+   Index Templates:
+      - it1
+      - it2
+
+   Component Templates:
+      - ct1
+      - ct2
+
+   Indexes:
+      - i1
+      - i2
+
+   Aliases:
+      - a1
+      - a2
+
+Transformations:
+   <None Found>
+
+Results:
+   0 issue(s) detected
+
+
+Consult /home/ubuntu/git/opensearch-migrations/MetadataMigration/logs/ip-172-31-18-157/metadata/metadata2025-07-31_19-44-03.log to see detailed logs for this run
+See transformations applied for this run at /home/ubuntu/git/opensearch-migrations/MetadataMigration/logs/ip-172-31-18-157/metadata/metadata2025-07-31_19-44-03-transforms.log
+```
+
+**JSON format**:
+```json
+{
+    "clusters": {
+        "source": {
+            "type": "MockRemoteReader",
+            "version": "OPENSEARCH 54.0.0",
+            "uri": "http://remote.source",
+            "protocol": "HTTP",
+            "insecure": true,
+            "compressionSupported": false,
+            "awsSpecificAuthentication": false
+        },
+        "target": {
+            "type": "MockClusterWriter",
+            "version": "OPENSEARCH 2000.0.0",
+            "uri": "http://remote.target",
+            "protocol": "HTTP",
+            "insecure": false,
+            "compressionSupported": false,
+            "awsSpecificAuthentication": false
+        }
+    },
+    "items": {
+        "dryRun": true,
+        "indexTemplates": [
+           { "name": "it1", "successful": true },
+           { "name": "it2", "successful": true }
+        ],
+        "componentTemplates": [
+           { "name": "ct1", "successful": true },
+           { "name": "ct2", "successful": true }
+        ],
+        "indexes": [
+           { "name": "i1", "successful": true },
+           { "name": "i2", "successful": true }
+        ],
+        "aliases": [
+           { "name": "a1", "successful": true },
+           { "name": "a2", "successful": true }
+        ],
+        "errors": []
+    },
+    "transformations": {
+        "transformers": []
+    },
+    "errors": [],
+    "errorCount": 0
+}
+```
+
+The JSON output is particularly useful for programmatic consumption, logging to external systems, or post-processing with tools like `jq`.

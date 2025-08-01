@@ -16,7 +16,9 @@ import org.opensearch.migrations.cluster.ClusterWriter;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
 import static org.mockito.Mockito.mock;
@@ -25,49 +27,67 @@ import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
 
 public class ClustersTest {
     @Test
-    void testAsString_empty() {
-        var clusters = Clusters.builder().build();
+    void testOutput_Empty() {
+        var clusters = new Clusters(null, null);
+        var strResult = clusters.asCliOutput();
+        assertThat(strResult, containsString("Clusters:"));
+        assertThat(strResult, not(containsString("Source:")));
+        assertThat(strResult, not(containsString("Target:")));
+        assertThat(strResult, hasLineCount(1));
 
-        var result = clusters.asCliOutput();
-
-        assertThat(result, containsString("Clusters:"));
-        assertThat(result, not(containsString("Source:")));
-        assertThat(result, not(containsString("Target:")));
-        assertThat(result, hasLineCount(1));
+        var json = clusters.asJsonOutput();
+        assertThat(json, notNullValue());
+        assertThat(json.has("source"), equalTo(false));
+        assertThat(json.has("target"), equalTo(false));
     }
 
     @Test
-    void testAsString_withS3Source() {
+    void testOutput_withS3Source() {
         var clusters = Clusters.builder()
             .source(mockS3SnapshotReaderOS78())
             .build();
 
-        var result = clusters.asCliOutput();
+        var strResult = clusters.asCliOutput();
+        assertThat(strResult, containsString("Clusters:"));
+        assertThat(strResult, containsString("Source:"));
+        assertThat(strResult, containsString("Type: MockS3SnapshotReader (OPENSEARCH 78.0.0)"));
+        assertThat(strResult, containsString("S3 repository: s3://s3.aws.com/repo"));
+        assertThat(strResult, not(containsString("Target:")));
+        assertThat(strResult, hasLineCount(4));
 
-        assertThat(result, containsString("Clusters:"));
-        assertThat(result, containsString("Source:"));
-        assertThat(result, containsString("Type: MockS3SnapshotReader (OPENSEARCH 78.0.0)"));
-        assertThat(result, containsString("S3 repository: s3://s3.aws.com/repo"));
-        assertThat(result, not(containsString("Target:")));
-        assertThat(result, hasLineCount(4));
+        var json = clusters.asJsonOutput();
+        assertThat(json.has("source"), equalTo(true));
+        assertThat(json.has("target"), equalTo(false));
+
+        var src = json.get("source");
+        assertThat(src.get("type").asText(), equalTo("MockS3SnapshotReader"));
+        assertThat(src.get("version").asText(), equalTo("OPENSEARCH 78.0.0"));
+        assertThat(src.get("s3Repository").asText(), equalTo("s3://s3.aws.com/repo"));
     }
 
     @Test
-    void testAsString_withLocalSource() {
+    void testOutput_withLocalSource() {
         var clusters = Clusters.builder()
             .source(mockLocalSnapshotReaderOS87())
             .build();
 
-        var result = clusters.asCliOutput();
+        var strResult = clusters.asCliOutput();
+        assertThat(strResult, containsString("Clusters:"));
+        assertThat(strResult, containsString("Source:"));
+        assertThat(strResult, containsString("Type: MockSnapshotReader (OPENSEARCH 87.0.0)"));
+        assertThat(strResult, containsString("Local repository: /tmp/snapshots"));
+        assertThat(strResult, not(containsString("Target:")));
+        assertThat(strResult, hasLineCount(4));
 
-        assertThat(result, containsString("Clusters:"));
-        assertThat(result, containsString("Source:"));
-        assertThat(result, containsString("Type: MockSnapshotReader (OPENSEARCH 87.0.0)"));
-        assertThat(result, containsString("Local repository: /tmp/snapshots"));
-        assertThat(result, not(containsString("Target:")));
-        assertThat(result, hasLineCount(4));
+        var json = clusters.asJsonOutput();
+        assertThat(json.has("source"), equalTo(true));
+        assertThat(json.has("target"), equalTo(false));
+
+        var src = json.get("source");
+        assertThat(src.get("type").asText(), equalTo("MockSnapshotReader"));
+        assertThat(src.get("version").asText(), equalTo("OPENSEARCH 87.0.0"));
+        assertThat(src.get("localRepository").asText(), equalTo("/tmp/snapshots"));
     }
-
 
     @Test
     void testAsString_withRemoteSourceAndTarget() {
@@ -76,19 +96,29 @@ public class ClustersTest {
             .target(mockRemoteWriterOS2000())
             .build();
 
-        var result = clusters.asCliOutput();
-
-        assertThat(result, containsString("Clusters:"));
-        assertThat(result, containsString("Source:"));
-        assertThat(result, containsString("Source:"));
-        assertThat(result, stringContainsInOrder("Type: MockRemoteReader (OPENSEARCH 54.0.0)",
+        var strResult = clusters.asCliOutput();
+        assertThat(strResult, containsString("Clusters:"));
+        assertThat(strResult, containsString("Source:"));
+        assertThat(strResult, stringContainsInOrder("Type: MockRemoteReader (OPENSEARCH 54.0.0)",
                                                  "Uri: http://remote.source",
                                                  "TLS Verification: Disabled"));
-        assertThat(result, containsString("Target:"));
-        assertThat(result, stringContainsInOrder("Type: MockClusterWriter (OPENSEARCH 2000.0.0)",
+        assertThat(strResult, containsString("Target:"));
+        assertThat(strResult, stringContainsInOrder("Type: MockClusterWriter (OPENSEARCH 2000.0.0)",
                                                  "Uri: http://remote.target",
                                                  "TLS Verification: Enabled"));
-        assertThat(result, hasLineCount(12));
+        assertThat(strResult, hasLineCount(12));
+
+        var json = clusters.asJsonOutput();
+        assertThat(json.has("source"), equalTo(true));
+        assertThat(json.has("target"), equalTo(true));
+
+        var src = json.get("source");
+        assertThat(src.get("uri").asText(), equalTo("http://remote.source"));
+        assertThat(src.get("insecure").asBoolean(), equalTo(true));
+
+        var tgt = json.get("target");
+        assertThat(tgt.get("uri").asText(), equalTo("http://remote.target"));
+        assertThat(tgt.get("insecure").asBoolean(), equalTo(false));
     }
 
     private ClusterReader mockS3SnapshotReaderOS78() {

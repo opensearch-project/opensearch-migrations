@@ -12,6 +12,8 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import com.beust.jcommander.converters.PathConverter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -29,13 +31,20 @@ public class ConnectionContext {
         HTTPS
     }
 
+    @JsonProperty("uri")
     private final URI uri;
+    @JsonProperty("protocol")
     private final Protocol protocol;
+    @JsonProperty("insecure")
     private final boolean insecure;
+    @JsonIgnore
     private final RequestTransformer requestTransformer;
+    @JsonProperty("compressionSupported")
     private final boolean compressionSupported;
+    @JsonProperty("awsSpecificAuthentication")
     private final boolean awsSpecificAuthentication;
 
+    @JsonIgnore
     private TlsCredentialsProvider tlsCredentialsProvider;
 
     private ConnectionContext(IParams params) {
