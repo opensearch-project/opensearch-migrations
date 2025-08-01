@@ -56,19 +56,35 @@ public class DocumentReindexer {
                     threadSafeTransformer.close();
                 }
             }, "DocumentBulkAggregator"),
-            60 // TTL on threads
+            60 // TTL on threads in seconds
         );
         var rfsDocs = documentStream
-            .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
+            .publishOn(Schedulers.parallel())
+
+            // Prep for transform (arbitrary sized) batches
+            .map(doc -> RfsDocument.fromLuceneDocument(doc, indexName))
+            .buffer(Math.min(100, maxDocsPerBulkRequest))
+
+            // Schedule cleanup for transform threads to occur after use (doFinally started asynchronously from bottom to top)
             .doFinally(signalType -> transformScheduler.dispose())
+
+            // transform docs on transformScheduler thread and maintain order (for correct checkpointing)
             .flatMapSequential(docList ->
-                Mono.<List<RfsDocument>>fromRunnable(
-                        () -> transformDocumentBatch(threadSafeTransformer, docList, indexName)
-                ).subscribeOn(transformScheduler),
-                transformationParallelizationFactor, 1 )
-            .publishOn(Schedulers.boundedElastic(), 1) // Switch off of transformScheduler to limit scope
-            .concatMapIterable(s -> s); // flatten flux
+                    Flux.defer(() ->
+                        Flux.fromIterable(transformDocumentBatch(threadSafeTransformer, docList))
+                    ).subscribeOn(transformScheduler),
+                transformationParallelizationFactor)
+            // Switch off of transformScheduler to limit scope for downstream consumers
+            .publishOn(Schedulers.boundedElastic(), 1);
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context);
+    }
+
+    @SneakyThrows
+    List<RfsDocument> transformDocumentBatch(IJsonTransformer transformer, List<RfsDocument> docs) {
+        if (!isNoopTransformer) {
+            return RfsDocument.transform(transformer, docs);
+        }
+        return docs;
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
@@ -85,16 +101,6 @@ public class DocumentReindexer {
             .doFinally(s -> scheduler.dispose());
     }
 
-    @SneakyThrows
-    List<RfsDocument> transformDocumentBatch(IJsonTransformer transformer, List<RfsLuceneDocument> docs, String indexName) {
-        var originalDocs = docs.stream().map(doc ->
-                        RfsDocument.fromLuceneDocument(doc, indexName))
-                .collect(Collectors.toList());
-        if (!isNoopTransformer) {
-            return RfsDocument.transform(transformer, originalDocs);
-        }
-        return originalDocs;
-    }
 
     /*
      * TODO: Update the reindexing code to rely on _index field embedded in each doc section rather than requiring it in the
