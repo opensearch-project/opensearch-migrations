@@ -10,7 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Base implementation of SnapshotFileFInder with default logic
- * based on snapshot structure supported by ES 5x to OS 2x :
+ * based on snapshot structure belonging to ES 5/6/7/8 and OS 1/2
  *
  * <pre>
  * /repo/

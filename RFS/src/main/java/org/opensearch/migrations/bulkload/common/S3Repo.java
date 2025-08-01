@@ -207,17 +207,31 @@ public class S3Repo implements SourceRepo {
     }
 
     protected S3Uri makeS3Uri(Path filePath) {
-        if (!filePath.startsWith(s3LocalDir)) {
+        Path absS3LocalDir = s3LocalDir.toAbsolutePath().normalize();
+        Path absFilePath = filePath.toAbsolutePath().normalize();
+
+        String s3LocalDirStr = absS3LocalDir.toString();
+        String filePathStr = absFilePath.toString();
+
+        if (!filePathStr.startsWith(s3LocalDirStr)) {
             throw new IllegalArgumentException("File path must be under s3LocalDir: " + filePath);
         }
-        Path relativePath = s3LocalDir.relativize(filePath);
+
+        String relativePathStr = filePathStr.substring(s3LocalDirStr.length());
+        if (relativePathStr.startsWith(java.io.File.separator)) {
+            relativePathStr = relativePathStr.substring(1);
+        }
+
+        relativePathStr = relativePathStr.replace('\\', '/');
+
         String baseUri = s3RepoUri.uri.endsWith("/")
             ? s3RepoUri.uri.substring(0, s3RepoUri.uri.length() - 1)
             : s3RepoUri.uri;
-        String relativePathStr = relativePath.toString().replace('\\', '/');
+
         String fullUri = relativePathStr.isEmpty()
             ? baseUri
             : baseUri + "/" + relativePathStr;
+
         return new S3Uri(fullUri);
     }
 
@@ -247,8 +261,7 @@ public class S3Repo implements SourceRepo {
             throw new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, prefixKey);
         }
 
-        List<String> strippedKeys = s3Client.listObjectsV2(listRequest).join()
-            .contents().stream()
+        List<String> strippedKeys = response.contents().stream()
             .map(S3Object::key)
             .map(key -> key.substring((listPrefix == null ? 0 : listPrefix.length())))
             .map(k -> k.startsWith("/") ? k.substring(1) : k)
