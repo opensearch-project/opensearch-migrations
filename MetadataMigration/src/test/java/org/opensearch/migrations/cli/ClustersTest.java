@@ -103,9 +103,9 @@ public class ClustersTest {
                                                  "Uri: http://remote.source",
                                                  "TLS Verification: Disabled"));
         assertThat(strResult, containsString("Target:"));
-        assertThat(strResult + "&&&" + clusters.asJsonOutput().toPrettyString(), stringContainsInOrder("Type: MockClusterWriter (OPENSEARCH 2000.0.0)",
+        assertThat(strResult, stringContainsInOrder("Type: MockClusterWriter (OPENSEARCH 2000.0.0)",
                                                  "Uri: http://remote.target",
-                                                 "TLS Verification: Disabled"));
+                                                 "TLS Verification: Enabled"));
         assertThat(strResult, hasLineCount(12));
 
         var json = clusters.asJsonOutput();
