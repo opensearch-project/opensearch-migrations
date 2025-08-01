@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -61,11 +60,6 @@ public class DocumentReindexer {
                 }
             }, "DocumentBulkAggregator-" + threadNum);
         });
-        if (executor instanceof ThreadPoolExecutor) {
-            var executorAsTheadPoolExecutor = (ThreadPoolExecutor) executor;
-            log.atInfo().setMessage("Pre-starting all cores on thread pool executor").log();
-            executorAsTheadPoolExecutor.prestartAllCoreThreads();
-        }
         Scheduler scheduler = Schedulers.fromExecutor(executor);
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
