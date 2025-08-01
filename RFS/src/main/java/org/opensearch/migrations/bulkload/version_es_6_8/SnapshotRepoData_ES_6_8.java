@@ -65,7 +65,7 @@ public class SnapshotRepoData_ES_6_8 {
     public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
         Path file = repo.getSnapshotRepoDataFilePath();
         if (file == null) {
-            throw new CannotParseRepoFile("No index file found in " + repo.getSnapshotRepoDataFilePath().getParent());
+            throw new CannotParseRepoFile("No index file found in " + repo.getRepoDetails());
         }
         return fromRepoFile(file);
     }

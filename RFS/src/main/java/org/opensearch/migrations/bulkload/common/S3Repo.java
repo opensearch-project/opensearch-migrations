@@ -30,15 +30,14 @@ public class S3Repo implements SourceRepo {
     private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
     public static final String INDICES_PREFIX_STR = "indices/";
-
+    private final Path s3LocalDir;
+    private final S3AsyncClient s3Client;
+    private final String s3Region;
     private final SnapshotFileFinder fileFinder;
 
-    private final Path s3LocalDir;
     @Getter
     @ToString.Include
     private final S3Uri s3RepoUri;
-    private final String s3Region;
-    private final S3AsyncClient s3Client;
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {
         try {
@@ -102,6 +101,14 @@ public class S3Repo implements SourceRepo {
     @Override
     public Path getRepoRootDir() {
         return s3LocalDir;
+    }
+
+    @Override
+    public String getRepoDetails() {
+        return String.format("S3Repo [uri=%s, region=%s, fileFinder=%s]",
+            s3RepoUri.uri,
+            s3Region,
+            fileFinder.getClass().getSimpleName());
     }
 
     @Override
