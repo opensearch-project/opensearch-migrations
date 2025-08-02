@@ -1,0 +1,163 @@
+import { z } from 'zod';
+import {defineParam, defineRequiredParam, InputParametersRecord} from '@/schemas/parameterSchemas'
+import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
+import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
+import {getKeyAndValue} from "@/utils";
+import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
+
+
+const test = new TemplateBuilder({a: true}, {b: 2})
+    .addOptional("prefix", (s=> ""), "no desc" )
+    .addOptional("n2", (s=> s.currentScope.prefix.defaultValue), "no desc" )
+    .getFullTemplateScope();
+
+export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
+    .addParams(CommonWorkflowParameters)
+        // .addParams({foo: defineParam({ defaultValue: "foo" }),})
+    .addTemplate("init", t=> t
+        // .addOptional("prefix", (s=> ""+s.context.workflowParameters.etcdUser.defaultValue), "no desc" )
+        .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
+        // .addRequired("bad", z.string())
+        // .addSteps("init", sb => sb
+            //     //.getSigScope().inputs.main
+            //     .addStep(/**/))
+    )
+    // .addTemplate("init", t => t
+    //     .addOptional("t", c => c.context.templates.init.input.next)
+    //     // .addOptional("t2", c => c.context.workflowParameters.etcdUser)
+    // )
+    .getFullScope();
+// .
+// .add(s=> ({}))
+// .add(s => ({ "params": CommonWorkflowParameters}))
+//
+// .addParams(CommonWorkflowParameters)
+// .
+//.build();
+;
+
+export const FullMigration = WFBuilder.create("FullMigration")
+    .addParams(CommonWorkflowParameters)
+    .addTemplate("main", t=> t
+            .addRequired("sourceMigrationConfigs",
+                SNAPSHOT_MIGRATION_CONFIG,
+                "List of server configurations to direct migrated traffic toward")
+        .addRequired("targets", z.array(CLUSTER_CONFIG),
+                     "List of server configurations to direct migrated traffic toward")
+        .addOptional("imageParams",
+            scope =>
+                Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
+                        .flatMap((k) => [
+                            [`${k}Image`, ""],
+                            [`${k}ImagePullPolicy`, ""]
+                        ])
+                ),
+            "OCI image locations and pull policies for required images")
+//         .addSteps("init", b => b
+// //            .addStep("name", s => callTemplate(s..., args...), s => whenConditionEval, s => withItemsPuller...)
+//         )
+// //        .addOutput("name", stepsSignatures => ...)
+
+    )
+    .addTemplate("main2", t => t
+        //.addSteps("cleanup", b=>b)
+    )
+    .getFullScope();
+
+;
+//
+// export class FullMigration extends OuterWorkflowTemplateScope {
+//     // build() {
+//     //     return super.build({
+//     //         name: "fullMigration",
+//     //         serviceAccountName: "workflow-service-account",
+//     //         workflowParameters: CommonWorkflowParameters
+//     //     });
+//     // }
+//
+//     static get main() : StepsInterface {
+//         return new (class {
+//             readonly inputs = {
+//                 sourceMigrationConfigs: defineRequiredParam({
+//                     type: SNAPSHOT_MIGRATION_CONFIG,
+//                     description: "List of server configurations to direct migrated traffic toward",
+//                 }),
+//                 targets: defineRequiredParam({
+//                     type: z.array(CLUSTER_CONFIG),
+//                     description: "List of server configurations to direct migrated traffic toward"
+//                 }),
+//                 imageParams: defineParam({
+//                     defaultValue:
+//                         Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
+//                             .flatMap((k) => [
+//                                 [`${k}Image`, ""],
+//                                 [`${k}ImagePullPolicy`, ""]
+//                             ])
+//                         ),
+//                     description: "OCI image locations and pull policies for required images"
+//                 })
+//             };
+//
+//             readonly steps = stepsList((() => {
+//                 const parentInputs = this.inputs;
+//                 return new (class {
+//                     init = callTemplate(TargetLatchHelpers, "init", {
+//                         prefix: ""
+//                     });
+//                     mainThing = callTemplate(FullMigration, "singleSourceMigration",
+//                         {
+//                             // sourceConfig: this.inputs.sourceMigrationConfigs,
+//                             // targetCluster: this.inputs.targets,
+//                             // Can reference init step outputs:
+//                             // initData: this.init.templateRef.value.outputs.abc,
+//                             // dummy: "custom-migration-name"
+//                             required: "aaaa" + parentInputs.sourceMigrationConfigs // TODO - figure out how to get inside the object
+//                         });
+//                     cleanup = {
+//                         templateRef: getKeyAndValue(TargetLatchHelpers, "cleanup"),
+//                         arguments: {
+//                             parameters: {
+//                                 // Can reference previous step outputs:
+//                                 // initData: this.init.templateRef.value.outputs.abc,
+//                                 // migrationId: this.mainThing.templateRef.value.outputs.migrationId
+//                                 required: "aaaa" + parentInputs.sourceMigrationConfigs // TODO - figure out how to get inside the object
+//                             }
+//                         }
+//                     } as WorkflowTask<any, any>;
+//                 })();
+//             })());
+//
+//             readonly outputs = {
+//                 // foo: this.inputs.sourceMigrationConfigs,
+//                 // bar: this.steps.init.templateRef.value.outputs.a,
+//                 // migrationResult: this.steps.mainThing.templateRef.value.outputs.migrationId,
+//                 // cleanupStatus: this.steps.cleanup.templateRef.value.outputs.status
+//             };
+//         })();
+//     }
+//
+//     static get singleSourceMigration() {
+//         //const s = this.main.steps.mainThing.arguments?.parameters;
+//         return new (class {
+//             inputs = {
+//                 // sourceConfig: defineRequiredParam({
+//                 //     type: SNAPSHOT_MIGRATION_CONFIG,
+//                 //     description: "Source migration configuration"
+//                 // }),
+//                 // targetCluster: defineRequiredParam({
+//                 //     type: CLUSTER_CONFIG,
+//                 //     description: "Target cluster configuration"
+//                 // }),
+//                 dummy: defineParam({
+//                     defaultValue: "default-migration",
+//                     description: "Name for this migration"
+//                 }),
+//                 required: defineRequiredParam({type: z.string()})
+//             };
+//             outputs = {
+//                 migrationId: { type: z.string(), description: "Generated migration ID" },
+//                 status: { type: z.string(), description: "Migration status" }
+//             };
+//         })();
+//     }
+// }
