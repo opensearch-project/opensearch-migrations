@@ -95,10 +95,13 @@ public class DocumentReindexer {
 
         return bulkDocsBatches
             .limitRate(bulkDocsToBuffer, 1) // Bulk Doc Buffer, Keep Full
+            // do finally started async bottom to top
+            .doFinally(s -> scheduler.dispose())
             .publishOn(scheduler, 1) // Switch scheduler
             .flatMapSequential(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
                 maxConcurrentWorkItems)
-            .doFinally(s -> scheduler.dispose());
+            .publishOn(Schedulers.boundedElastic(), 1); // Switch Scheduler afterwards to limit scope of DocumentBatchReindexer
+
     }
 
 

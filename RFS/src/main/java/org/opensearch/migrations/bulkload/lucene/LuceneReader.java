@@ -15,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
@@ -35,16 +34,13 @@ public class LuceneReader {
             .log();
 
         // Create shared scheduler for i/o bound document reading
-        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
             .concatMapDelayError(c -> readDocsFromSegment(c,
                     startDocId,
-                    sharedSegmentReaderScheduler,
                     maxDocumentsToReadAtOnce,
                     reader.getIndexDirectoryPath())
             )
-            .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
-            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+            .subscribeOn(Schedulers.boundedElastic()); // Scheduler to read documents on
     }
 
     /**
@@ -95,7 +91,7 @@ public class LuceneReader {
         return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
-    static Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
+    static Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 int concurrency, Path indexDirectoryPath) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = segmentReader.getLiveDocs();
@@ -140,9 +136,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(scheduler),
-                        concurrency, 1)
-                .subscribeOn(scheduler);
+                }), concurrency, 1);
     }
 
     static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
