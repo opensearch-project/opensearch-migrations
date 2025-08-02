@@ -110,8 +110,10 @@ public class DocumentsRunner {
                                 break; // success
                             } catch (InterruptedException e) {
                                 log.warn("Interrupted while waiting, but continuing.");
-                                // DO NOT call Thread.currentThread().interrupt(); if you want to ignore it
-                                // The thread will continue as if it wasn't interrupted
+                                Thread.currentThread().interrupt();
+                                // intentionally set interrupt false to re-await for latch
+                                var wasInterrupted = Thread.interrupted();
+                                assert wasInterrupted : "Expected previous state was interrupted";
                             }
                         }
                         long duration = System.currentTimeMillis() - start;
