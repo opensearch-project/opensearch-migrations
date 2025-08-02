@@ -23,6 +23,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -431,7 +432,8 @@ public abstract class OpenSearchClient {
             RestClient.addGzipRequestHeaders(additionalHeaders);
             RestClient.addGzipResponseHeaders(additionalHeaders);
         }
-        return client.postAsync(targetPath, body, additionalHeaders, context)
+
+        return Mono.defer(() -> client.postAsync(targetPath, body, additionalHeaders, context)
             .flatMap(response -> {
                 var resp =
                     new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
@@ -451,24 +453,33 @@ public abstract class OpenSearchClient {
                     .addArgument(docsMap::size)
                     .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
                     .log();
-                return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
-        })
+                return Mono.error(new BulkOperationFailed(resp.getFailureMessage(), resp));
+        }))
         .retryWhen(getBulkRetryStrategy())
-        .doOnError(error -> {
-            if (!docsMap.isEmpty()) {
-                failedRequestsLogger.logBulkFailure(
-                    indexName,
-                    docsMap::size,
-                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
-                    error
-                );
-            } else {
+        .onErrorMap(error -> {
+            var underlyingError = error.getCause();
+            if (underlyingError instanceof BulkOperationFailed) {
+                var underlyingBulkError = (BulkOperationFailed) underlyingError;
+                if (!docsMap.isEmpty()) {
+                    failedRequestsLogger.logBulkFailure(
+                        indexName,
+                        docsMap::size,
+                        () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                        underlyingBulkError
+                    );
+                    return underlyingError;
+                }
                 log.atError()
-                    .setCause(error)
+                    .setCause(underlyingBulkError)
                     .setMessage("Unexpected empty document map for bulk request on index {}")
                     .addArgument(indexName)
                     .log();
             }
+            log.atError()
+                .setMessage("Unexpected error during bulk request for index {}")
+                .addArgument(indexName)
+                .setCause(error).log();
+            return error;
         });
     }
 
@@ -518,12 +529,25 @@ public abstract class OpenSearchClient {
         }
     }
 
+    public static class BulkOperationFailed extends OperationFailed {
+        public BulkOperationFailed(String message, BulkResponse response) {
+            super("Bulk operation failed with message: "
+                + message + " and status: " + response.statusCode, response);
+        }
+
+        @Override
+        public BulkResponse getResponse() {
+            return (BulkResponse) response;
+        }
+    }
+
+
     public static class OperationFailed extends RuntimeException {
-        public final transient HttpResponse response;
+        @Getter
+        protected final transient HttpResponse response;
 
         public OperationFailed(String message, HttpResponse response) {
-            super(message +"\nBody:\n" + response);
-
+            super(message + "\nBody:\n" + response);
             this.response = response;
         }
     }
@@ -532,5 +556,4 @@ public abstract class OpenSearchClient {
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code " + response.statusCode, response);
         }
-    }
-}
+    }}

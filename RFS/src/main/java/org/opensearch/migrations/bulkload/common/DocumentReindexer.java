@@ -128,6 +128,8 @@ public class DocumentReindexer {
                 .addArgument(batchId)
                 .addArgument(error::getMessage)
                 .log())
+            .onErrorResume(OpenSearchClient.BulkOperationFailed.class, error -> Mono.just(error.getResponse())
+            )
             .map(ignoredResponse -> new WorkItemCursor(lastDoc.progressCheckpointNum));
     }
 

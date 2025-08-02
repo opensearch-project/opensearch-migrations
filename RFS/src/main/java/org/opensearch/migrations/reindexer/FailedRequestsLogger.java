@@ -22,7 +22,7 @@ public class FailedRequestsLogger {
         var responseBody = Optional.ofNullable(rootCause)
             .filter(OperationFailed.class::isInstance)
             .map(OperationFailed.class::cast)
-            .map(opFailed -> opFailed.response)
+            .map(OperationFailed::getResponse)
             .map(response -> response.body);
 
         if (responseBody.isPresent()) {
