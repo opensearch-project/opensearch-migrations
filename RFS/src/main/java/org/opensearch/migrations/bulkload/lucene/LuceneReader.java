@@ -117,7 +117,7 @@ public class LuceneReader {
                 .log();
 
         return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)
-                .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
+                .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {
                             // Get document, returns null to skip malformed docs
@@ -136,7 +136,8 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }), concurrency, 1);
+                }).subscribeOn(Schedulers.boundedElastic())
+                    , concurrency, 1);
     }
 
     static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
