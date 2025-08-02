@@ -100,20 +100,24 @@ public class DocumentsRunner {
                     // before sending requests prior to the lease expiration allowing
                     // the in-flight requests to be finished before creating the successor items.
                     cancellationTriggerConsumer.accept(disposable::dispose);
-                    try {
-                        log.info("Waiting on latch for index={}, shard={}...", 
+                        log.info("Waiting on latch for index={}, shard={}...",
                                     workItem.getWorkItem().getIndexName(), 
                                     workItem.getWorkItem().getShardNumber());
                         long start = System.currentTimeMillis();
-                        latch.await();
+                        while (true) {
+                            try {
+                                latch.await();
+                                break; // success
+                            } catch (InterruptedException e) {
+                                log.warn("Interrupted while waiting, but continuing.");
+                                // DO NOT call Thread.currentThread().interrupt(); if you want to ignore it
+                                // The thread will continue as if it wasn't interrupted
+                            }
+                        }
                         long duration = System.currentTimeMillis() - start;
                         log.info("Latch released after {} ms for index={}, shard={}",
                                     duration, workItem.getWorkItem().getIndexName(), workItem.getWorkItem().getShardNumber());
                         return CompletionStatus.WORK_COMPLETED;
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw Lombok.sneakyThrow(e);
-                    }
                 }
 
                 @Override
