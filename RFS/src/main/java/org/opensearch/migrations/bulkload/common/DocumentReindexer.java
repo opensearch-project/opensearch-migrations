@@ -52,23 +52,26 @@ public class DocumentReindexer {
                 try {
                     r.run();
                 } finally {
+                    log.atInfo().log("Starting close of thread.");
                     threadSafeTransformer.close();
+                    log.atInfo().log("Finish close of thread transformer.");
                 }
             }, "DocumentBulkAggregator"),
             60 // TTL on threads in seconds
+//            true
         );
         var rfsDocs = documentStream
-            .publishOn(Schedulers.parallel())
+            .publishOn(Schedulers.boundedElastic())
 
             // Prep for transform (arbitrary sized) batches
             .map(doc -> RfsDocument.fromLuceneDocument(doc, indexName))
             .buffer(Math.min(100, maxDocsPerBulkRequest))
 
             // Schedule cleanup for transform threads to occur after use (doFinally started asynchronously from bottom to top)
-            .doFinally(signalType -> {
-                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
-                transformScheduler.dispose();
-            })
+//            .doFinally(signalType -> {
+//                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
+//                transformScheduler.dispose();
+//            })
 
             // transform docs on transformScheduler thread and maintain order (for correct checkpointing)
             .flatMapSequential(docList ->
@@ -90,24 +93,16 @@ public class DocumentReindexer {
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
-        // Use parallel scheduler for send subscription due on non-blocking io client
-        var scheduler = Schedulers.newParallel("DocumentBatchReindexer");
         var bulkDocsBatches = batchDocsBySizeOrCount(docs);
         var bulkDocsToBuffer = 50; // Arbitrary, takes up 500MB at default settings
-
         return bulkDocsBatches
             .limitRate(bulkDocsToBuffer, 1) // Bulk Doc Buffer, Keep Full
-            // do finally started async bottom to top
-            .doFinally(s -> {
-                log.atInfo().setMessage("Starting dispose of document batch reindexer.").log();
-                scheduler.dispose();
-            })
-            .publishOn(scheduler, 1) // Switch scheduler
+            // Use parallel scheduler for send subscription due on non-blocking io client
+            .publishOn(Schedulers.parallel(), 1) // Switch scheduler
             .flatMapSequential(
                 docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context),
                 maxConcurrentWorkItems, 1)
-            .publishOn(Schedulers.boundedElastic()); // Switch Scheduler afterwards to limit scope of DocumentBatchReindexer
-
+            .publishOn(Schedulers.boundedElastic()); // Switch Scheduler to reduce load on netty thread pool
     }
 
 
