@@ -51,6 +51,7 @@ public class DocumentReindexer {
             Integer.MAX_VALUE,
             r -> new Thread(() -> {
                 try {
+                    log.info("Create and use thread");
                     r.run();
                 } finally {
                     log.atInfo().log("Starting close of thread.");
@@ -59,30 +60,11 @@ public class DocumentReindexer {
                 }
             }, "DocumentBulkAggregator"),
             60 // TTL on threads in seconds
-//            true
         );
         var rfsDocs = documentStream
-            .publishOn(Schedulers.boundedElastic())
-
             // Prep for transform (arbitrary sized) batches
             .map(doc -> RfsDocument.fromLuceneDocument(doc, indexName))
             .buffer(Math.min(100, maxDocsPerBulkRequest))
-
-            // Schedule cleanup for transform threads to occur after use (doFinally started asynchronously from bottom to top)
-            .doFinally(signalType -> {
-                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
-                transformScheduler.disposeGracefully()
-                    .timeout(Duration.ofSeconds(2))
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .onErrorResume(error -> {
-                        log.atInfo()
-                            .setMessage("TransformScheduler failed to dispose gracefully")
-                            .setCause(error).log();
-                        return Mono.fromRunnable(transformScheduler::dispose);
-                    })
-                    .subscribe();
-            })
-
             // transform docs on transformScheduler thread and maintain order (for correct checkpointing)
             .flatMapSequential(docList ->
                     Flux.defer(() ->
@@ -90,7 +72,19 @@ public class DocumentReindexer {
                     ).subscribeOn(transformScheduler),
                 transformationParallelizationFactor)
             // Switch off of transformScheduler to limit scope for downstream consumers
-            .publishOn(Schedulers.boundedElastic(), 1);
+            .publishOn(Schedulers.boundedElastic(), 1)
+            .doFinally(signalType -> {
+                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
+                transformScheduler.disposeGracefully()
+                    .timeout(Duration.ofSeconds(1))
+                    .onErrorResume(error -> {
+                        log.atInfo()
+                            .setMessage("TransformScheduler failed to dispose gracefully")
+                            .setCause(error).log();
+                        return Mono.fromRunnable(transformScheduler::dispose);
+                    })
+                    .subscribe();
+            });
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context);
     }
 

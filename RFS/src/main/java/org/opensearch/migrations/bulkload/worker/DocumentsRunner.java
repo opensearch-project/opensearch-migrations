@@ -76,18 +76,22 @@ public class DocumentsRunner {
                     var disposable = docMigrationCursors
                         .subscribeOn(Schedulers.boundedElastic())
                         .takeLast(1)
+                        .doOnComplete(
+                            () -> {
+                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
+                                    .addArgument(workItem.getWorkItem().getIndexName())
+                                    .addArgument(workItem.getWorkItem().getShardNumber())
+                                    .log();
+                                latch.countDown();
+                            }
+                        )
                         .subscribe(lastItem -> {},
                             error -> log.atError()
                                     .setCause(error)
                                     .setMessage("Error prevented some batches from being processed")
                                     .log(),
-                            () ->  {
-                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
-                                        .addArgument(workItem.getWorkItem().getIndexName())
-                                        .addArgument(workItem.getWorkItem().getShardNumber())
-                                        .log();
-                                latch.countDown();
-                            });
+                            () -> {}
+                        );
                     // This allows us to cancel the subscription to stop sending new docs
                     // when the lease expires and a successor work item is made.
                     // There may be in-flight requests that are not reflected in the progress cursor
