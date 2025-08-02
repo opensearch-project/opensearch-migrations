@@ -124,7 +124,7 @@ public class DocumentReindexer {
                 .collect(Collectors.toList());
 
         return client.sendBulkRequest(indexName, bulkDocSections, context.createBulkRequest()) // Send the request
-            .doon(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
+            .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
                 .addArgument(batchId)
                 .addArgument(docsBatch::size)
                 .log())
