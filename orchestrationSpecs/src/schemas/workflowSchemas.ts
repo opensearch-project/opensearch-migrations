@@ -1,16 +1,28 @@
-import {defineParam, InputParamDef, InputParametersRecord,} from "@/schemas/parameterSchemas";
-import {Scope, ScopeFn, ExtendScope, TemplateSigEntry, DuplicateTemplateError, DuplicateParamError} from "@/schemas/workflowTypes";
+import {defineParam, InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {Scope, ScopeFn, ExtendScope, TemplateSigEntry} from "@/schemas/workflowTypes";
+import {ZodType, ZodTypeAny} from "zod";
+
+type TypescriptError<Message extends string> = {
+    readonly __error: Message;
+    readonly __never: never;
+};
 
 declare global {
-    const __UNIQUE_NAME_CHECKING__: boolean;
+    // true: worse LSP, but squigglies under the name declaration
+    // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
+    const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME__: boolean;
 }
-declare const __UNIQUE_NAME_CHECKING__: true;
+declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
-type UniqueNameConstraint<Name extends string, Scope> =
-    typeof __UNIQUE_NAME_CHECKING__ extends true
-        ? Name extends keyof Scope ? /*{ error: "Duplicate name detected" }*/ never : Name
-        : Name;  // better LSP experience!
+type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
+    typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
+        ? Name extends keyof S ? TypescriptError<`Template name '${Name}' already exists. Choose a unique name.`> : TypeWhenValid
+        : TypeWhenValid;
 
+type UniqueNameConstraintAtDeclaration<Name extends string, S> =
+    typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
+        ? Name extends keyof S ? TypescriptError<`Template name '${Name}' already exists. Choose a unique name.`> : Name
+        : Name;
 
 class ScopeBuilder<SigScope extends Scope = Scope> {
     constructor(protected readonly sigScope: SigScope) {}
@@ -76,40 +88,47 @@ export class WFBuilder<
         TB extends TemplateBuilder<any, any>,
         FullTemplate extends ReturnType<TB["getFullTemplateScope"]>
     >(
-        name: UniqueNameConstraint<Name, TemplateSigScope>,
-        fn: (tb: TemplateBuilder<{
-            workflowParameters: WorkflowInputsScope;
-            templates: TemplateSigScope;
-        }, {}>) => TB
-    ): WFBuilder<
-        MetadataScope,
-        WorkflowInputsScope,
-        ExtendScope<TemplateSigScope, { [K in Name]: TemplateSigEntry<FullTemplate> }>,
-        ExtendScope<TemplateFullScope, { [K in Name]: FullTemplate }>
+        name: UniqueNameConstraintAtDeclaration<Name, TemplateSigScope>,
+        builderFn: UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope, (tb: TemplateBuilder<{
+                workflowParameters: WorkflowInputsScope;
+                templates: TemplateSigScope;
+            }, {}>) => TB>
+    ): UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope,
+        WFBuilder<
+            MetadataScope,
+            WorkflowInputsScope,
+            ExtendScope<TemplateSigScope, { [K in Name]: (Name extends keyof TemplateSigScope ? Exclude<TemplateSigEntry<FullTemplate>, Name> : TemplateSigEntry<FullTemplate>)}>,
+            ExtendScope<TemplateFullScope, { [K in Name]: FullTemplate }>
+        >
     > {
         const templateScope = {
             workflowParameters: this.inputsScope,
             templates: this.templateSigScope
         };
 
-        const templateBuilder = fn(new TemplateBuilder(templateScope, {}));
+        // workaround type warning/breakage that I'm creating in the signature w/ `as any`
+        const fn = builderFn as (tb: TemplateBuilder<{
+            workflowParameters: WorkflowInputsScope;
+            templates: TemplateSigScope;
+        }, {}>) => TB;
+        const templateBuilder = fn(new TemplateBuilder(templateScope, {}) as any);
         const fullTemplate = templateBuilder.getFullTemplateScope();
 
         const newSig = {
-            [name]: {
+            [name as string]: {
                 input: fullTemplate.inputs,
                 output: (fullTemplate as any).outputs
             }
         } as { [K in Name]: TemplateSigEntry<FullTemplate> };
 
-        const newFull = {[name]: fullTemplate} as { [K in Name]: FullTemplate };
+        const newFull = {[name as string]: fullTemplate} as { [K in Name]: FullTemplate };
 
         return new WFBuilder(
             this.metadataScope,
             this.inputsScope,
             {...this.templateSigScope, ...newSig},
             {...this.templateFullScope, ...newFull}
-        );
+        ) as any;
     }
 
     getFullScope() {
@@ -151,45 +170,51 @@ export class TemplateBuilder<
         ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, R> }>
     > {
         const newScope = this.scopeBuilder.extendScope(s =>
-            ({ [name]: param })// as { [K in Name]: InputParamDef<T, R> }
+            ({[name]: param})// as { [K in Name]: InputParamDef<T, R> }
         );
 
         return new TemplateBuilder(this.contextualScope, newScope);
     }
 
     addOptional<T, Name extends string>(
-        name: UniqueNameConstraint<Name, InputParamsScope>,
-        defaultValueFromScopeFn: (s: { context: ContextualScope; currentScope: InputParamsScope }) => T,
+        name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
+        defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
+            (s: { context: ContextualScope; currentScope: InputParamsScope }) => T>,
         description?: string
-    ): TemplateBuilder<
-        ContextualScope,
-        ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>
-    > {
+    ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
+        TemplateBuilder<
+            ContextualScope,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>
+        >>
+    {
+        const fn = defaultValueFromScopeFn as (s: { context: ContextualScope; currentScope: InputParamsScope }) => T;
         const param = defineParam({
-            defaultValue: defaultValueFromScopeFn({
+            defaultValue: fn({
                 context: this.contextualScope,
                 currentScope: this.getTemplateSignatureScope()
             }),
             description
         });
 
-        return this.extendWithParam(name, param);
+        return this.extendWithParam(name, param) as any;
     }
 
     addRequired<Name extends string>(
-        name: UniqueNameConstraint<Name, InputParamsScope>,
-        type: any,
+        name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
+        t: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, any>,
         description?: string
-    ): TemplateBuilder<
-        ContextualScope,
-        ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> }>
-    > {
+    ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
+        TemplateBuilder<
+            ContextualScope,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> }>
+        >>
+    {
         const param: InputParamDef<any, true> = {
-            type,
+            type: t as any,
             description
         };
 
-        return this.extendWithParam(name, param);
+        return this.extendWithParam(name, param) as any;
     }
 
     getTemplateSignatureScope(): InputParamsScope {
