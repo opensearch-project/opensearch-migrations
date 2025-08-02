@@ -1,31 +1,30 @@
 import { z } from 'zod';
 import {defineParam, defineRequiredParam, InputParametersRecord} from '@/schemas/parameterSchemas'
-import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
+import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {getKeyAndValue} from "@/utils";
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 
 
-const test = new TemplateBuilder({a: true}, {b: 2})
-    .addOptional("prefix", (s=> ""), "no desc" )
-    .addOptional("n2", (s=> s.currentScope.prefix.defaultValue), "no desc" )
-    .getFullTemplateScope();
-
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
-    .addParams(CommonWorkflowParameters)
+    //.addParams(CommonWorkflowParameters)
         // .addParams({foo: defineParam({ defaultValue: "foo" }),})
-    .addTemplate("init", t=> t
-        // .addOptional("prefix", (s=> ""+s.context.workflowParameters.etcdUser.defaultValue), "no desc" )
-        .addOptional("bad", (s=> ""+s.currentScope), "no desc" )
-        // .addRequired("bad", z.string())
-        // .addSteps("init", sb => sb
-            //     //.getSigScope().inputs.main
-            //     .addStep(/**/))
+    .template("init", t=> t
+            .requiredInput("targets", z.array(CLUSTER_CONFIG))
+            .requiredInput("prefix", z.string())
+            .requiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
+            .requiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
+            .steps(sb => sb)
+
+        //     //.getSigScope().inputs.main
+        //     .addStep(/**/))
     )
-    // .addTemplate("init", t => t
-    //     .addOptional("t", c => c.context.templates.init.input.next)
-    //     // .addOptional("t2", c => c.context.workflowParameters.etcdUser)
-    // )
+    .template("cleanup", t => t
+        .requiredInput("prefix", z.string())
+        .requiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
+        .requiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
+
+    )
     .getFullScope();
 // .
 // .add(s=> ({}))
@@ -38,13 +37,13 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 
 export const FullMigration = WFBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
-    .addTemplate("main", t=> t
-            .addRequired("sourceMigrationConfigs",
+    .template("main", t=> t
+            .requiredInput("sourceMigrationConfigs",
                 SNAPSHOT_MIGRATION_CONFIG,
                 "List of server configurations to direct migrated traffic toward")
-        .addRequired("targets", z.array(CLUSTER_CONFIG),
+        .requiredInput("targets", z.array(CLUSTER_CONFIG),
                      "List of server configurations to direct migrated traffic toward")
-        .addOptional("imageParams",
+        .optionalInput("imageParams",
             scope =>
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
                         .flatMap((k) => [
@@ -59,7 +58,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
 // //        .addOutput("name", stepsSignatures => ...)
 
     )
-    .addTemplate("main2", t => t
+    .template("main2", t => t
         //.addSteps("cleanup", b=>b)
     )
     .getFullScope();

@@ -16,13 +16,18 @@ declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
 type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
-        ? Name extends keyof S ? TypescriptError<`Template name '${Name}' already exists. Choose a unique name.`> : TypeWhenValid
+        ? Name extends keyof S ? TypescriptError<`Name '${Name}' already exists within scope. Choose a unique name.`> : TypeWhenValid
         : TypeWhenValid;
 
 type UniqueNameConstraintAtDeclaration<Name extends string, S> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
-        ? Name extends keyof S ? TypescriptError<`Template name '${Name}' already exists. Choose a unique name.`> : Name
+        ? Name extends keyof S ? TypescriptError<`Name '${Name}' already exists within scope. Choose a unique name.`> : Name
         : Name;
+
+type ScopeIsEmptyConstraint<S, T> =
+    keyof S extends never
+        ? T
+        : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
 
 class ScopeBuilder<SigScope extends Scope = Scope> {
     constructor(protected readonly sigScope: SigScope) {}
@@ -83,20 +88,21 @@ export class WFBuilder<
         );
     }
 
-    addTemplate<
+    template<
         Name extends string,
-        TB extends TemplateBuilder<any, any>,
+        TB extends TemplateBuilder<any, any, any, any>,
         FullTemplate extends ReturnType<TB["getFullTemplateScope"]>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TemplateSigScope>,
         builderFn: UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope, (tb: TemplateBuilder<{
                 workflowParameters: WorkflowInputsScope;
                 templates: TemplateSigScope;
-            }, {}>) => TB>
+            }, {}, {}, {}>) => TB>
     ): UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope,
         WFBuilder<
             MetadataScope,
             WorkflowInputsScope,
+            // update the next line to use the macro
             ExtendScope<TemplateSigScope, { [K in Name]: (Name extends keyof TemplateSigScope ? Exclude<TemplateSigEntry<FullTemplate>, Name> : TemplateSigEntry<FullTemplate>)}>,
             ExtendScope<TemplateFullScope, { [K in Name]: FullTemplate }>
         >
@@ -111,7 +117,7 @@ export class WFBuilder<
             workflowParameters: WorkflowInputsScope;
             templates: TemplateSigScope;
         }, {}>) => TB;
-        const templateBuilder = fn(new TemplateBuilder(templateScope, {}) as any);
+        const templateBuilder = fn(new TemplateBuilder(templateScope, {}, {}, {}) as any);
         const fullTemplate = templateBuilder.getFullTemplateScope();
 
         const newSig = {
@@ -148,44 +154,57 @@ export class WFBuilder<
  */
 export class TemplateBuilder<
     ContextualScope extends Scope,
-    InputParamsScope extends Scope = Scope
+    BodyScope extends Scope = Scope,
+    InputParamsScope extends Scope = Scope,
+    OutputParamsScope extends Scope = Scope
 > {
-    readonly contextualScope: ContextualScope;
-    private readonly scopeBuilder: ScopeBuilder<InputParamsScope>;
+    private readonly contextualScope: ContextualScope;
+    private readonly bodyScope: BodyScope;
+    private readonly inputScopeBuilder: ScopeBuilder<InputParamsScope>;
+    private readonly outputScopeBuilder: ScopeBuilder<OutputParamsScope>;
 
-    constructor(contextualScope: ContextualScope, scope: InputParamsScope) {
+    constructor(contextualScope: ContextualScope,
+                bodyScope: BodyScope,
+                inputScope: InputParamsScope,
+                outputScope: OutputParamsScope) {
         this.contextualScope = contextualScope;
-        this.scopeBuilder = new ScopeBuilder(scope);
+        this.bodyScope = bodyScope;
+        this.inputScopeBuilder = new ScopeBuilder(inputScope);
+        this.outputScopeBuilder = new ScopeBuilder(outputScope);
     }
 
     private extendWithParam<
-        T,
         Name extends string,
-        R extends boolean
+        R extends boolean,
+        T
     >(
         name: Name,
         param: InputParamDef<T, R>
     ): TemplateBuilder<
         ContextualScope,
-        ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, R> }>
+        BodyScope,
+        ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, R> }>,
+        OutputParamsScope
     > {
-        const newScope = this.scopeBuilder.extendScope(s =>
+        const newScope = this.inputScopeBuilder.extendScope(s =>
             ({[name]: param})// as { [K in Name]: InputParamDef<T, R> }
         );
 
-        return new TemplateBuilder(this.contextualScope, newScope);
+        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScopeBuilder.getScope());
     }
 
-    addOptional<T, Name extends string>(
+    optionalInput<T, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
             (s: { context: ContextualScope; currentScope: InputParamsScope }) => T>,
         description?: string
-    ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
+    ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
             ContextualScope,
-            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>
-        >>
+            BodyScope,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
+            OutputParamsScope
+        > > >
     {
         const fn = defaultValueFromScopeFn as (s: { context: ContextualScope; currentScope: InputParamsScope }) => T;
         const param = defineParam({
@@ -199,14 +218,16 @@ export class TemplateBuilder<
         return this.extendWithParam(name, param) as any;
     }
 
-    addRequired<Name extends string>(
+    requiredInput<Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
-        t: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, any>,
+        t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, any>>,
         description?: string
     ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
             ContextualScope,
-            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> }>
+            BodyScope,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> } >,
+            OutputParamsScope
         >>
     {
         const param: InputParamDef<any, true> = {
@@ -214,28 +235,87 @@ export class TemplateBuilder<
             description
         };
 
-        return this.extendWithParam(name, param) as any;
+        return this.extendWithParam(name as any, param) as any;
+    }
+
+    steps<
+        StepsScope extends Scope,
+        SB extends StepsBuilder<ContextualScope, StepsScope>,
+        FullSteps extends ReturnType<SB["getSteps"]>
+    >(builderFn: ScopeIsEmptyConstraint<BodyScope, (
+        b: StepsBuilder<ContextualScope, {}>) => SB>
+    ): TemplateBuilder<ContextualScope, FullSteps, InputParamsScope, OutputParamsScope>
+    {
+        const fn = builderFn as (b: StepsBuilder<ContextualScope, {}>) => SB;
+        const steps = fn(new StepsBuilder(this.contextualScope, {})).getSteps();
+        return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
+    }
+
+    addDag<
+        DagScope extends Scope,
+        DB extends DagBuilder<ContextualScope, DagScope>,
+        FullDag extends ReturnType<DB["getDag"]>
+    >(builderFn: ScopeIsEmptyConstraint<BodyScope,
+        (b: DagBuilder<ContextualScope, {}>) => DB>
+    ): TemplateBuilder<ContextualScope, FullDag, InputParamsScope, OutputParamsScope>
+    {
+        const fn = builderFn as (b: DagBuilder<ContextualScope, {}>) => DB;
+        const steps = fn(new DagBuilder(this.contextualScope, {})).getDag();
+        return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
+    }
+
+    addContainer() {
+
     }
 
     getTemplateSignatureScope(): InputParamsScope {
-        return this.scopeBuilder.getScope();
+        return this.inputScopeBuilder.getScope();
     }
 
-    getFullTemplateScope(): { inputs: InputParamsScope } {
-        return { inputs: this.scopeBuilder.getScope() };
+    getFullTemplateScope(): {
+        inputs: InputParamsScope,
+        body: BodyScope
+    } {
+        return {
+            inputs: this.inputScopeBuilder.getScope(),
+            body: this.bodyScope}
+    }
+}
+
+class StepsBuilder<
+    ContextualScope extends Scope,
+    StepsScope extends Scope
+> {
+    private readonly contextualScope: ContextualScope;
+    private readonly stepsScope: StepsScope;
+
+    constructor(contextualScope: ContextualScope, stepsScope: StepsScope) {
+        this.contextualScope = contextualScope;
+        this.stepsScope = stepsScope;
+    }
+    addSteps() {}
+
+    getSteps(): { steps: StepsScope } {
+        return { steps: this.stepsScope };
     }
 }
 
 
+class DagBuilder<
+    ContextualScope extends Scope,
+    DagScope extends Scope
+> {
+    private readonly contextualScope: ContextualScope;
+    private readonly stepsScope: DagScope;
 
-export class SpecificTemplateBuilder<S extends Scope> extends ScopeBuilder<S> {
+    constructor(contextualScope: ContextualScope, stepsScope: DagScope) {
+        this.contextualScope = contextualScope;
+        this.stepsScope = stepsScope;
+    }
+    addTask() {}
 
-}
-
-export class StepsTemplateBuilder<S extends Scope>
-    extends SpecificTemplateBuilder<S> {
-    addStep() {
-        return this;
+    getDag(): { steps: DagScope } {
+        return { steps: this.stepsScope };
     }
 }
 
