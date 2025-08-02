@@ -1,6 +1,17 @@
 import {defineParam, InputParamDef, InputParametersRecord,} from "@/schemas/parameterSchemas";
 import {Scope, ScopeFn, ExtendScope, TemplateSigEntry, DuplicateTemplateError, DuplicateParamError} from "@/schemas/workflowTypes";
 
+declare global {
+    const __UNIQUE_NAME_CHECKING__: boolean;
+}
+declare const __UNIQUE_NAME_CHECKING__: true;
+
+type UniqueNameConstraint<Name extends string, Scope> =
+    typeof __UNIQUE_NAME_CHECKING__ extends true
+        ? Name extends keyof Scope ? /*{ error: "Duplicate name detected" }*/ never : Name
+        : Name;  // better LSP experience!
+
+
 class ScopeBuilder<SigScope extends Scope = Scope> {
     constructor(protected readonly sigScope: SigScope) {}
 
@@ -65,7 +76,7 @@ export class WFBuilder<
         TB extends TemplateBuilder<any, any>,
         FullTemplate extends ReturnType<TB["getFullTemplateScope"]>
     >(
-        name: Name extends keyof TemplateSigScope ? never : Name,
+        name: UniqueNameConstraint<Name, TemplateSigScope>,
         fn: (tb: TemplateBuilder<{
             workflowParameters: WorkflowInputsScope;
             templates: TemplateSigScope;
@@ -147,7 +158,7 @@ export class TemplateBuilder<
     }
 
     addOptional<T, Name extends string>(
-        name: Name extends keyof InputParamsScope ? never : Name,
+        name: UniqueNameConstraint<Name, InputParamsScope>,
         defaultValueFromScopeFn: (s: { context: ContextualScope; currentScope: InputParamsScope }) => T,
         description?: string
     ): TemplateBuilder<
@@ -165,10 +176,8 @@ export class TemplateBuilder<
         return this.extendWithParam(name, param);
     }
 
-    addRequired<
-        Name extends string & keyof any
-    >(
-        name: Name extends keyof InputParamsScope ? never : Name,
+    addRequired<Name extends string>(
+        name: UniqueNameConstraint<Name, InputParamsScope>,
         type: any,
         description?: string
     ): TemplateBuilder<
