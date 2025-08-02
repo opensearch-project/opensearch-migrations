@@ -23,6 +23,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -422,55 +423,63 @@ public abstract class OpenSearchClient {
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
-        return Mono.defer(() -> {
-            final String targetPath = getBulkRequestPath(indexName);
-            log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
-            var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
-            var additionalHeaders = new HashMap<String, List<String>>();
-            // Reduce network bandwidth by attempting request and response compression
-            if (client.supportsGzipCompression()) {
-                RestClient.addGzipRequestHeaders(additionalHeaders);
-                RestClient.addGzipResponseHeaders(additionalHeaders);
-            }
-            return client.postAsync(targetPath, body, additionalHeaders, context)
-                .flatMap(response -> {
-                    var resp =
-                        new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
-                    if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
-                        return Mono.just(resp);
-                    }
-                    log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
-                    log.atDebug().setMessage("... for request: {}").addArgument(body).log();
-                    // Remove all successful documents for the next bulk request attempt
-                    var successfulDocs = resp.getSuccessfulDocs();
-                    successfulDocs.forEach(docsMap::remove);
-                    log.atWarn()
-                        .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
-                        .addArgument(attemptCounter.incrementAndGet())
-                        .addArgument(indexName)
-                        .addArgument(successfulDocs::size)
-                        .addArgument(docsMap::size)
-                        .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
-                        .log();
-                    return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
-                });
-        })
+        final String targetPath = getBulkRequestPath(indexName);
+        log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
+        var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
+        var additionalHeaders = new HashMap<String, List<String>>();
+        // Reduce network bandwidth by attempting request and response compression
+        if (client.supportsGzipCompression()) {
+            RestClient.addGzipRequestHeaders(additionalHeaders);
+            RestClient.addGzipResponseHeaders(additionalHeaders);
+        }
+
+        return Mono.defer(() -> client.postAsync(targetPath, body, additionalHeaders, context)
+            .flatMap(response -> {
+                var resp =
+                    new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+                if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
+                    return Mono.just(resp);
+                }
+                log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
+                log.atDebug().setMessage("... for request: {}").addArgument(body).log();
+                // Remove all successful documents for the next bulk request attempt
+                var successfulDocs = resp.getSuccessfulDocs();
+                successfulDocs.forEach(docsMap::remove);
+                log.atWarn()
+                    .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
+                    .addArgument(attemptCounter.incrementAndGet())
+                    .addArgument(indexName)
+                    .addArgument(successfulDocs::size)
+                    .addArgument(docsMap::size)
+                    .addArgument(truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
+                    .log();
+                return Mono.error(new BulkOperationFailed(resp.getFailureMessage(), resp));
+        }))
         .retryWhen(getBulkRetryStrategy())
-        .doOnError(error -> {
-            if (!docsMap.isEmpty()) {
-                failedRequestsLogger.logBulkFailure(
-                    indexName,
-                    docsMap::size,
-                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
-                    error
-                );
-            } else {
+        .onErrorMap(error -> {
+            var underlyingError = error.getCause();
+            if (underlyingError instanceof BulkOperationFailed) {
+                var underlyingBulkError = (BulkOperationFailed) underlyingError;
+                if (!docsMap.isEmpty()) {
+                    failedRequestsLogger.logBulkFailure(
+                        indexName,
+                        docsMap::size,
+                        () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                        underlyingBulkError
+                    );
+                    return underlyingError;
+                }
                 log.atError()
-                    .setCause(error)
+                    .setCause(underlyingBulkError)
                     .setMessage("Unexpected empty document map for bulk request on index {}")
                     .addArgument(indexName)
                     .log();
             }
+            log.atError()
+                .setMessage("Unexpected error during bulk request for index {}")
+                .addArgument(indexName)
+                .setCause(error).log();
+            return error;
         });
     }
 
@@ -520,12 +529,25 @@ public abstract class OpenSearchClient {
         }
     }
 
+    public static class BulkOperationFailed extends OperationFailed {
+        public BulkOperationFailed(String message, BulkResponse response) {
+            super("Bulk operation failed with message: "
+                + message + " and status: " + response.statusCode, response);
+        }
+
+        @Override
+        public BulkResponse getResponse() {
+            return (BulkResponse) response;
+        }
+    }
+
+
     public static class OperationFailed extends RuntimeException {
-        public final transient HttpResponse response;
+        @Getter
+        protected final transient HttpResponse response;
 
         public OperationFailed(String message, HttpResponse response) {
-            super(message +"\nBody:\n" + response);
-
+            super(message + "\nBody:\n" + response);
             this.response = response;
         }
     }
@@ -534,5 +556,4 @@ public abstract class OpenSearchClient {
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code " + response.statusCode, response);
         }
-    }
-}
+    }}

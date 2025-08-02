@@ -211,11 +211,9 @@ class OpenSearchClientTest {
             List.of(bulkDoc),
             mock(IRfsContexts.IRequestContext.class)
         );
-        var exception = assertThrows(Exception.class, () -> responseMono.block());
+        assertThrows(OpenSearchClient.BulkOperationFailed.class, responseMono::block);
 
         // Assertions
-        assertThat(exception.getMessage(), containsString("Retries exhausted"));
-
         var maxAttempts = maxRetries + 1;
         verify(restClient, times(maxAttempts)).postAsync(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());

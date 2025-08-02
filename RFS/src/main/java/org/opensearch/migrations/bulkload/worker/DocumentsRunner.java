@@ -73,10 +73,8 @@ public class DocumentsRunner {
                     log.info("Acquired work item: {}", workItem.getWorkItem());
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
-                    var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
                     var disposable = docMigrationCursors
-                        .subscribeOn(finishScheduler)
-                        .doFinally(s -> finishScheduler.dispose())
+                        .subscribeOn(Schedulers.boundedElastic())
                         .takeLast(1)
                         .subscribe(lastItem -> {},
                             error -> log.atError()
@@ -102,20 +100,26 @@ public class DocumentsRunner {
                     // before sending requests prior to the lease expiration allowing
                     // the in-flight requests to be finished before creating the successor items.
                     cancellationTriggerConsumer.accept(disposable::dispose);
-                    try {
-                        log.info("Waiting on latch for index={}, shard={}...", 
+                        log.info("Waiting on latch for index={}, shard={}...",
                                     workItem.getWorkItem().getIndexName(), 
                                     workItem.getWorkItem().getShardNumber());
                         long start = System.currentTimeMillis();
-                        latch.await();
+                        while (true) {
+                            try {
+                                latch.await();
+                                break; // success
+                            } catch (InterruptedException e) {
+                                log.warn("Interrupted while waiting, but continuing.");
+                                Thread.currentThread().interrupt();
+                                // intentionally set interrupt false to re-await for latch
+                                var wasInterrupted = Thread.interrupted();
+                                assert wasInterrupted : "Expected previous state was interrupted";
+                            }
+                        }
                         long duration = System.currentTimeMillis() - start;
                         log.info("Latch released after {} ms for index={}, shard={}",
                                     duration, workItem.getWorkItem().getIndexName(), workItem.getWorkItem().getShardNumber());
                         return CompletionStatus.WORK_COMPLETED;
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw Lombok.sneakyThrow(e);
-                    }
                 }
 
                 @Override

@@ -84,14 +84,12 @@ public class PerformanceVerificationTest {
             List<BulkDocSection> docs = invocation.getArgument(1);
             sentDocuments.addAndGet(docs.size());
             var response = new BulkResponse(200, "OK", null, null);
-            var blockingScheduler = Schedulers.newSingle("TestWaiting");
             return Mono.fromCallable(() -> {
                     // Perform wait on separate thread to simulate nio behavior
                     pauseLatch.await();
                     return null;
-                }).subscribeOn(blockingScheduler)
-                .then(Mono.just(response))
-                .doFinally(s -> blockingScheduler.dispose());
+                }).subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(response));
         });
 
         // Create DocumentReindexer
