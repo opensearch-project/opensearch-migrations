@@ -65,7 +65,10 @@ public class DocumentReindexer {
             .buffer(Math.min(100, maxDocsPerBulkRequest))
 
             // Schedule cleanup for transform threads to occur after use (doFinally started asynchronously from bottom to top)
-            .doFinally(signalType -> transformScheduler.dispose())
+            .doFinally(signalType -> {
+                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
+                transformScheduler.dispose();
+            })
 
             // transform docs on transformScheduler thread and maintain order (for correct checkpointing)
             .flatMapSequential(docList ->
@@ -95,7 +98,10 @@ public class DocumentReindexer {
         return bulkDocsBatches
             .limitRate(bulkDocsToBuffer, 1) // Bulk Doc Buffer, Keep Full
             // do finally started async bottom to top
-            .doFinally(s -> scheduler.dispose())
+            .doFinally(s -> {
+                log.atInfo().setMessage("Starting dispose of document batch reindexer.").log();
+                scheduler.dispose();
+            })
             .publishOn(scheduler, 1) // Switch scheduler
             .flatMapSequential(
                 docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context),
@@ -118,7 +124,7 @@ public class DocumentReindexer {
                 .collect(Collectors.toList());
 
         return client.sendBulkRequest(indexName, bulkDocSections, context.createBulkRequest()) // Send the request
-            .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
+            .doon(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
                 .addArgument(batchId)
                 .addArgument(docsBatch::size)
                 .log())
