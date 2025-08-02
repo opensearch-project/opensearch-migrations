@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Predicate;
@@ -68,10 +69,19 @@ public class DocumentReindexer {
             .buffer(Math.min(100, maxDocsPerBulkRequest))
 
             // Schedule cleanup for transform threads to occur after use (doFinally started asynchronously from bottom to top)
-//            .doFinally(signalType -> {
-//                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
-//                transformScheduler.dispose();
-//            })
+            .doFinally(signalType -> {
+                log.atInfo().setMessage("Starting dispose of transformScheduler.").log();
+                transformScheduler.disposeGracefully()
+                    .timeout(Duration.ofSeconds(2))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .onErrorResume(error -> {
+                        log.atInfo()
+                            .setMessage("TransformScheduler failed to dispose gracefully")
+                            .setCause(error).log();
+                        return Mono.fromRunnable(transformScheduler::dispose);
+                    })
+                    .subscribe();
+            })
 
             // transform docs on transformScheduler thread and maintain order (for correct checkpointing)
             .flatMapSequential(docList ->
