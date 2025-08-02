@@ -16,7 +16,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
@@ -98,9 +97,10 @@ public class DocumentReindexer {
             // do finally started async bottom to top
             .doFinally(s -> scheduler.dispose())
             .publishOn(scheduler, 1) // Switch scheduler
-            .flatMapSequential(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
-                maxConcurrentWorkItems)
-            .publishOn(Schedulers.boundedElastic(), 1); // Switch Scheduler afterwards to limit scope of DocumentBatchReindexer
+            .flatMapSequential(
+                docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context),
+                maxConcurrentWorkItems, 1)
+            .publishOn(Schedulers.boundedElastic()); // Switch Scheduler afterwards to limit scope of DocumentBatchReindexer
 
     }
 
@@ -109,7 +109,7 @@ public class DocumentReindexer {
      * TODO: Update the reindexing code to rely on _index field embedded in each doc section rather than requiring it in the
      * REST path.  See: https://opensearch.atlassian.net/browse/MIGRATIONS-2232
      */
-    Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
+    Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context) {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);
         log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.progressCheckpointNum).log();
 
@@ -127,10 +127,7 @@ public class DocumentReindexer {
                 .addArgument(batchId)
                 .addArgument(error::getMessage)
                 .log())
-            // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
-            .onErrorResume(e -> Mono.empty())
-            .then(Mono.just(new WorkItemCursor(lastDoc.progressCheckpointNum))
-            .subscribeOn(scheduler));
+            .map(ignoredResponse -> new WorkItemCursor(lastDoc.progressCheckpointNum));
     }
 
     Flux<List<RfsDocument>> batchDocsBySizeOrCount(Flux<RfsDocument> docs) {
