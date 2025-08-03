@@ -16,12 +16,12 @@ declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
 type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
-        ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within scope`> : TypeWhenValid
+        ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within ${keyof S & string}`> : TypeWhenValid
         : TypeWhenValid;
 
 type UniqueNameConstraintAtDeclaration<Name extends string, S> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
-        ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within scope.`> : Name
+        ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within  ${keyof S & string}.`> : Name
         : Name;
 
 type ScopeIsEmptyConstraint<S, T> =
