@@ -7,21 +7,27 @@ import {WFBuilder} from "@/schemas/workflowSchemas";
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     //.addParams(CommonWorkflowParameters)
         // .addParams({foo: defineParam({ defaultValue: "foo" }),})
-    .template("init", t=> t
-            .requiredInput("targets", z.array(CLUSTER_CONFIG))
-            .requiredInput("prefix", z.string())
-            .requiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
-            .requiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
-            .steps(sb => sb
-                .addSingleStep("first", "thing")
+    .addTemplate("init", t=> t
+        .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
+        .addRequiredInput("prefix", z.string())
+        .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
+        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
+        .addSteps(sb => sb
+                .addSingleStep("a", "thing")
+                .addSingleStep("b", "thing")
+                .addSingleStep("c", "thing")
                 .addStepGroup(gb => gb
-                    .addStep("first", "next"))
+                    .addStep("d1", "next")
+                    //.addStep("first", "next"))
+                    .addStep("d2", gb.getStepTasks().scope.a+"")
+                    .addStep("d2e", "")
+                )
             )
     )
-    .template("cleanup", t => t
-        .requiredInput("prefix", z.string())
-        .requiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
-        .requiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
+    .addTemplate("cleanup", t => t
+        .addRequiredInput("prefix", z.string())
+        .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
+        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
 
     )
     .getFullScope();
@@ -36,11 +42,11 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 
 export const FullMigration = WFBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
-    .template("main", t=> t
-            .requiredInput("sourceMigrationConfigs",
+    .addTemplate("main", t=> t
+            .addRequiredInput("sourceMigrationConfigs",
                 SNAPSHOT_MIGRATION_CONFIG,
                 "List of server configurations to direct migrated traffic toward")
-        .requiredInput("targets", z.array(CLUSTER_CONFIG),
+        .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
                      "List of server configurations to direct migrated traffic toward")
         .optionalInput("imageParams",
             scope =>
@@ -57,7 +63,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
 // //        .addOutput("name", stepsSignatures => ...)
 
     )
-    .template("main2", t => t
+    .addTemplate("main2", t => t
         //.addSteps("cleanup", b=>b)
     )
     .getFullScope();

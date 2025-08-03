@@ -16,12 +16,12 @@ declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
 type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
-        ? Name extends keyof S ? TypescriptError<`Name '${Name}' already exists within scope. Choose a unique name.`> : TypeWhenValid
+        ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within scope`> : TypeWhenValid
         : TypeWhenValid;
 
 type UniqueNameConstraintAtDeclaration<Name extends string, S> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
-        ? Name extends keyof S ? TypescriptError<`Name '${Name}' already exists within scope. Choose a unique name.`> : Name
+        ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within scope.`> : Name
         : Name;
 
 type ScopeIsEmptyConstraint<S, T> =
@@ -88,16 +88,16 @@ export class WFBuilder<
         );
     }
 
-    template<
+    addTemplate<
         Name extends string,
         TB extends TemplateBuilder<any, any, any, any>,
         FullTemplate extends ReturnType<TB["getFullTemplateScope"]>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TemplateSigScope>,
         builderFn: UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope, (tb: TemplateBuilder<{
-                workflowParameters: WorkflowInputsScope;
-                templates: TemplateSigScope;
-            }, {}, {}, {}>) => TB>
+            workflowParameters: WorkflowInputsScope;
+            templates: TemplateSigScope;
+        }, {}, {}, {}>) => TB>
     ): UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope,
         WFBuilder<
             MetadataScope,
@@ -215,10 +215,10 @@ export class TemplateBuilder<
             description
         });
 
-        return this.extendWithParam(name, param) as any;
+        return this.extendWithParam(name as string, param) as any;
     }
 
-    requiredInput<Name extends string>(
+    addRequiredInput<Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, any>>,
         description?: string
@@ -238,7 +238,7 @@ export class TemplateBuilder<
         return this.extendWithParam(name as any, param) as any;
     }
 
-    steps<SB extends StepsBuilder<ContextualScope, any>>(
+    addSteps<SB extends StepsBuilder<ContextualScope, any>>(
         builderFn: ScopeIsEmptyConstraint<BodyScope, (
             b: StepsBuilder<ContextualScope, {}>) => SB>
     ): TemplateBuilder<
@@ -293,7 +293,7 @@ export interface StepGroup {
     steps: StepTask[];
 }
 
-interface StepTask {
+export interface StepTask {
     name: string;
     template: string;
     arguments?: {
@@ -316,31 +316,26 @@ class StepsBuilder<
         this.stepGroups = stepGroups;
     }
 
-    addStepGroup<NewStepScope extends Scope>(
-        builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => NewStepScope
+    addStepGroup<NewStepScope extends Scope,
+        GB extends StepGroupBuilder<any, any>,
+        StepsGroup extends ReturnType<GB["getStepTasks"]>>
+    (
+        builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => GB
     ): StepsBuilder<
         ContextualScope,
-        ExtendScope<StepsScope, NewStepScope>
+        ExtendScope<StepsScope, StepsGroup>
     > {
         // TODO - add the other steps into the contextual scope
-        const groupBuilder = new StepGroupBuilder(this.contextualScope);
-        const newSteps = builderFn(groupBuilder);
-
-        // for runtime/final emission
-        this.stepGroups.push({
-            steps: groupBuilder.getStepTasks()
-        });
-
-        // Update type-level scope for type checking
-        const newStepsScope = { ...this.stepsScope, ...newSteps } as ExtendScope<StepsScope, NewStepScope>;
-
-        return new StepsBuilder(this.contextualScope, newStepsScope, this.stepGroups);
+        const newSteps = builderFn(new StepGroupBuilder(this.contextualScope, this.stepsScope, []));
+        const results = newSteps.getStepTasks();
+        return new StepsBuilder(this.contextualScope, results.scope,
+            [...this.stepGroups, {steps: results.taskList}]) as any;
     }
 
     // Convenience method for single step
     addSingleStep<Name extends string, StepDef>(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        template: string,
+        template: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, string>,
         args?: { parameters?: Record<string, any> }
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
@@ -348,9 +343,10 @@ class StepsBuilder<
             ExtendScope<StepsScope, { [K in Name]: StepDef }>
         >
     > {
-        return this.addStepGroup(groupBuilder =>
-            groupBuilder.addStep(name, template, args)
-        ) as any;
+        return this.addStepGroup(groupBuilder => {
+            // addStep returns a constrained type, so we need to cast it for internal use
+            return groupBuilder.addStep(name, template, args) as any;
+        }) as any;
     }
 
     getSteps(): {
@@ -366,35 +362,48 @@ class StepsBuilder<
 
 class StepGroupBuilder<
     ContextualScope extends Scope,
-    ParentStepsScope extends Scope
+    StepsScope extends Scope
 > {
     private readonly contextualScope: ContextualScope;
+    private readonly stepsScope: StepsScope;
     private readonly stepTasks: StepTask[] = [];
 
-    constructor(contextualScope: ContextualScope) {
+    constructor(contextualScope: ContextualScope, stepsScope: StepsScope, stepTasks: StepTask[]) {
         this.contextualScope = contextualScope;
+        this.stepsScope = stepsScope;
+        this.stepTasks = stepTasks;
     }
 
-    addStep<Name extends string>(
-        name: UniqueNameConstraintAtDeclaration<Name, ParentStepsScope>,
-        template: string,
+    addStep<Name extends string, StepDef>(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        template: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, string>,
         args?: { parameters?: Record<string, any> },
         dependencies?: string[]
-    ): { [K in Name]: { name: Name; template: string } } {
+    ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+        StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, { [K in Name]: StepDef }>>>
+    {
+        // Use type assertions since constraints prevent invalid calls at compile time
+        const nameStr = name as string;
+        const templateStr = template as string;
+
         // Add to runtime structure
         this.stepTasks.push({
-            name: name as string,
-            template,
+            name: nameStr,
+            template: templateStr,
             arguments: args,
             dependencies
         });
 
-        // Return type-level representation
-        return { [name]: { name, template } } as any;
+        // Return type-level representation - use 'as any' to bypass constraint checking in implementation
+        return new StepGroupBuilder(
+            this.contextualScope,
+            { ...this.stepsScope, [nameStr]: { name: nameStr, template: templateStr } } as ExtendScope<StepsScope, { [K in Name]: StepDef }>,
+            this.stepTasks
+        ) as any;
     }
 
-    getStepTasks(): StepTask[] {
-        return this.stepTasks;
+    getStepTasks() {
+        return { scope: this.stepsScope, taskList: this.stepTasks };
     }
 }
 
