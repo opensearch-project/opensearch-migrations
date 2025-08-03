@@ -1,9 +1,7 @@
 import { z } from 'zod';
-import {defineParam, defineRequiredParam, InputParametersRecord} from '@/schemas/parameterSchemas'
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {getKeyAndValue} from "@/utils";
-import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
+import {WFBuilder} from "@/schemas/workflowSchemas";
 
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
@@ -14,10 +12,11 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
             .requiredInput("prefix", z.string())
             .requiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
             .requiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
-            .steps(sb => sb)
-
-        //     //.getSigScope().inputs.main
-        //     .addStep(/**/))
+            .steps(sb => sb
+                .addSingleStep("first", "thing")
+                .addStepGroup(gb => gb
+                    .addStep("first", "next"))
+            )
     )
     .template("cleanup", t => t
         .requiredInput("prefix", z.string())

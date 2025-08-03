@@ -1,5 +1,7 @@
 import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {Scope} from "@/schemas/workflowTypes";
+import {StepGroup} from "@/schemas/workflowSchemas";
 
 function formatParameterDefinition<P extends InputParamDef<ZodTypeAny, boolean>>(inputs : P) {
     return {
@@ -20,13 +22,22 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
     }
 }
 
-function formatTemplate(template: Record<string, any>) {
-    return {
-        inputs: formatParameters(template.inputs)
+function formatBody(body: Scope) {
+    if (body.steps == undefined) {
+        return body;
+    } else {
+        return { steps: (body.stepGroups as StepGroup[]).map(g => g.steps) };
     }
 }
 
-export function renderWorkflowTemplate(wf: Record<string, any>) {
+function formatTemplate(template: Scope) {
+    return {
+        inputs: formatParameters(template.inputs),
+        ...formatBody(template.body)
+    }
+}
+
+export function renderWorkflowTemplate(wf: Scope) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",

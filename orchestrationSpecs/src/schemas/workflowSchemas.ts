@@ -187,7 +187,7 @@ export class TemplateBuilder<
         OutputParamsScope
     > {
         const newScope = this.inputScopeBuilder.extendScope(s =>
-            ({[name]: param})// as { [K in Name]: InputParamDef<T, R> }
+            ({[name]: param})
         );
 
         return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScopeBuilder.getScope());
@@ -238,17 +238,24 @@ export class TemplateBuilder<
         return this.extendWithParam(name as any, param) as any;
     }
 
-    steps<
-        StepsScope extends Scope,
-        SB extends StepsBuilder<ContextualScope, StepsScope>,
-        FullSteps extends ReturnType<SB["getSteps"]>
-    >(builderFn: ScopeIsEmptyConstraint<BodyScope, (
-        b: StepsBuilder<ContextualScope, {}>) => SB>
-    ): TemplateBuilder<ContextualScope, FullSteps, InputParamsScope, OutputParamsScope>
+    steps<SB extends StepsBuilder<ContextualScope, any>>(
+        builderFn: ScopeIsEmptyConstraint<BodyScope, (
+            b: StepsBuilder<ContextualScope, {}>) => SB>
+    ): TemplateBuilder<
+        ContextualScope,
+        ReturnType<SB["getSteps"]>,
+        InputParamsScope,
+        OutputParamsScope
+    >
     {
         const fn = builderFn as (b: StepsBuilder<ContextualScope, {}>) => SB;
-        const steps = fn(new StepsBuilder(this.contextualScope, {})).getSteps();
-        return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
+        const steps = fn(new StepsBuilder(this.contextualScope, {}, [])).getSteps();
+        return new TemplateBuilder(
+            this.contextualScope,
+            steps,
+            this.inputScopeBuilder.getScope(),
+            this.outputScopeBuilder.getScope()
+        ) as any;
     }
 
     addDag<
@@ -282,24 +289,114 @@ export class TemplateBuilder<
     }
 }
 
+export interface StepGroup {
+    steps: StepTask[];
+}
+
+interface StepTask {
+    name: string;
+    template: string;
+    arguments?: {
+        parameters?: Record<string, any>;
+    };
+    dependencies?: string[];
+}
+
 class StepsBuilder<
     ContextualScope extends Scope,
     StepsScope extends Scope
 > {
-    private readonly contextualScope: ContextualScope;
+    readonly contextualScope: ContextualScope;
     private readonly stepsScope: StepsScope;
+    private readonly stepGroups: StepGroup[] = []; // Runtime ordering
 
-    constructor(contextualScope: ContextualScope, stepsScope: StepsScope) {
+    constructor(contextualScope: ContextualScope, stepsScope: StepsScope, stepGroups: StepGroup[]) {
         this.contextualScope = contextualScope;
         this.stepsScope = stepsScope;
+        this.stepGroups = stepGroups;
     }
-    addSteps() {}
 
-    getSteps(): { steps: StepsScope } {
-        return { steps: this.stepsScope };
+    addStepGroup<NewStepScope extends Scope>(
+        builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => NewStepScope
+    ): StepsBuilder<
+        ContextualScope,
+        ExtendScope<StepsScope, NewStepScope>
+    > {
+        // TODO - add the other steps into the contextual scope
+        const groupBuilder = new StepGroupBuilder(this.contextualScope);
+        const newSteps = builderFn(groupBuilder);
+
+        // for runtime/final emission
+        this.stepGroups.push({
+            steps: groupBuilder.getStepTasks()
+        });
+
+        // Update type-level scope for type checking
+        const newStepsScope = { ...this.stepsScope, ...newSteps } as ExtendScope<StepsScope, NewStepScope>;
+
+        return new StepsBuilder(this.contextualScope, newStepsScope, this.stepGroups);
+    }
+
+    // Convenience method for single step
+    addSingleStep<Name extends string, StepDef>(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        template: string,
+        args?: { parameters?: Record<string, any> }
+    ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+        StepsBuilder<
+            ContextualScope,
+            ExtendScope<StepsScope, { [K in Name]: StepDef }>
+        >
+    > {
+        return this.addStepGroup(groupBuilder =>
+            groupBuilder.addStep(name, template, args)
+        ) as any;
+    }
+
+    getSteps(): {
+        steps: StepsScope;
+        stepGroups: StepGroup[]; // Runtime structure for serialization
+    } {
+        return {
+            steps: this.stepsScope,
+            stepGroups: this.stepGroups
+        };
     }
 }
 
+class StepGroupBuilder<
+    ContextualScope extends Scope,
+    ParentStepsScope extends Scope
+> {
+    private readonly contextualScope: ContextualScope;
+    private readonly stepTasks: StepTask[] = [];
+
+    constructor(contextualScope: ContextualScope) {
+        this.contextualScope = contextualScope;
+    }
+
+    addStep<Name extends string>(
+        name: UniqueNameConstraintAtDeclaration<Name, ParentStepsScope>,
+        template: string,
+        args?: { parameters?: Record<string, any> },
+        dependencies?: string[]
+    ): { [K in Name]: { name: Name; template: string } } {
+        // Add to runtime structure
+        this.stepTasks.push({
+            name: name as string,
+            template,
+            arguments: args,
+            dependencies
+        });
+
+        // Return type-level representation
+        return { [name]: { name, template } } as any;
+    }
+
+    getStepTasks(): StepTask[] {
+        return this.stepTasks;
+    }
+}
 
 class DagBuilder<
     ContextualScope extends Scope,
