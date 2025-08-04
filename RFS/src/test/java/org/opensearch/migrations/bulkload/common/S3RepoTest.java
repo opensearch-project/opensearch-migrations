@@ -9,7 +9,6 @@ import java.util.concurrent.CompletableFuture;
 import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -27,7 +26,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-@Disabled
 @ExtendWith(MockitoExtension.class)
 public class S3RepoTest {
     @Mock
@@ -117,16 +115,13 @@ public class S3RepoTest {
     void GetSnapshotRepoDataFilePath_DoesNotExist() throws IOException {
         // Set up the test
         var listResponse = mock(ListObjectsV2Response.class);
-        when(listResponse.contents()).thenReturn(List.of());
-        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+        lenient().when(listResponse.contents()).thenReturn(List.of());
+        lenient().when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
                 .thenReturn(CompletableFuture.completedFuture(listResponse));
-
-        // Spy on testRepo to call real listFilesInS3Root (which calls the above)
-        TestableS3Repo testRepo = spy(new TestableS3Repo(testDir, testRepoUri, testRegion, mockS3Client, mockFileFinder));
 
         // Mock fileFinder to throw exception when asked to find the path with empty file list
         var emptyFileList = List.<String>of();
-        when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(emptyFileList)))
+        lenient().when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(emptyFileList)))
                 .thenThrow(new BaseSnapshotFileFinder.CannotFindRepoIndexFile("No matching index-N file found"));
 
         // Run the test
@@ -328,7 +323,7 @@ public class S3RepoTest {
                 S3Object.builder().key("directory/file1.txt").build(),
                 S3Object.builder().key("directory/file2.txt").build(),
                 // Adding a file outside prefix to verify filtering logic
-                S3Object.builder().key("other/file3.txt").build()
+                S3Object.builder().key("directory/foo/fooagain/file3.txt").build()
             ))
             .build();
 
@@ -344,41 +339,21 @@ public class S3RepoTest {
 
     @Test
     void getSnapshotRepoDataFilePath_WithEmptyFileName() throws IOException {
-        // Create empty file name so no file in the root prefix
-        String emptyFileName = "";
-
         // Mock listFilesInS3Root to return one file which is empty string
-        doReturn(List.of(emptyFileName)).when(testRepo).listFilesInS3Root();
+        doReturn(List.of()).when(testRepo).listFilesInS3Root();
 
-        // The expected path is just the local directory root
-        Path expectedPath = testDir.resolve(emptyFileName);
+        // Mock fileFinder to throw the expected exception because no files are found
+        when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(List.of())))
+                .thenThrow(new BaseSnapshotFileFinder.CannotFindRepoIndexFile("No matching index-N file found"));
 
-        // Mock fileFinder to return the root path for empty file name
-        when(mockFileFinder.getSnapshotRepoDataFilePath(testDir, List.of(emptyFileName)))
-                .thenReturn(expectedPath);
-
-        // Assume file does not exist locally, so fetch will attempt download
-        doReturn(false).when(testRepo).doesFileExistLocally(expectedPath);
-
-        // Stub directory creation as no-op
-        doNothing().when(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
-
-        // Run the test
-        Path filePath = testRepo.getSnapshotRepoDataFilePath();
+        // Run and assert that the S3Repo throws CannotFindSnapshotRepoRoot when no index file is found
+        CannotFindSnapshotRepoRoot thrown = assertThrows(
+                CannotFindSnapshotRepoRoot.class,
+                () -> testRepo.getSnapshotRepoDataFilePath()
+        );
 
         // Assertions
-        assertEquals(expectedPath, filePath);
-        verify(testRepo).ensureS3LocalDirectoryExists(expectedPath.getParent());
-
-        // Expected key from makeS3Uri - since empty filename, key is repo prefix itself without trailing slash
-        String expectedKey = testRepo.makeS3Uri(expectedPath).key;
-
-        // Verify that S3 client invoked with bucket and correct key for download
-        GetObjectRequest expectedRequest = GetObjectRequest.builder()
-                .bucket(testRepoUri.bucketName)
-                .key(expectedKey)
-                .build();
-
-        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
+        assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
+        assertThat(thrown.getMessage(), containsString(testRepoUri.key));
     }
 }

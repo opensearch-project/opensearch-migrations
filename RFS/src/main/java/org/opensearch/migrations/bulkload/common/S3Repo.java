@@ -261,6 +261,7 @@ public class S3Repo implements SourceRepo {
             .map(key -> key.substring((listPrefix == null ? 0 : listPrefix.length())))
             .map(k -> k.startsWith("/") ? k.substring(1) : k)
             .filter(k -> !k.isEmpty())
+            .filter(k -> !k.contains("/"))
             .toList();
 
         log.atDebug()
