@@ -48,8 +48,8 @@ public class ClusterReaderExtractor {
                 Path.of(arguments.s3LocalDirPath),
                 new S3Uri(arguments.s3RepoUri),
                 arguments.s3Region,
-                fileFinder,
-                Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
+                Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                fileFinder
             );
         } else {
             throw new ParameterException("Unable to find valid resource provider");
