@@ -125,7 +125,7 @@ public class MetadataMigration {
 
     protected void writeOutput(String humanReadableOutput) {
         if (outputFormat.get() == OutputFormat.HUMAN_READABLE) {
-            log.atInfo().setMessage(humanReadableOutput).log();
+            log.atInfo().setMessage("{}").addArgument(humanReadableOutput).log();
         }
     }
 
