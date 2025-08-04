@@ -21,6 +21,7 @@ def call(Map config = [:]) {
         options {
             timeout(time: 1, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
+            skipDefaultCheckout(true)
         }
 
         triggers {
@@ -41,10 +42,13 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
+                        sh 'sudo chown -R $(whoami) .'
+                        sh 'sudo chmod -R u+w .'
                         // If in an existing git repository, remove any additional files in git tree that are not listed in .gitignore
                         if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
                             echo 'Cleaning any existing git files in workspace'
-                            sh 'sudo --preserve-env git clean -fd'
+                            sh 'git reset --hard'
+                            sh 'git clean -fd'
                         } else {
                             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
                         }
@@ -81,7 +85,7 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/k8s') {
                             script {
-                                sh "sudo -u ec2-user ./buildDockerImagesMini.sh"
+                                sh "./buildDockerImagesMini.sh"
                             }
                         }
                     }
@@ -93,8 +97,8 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('libraries/testAutomation') {
                             script {
-                                sh "sudo -u ec2-user pipenv install --deploy"
-                                sh "sudo -u ec2-user pipenv run app --source-version=$sourceVersion --target-version=$targetVersion --skip-delete"
+                                sh "pipenv install --deploy"
+                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion --skip-delete"
                             }
                         }
                     }
@@ -106,8 +110,8 @@ def call(Map config = [:]) {
                 timeout(time: 15, unit: 'MINUTES') {
                     dir('libraries/testAutomation') {
                         script {
-                            sh "sudo -u ec2-user pipenv install --deploy"
-                            sh "sudo -u ec2-user pipenv run app --delete-only"
+                            sh "pipenv install --deploy"
+                            sh "pipenv run app --delete-only"
                         }
                     }
                 }

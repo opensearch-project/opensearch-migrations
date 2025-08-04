@@ -6,6 +6,7 @@ import java.util.List;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
+import org.opensearch.migrations.cli.Transformers;
 
 import org.apache.logging.log4j.util.Strings;
 
@@ -13,6 +14,7 @@ import org.apache.logging.log4j.util.Strings;
 public interface MigrationItemResult extends Result {
     Clusters getClusters();
     Items getItems();
+    Transformers getTransformations();
 
     default List<String> collectErrors() {
         var errors = new ArrayList<String>();
@@ -36,6 +38,9 @@ public interface MigrationItemResult extends Result {
         }
         if (getItems() != null) {
             sb.append(getItems().asCliOutput() + System.lineSeparator());
+        }
+        if (getTransformations() != null) {
+            sb.append(getTransformations().asCliOutput()).append(System.lineSeparator());
         }
         sb.append("Results:" + System.lineSeparator());
         var innerErrors = collectErrors();

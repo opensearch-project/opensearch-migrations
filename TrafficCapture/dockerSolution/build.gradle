@@ -75,6 +75,9 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
             }
         }
 
+        // Sync VERSION file
+        from (project.rootProject.layout.projectDirectory.file("VERSION"))
+
         from(project.layout.projectDirectory.dir("src/main/docker/${projectName}").asFileTree.matching {
             exclude("**/build/**", "**/.venv/**")
         })

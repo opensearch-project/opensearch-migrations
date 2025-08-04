@@ -2,12 +2,12 @@ package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
 
+import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.codecs.FieldsConsumer;
 import shadow.lucene9.org.apache.lucene.codecs.FieldsProducer;
 import shadow.lucene9.org.apache.lucene.codecs.PostingsFormat;
 import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
-import shadow.lucene9.org.apache.lucene.store.Directory;
 
 /**
  * PostingsFormat fallback for Elasticsearch 8.12+ segment formats.
@@ -24,6 +24,7 @@ import shadow.lucene9.org.apache.lucene.store.Directory;
  * stored in segment metadata.</p>
  *
  */
+@Slf4j
 public class IgnorePsmPostings extends PostingsFormat {
 
     public IgnorePsmPostings() {
@@ -37,17 +38,7 @@ public class IgnorePsmPostings extends PostingsFormat {
 
     @Override
     public FieldsProducer fieldsProducer(SegmentReadState state) throws IOException {
-        Directory dir = state.directory;
-        for (String file : dir.listAll()) {
-            if (file.endsWith(".psm")) {
-                throw new UnsupportedOperationException(
-                    String.format(
-                        "Detected unsupported .psm file in segment [%s]. The index is using an unrecognized format.",
-                        state.segmentInfo.name
-                    )
-                );
-            }
-        }
+        // We do not check for .psm files explicitly and silently ignore them
         return FallbackLuceneComponents.EMPTY_FIELDS_PRODUCER;
     }
 }
