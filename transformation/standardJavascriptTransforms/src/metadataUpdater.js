@@ -1,7 +1,7 @@
 function applyRulesToMap(when, set, remove, map) {
-  const matches = Object.entries(when).every(([k, v]) => map.get(k) === v);
+  const matches = [...when.entries()].every( ([k, v]) => map.get(k) === v);
   if (matches) {
-    Object.entries(set).every(([k, v]) => map.set(k, v));
+    [...set.entries()].every(([k, v]) => map.set(k, v));
     remove.forEach((key) => map.delete(key));
   }
 }
