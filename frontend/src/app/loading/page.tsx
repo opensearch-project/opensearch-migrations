@@ -1,17 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Header from "@cloudscape-design/components/header";
-import Container from "@cloudscape-design/components/container";
-import SpaceBetween from "@cloudscape-design/components/space-between";
-import Button from "@cloudscape-design/components/button";
-import Alert from "@cloudscape-design/components/alert";
-import ExpandableSection from "@cloudscape-design/components/expandable-section";
 import { useRouter } from "next/navigation";
+import {
+  Box,
+  Button,
+  Container,
+  Header,
+  SpaceBetween,
+  StatusIndicator,
+  Alert,
+  KeyValuePairs,
+  Spinner,
+  ExpandableSection,
+} from "@cloudscape-design/components";
 import { systemHealth } from "@/generated/api";
-import { Box, Spinner } from "@cloudscape-design/components";
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
 import { withTimeLimit } from "@/utils/async";
+import DebugCommands from "@/components/playground/debug/DebugCommands";
 
 const DEFAULT_POLLING_INTERVAL_MS = 5000;
 
@@ -24,10 +30,8 @@ export default function LoadingPage() {
     const pollHealth = async () => {
       if (getSiteReadiness()) {
         setIsReady(true);
-        setErrorMessage(null);
         return true;
       }
-
       try {
         const res = await withTimeLimit(
           systemHealth(),
@@ -35,31 +39,23 @@ export default function LoadingPage() {
         );
         if (res.data?.status === "ok") {
           setIsReady(true);
-          setErrorMessage(null);
           setSiteReadiness(true);
           return true;
         } else {
-          setIsReady(false);
           setErrorMessage(JSON.stringify(res.error, null, 2));
         }
       } catch (err) {
-        console.error(err);
-        const formattedError =
+        const formatted =
           err instanceof Error ? { name: err.name, message: err.message } : err;
-
-        setErrorMessage(JSON.stringify(formattedError, null, 2));
-        setIsReady(false);
+        setErrorMessage(JSON.stringify(formatted, null, 2));
       }
       return false;
     };
 
     const startPolling = async () => {
-      const ready = await pollHealth();
-      if (ready) return;
-
+      if (await pollHealth()) return;
       const interval = setInterval(async () => {
-        const success = await pollHealth();
-        if (success) clearInterval(interval);
+        if (await pollHealth()) clearInterval(interval);
       }, DEFAULT_POLLING_INTERVAL_MS);
     };
 
@@ -68,37 +64,122 @@ export default function LoadingPage() {
 
   return (
     <SpaceBetween size="l">
-      <Header variant="h1">Migration Assistant is getting ready</Header>
+      <Header
+        variant="h1"
+        actions={
+          <SpaceBetween direction="horizontal" size="xs">
+            {isReady ? (
+              <Button
+                variant="primary"
+                onClick={() => router.push("/migration")}
+              >
+                Start data migration
+              </Button>
+            ) : (
+              <Button iconName="refresh"></Button>
+            )}
+          </SpaceBetween>
+        }
+      >
+        OpenSearch Migration Assistant
+      </Header>
+      <Box variant="p">
+        Monitor the progress of your migration setup and prepare for next steps.
+      </Box>
 
-      <Container>
-        <SpaceBetween size="m">
-          {isReady ? (
-            <Alert
-              type="success"
-              action={
-                <Button variant="primary" onClick={() => router.push("/home")}>
-                  Enter
-                </Button>
-              }
-              header="Migration assistant is ready"
-            ></Alert>
-          ) : (
-            <Alert
-              type="info"
-              header="Waiting for Migration Assistant to be ready..."
-            >
-              <Box variant="span" display="inline">
-                <Spinner size="normal" />{" "}
-                {errorMessage && (
-                  <ExpandableSection headerText="Details">
-                    <pre>Error Message: {errorMessage}</pre>
-                  </ExpandableSection>
-                )}
-              </Box>
-            </Alert>
-          )}
+      <Container
+        header={<Header variant="h2">CloudFormation Setup in Progress</Header>}
+      >
+        <SpaceBetween size="l">
+          <Alert
+            type="info"
+            header={isReady ? "Setup complete" : "Setup in progress"}
+            dismissible={false}
+          >
+            {!isReady && <Spinner size="normal" />}
+            {isReady
+              ? "The CloudFormation stack has been successfully created. You can now proceed with the data migration process."
+              : "The CloudFormation stack is currently being created. This process typically takes 10–15 minutes to complete."}
+            {!isReady && errorMessage && (
+              <ExpandableSection headerText="Details">
+                <pre>Error Message: {errorMessage}</pre>
+              </ExpandableSection>
+            )}
+          </Alert>
+
+          <KeyValuePairs
+            items={[
+              {
+                label: "Status",
+                value: isReady ? (
+                  <StatusIndicator type="success">Complete</StatusIndicator>
+                ) : (
+                  <StatusIndicator type="in-progress">
+                    In progress
+                  </StatusIndicator>
+                ),
+              },
+            ]}
+          />
+
+          <Box variant="p">
+            You will be notified when the CloudFormation setup is complete. You
+            can close this page and return later – your progress will be saved.
+          </Box>
         </SpaceBetween>
       </Container>
+
+      <Container
+        header={
+          <Header
+            variant="h2"
+            actions={
+              isReady && (
+                <Button
+                  variant="primary"
+                  onClick={() => router.push("/migration")}
+                  data-testid="start-migration-button"
+                >
+                  Start data migration
+                </Button>
+              )
+            }
+          >
+            Next Steps
+          </Header>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box variant="p">
+            {isReady
+              ? "Your infrastructure is ready. You can now begin the data migration process."
+              : "Once the infrastructure setup is complete, you'll need to configure your migration parameters."}
+          </Box>
+        </SpaceBetween>
+      </Container>
+      <DebugCommands>
+        <SpaceBetween size="xs" direction="horizontal">
+          <Button onClick={() => setIsReady(true)}>Simulate Loaded</Button>
+          <Button onClick={() => setIsReady(false)}>Simulate Loading</Button>
+          <Button
+            onClick={() =>
+              setErrorMessage(
+                JSON.stringify({ error: "simulated", details: "N/A" }),
+              )
+            }
+          >
+            Set Error
+          </Button>
+          <Button
+            onClick={() => {
+              setIsReady(false);
+              setErrorMessage(null);
+            }}
+          >
+            Reset
+          </Button>
+        </SpaceBetween>
+      </DebugCommands>
     </SpaceBetween>
   );
 }

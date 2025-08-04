@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen, waitFor, act } from "@testing-library/react";
-import LandingPage from "@/app/loading/page";
+import LoadingPage from "@/app/loading/page";
 import { server } from "@tests/__utils__/mswServer";
 import { http, HttpResponse } from "msw";
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
@@ -14,44 +14,45 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({
     push: jest.fn(),
   }),
+  useSearchParams: () => ({
+    get: jest.fn(),
+  }),
 }));
 
-describe("LandingPage", () => {
+describe("LoadingPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it("shows loading and then success UI from cache", async () => {
+  it("short-circuits to ready UI when cached", async () => {
     (getSiteReadiness as jest.Mock).mockReturnValueOnce(true);
     let serviceCalled = false;
     server.use(
       http.get("http://localhost/system/health", () => {
         serviceCalled = true;
-        HttpResponse.json({ status: "ok", checks: {} });
+        return HttpResponse.json({ status: "ok", checks: {} });
       })
     );
 
-    render(<LandingPage />);
+    render(<LoadingPage />);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument()
+      expect(screen.getByTestId("start-migration-button")).toBeInTheDocument()
     );
     expect(setSiteReadiness).not.toHaveBeenCalled();
     expect(serviceCalled).toBe(false);
   });
 
-  it("shows loading and then success UI", async () => {
+  it("polls then shows ready UI on success", async () => {
     server.use(
       http.get("http://localhost/system/health", () =>
         HttpResponse.json({ status: "ok", checks: {} })
       )
     );
 
-    render(<LandingPage />);
-    expect(
-      screen.getByText(/Waiting for Migration Assistant/i)
-    ).toBeInTheDocument();
+    render(<LoadingPage />);
+    expect(screen.getByText(/CloudFormation Setup in progress/i)).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /enter/i })).toBeInTheDocument()
+      expect(screen.getByTestId("start-migration-button")).toBeInTheDocument()
     );
     expect(setSiteReadiness).toHaveBeenCalledWith(true);
   });
@@ -63,7 +64,7 @@ describe("LandingPage", () => {
       )
     );
 
-    render(<LandingPage />);
+    render(<LoadingPage />);
     await screen.findByText(/Details/i);
     expect(screen.getByText(/Error Message/i)).toBeInTheDocument();
     expect(setSiteReadiness).not.toHaveBeenCalled();
@@ -88,16 +89,15 @@ describe("LandingPage", () => {
       })
     );
 
-    render(<LandingPage />);
-    await screen.findByText(/Waiting for Migration Assistant/i);
+    render(<LoadingPage />);
+    expect(screen.getByText(/CloudFormation Setup in Progress/i)).toBeInTheDocument();
     await waitFor(
       () =>
-        expect(
-          screen.getByRole("button", { name: /enter/i })
-        ).toBeInTheDocument(),
+        expect(screen.getByTestId("start-migration-button")).toBeInTheDocument(),
       { timeout: 11_000 }
     );
     expect(callCount).toBe(3);
     expect(setSiteReadiness).toHaveBeenCalledWith(true);
+    jest.useRealTimers();
   });
 });
