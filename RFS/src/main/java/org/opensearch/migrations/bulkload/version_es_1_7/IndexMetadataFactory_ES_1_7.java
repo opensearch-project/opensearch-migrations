@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
+import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchConstants_ES_1_7.SNAPSHOT_PREFIX;
+
 public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     private final SnapshotRepo.Provider repoDataProvider;
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -43,7 +45,7 @@ public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     @Override
     public String getIndexFileId(String snapshotName, String indexName) {
         // ES 1.7 follows indices/blog_legacy_2023/snapshot-my_snap_evaluate
-        return "snapshot-" + snapshotName;
+        return SNAPSHOT_PREFIX + snapshotName;
     }
 
     @Override
