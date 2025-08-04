@@ -115,25 +115,18 @@ public class S3RepoTest {
     void GetSnapshotRepoDataFilePath_DoesNotExist() throws IOException {
         // Set up the test
         var listResponse = mock(ListObjectsV2Response.class);
-        lenient().when(listResponse.contents()).thenReturn(List.of());
-        lenient().when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
                 .thenReturn(CompletableFuture.completedFuture(listResponse));
-
-        // Mock fileFinder to throw exception when asked to find the path with empty file list
-        var emptyFileList = List.<String>of();
-        lenient().when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(emptyFileList)))
-                .thenThrow(new BaseSnapshotFileFinder.CannotFindRepoIndexFile("No matching index-N file found"));
 
         // Run the test
         CannotFindSnapshotRepoRoot thrown = assertThrows(
-                CannotFindSnapshotRepoRoot.class,
-                () -> testRepo.getSnapshotRepoDataFilePath()
+            CannotFindSnapshotRepoRoot.class,
+            () -> testRepo.getSnapshotRepoDataFilePath()
         );
 
         // Check the results
         assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
         assertThat(thrown.getMessage(), containsString(testRepoUri.key));
-
     }
 
     @Test
