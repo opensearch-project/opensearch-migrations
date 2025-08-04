@@ -10,7 +10,6 @@ import java.util.concurrent.CompletionException;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.Getter;
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
@@ -25,7 +24,6 @@ import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
 
-@ToString(onlyExplicitlyIncluded = true)
 @Slf4j
 public class S3Repo implements SourceRepo {
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
@@ -34,12 +32,16 @@ public class S3Repo implements SourceRepo {
     public static final String INDICES_PREFIX_STR = "indices/";
     private final Path s3LocalDir;
     private final S3AsyncClient s3Client;
-    private final String s3Region;
     private final SnapshotFileFinder fileFinder;
+    private final String s3Region;
 
     @Getter
-    @ToString.Include
     private final S3Uri s3RepoUri;
+
+    @Override
+    public String toString() {
+        return String.format("S3Repo [uri=%s, region=%s]", s3RepoUri.uri, s3Region);
+    }
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {
         try {
@@ -103,13 +105,6 @@ public class S3Repo implements SourceRepo {
     @Override
     public Path getRepoRootDir() {
         return s3LocalDir;
-    }
-
-    @Override
-    public String getRepoDetails() {
-        return String.format("S3Repo [uri=%s, region=%s]",
-            s3RepoUri.uri,
-            s3Region);
     }
 
     @Override

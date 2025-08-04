@@ -9,9 +9,7 @@ import java.util.stream.StreamSupport;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
-import lombok.ToString;
 
-@ToString
 public class FileSystemRepo implements SourceRepo {
     private final Path repoRootDir;
     private final SnapshotFileFinder fileFinder;
@@ -22,14 +20,13 @@ public class FileSystemRepo implements SourceRepo {
     }
 
     @Override
-    public Path getRepoRootDir() {
-        return repoRootDir;
+    public String toString() {
+        return String.format("FileSystemRepo [path=%s]", repoRootDir.toAbsolutePath());
     }
 
     @Override
-    public String getRepoDetails() {
-        return String.format("FileSystemRepo [path=%s]",
-            repoRootDir.toAbsolutePath());
+    public Path getRepoRootDir() {
+        return repoRootDir;
     }
 
     @Override

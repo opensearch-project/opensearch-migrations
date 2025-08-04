@@ -7,8 +7,6 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 public interface SourceRepo {
     public Path getRepoRootDir();
 
-    public String getRepoDetails();
-
     public Path getSnapshotRepoDataFilePath();
 
     public Path getGlobalMetadataFilePath(String snapshotId);
