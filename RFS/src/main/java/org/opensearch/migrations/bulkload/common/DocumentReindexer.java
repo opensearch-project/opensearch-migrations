@@ -60,7 +60,8 @@ public class DocumentReindexer {
                 }
             }, "DocumentBulkAggregator-" + threadNum);
         });
-        Scheduler scheduler = Schedulers.fromExecutor(executor);
+        // Create with trampoline=true to allow reactor to manage pooling prior to invoking transformation executor
+        Scheduler scheduler = Schedulers.fromExecutor(executor, true);
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
