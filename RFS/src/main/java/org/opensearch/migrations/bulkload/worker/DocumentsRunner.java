@@ -132,6 +132,7 @@ public class DocumentsRunner {
             // Clear any interrupt for next iteration of while loop
             boolean wasInterrupted = Thread.interrupted();
             assert wasInterrupted : "Expected thread interrupted if looping over latch.await()";
+            log.info("Retrying latch.await() after thread interruption.");
         }
 
     }
