@@ -125,14 +125,12 @@ jobs:
     steps:
       - id: set-matrix
         run: |
-          # Generate a JSON array duplicating each index 5 times
+          # Generate a JSON array from 0 to gradle-test-parallelization-1
           indices=()
-          for i in $(seq 0 $((${{ env.gradle-test-parallelization }} - 1))); do
-            for j in {1..5}; do
-              indices+=($i)
-            done
+          for i in $(seq 0 $((${{ env.gradle-test-parallelization }}-1))); do
+            indices+=($i)
           done
-          echo "matrix=$(printf '[%s]' "$(IFS=,; echo "${indices[*]}")")" >> $GITHUB_OUTPUT
+          echo "matrix=$(IFS=,; echo "[${indices[*]}]")" >> $GITHUB_OUTPUT
 
   gradle-tests:
     needs: [generate-test-matrix, generate-cache-key]
@@ -174,7 +172,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          overwrite: true
           if-no-files-found: warn
           name: memory-dumps-gradle-tests-stripe-${{ matrix.index }}
           path: ./**/*.hprof
@@ -183,7 +180,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          overwrite: true
           if-no-files-found: error
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
           path: |
@@ -194,7 +190,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          overwrite: true
           name: coverage-exec-artifacts-gradle-tests-stripe-${{ matrix.index }}
           path: |
             **/build/jacoco/*.exec
