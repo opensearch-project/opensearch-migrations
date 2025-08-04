@@ -111,7 +111,7 @@ public class MetadataTransformationRegistry {
     private static String getAggregateJSTransformer(List<TransformerConfigs> transformerConfigs) {
         return transformerConfigs.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
             transformerConfigs.stream()
-                .map((config) -> getJSTransform(config.getFilename(), config.getContext()))
+                .map(config -> getJSTransform(config.getFilename(), config.getContext()))
                 .collect(Collectors.joining(",", "[", "]"));
     }
 
