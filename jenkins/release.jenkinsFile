@@ -1,4 +1,4 @@
-lib = library(identifier: 'jenkins@10.0.1', retriever: modernSCM([
+lib = library(identifier: 'jenkins@10.2.2', retriever: modernSCM([
     $class: 'GitSCMSource',
     remote: 'https://github.com/opensearch-project/opensearch-build-libraries.git',
 ]))
@@ -80,7 +80,7 @@ pipeline {
                         publishToMaven(
                             signingArtifactsPath: "$WORKSPACE/repository/",
                             mavenArtifactsPath: "$WORKSPACE/repository/",
-                            autoPublish: false
+                            autoPublish: true
                         )
 
                         def sourceRegistry = "opensearchstaging"

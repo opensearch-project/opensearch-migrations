@@ -136,7 +136,7 @@ spec:
         imagePullPolicy: "{{inputs.parameters.etcd-utils-pull-policy}}"
         command: [sh]
         source: |
-          set -x -e
+          set -e
           PROCESSOR_ID="{{inputs.parameters.processor}}"
           TARGET_ENDPOINT="{{inputs.parameters.target}}"
           ETCD_ENDPOINT={{workflow.parameters.etcd-endpoints}}

@@ -24,6 +24,7 @@ _Please provide a detailed description of the problem or question. If you have a
   *Please specify details about your target environment, including whether it is self-managed or managed, and whether it is in the cloud or on-premises.*
 
 - **Migration Assistant Version:** `<Specify release version used>`
+  *This can be determined by running `console --version` on the Migration Console*
 
 - **Do you have a maintenance window during which requests will not be serviced?** `<Yes | No>`  
   *Determines the migration strategy—zero downtime vs. planned outage—and helps prevent unexpected service disruptions. If no maintenance window is available, or if the window is insufficient for a full backfill, a live capture mechanism must be included.*

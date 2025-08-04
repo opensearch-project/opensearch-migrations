@@ -1,0 +1,26 @@
+name: Setup CI Environment
+description: Sets up all required runtimes and environment versions
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: "corretto"
+
+    - uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: 8.12.1
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Install pipenv globally
+      run: |
+        python3 -m pip install --upgrade pipenv
+      shell: bash
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 18.x

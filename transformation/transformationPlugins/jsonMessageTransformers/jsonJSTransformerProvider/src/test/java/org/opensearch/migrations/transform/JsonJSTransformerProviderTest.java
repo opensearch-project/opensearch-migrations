@@ -99,7 +99,7 @@ public class JsonJSTransformerProviderTest {
                 "bindingsObject", "{}");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(),
-                containsString("One of {\"initializationScriptFile\",\"initializationScript\"} must be provided."));
+                containsString("One of {\"initializationScriptFile\",\"initializationScript\",\"initializationResourcePath\"} must be provided."));
     }
 
     @Test
@@ -110,7 +110,7 @@ public class JsonJSTransformerProviderTest {
                 "initializationScriptFile", tempScriptFile.getAbsolutePath());
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(), containsString(
-                "Unable to use both parameters at the same time, {\"initializationScriptFile\",\"initializationScript\"}. "));
+                "Unable to use both parameters at the same time, {\"initializationScriptFile\",\"initializationScript\",\"initializationResourcePath\"}."));
     }
 
     @Test
