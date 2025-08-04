@@ -1,6 +1,12 @@
-import {defineParam, InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {
+    defineParam,
+    InputParamDef,
+    InputParametersRecord,
+    OutputParametersRecord,
+    paramsToCallerSchema
+} from "@/schemas/parameterSchemas";
 import {Scope, ScopeFn, ExtendScope, TemplateSigEntry} from "@/schemas/workflowTypes";
-import {ZodType, ZodTypeAny} from "zod";
+import {z, ZodType, ZodTypeAny} from "zod";
 
 type TypescriptError<Message extends string> = {
     readonly __error: Message;
@@ -333,10 +339,17 @@ class StepsBuilder<
     }
 
     // Convenience method for single step
-    addSingleStep<Name extends string, StepDef>(
+    addSingleStep<
+        Name extends string, 
+        StepDef,
+        TClass extends Record<string, any>,
+        TKey extends Extract<keyof TClass, string>
+    >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        template: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, string>,
-        args?: { parameters?: Record<string, any> }
+        classConstructor: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TClass>,
+        key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
+        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>>,
+        dependencies?: string[]
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
@@ -345,7 +358,7 @@ class StepsBuilder<
     > {
         return this.addStepGroup(groupBuilder => {
             // addStep returns a constrained type, so we need to cast it for internal use
-            return groupBuilder.addStep(name, template, args) as any;
+            return groupBuilder.addStep(name, classConstructor, key, params, dependencies) as any;
         }) as any;
     }
 
@@ -374,30 +387,42 @@ class StepGroupBuilder<
         this.stepTasks = stepTasks;
     }
 
-    addStep<Name extends string, StepDef>(
+    addStep<
+        Name extends string, 
+        StepDef,
+        TClass extends Record<string, any>,
+        TKey extends Extract<keyof TClass, string>
+    >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        template: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, string>,
-        args?: { parameters?: Record<string, any> },
+        classConstructor: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TClass>,
+        key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
+        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>>,
         dependencies?: string[]
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, { [K in Name]: StepDef }>>>
     {
         // Use type assertions since constraints prevent invalid calls at compile time
         const nameStr = name as string;
-        const templateStr = template as string;
+        
+        // Call callTemplate to get the template reference and arguments
+        const templateCall = callTemplate(
+            classConstructor as TClass,
+            key as TKey,
+            params as z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
+        );
 
         // Add to runtime structure
         this.stepTasks.push({
             name: nameStr,
-            template: templateStr,
-            arguments: args,
+            template: templateCall.templateRef.key,
+            arguments: templateCall.arguments,
             dependencies
         });
 
         // Return type-level representation - use 'as any' to bypass constraint checking in implementation
         return new StepGroupBuilder(
             this.contextualScope,
-            { ...this.stepsScope, [nameStr]: { name: nameStr, template: templateStr } } as ExtendScope<StepsScope, { [K in Name]: StepDef }>,
+            { ...this.stepsScope, [nameStr]: { name: nameStr, template: templateCall.templateRef.key } } as ExtendScope<StepsScope, { [K in Name]: StepDef }>,
             this.stepTasks
         ) as any;
     }
@@ -425,17 +450,38 @@ class DagBuilder<
     }
 }
 
-// export function callTemplate<
-//     TClass extends Record<string, any>,
-//     TKey extends Extract<keyof TClass, string>
-// >(
-//     classConstructor: TClass,
-//     key: TKey,
-//     params: z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
-// ): WorkflowTask<TClass[TKey]["inputs"], TClass[TKey]["outputs"]> {
-//     const value = classConstructor[key];
-//     return {
-//         templateRef: { key, value },
-//         arguments: { parameters: params }
-//     };
-// }
+const TemplateDefSchema = z.object({
+    inputs: z.any(),
+    outputs: z.any(),
+});
+
+export type TemplateDef<
+    IN extends InputParametersRecord,
+    OUT extends OutputParametersRecord
+> = z.infer<typeof TemplateDefSchema> & {
+    inputs: IN;
+    outputs: OUT;
+};
+
+export type WorkflowTask<
+    IN extends InputParametersRecord,
+    OUT extends OutputParametersRecord
+> = {
+    templateRef: { key: string, value: TemplateDef<IN,OUT> }
+    arguments?: { parameters: any }
+}
+
+export function callTemplate<
+    TClass extends Record<string, any>,
+    TKey extends Extract<keyof TClass, string>
+>(
+    classConstructor: TClass,
+    key: TKey,
+    params: z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
+): WorkflowTask<TClass[TKey]["inputs"], TClass[TKey]["outputs"]> {
+    const value = classConstructor[key];
+    return {
+        templateRef: { key, value },
+        arguments: { parameters: params }
+    };
+}

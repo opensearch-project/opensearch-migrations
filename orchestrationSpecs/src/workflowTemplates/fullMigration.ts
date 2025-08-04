@@ -13,15 +13,14 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
         .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
         .addSteps(sb => sb
-                .addSingleStep("a", "thing")
-                .addSingleStep("b", "thing")
-                .addSingleStep("c", "thing")
-                .addStepGroup(gb => gb
-                    .addStep("d1", "next")
-                    //.addStep("first", "next"))
-                    .addStep("d2", gb.getStepTasks().scope.a+"")
-                    .addStep("d2e", "")
-                )
+                // .addSingleStep("a", TargetLatchHelpers.templates, "init", { prefix: "a", targets: [], etcdUtilsImage: "", etcdUtilsImagePullPolicy: "" })
+                // .addSingleStep("b", TargetLatchHelpers.templates, "init", { prefix: "b", targets: [], etcdUtilsImage: "", etcdUtilsImagePullPolicy: "" })
+                // .addSingleStep("c", TargetLatchHelpers.templates, "init", { prefix: "c", targets: [], etcdUtilsImage: "", etcdUtilsImagePullPolicy: "" })
+                // .addStepGroup(gb => gb
+                //     .addStep("d1", "next")
+                //     //.addStep("first", "next"))
+                //     .addStep("d2", gb.getStepTasks().scope.a+"")
+                // )
             )
     )
     .addTemplate("cleanup", t => t
@@ -43,11 +42,11 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 export const FullMigration = WFBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
-            .addRequiredInput("sourceMigrationConfigs",
-                SNAPSHOT_MIGRATION_CONFIG,
-                "List of server configurations to direct migrated traffic toward")
+        .addRequiredInput("sourceMigrationConfigs",
+            SNAPSHOT_MIGRATION_CONFIG,
+            "List of server configurations to direct migrated traffic toward")
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
-                     "List of server configurations to direct migrated traffic toward")
+            "List of server configurations to direct migrated traffic toward")
         .optionalInput("imageParams",
             scope =>
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
@@ -57,11 +56,15 @@ export const FullMigration = WFBuilder.create("FullMigration")
                         ])
                 ),
             "OCI image locations and pull policies for required images")
-//         .addSteps("init", b => b
-// //            .addStep("name", s => callTemplate(s..., args...), s => whenConditionEval, s => withItemsPuller...)
-//         )
-// //        .addOutput("name", stepsSignatures => ...)
-
+        .addSteps(b => b
+           .addSingleStep("name", TargetLatchHelpers.templates, "init", {
+            prefix: "foo",
+            targets: [],
+            etcdUtilsImage: "",
+            etcdUtilsImagePullPolicy: ""
+           })
+        )
+//        .addOutput("name", stepsSignatures => ...)
     )
     .addTemplate("main2", t => t
         //.addSteps("cleanup", b=>b)
