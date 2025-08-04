@@ -174,6 +174,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           if-no-files-found: warn
           name: memory-dumps-gradle-tests-stripe-${{ matrix.index }}
           path: ./**/*.hprof
@@ -182,6 +183,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           if-no-files-found: error
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
           path: |
