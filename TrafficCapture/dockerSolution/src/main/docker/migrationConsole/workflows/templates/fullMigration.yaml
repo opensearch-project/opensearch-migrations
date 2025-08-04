@@ -431,51 +431,51 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
                 - name: localstack-enabled
                   value: "{{inputs.parameters.localstack-enabled}}"
-#        - - name: bulk-load-documents
-#            templateRef:
-#              name: bulk-load
-#              template: run-bulk-load-from-config
-#            withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
-#            arguments:
-#              parameters:
-#                - name: snapshot-config
-#                  value: "{{inputs.parameters.snapshot-config}}"
-#                - name: rfs-config
-#                  value: "{{item}}"
-#                - name: target-config
-#                  value: "{{inputs.parameters.target-config}}"
-#                - name: session-name
-#                  value: "{{steps.id-generator.id}}"
-#                - name: image-config
-#                  value: "{{inputs.parameters.image-config}}"
-#                - name: localstack-enabled
-#                  value: "{{inputs.parameters.localstack-enabled}}"
-#        # Check target readiness after processing and bump it to the next phase if ready
-#        - - name: target-backfill-complete-check
-#            templateRef:
-#              name: target-latch-helpers
-#              template: target-processed-latch
-#            arguments:
-#              parameters:
-#                - name: processor
-#                  value: "{{steps.id-generator.id}}"
-#                - name: target
-#                  value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
-#                - name: prefix
-#                  value: "{{inputs.parameters.latch-coordination-prefix}}"
-#                - name: etcd-utils-image
-#                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
-#                - name: etcd-utils-pull-policy
-#                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
-#        - - name: run-replayer-for-target
-#            template: run-replayer-for-target
-#            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
-#            arguments:
-#              parameters:
-#                - name: target-config
-#                  value: "{{inputs.parameters.target-config}}"
-#                - name: image-config
-#                  value: "{{inputs.parameters.image-config}}"
+        - - name: bulk-load-documents
+            templateRef:
+              name: bulk-load
+              template: run-bulk-load-from-config
+            withParam: "{{=fromJSON(inputs.parameters['migration-config'])['documentBackfillConfigs']}}"
+            arguments:
+              parameters:
+                - name: snapshot-config
+                  value: "{{inputs.parameters.snapshot-config}}"
+                - name: rfs-config
+                  value: "{{item}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: session-name
+                  value: "{{steps.id-generator.id}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
+        # Check target readiness after processing and bump it to the next phase if ready
+        - - name: target-backfill-complete-check
+            templateRef:
+              name: target-latch-helpers
+              template: target-processed-latch
+            arguments:
+              parameters:
+                - name: processor
+                  value: "{{steps.id-generator.id}}"
+                - name: target
+                  value: "{{=fromJSON(inputs.parameters['target-config'])['endpoint']}}"
+                - name: prefix
+                  value: "{{inputs.parameters.latch-coordination-prefix}}"
+                - name: etcd-utils-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
+                - name: etcd-utils-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
+        - - name: run-replayer-for-target
+            template: run-replayer-for-target
+            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
+            arguments:
+              parameters:
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: image-config
+                  value: "{{inputs.parameters.image-config}}"
 
     # This is where we'd start running live-replay
     - name: run-replayer-for-target

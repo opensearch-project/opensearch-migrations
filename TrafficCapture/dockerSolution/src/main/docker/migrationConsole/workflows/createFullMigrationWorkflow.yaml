@@ -35,6 +35,7 @@ spec:
                                   },
                                   "documentBackfillConfigs": [
                                       {
+                                          "transformer_config_base64": "",
                                           "indices": [
                                               "index_3",
                                               "index_4"

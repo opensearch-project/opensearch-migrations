@@ -16,11 +16,10 @@ spec:
             description: "Target host config object"
           - name: snapshot-config
             description: "Details of the snapshot to use (required)"
+          - name: rfs-config
+            description: "Reindex-from-snapshot config object"
           - name: session-name
             description: "Name of the unique session to disambiguate coordinating indices"
-          - name: optional-configs
-            description: "JSON Key-Value form of all of the optional parameters to run-bulk-load"
-            value: ""
           - name: image-config
             description: "Map of MA images and settings (e.g. pull policy)"
           - name: localstack-enabled
@@ -46,6 +45,8 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['snapshot-config'])['s3']['aws_region'] ?? ''}}"
                 - name: s3-endpoint
                   value: "{{=fromJSON(inputs.parameters['snapshot-config'])['s3']['endpoint'] ?? ''}}"
+                - name: doc-transformer-base64
+                  value: "{{=fromJSON(inputs.parameters['rfs-config'])['transformer_config_base64'] ?? ''}}"
                 - name: session-name
                   value: "{{inputs.parameters.session-name}}"
                 - name: image-config
