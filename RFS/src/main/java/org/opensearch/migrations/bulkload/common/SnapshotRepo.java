@@ -47,6 +47,10 @@ public class SnapshotRepo {
     }
 
     public static class CannotParseRepoFile extends RfsException {
+        public CannotParseRepoFile(SourceRepo repo) {
+            super("Unable to locate valid snapshot repository files in repo: " + repo);
+        }
+
         public CannotParseRepoFile(String message) {
             super(message);
         }
