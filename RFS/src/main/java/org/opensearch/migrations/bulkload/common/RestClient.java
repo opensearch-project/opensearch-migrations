@@ -6,6 +6,7 @@ import javax.net.ssl.SSLParameters;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.GzipPayloadRequestTransformer;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.common.http.TlsCredentialsProvider;
+import org.opensearch.migrations.bulkload.common.http.TransformedRequest;
 import org.opensearch.migrations.bulkload.netty.ReadMeteringHandler;
 import org.opensearch.migrations.bulkload.netty.WriteMeteringHandler;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -34,6 +36,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.netty.Connection;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientRequest;
@@ -121,7 +124,6 @@ public class RestClient {
         return asyncRequest(method, path, body, convertedHeaders, context);
     }
 
-
     public Mono<HttpResponse> asyncRequest(HttpMethod method, String path, String body, Map<String, List<String>> additionalHeaders,
                                            @Nullable IRfsContexts.IRequestContext context) {
         assert connectionContext.getUri() != null;
@@ -143,29 +145,24 @@ public class RestClient {
         }
         var contextCleanupRef = new AtomicReference<Runnable>(() -> {});
         // Support auto compressing payload if headers indicate support and payload is not compressed
-        return new CompositeTransformer(
-            new GzipPayloadRequestTransformer(),
-            connectionContext.getRequestTransformer()
-        ).transform(method.name(), path, headers, Mono.justOrEmpty(body)
-                .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
-            )
-            .flatMap(transformedRequest ->
-                client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
-                .headers(h -> transformedRequest.getHeaders().forEach(h::add))
-                .compress(hasGzipResponseHeaders(transformedRequest.getHeaders()))
-                .request(method)
-                .uri("/" + path)
-                .send(transformedRequest.getBody().map(Unpooled::wrappedBuffer))
-                .responseSingle(
-                    (response, bytes) -> bytes.asString()
-                        .singleOptional()
-                        .map(bodyOp -> new HttpResponse(
-                            response.status().code(),
-                            response.status().reasonPhrase(),
-                            extractHeaders(response.responseHeaders()),
-                            bodyOp.orElse(null)
-                            ))
-                )
+        var transformedRequest = transformRequest(method, path, body, headers);
+        assert transformedRequest != null;
+        return client
+            .doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
+            .headers(h -> transformedRequest.getHeaders().forEach(h::add))
+            .compress(hasGzipResponseHeaders(transformedRequest.getHeaders()))
+            .request(method)
+            .uri("/" + path)
+            .send(transformedRequest.getBody().map(Unpooled::wrappedBuffer))
+            .responseSingle(
+                (response, bytes) -> bytes.asString()
+                    .singleOptional()
+                    .map(bodyOp -> new HttpResponse(
+                        response.status().code(),
+                        response.status().reasonPhrase(),
+                        extractHeaders(response.responseHeaders()),
+                        bodyOp.orElse(null)
+                        ))
             )
             .doOnError(t -> {
                 if (context != null) {
@@ -175,6 +172,14 @@ public class RestClient {
             .doOnTerminate(() -> contextCleanupRef.get().run());
     }
 
+    protected TransformedRequest transformRequest(HttpMethod method, String path, String body, Map<String, List<String>> headers) {
+        return new CompositeTransformer(
+            new GzipPayloadRequestTransformer(),
+            connectionContext.getRequestTransformer()
+        ).transform(method.name(), path, headers, Mono.justOrEmpty(body)
+            .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
+        ).block();
+    }
 
     public boolean supportsGzipCompression() {
         return connectionContext.isCompressionSupported();
