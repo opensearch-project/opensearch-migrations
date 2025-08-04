@@ -68,7 +68,10 @@ import org.slf4j.MDC;
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
-    public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+
+    // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
+    // observed on production clusters during migrations
+    public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 15;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
     // Decrease successor nextAcquisitionLeaseExponent if shard setup takes less than 2.5% of total lease time
@@ -397,17 +400,19 @@ public class RfsMigrateDocuments {
                 arguments.maxConnections,
                 docTransformerSupplier);
 
-            SourceRepo sourceRepo;
-            if (snapshotLocalDirPath == null) {
-                sourceRepo = S3Repo.create(
+            var finder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    arguments.sourceVersion,
+                    arguments.versionStrictness.allowLooseVersionMatches);
+
+            SourceRepo sourceRepo = (snapshotLocalDirPath == null)
+                ? S3Repo.create(
                     Paths.get(arguments.s3LocalDir),
                     new S3Uri(arguments.s3RepoUri),
                     arguments.s3Region,
-                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
-                );
-            } else {
-                sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
-            }
+                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                    finder)
+                : new FileSystemRepo(snapshotLocalDirPath, finder);
+
             var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
             var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);

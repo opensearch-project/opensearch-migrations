@@ -3,19 +3,24 @@ package org.opensearch.migrations.image
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.tasks.Exec
+import org.opensearch.migrations.common.CommonUtils
 
 class RegistryImageBuildUtils {
 
     def configureJibFor = { Project project, String baseImageRegistryEndpoint, String baseImageGroup, String baseImageName,
-                            String baseImageTag, String imageName, String imageTag, List<String> requiredDependencies ->
+                            String baseImageTag, String imageName, String imageTag, Map<String, List<String>> requiredDependencies ->
         def registryEndpoint = project.rootProject.ext.registryEndpoint.toString()
         def baseFormatter = ImageRegistryFormatterFactory.getFormatter(baseImageRegistryEndpoint)
         def targetFormatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
         def baseImage = baseFormatter.getFullBaseImageIdentifier(baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag)
         def registryDestination= targetFormatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag)[0]
-        requiredDependencies.each { taskPath ->
-            project.tasks.named("jib").configure {
-                dependsOn project.rootProject.tasks.named(taskPath)
+        CommonUtils.copyVersionFileToDockerStaging(project, imageName, "build/versionDir")
+        requiredDependencies.each { projectPath, taskNames ->
+            def targetProject = projectPath ? project.rootProject.project(projectPath) : project.rootProject
+            taskNames.each { taskName ->
+                project.tasks.named("jib").configure {
+                    dependsOn(targetProject.tasks.named(taskName))
+                }
             }
         }
         project.plugins.withId('com.google.cloud.tools.jib') {
@@ -36,6 +41,10 @@ class RegistryImageBuildUtils {
                     paths {
                         path {
                             from = project.file("docker")
+                            into = '/'
+                        }
+                        path {
+                            from = project.file("build/versionDir")
                             into = '/'
                         }
                     }
@@ -62,7 +71,7 @@ class RegistryImageBuildUtils {
                         config.baseImageTag.toString(),
                         config.imageName.toString(),
                         config.imageTag.toString(),
-                        (List<String>) config.get("requiredDependencies", [])
+                        (Map<String, List<String>>) config.get("requiredDependencies", [])
                 )
             }
         }

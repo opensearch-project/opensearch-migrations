@@ -6,9 +6,12 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -16,10 +19,12 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -88,6 +93,7 @@ public class EndToEndTest extends SourceTestBase {
             // So we explicitly set it.
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
             boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(sourceVersion);
+            boolean supportsCompletion = sourceSupportsCompletionFields(sourceVersion);
             String body = String.format(
                 "{" +
                 "  \"settings\": {" +
@@ -103,6 +109,21 @@ public class EndToEndTest extends SourceTestBase {
             );
             sourceClusterOperations.createIndex(indexName, body);
             targetClusterOperations.createIndex(indexName, body);
+
+            // Create and verify a 'completion' index only for ES 2.x and above
+            if (supportsCompletion) {
+                String completionIndex = "completion_index";
+                sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
+                targetClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
+                String completionDoc =
+                "{" +
+                "    \"completion\": \"bananas\" " +
+                "}";
+                String docType = sourceClusterOperations.defaultDocType();
+                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
+                sourceClusterOperations.post("/_refresh", null);
+                targetClusterOperations.post("/_refresh", null);
+            }
 
             // === ACTION: Create two large documents (2MB each) ===
             String largeDoc = generateLargeDocJson(2);
@@ -143,7 +164,9 @@ public class EndToEndTest extends SourceTestBase {
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var sourceRepo = new FileSystemRepo(localDirectory.toPath());
+            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             // === ACTION: Migrate the documents ===
             var runCounter = new AtomicInteger();
@@ -168,12 +191,17 @@ public class EndToEndTest extends SourceTestBase {
                     transformationConfig
             ));
 
-            Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
+            int totalShards = supportsCompletion ? 2 * numberOfShards : numberOfShards;
+            Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
 
             // Check that the docs were migrated
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
             boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
             boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
+
+            if (supportsCompletion) {
+                validateCompletionDoc(targetClusterOperations);
+            }
 
             // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
             checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
@@ -181,6 +209,22 @@ public class EndToEndTest extends SourceTestBase {
         } finally {
             deleteTree(localDirectory.toPath());
         }
+    }
+
+    private boolean sourceSupportsCompletionFields(Version sourceVersion) {
+        return !UnboundVersionMatchers.isBelowES_2_X.test(sourceVersion);
+    }
+
+    @SneakyThrows
+    private void validateCompletionDoc(ClusterOperations targetClusterOperations) {
+        targetClusterOperations.post("/_refresh", null);
+        String docType = targetClusterOperations.defaultDocType();
+        var res = targetClusterOperations.get("/completion_index/" + docType + "/1");
+        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
+        JsonNode doc = mapper.readTree(res.getValue());
+        JsonNode sourceNode = doc.path("_source").path("completion");
+        Assertions.assertTrue(sourceNode.isTextual() || sourceNode.isArray(),
+                "Expected 'completion' field to be present and textual or array");
     }
 
     private String generateLargeDocJson(int sizeInMB) {
@@ -225,5 +269,4 @@ public class EndToEndTest extends SourceTestBase {
             }
         }
     }
-    
 }

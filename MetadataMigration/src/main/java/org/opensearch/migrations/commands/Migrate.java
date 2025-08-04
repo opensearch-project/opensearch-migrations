@@ -25,8 +25,9 @@ public class Migrate extends MigratorEvaluatorBase {
             migrateResult.clusters(clusters);
 
             var transformer = selectTransformer(clusters);
+            migrateResult.transformations(transformer);
 
-            var items = migrateAllItems(migrationMode, clusters, transformer, context);
+            var items = migrateAllItems(migrationMode, clusters, transformer.getTransformer(), context);
             migrateResult.items(items);
         } catch (ParameterException pe) {
             log.atError().setCause(pe).setMessage("Invalid parameter").log();

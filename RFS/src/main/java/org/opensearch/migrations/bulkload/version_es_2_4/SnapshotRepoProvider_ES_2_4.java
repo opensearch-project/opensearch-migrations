@@ -1,6 +1,9 @@
 package org.opensearch.migrations.bulkload.version_es_2_4;
 
-import java.io.File;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -9,8 +12,12 @@ import java.util.List;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
-    private static final String INDICES_DIR_NAME = "indices";
     private final SourceRepo repo;
     private SnapshotRepoData_ES_2_4 repoData;
 
@@ -36,22 +43,69 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        List<SnapshotRepo.Index> result = new ArrayList<>();
-        Path indicesRoot = repo.getRepoRootDir().resolve(INDICES_DIR_NAME);
-        File[] indexDirs = indicesRoot.toFile().listFiles();
-        if (indexDirs == null) {
-            return Collections.emptyList();
-        }
-        for (File indexDir : indexDirs) {
-            if (!indexDir.isDirectory()) {
-                continue;
+        Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
+        ObjectMapper smileMapper = new ObjectMapper(ElasticsearchConstants_ES_2_4.SMILE_FACTORY);
+
+        try {
+            byte[] allBytes = Files.readAllBytes(snapshotMetaFile);
+            int smileStart = findSmileHeaderOffset(allBytes);
+            if (smileStart < 0) {
+                throw new IllegalStateException("SMILE header not found in snapshot metadata file: " + snapshotMetaFile);
             }
 
-            if (containsMetaFile(indexDir, snapshotName)) {
-                result.add(new SimpleIndex(indexDir.getName(), snapshotName));
+            try (InputStream in = new ByteArrayInputStream(allBytes, smileStart, allBytes.length - smileStart)) {
+                JsonNode rootNode = smileMapper.readTree(in);
+
+                // Get the 'snapshot' node
+                JsonNode snapshotNode = rootNode.get("snapshot");
+                if (snapshotNode == null || !snapshotNode.isObject()) {
+                    log.atWarn()
+                        .setMessage("No 'snapshot' object found in snapshot metadata for [{}]")
+                        .addArgument(snapshotName)
+                        .log();
+                    return Collections.emptyList();
+                }
+
+                // Get the 'indices' array inside 'snapshot'
+                JsonNode indicesNode = snapshotNode.get("indices");
+                if (indicesNode == null || !indicesNode.isArray()) {
+                    log.atWarn()
+                        .setMessage("No 'indices' array found in snapshot metadata for [{}]")
+                        .addArgument(snapshotName)
+                        .log();
+                    return Collections.emptyList();
+                }
+
+                List<SnapshotRepo.Index> result = new ArrayList<>();
+                for (JsonNode indexNameNode : indicesNode) {
+                    String indexName = indexNameNode.asText();
+                    log.atInfo()
+                        .setMessage("Found index [{}] in snapshot [{}]")
+                        .addArgument(indexName)
+                        .addArgument(snapshotName)
+                        .log();
+                    result.add(new SimpleIndex(indexName, snapshotName));
+                }
+                return result;
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read SMILE snapshot metadata for snapshot=" + snapshotName, e);
+        }
+    }
+
+    /**
+     * Lookup for the SMILE header sequence 0x3A 0x29 0x0A (":)\n") in the provided bytes.
+     * @return the offset of the SMILE header or -1 if not found
+     */
+    private int findSmileHeaderOffset(byte[] bytes) {
+        for (int i = 0; i < bytes.length - 2; i++) {
+            if ((bytes[i] & 0xFF) == 0x3A &&
+                    (bytes[i + 1] & 0xFF) == 0x29 &&
+                    (bytes[i + 2] & 0xFF) == 0x0A) {
+                return i;
             }
         }
-        return result;
+        return -1;
     }
 
     @Override
@@ -72,19 +126,6 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     @Override
     public SourceRepo getRepo() {
         return repo;
-    }
-
-    private boolean containsMetaFile(File dir, String snapshotName) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return false;
-        }
-        for (File f : files) {
-            if (f.getName().equals("meta-" + snapshotName + ".dat")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public static class SimpleSnapshot implements SnapshotRepo.Snapshot {

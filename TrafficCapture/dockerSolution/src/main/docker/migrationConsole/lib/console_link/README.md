@@ -335,13 +335,10 @@ As part of the Migration console many console commands are available for use by 
 
 #### Locally testing
 
+For local development, you can use the API development script:
+
 ```shell
-pipenv run gunicorn console_link.api.main:app \
-    -k uvicorn.workers.UvicornWorker \
-    -w 4 \
-    -b 0.0.0.0:8000 \
-    --access-logfile - \
-    --error-logfile -
+pipenv run api-dev
 ```
 
 *Website passthrough*
@@ -352,17 +349,17 @@ To test the api when the the web frontend is running without deploying in AWS or
 `        proxy_pass         http://127.0.0.1:8000/;` -> 
 `        proxy_pass         http://host.docker.internal:8000/;`
 
-2. Rebuild the website docker image
+1. Rebuild the website docker image
 ```shell
 ./gradlew :frontend:buildDockerImage
 ```
 
-3. Run the website with the additional host
+1. Run the website with the additional host
 ```shell
 docker run -p 8080:80 --add-host=host.docker.internal:host-gateway migrations/website
 ```
 
-4. Access the api through the website passthrough
+1. Access the api through the website passthrough
 ```shell
 curl http://localhost:8080/api/docs
 ```
