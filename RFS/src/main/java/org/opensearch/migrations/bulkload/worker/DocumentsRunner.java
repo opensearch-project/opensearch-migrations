@@ -102,20 +102,15 @@ public class DocumentsRunner {
                     // before sending requests prior to the lease expiration allowing
                     // the in-flight requests to be finished before creating the successor items.
                     cancellationTriggerConsumer.accept(disposable::dispose);
-                    try {
-                        log.info("Waiting on latch for index={}, shard={}...", 
-                                    workItem.getWorkItem().getIndexName(), 
-                                    workItem.getWorkItem().getShardNumber());
-                        long start = System.currentTimeMillis();
-                        latch.await();
-                        long duration = System.currentTimeMillis() - start;
-                        log.info("Latch released after {} ms for index={}, shard={}",
-                                    duration, workItem.getWorkItem().getIndexName(), workItem.getWorkItem().getShardNumber());
-                        return CompletionStatus.WORK_COMPLETED;
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw Lombok.sneakyThrow(e);
-                    }
+                    log.info("Waiting on latch for index={}, shard={}...",
+                                workItem.getWorkItem().getIndexName(),
+                                workItem.getWorkItem().getShardNumber());
+                    long start = System.currentTimeMillis();
+                    latchAwaitWithoutInterruption(latch);
+                    long duration = System.currentTimeMillis() - start;
+                    log.info("Latch released after {} ms for index={}, shard={}",
+                                duration, workItem.getWorkItem().getIndexName(), workItem.getWorkItem().getShardNumber());
+                    return CompletionStatus.WORK_COMPLETED;
                 }
 
                 @Override
@@ -124,6 +119,21 @@ public class DocumentsRunner {
                 }
             }, context::createCloseContet);
         }
+    }
+
+    private static void latchAwaitWithoutInterruption(CountDownLatch latch) {
+        while (true) {
+            try {
+                latch.await();
+                break;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            // Clear any interrupt for next iteration of while loop
+            boolean wasInterrupted = Thread.interrupted();
+            assert wasInterrupted : "Expected thread interrupted if looping over latch.await()";
+        }
+
     }
 
     public static class ShardTooLargeException extends RfsException {
