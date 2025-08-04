@@ -7,6 +7,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionStrictness;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
@@ -69,6 +70,28 @@ public class ClusterProviderRegistry {
             .addArgument(version)
             .log();
         return snapshotProvider;
+    }
+
+    /**
+     * Gets the SnapshotFileFinder associated with the appropriate SnapshotReader for the given version.
+     * This allows you to construct the SourceRepo before instantiating the full SnapshotReader.
+     */
+    public SnapshotFileFinder getSnapshotFileFinder(Version version, boolean looseMatch) {
+        return getProviders()
+            .stream()
+            .filter(p -> looseMatch ? p.looseCompatibleWith(version) : p.compatibleWith(version))
+            .filter(ClusterSnapshotReader.class::isInstance)
+            .map(ClusterSnapshotReader.class::cast)
+            .map(p -> p.initialize(version))
+            .findFirst()
+            .map(ClusterSnapshotReader::getSnapshotFileFinder)
+            .orElseThrow(() -> {
+                var message = "No SnapshotFileFinder found for version: " + version;
+                if (!looseMatch) {
+                    message = message + " " + VersionStrictness.REMEDIATION_MESSAGE;
+                }
+                return new UnsupportedVersionException(message);
+            });
     }
 
     /**
