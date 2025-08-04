@@ -48,17 +48,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
 
         try {
             byte[] allBytes = Files.readAllBytes(snapshotMetaFile);
-
-            // Find the offset of the SMILE header sequence 0x3A 0x29 0x0A (':)\n')
-            int smileStart = -1;
-            for (int i = 0; i < allBytes.length - 2; i++) {
-                if ((allBytes[i] & 0xFF) == 0x3A &&
-                        (allBytes[i + 1] & 0xFF) == 0x29 &&
-                        (allBytes[i + 2] & 0xFF) == 0x0A) {
-                    smileStart = i;
-                    break;
-                }
-            }
+            int smileStart = findSmileHeaderOffset(allBytes);
             if (smileStart < 0) {
                 throw new IllegalStateException("SMILE header not found in snapshot metadata file: " + snapshotMetaFile);
             }
@@ -101,6 +91,21 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read SMILE snapshot metadata for snapshot=" + snapshotName, e);
         }
+    }
+
+    /**
+     * Lookup for the SMILE header sequence 0x3A 0x29 0x0A (":)\n") in the provided bytes.
+     * @return the offset of the SMILE header or -1 if not found
+     */
+    private int findSmileHeaderOffset(byte[] bytes) {
+        for (int i = 0; i < bytes.length - 2; i++) {
+            if ((bytes[i] & 0xFF) == 0x3A &&
+                    (bytes[i + 1] & 0xFF) == 0x29 &&
+                    (bytes[i + 2] & 0xFF) == 0x0A) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     @Override
