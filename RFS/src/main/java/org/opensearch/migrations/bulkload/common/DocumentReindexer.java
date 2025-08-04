@@ -83,6 +83,7 @@ public class DocumentReindexer {
             .publishOn(scheduler, 1) // Switch scheduler
             .flatMapSequential(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
                 maxConcurrentWorkItems)
+            .publishOn(Schedulers.boundedElastic(), 1) // Finish on boundedElastic scheduler (including scheduler dispose)
             .doFinally(s -> scheduler.dispose());
     }
 
