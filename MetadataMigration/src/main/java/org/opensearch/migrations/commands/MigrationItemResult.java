@@ -83,9 +83,11 @@ public interface MigrationItemResult extends Result {
             errorsArray.add(err);
         }
 
-        root.put("errorCode", getExitCode());
+        var exitCode = getExitCode();
+        root.put("errorCode", exitCode);
         if (Strings.isNotBlank(getErrorMessage())) {
-            root.put("errorMessage", getErrorMessage());
+            var errorMessage = getErrorMessage();
+            root.put("errorMessage", errorMessage);
         }
 
         return root;
