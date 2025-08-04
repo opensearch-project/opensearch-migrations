@@ -28,7 +28,7 @@ import reactor.util.Loggers;
 @Slf4j
 public class DocumentReindexer {
     private static final Supplier<IJsonTransformer> NOOP_TRANSFORMER_SUPPLIER = () -> new NoopTransformerProvider().createTransformer(null);
-    private static Logger REINDEXER_REACTOR_LOGGER = Loggers.getLogger(DocumentReindexer.class);
+    private static final Logger REINDEXER_REACTOR_LOGGER = Loggers.getLogger(DocumentReindexer.class);
     protected final OpenSearchClient client;
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
