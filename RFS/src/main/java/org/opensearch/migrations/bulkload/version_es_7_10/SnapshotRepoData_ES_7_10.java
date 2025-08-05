@@ -8,7 +8,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo.CantParseRepoFile;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo.CannotParseRepoFile;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -80,14 +80,14 @@ public class SnapshotRepoData_ES_7_10 {
             data.filePath = filePath;
             return data;
         } catch (IOException e) {
-            throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
+            throw new CannotParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
         }
     }
 
     public static SnapshotRepoData_ES_7_10 fromRepo(SourceRepo repo) {
         Path file = repo.getSnapshotRepoDataFilePath();
         if (file == null) {
-            throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
+            throw new CannotParseRepoFile(repo);
         }
         return fromRepoFile(file);
     }

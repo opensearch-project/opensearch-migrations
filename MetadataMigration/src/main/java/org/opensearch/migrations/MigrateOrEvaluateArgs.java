@@ -5,6 +5,7 @@ package org.opensearch.migrations;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.transformers.MetadataTransformerParams;
+import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
@@ -16,6 +17,10 @@ import lombok.Getter;
 public class MigrateOrEvaluateArgs {
     @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
     public boolean help;
+ 
+    @Parameter(names = { "--output" }, description = "Output format: human-readable (default) or json", 
+            converter = OutputFormat.OutputFormatConverter.class)
+    public OutputFormat outputFormat = OutputFormat.HUMAN_READABLE;
 
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate")
     public String snapshotName;
