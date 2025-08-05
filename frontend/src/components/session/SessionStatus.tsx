@@ -8,7 +8,8 @@ import {
   StatusIndicator,
   StatusIndicatorProps
 } from '@cloudscape-design/components';
-import { SessionStatus, StepState } from '@/generated/api';
+import { SessionStatus } from './types';
+import { StepState } from '@/generated/api/types.gen';
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
