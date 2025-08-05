@@ -31,7 +31,7 @@ tasks.register('buildOpenApiDockerImage') {
 
     doLast {
         def buildCommand = [
-            'docker', 'build', 
+            'docker', 'build',
             '-f', 'Dockerfile.openapi',
             '-t', dockerImageName,
             '.'
@@ -56,7 +56,7 @@ tasks.register('generateOpenApiSpec') {
             'docker', 'run', '--rm',
             dockerImageName
         ]
-        
+
         def proc = runCommand.execute(null, projectDirRef)
         def stdout = new ByteArrayOutputStream()
         def stderr = new ByteArrayOutputStream()
