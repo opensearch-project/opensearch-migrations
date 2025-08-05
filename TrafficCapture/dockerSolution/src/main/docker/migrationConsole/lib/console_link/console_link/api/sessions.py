@@ -107,7 +107,7 @@ def list_sessions() -> List[Session]:
     return [Session.model_validate(session) for session in sessions]
 
 
-@session_router.get("/{session_name}", response_model=List[Session], operation_id="sessionGet")
+@session_router.get("/{session_name}", response_model=Session, operation_id="sessionGet")
 def single_session(session_name: str) -> Session | None:
     return existance_check(find_session(session_name))
 

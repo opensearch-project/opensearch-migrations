@@ -347,10 +347,10 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
 
     snapshot_data = response.json()
     snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots or not snapshot[0]:
+    if not snapshots or not snapshots[0]:
         raise SnapshotStatusUnavaliable()
     
-    return SnapshotStateAndDetails(state, snapshot[0])
+    return SnapshotStateAndDetails(state, snapshots[0])
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:

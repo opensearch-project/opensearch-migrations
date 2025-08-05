@@ -73,33 +73,6 @@ export type SessionDeleteResponse = {
 };
 
 /**
- * SessionStatus
- */
-export type SessionStatus = {
-  /**
-   * Name
-   */
-  name: string;
-  /**
-   * Created
-   */
-  created: string;
-  /**
-   * Updated
-   */
-  updated: string;
-  /**
-   * Env
-   */
-  env: {
-    [key: string]: unknown;
-  };
-  snapshot: StepDetail;
-  metadata: StepDetail;
-  backfill: StepDetail;
-};
-
-/**
  * SnapshotStatus
  */
 export type SnapshotStatus = {
@@ -120,21 +93,6 @@ export type SnapshotStatus = {
    * Finished
    */
   finished?: string | null;
-};
-
-/**
- * StepDetail
- */
-export type StepDetail = {
-  /**
-   * Started
-   */
-  started?: string | null;
-  /**
-   * Finished
-   */
-  finished?: string | null;
-  status: StepState;
 };
 
 /**
@@ -242,7 +200,7 @@ export type SessionCreateResponses = {
   /**
    * Successful Response
    */
-  200: Session;
+  201: Session;
 };
 
 export type SessionCreateResponse =
@@ -302,10 +260,9 @@ export type SessionGetError = SessionGetErrors[keyof SessionGetErrors];
 
 export type SessionGetResponses = {
   /**
-   * Response Sessionget
    * Successful Response
    */
-  200: Array<Session>;
+  200: Session;
 };
 
 export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses];
@@ -345,37 +302,6 @@ export type SessionUpdateResponses = {
 
 export type SessionUpdateResponse =
   SessionUpdateResponses[keyof SessionUpdateResponses];
-
-export type SessionStatusData = {
-  body?: never;
-  path: {
-    /**
-     * Session Name
-     */
-    session_name: string;
-  };
-  query?: never;
-  url: "/sessions/{session_name}/status";
-};
-
-export type SessionStatusErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError;
-};
-
-export type SessionStatusError = SessionStatusErrors[keyof SessionStatusErrors];
-
-export type SessionStatusResponses = {
-  /**
-   * Successful Response
-   */
-  200: SessionStatus;
-};
-
-export type SessionStatusResponse =
-  SessionStatusResponses[keyof SessionStatusResponses];
 
 export type SnapshotStatusData = {
   body?: never;

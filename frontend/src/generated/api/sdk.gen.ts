@@ -20,9 +20,6 @@ import type {
   SessionUpdateData,
   SessionUpdateResponses,
   SessionUpdateErrors,
-  SessionStatusData,
-  SessionStatusResponses,
-  SessionStatusErrors,
   SnapshotStatusData,
   SnapshotStatusResponses,
   SnapshotStatusErrors,
@@ -163,22 +160,6 @@ export const sessionUpdate = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
-  });
-};
-
-/**
- * Session Status
- */
-export const sessionStatus = <ThrowOnError extends boolean = false>(
-  options: Options<SessionStatusData, ThrowOnError>,
-) => {
-  return (options.client ?? _heyApiClient).get<
-    SessionStatusResponses,
-    SessionStatusErrors,
-    ThrowOnError
-  >({
-    url: "/sessions/{session_name}/status",
-    ...options,
   });
 };
 

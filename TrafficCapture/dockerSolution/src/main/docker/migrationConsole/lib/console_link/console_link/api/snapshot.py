@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_serializer
 from console_link.models.factories import get_snapshot
@@ -19,7 +20,7 @@ snapshot_router = APIRouter(
 class SnapshotStatus(BaseModel):
     status: StepState
     percentage_completed: float
-    eta_ms: int | None
+    eta_ms: float | None
     started: datetime | None = None
     finished: datetime | None = None
 
@@ -32,30 +33,56 @@ class SnapshotStatus(BaseModel):
 
     @classmethod
     def from_snapshot_info(cls, snapshot_info: dict) -> "SnapshotStatus":
-        # Calculate the percentage of completion
-        total_bytes = snapshot_info.get("stats", {}).get("total", {}).get("size_in_bytes", 0)
-        processed_bytes = snapshot_info.get("stats", {}).get("processed", {}).get("size_in_bytes", 0)
-        incremental_bytes = snapshot_info.get("stats", {}).get("incremental", {}).get("size_in_bytes", 0)
-        percentage = ((processed_bytes + incremental_bytes) / total_bytes) * 100 if total_bytes > 0 else 0
+        # 1) Extract progress metrics
+        total_units = processed_units = 0
+        if stats := snapshot_info.get("stats"):
+            # OpenSearch: byte-level stats
+            total_units = stats.get("total", {}).get("size_in_bytes", 0)
+            processed_units = (
+                stats.get("processed", {}).get("size_in_bytes", 0) + stats.get("incremental", {}).get("size_in_bytes", 0)
+            )
+            start_ms = stats.get("start_time_in_millis", 0)
+            elapsed_ms = stats.get("time_in_millis", 0)
+        elif shards_stats := snapshot_info.get("shards_stats"):
+            # ES ≥7.8 / OS: shard-level stats
+            total_units = shards_stats.get("total", 0)
+            processed_units = shards_stats.get("done", 0)
+            # these sometimes live at the top level
+            start_ms = snapshot_info.get("start_time_in_millis", 0)
+            elapsed_ms = snapshot_info.get("time_in_millis", 0)
+        else:
+            # ES <7.8: simple shards summary
+            shards = snapshot_info.get("shards", {})
+            total_units = shards.get("total", 0)
+            processed_units = shards.get("successful", 0)
+            start_ms = snapshot_info.get("start_time_in_millis", 0)
+            elapsed_ms = snapshot_info.get("time_in_millis", 0)
 
-        # Collect timing information
-        started_ms = snapshot_info.get("stats", {}).get("start_time_in_millis", 0)
-        finished_ms = started_ms + snapshot_info.get("stats", {}).get("time_in_millis", 0)
+        # 2) Compute percentage complete
+        percentage = (processed_units / total_units * 100) if total_units else 0.0
 
-        # Calculate ETA for completion
-        eta = None
-        if percentage > 0:
-            duration_in_millis = snapshot_info.get("stats", {}).get("time_in_millis", 0)
-            remaining_duration_in_millis = (duration_in_millis / percentage) * (100 - percentage)
-            eta = remaining_duration_in_millis
+        # 3) Compute ETA in ms (only once we’ve made some progress)
+        eta_ms: Optional[float] = None
+        if 0 < percentage < 100:
+            eta_ms = (elapsed_ms / percentage) * (100 - percentage)
 
-        state = convert_snapshot_state_to_step_state(snapshot_info.get("state", "Unknown"))
+        # 4) Normalize finished time
+        finished_ms = start_ms + elapsed_ms
+
+        # 5) Map snapshot state to your StepState enum
+        raw_state = snapshot_info.get("state", "")
+        state = convert_snapshot_state_to_step_state(raw_state)
+
+        # 6) If it’s already done, clamp to 100%
+        if state == StepState.COMPLETED:
+            percentage = 100.0
+            eta_ms = 0.0
 
         return cls(
             status=state,
             percentage_completed=percentage,
-            eta_ms=eta,
-            started=started_ms,
+            eta_ms=eta_ms,
+            started=start_ms,
             finished=finished_ms,
         )
 
@@ -109,7 +136,7 @@ def get_snapshot_status(session_name: str):
         raise HTTPException(status_code=400,
                             detail=f"No source cluster defined in the configuration: {env}")
 
-    snapshot = get_snapshot(env.snapshot, env.source_cluster)
+    snapshot = get_snapshot(env.snapshot.config, env.source_cluster)
     try:
         lastest_status = get_latest_snapshot_status_raw(snapshot.source_cluster,
                                                         snapshot.snapshot_name,
@@ -119,7 +146,7 @@ def get_snapshot_status(session_name: str):
     except SnapshotNotStarted:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0, eta_ms=None)
     except SnapshotStatusUnavaliable:
-        return HTTPException(status_code=500, detail="Snapshot status not available")
+        raise HTTPException(status_code=500, detail="Snapshot status not available")
     except Exception as e:
         logger.error(f"Unable to lookup snapshot information: {type(e).__name__} {str(e)}")
-        return HTTPException(status_code=500, detail=f"Failed to get full snapshot status: {type(e).__name__} {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get full snapshot status: {type(e).__name__} {str(e)}")
