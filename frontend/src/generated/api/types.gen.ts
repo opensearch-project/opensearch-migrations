@@ -44,6 +44,12 @@ export type Session = {
    * Updated
    */
   updated: string;
+  /**
+   * Env
+   */
+  env: {
+    [key: string]: unknown;
+  };
 };
 
 /**
@@ -55,6 +61,86 @@ export type SessionBase = {
    */
   name: string;
 };
+
+/**
+ * SessionDeleteResponse
+ */
+export type SessionDeleteResponse = {
+  /**
+   * Detail
+   */
+  detail: string;
+};
+
+/**
+ * SessionStatus
+ */
+export type SessionStatus = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Created
+   */
+  created: string;
+  /**
+   * Updated
+   */
+  updated: string;
+  /**
+   * Env
+   */
+  env: {
+    [key: string]: unknown;
+  };
+  snapshot: StepDetail;
+  metadata: StepDetail;
+  backfill: StepDetail;
+};
+
+/**
+ * SnapshotStatus
+ */
+export type SnapshotStatus = {
+  status: StepState;
+  /**
+   * Percentage Completed
+   */
+  percentage_completed: number;
+  /**
+   * Eta Ms
+   */
+  eta_ms: number | null;
+  /**
+   * Started
+   */
+  started?: string | null;
+  /**
+   * Finished
+   */
+  finished?: string | null;
+};
+
+/**
+ * StepDetail
+ */
+export type StepDetail = {
+  /**
+   * Started
+   */
+  started?: string | null;
+  /**
+   * Finished
+   */
+  finished?: string | null;
+  status: StepState;
+};
+
+/**
+ * StepState
+ */
+export type StepState = "Pending" | "Running" | "Completed" | "Failed";
 
 /**
  * ValidationError
@@ -187,8 +273,11 @@ export type SessionDeleteResponses = {
   /**
    * Successful Response
    */
-  200: unknown;
+  200: SessionDeleteResponse;
 };
+
+export type SessionDeleteResponse2 =
+  SessionDeleteResponses[keyof SessionDeleteResponses];
 
 export type SessionGetData = {
   body?: never;
@@ -256,6 +345,69 @@ export type SessionUpdateResponses = {
 
 export type SessionUpdateResponse =
   SessionUpdateResponses[keyof SessionUpdateResponses];
+
+export type SessionStatusData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/status";
+};
+
+export type SessionStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SessionStatusError = SessionStatusErrors[keyof SessionStatusErrors];
+
+export type SessionStatusResponses = {
+  /**
+   * Successful Response
+   */
+  200: SessionStatus;
+};
+
+export type SessionStatusResponse =
+  SessionStatusResponses[keyof SessionStatusResponses];
+
+export type SnapshotStatusData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/status";
+};
+
+export type SnapshotStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotStatusError =
+  SnapshotStatusErrors[keyof SnapshotStatusErrors];
+
+export type SnapshotStatusResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotStatus;
+};
+
+export type SnapshotStatusResponse =
+  SnapshotStatusResponses[keyof SnapshotStatusResponses];
 
 export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {});
