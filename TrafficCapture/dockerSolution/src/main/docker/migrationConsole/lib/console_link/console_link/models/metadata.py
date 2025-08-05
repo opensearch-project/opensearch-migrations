@@ -86,15 +86,7 @@ class Metadata:
         if (not snapshot) and (config["from_snapshot"] is None):
             raise ValueError("No snapshot is specified or can be assumed for the metadata migration to use.")
 
-        self._source_cluster_version = config.get("source_cluster_version", None)
-        if not self._source_cluster_version:
-            if source_cluster and source_cluster.version:
-                logger.info(f"Using source cluster version: {source_cluster.version} as cluster version used for "
-                            f"snapshot when performing metadata migrations")
-                self._source_cluster_version = source_cluster.version
-            else:
-                raise ValueError("A version field in the source_cluster object, or source_cluster_version in the "
-                                 "metadata object is required to perform metadata migrations e.g. version: \"ES_6.8\" ")
+        self._source_cluster_version = self._get_source_cluster_version(source_cluster)
 
         self._awareness_attributes = config.get("cluster_awareness_attributes", 0)
         self._index_allowlist = config.get("index_allowlist", None)
@@ -211,15 +203,7 @@ class Metadata:
         })
 
         if self._snapshot_location == 's3':
-            command_args.update({
-                "--s3-local-dir": self._local_dir,
-                "--s3-repo-uri": self._s3_uri,
-                "--s3-region": self._aws_region,
-            })
-            if hasattr(self, '_s3_endpoint') and self._s3_endpoint:
-                command_args.update({
-                    "--s3-endpoint": self._s3_endpoint,
-                })
+            self._add_s3_args(command_args=command_args)
         elif self._snapshot_location == 'fs':
             command_args.update({
                 "--file-system-repo-path": self._repo_path,
@@ -272,3 +256,26 @@ class Metadata:
         except CommandRunnerError as e:
             logger.debug(f"Metadata migration failed: {e}")
             return CommandResult(success=False, value=f"Metadata migration failed: {e}")
+
+    def _get_source_cluster_version(self, source_cluster: Optional[Cluster] = None) -> str:
+        version = self._config.get("source_cluster_version", None)
+        if not version:
+            if source_cluster and source_cluster.version:
+                logger.info(f"Using source cluster version: {source_cluster.version} as cluster version used for "
+                            f"snapshot when performing metadata migrations")
+                version = source_cluster.version
+            else:
+                raise ValueError("A version field in the source_cluster object, or source_cluster_version in the "
+                                 "metadata object is required to perform metadata migrations e.g. version: \"ES_6.8\" ")
+        return version
+
+    def _add_s3_args(self, command_args: Dict[str, Any]) -> None:
+        command_args.update({
+            "--s3-local-dir": self._local_dir,
+            "--s3-repo-uri": self._s3_uri,
+            "--s3-region": self._aws_region,
+        })
+        if hasattr(self, '_s3_endpoint') and self._s3_endpoint:
+            command_args.update({
+                "--s3-endpoint": self._s3_endpoint,
+            })
