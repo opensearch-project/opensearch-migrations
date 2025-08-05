@@ -41,8 +41,8 @@ public class ConnectionContext {
     private final RequestTransformer requestTransformer;
     @JsonProperty("awsSpecificAuthentication")
     private final boolean awsSpecificAuthentication;
-    @JsonProperty("forceDisableCompression")
-    private final boolean forceDisableCompression;
+    @JsonProperty("disableCompression")
+    private final boolean disableCompression;
 
     @JsonIgnore
     private TlsCredentialsProvider tlsCredentialsProvider;
@@ -107,7 +107,7 @@ public class ConnectionContext {
                 params.getClientCertKey());
         }
 
-        this.forceDisableCompression = params.isForceDisableCompression();
+        this.disableCompression = params.isDisableCompression();
     }
 
     // Used for presentation to user facing output
@@ -147,7 +147,7 @@ public class ConnectionContext {
 
         Path getClientCertKey();
 
-        boolean isForceDisableCompression();
+        boolean isDisableCompression();
 
         boolean isInsecure();
 
@@ -220,18 +220,18 @@ public class ConnectionContext {
         TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
 
         @Override
-        public boolean isForceDisableCompression() {
-            return advancedArgs.isForceDisableCompression();
+        public boolean isDisableCompression() {
+            return advancedArgs.isDisableCompression();
         }
     }
 
     // Flags that require more testing and validation before recommendations are made
     @Getter
     public static class TargetAdvancedArgs {
-        @Parameter(names = {"--force-disable-compression", "--forceDisableCompression" },
+        @Parameter(names = {"--disable-compression", "--disableCompression" },
             description = "**Advanced**. Disable request body compression even if supported on the target cluster."
         )
-        public boolean isForceDisableCompression = false;
+        public boolean isDisableCompression = false;
     }
 
     @Getter
@@ -296,7 +296,7 @@ public class ConnectionContext {
         public boolean insecure = false;
 
         @Override
-        public boolean isForceDisableCompression() {
+        public boolean isDisableCompression() {
             return false;
         }
     }

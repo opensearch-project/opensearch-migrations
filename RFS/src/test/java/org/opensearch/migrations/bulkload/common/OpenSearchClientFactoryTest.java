@@ -244,7 +244,7 @@ class OpenSearchClientFactoryTest {
 
     @Test
     void determineVersion_setsCompressionFalseWhenForcedOff() {
-        when(connectionContext.isForceDisableCompression()).thenReturn(true);
+        when(connectionContext.isDisableCompression()).thenReturn(true);
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         openSearchClientFactory.determineVersionAndCreate();
         assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
