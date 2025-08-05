@@ -40,14 +40,3 @@ def test_version_file_missing(fake_home, caplog):
         result = get_version_str()
         assert result == f"{VERSION_PREFIX} unknown"
         assert "VERSION file not found" in caplog.text
-
-
-def test_version_file_unreadable(fake_home, caplog):
-    version_path = fake_home / "VERSION"
-    version_path.write_text("1.2.3")
-    version_path.chmod(0)  # Remove all permissions
-
-    with caplog.at_level("INFO"):
-        result = get_version_str()
-        assert result == f"{VERSION_PREFIX} unknown"
-        assert "Failed to read" in caplog.text

@@ -86,6 +86,7 @@ public class ClusterReaderExtractorTest {
         args.s3Region = "us-west-1";
         args.s3LocalDirPath = "fizz.buzz";
         args.sourceVersion = Version.fromString("OS 9.9.9");
+        args.versionStrictness.allowLooseVersionMatches = true;
         var extractor = spy(new ClusterReaderExtractor(args));
         var mockReader = mock(ClusterReader.class);
         doReturn(mockReader).when(extractor).getSnapshotReader(eq(args.sourceVersion), any(S3Repo.class));
