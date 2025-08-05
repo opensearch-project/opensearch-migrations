@@ -44,6 +44,7 @@ public class LuceneReader {
                     reader.getIndexDirectoryPath())
             )
             .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
+            .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
             .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }
 
