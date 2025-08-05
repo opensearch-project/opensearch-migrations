@@ -98,7 +98,9 @@ def main(args=None):
     else:
         # Setup file logging for tool execution
         file_handler = setup_file_logging(args.tool)
-        env = Environment(args.config_file)
+        # Handle case where config_file might not be provided
+        config_file = getattr(args, 'config_file', '/config/migration_services.yaml')
+        env = Environment(config_file=config_file)
         try:
             args.func(env, args)
         except Exception as e:

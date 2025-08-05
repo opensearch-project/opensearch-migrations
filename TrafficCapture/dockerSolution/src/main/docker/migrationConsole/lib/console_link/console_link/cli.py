@@ -32,7 +32,7 @@ class Context(object):
     def __init__(self, config_file) -> None:
         self.config_file = config_file
         try:
-            self.env = Environment(config_file)
+            self.env = Environment(config_file=config_file)
         except Exception as e:
             raise click.ClickException(str(e))
         self.json = False
@@ -232,8 +232,6 @@ def snapshot_group(ctx):
     """All actions related to snapshot creation"""
     if ctx.env.snapshot is None:
         raise click.UsageError("Snapshot is not set")
-    if ctx.env.source_cluster is None:
-        raise click.UsageError("Snapshot commands require a source cluster to be defined")
     _external_snapshots_check(ctx.env.snapshot)
 
 

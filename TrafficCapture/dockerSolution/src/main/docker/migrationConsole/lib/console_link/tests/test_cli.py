@@ -33,7 +33,7 @@ def runner():
 @pytest.fixture
 def env():
     """A valid Environment for the given VALID_SERVICES_YAML file"""
-    return Environment(VALID_SERVICES_YAML)
+    return Environment(config_file=VALID_SERVICES_YAML)
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +117,7 @@ snapshot:
     assert isinstance(result.exception, SystemExit)
 
 
-def test_cli_snapshot_when_source_cluster_not_defined_raises_error(runner, tmp_path):
+def test_cli_snapshot_when_source_cluster_not_defined(runner, tmp_path):
     no_source_cluster_with_snapshot = """
 target_cluster:
   endpoint: "https://opensearchtarget:9200"
@@ -137,8 +137,7 @@ snapshot:
 
     result = runner.invoke(cli, ['--config-file', str(yaml_path), 'snapshot', 'create'],
                            catch_exceptions=True)
-    assert result.exit_code == 2
-    assert "Snapshot commands require a source cluster to be defined" in result.output
+    assert result.exit_code == 0
 
 # The following tests are mostly smoke-tests with a goal of covering every CLI command and option.
 # They generally mock functions either at the logic or the model layer, though occasionally going all the way to
