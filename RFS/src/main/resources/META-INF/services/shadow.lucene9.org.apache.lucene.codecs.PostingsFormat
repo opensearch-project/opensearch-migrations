@@ -1,2 +1,4 @@
 org.opensearch.migrations.bulkload.lucene.version_9.IgnorePsmPostings
-org.opensearch.migrations.bulkload.lucene.version_9.IgnoreBloomFilter
+org.opensearch.migrations.bulkload.lucene.version_9.IgnoreBloomFilter85
+org.opensearch.migrations.bulkload.lucene.version_9.IgnoreBloomFilter87
+
