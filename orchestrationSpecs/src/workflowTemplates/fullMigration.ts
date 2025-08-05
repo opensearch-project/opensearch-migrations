@@ -7,40 +7,56 @@ import {defineParam, InputParamDef} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
 
 
+// Define the common fields with their schemas in one place
+const TARGET_LATCH_FIELD_SPECS = {
+    prefix: z.string(),
+    etcdUtilsImage: IMAGE_SPECIFIER,
+    etcdUtilsImagePullPolicy: IMAGE_PULL_POLICY,
+    firstThing: ""
+} as const;
+
+type TargetLatchFieldNames = keyof typeof TARGET_LATCH_FIELD_SPECS;
+
+// Generate the type from the specs
+type TargetLatchFields = {
+    [K in TargetLatchFieldNames]: InputParamDef<any, true>;
+};
+
 function addCommonTargetLatchFields<
     TB extends TemplateBuilder<any, any, any, any>
 >(
-    templateBuilder: TB extends TemplateBuilder<any, any, infer CurrentInputs, any>
-        ? keyof CurrentInputs & ("prefix" | "etcdUtilsImage" | "etcdUtilsImagePullPolicy") extends never
-            ? TB  // If no conflicts, accept the template builder
-            : TypescriptError<`Cannot add common fields: '${keyof CurrentInputs & ("prefix" | "etcdUtilsImage" | "etcdUtilsImagePullPolicy") & string}' already exists`>
+    templateBuilder: TB,
+    isRequired: TB extends TemplateBuilder<any, any, infer CurrentInputs, any>
+        ? keyof CurrentInputs & TargetLatchFieldNames extends never
+            ? boolean
+            : TypescriptError<`Cannot add common fields: '${keyof CurrentInputs & TargetLatchFieldNames & string}' already exists`>
         : never
 ): TB extends TemplateBuilder<infer Context, infer Body, infer Inputs, infer Outputs>
-    ? TemplateBuilder<
-        Context,
-        Body,
-        ExtendScope<Inputs, {
-            prefix: InputParamDef<string, true>;
-            etcdUtilsImage: InputParamDef<any, true>;
-            etcdUtilsImagePullPolicy: InputParamDef<any, true>;
-        }>,
-        Outputs
-    >
+    ? TemplateBuilder<Context, Body, ExtendScope<Inputs, TargetLatchFields>, Outputs>
     : never {
 
-    return (templateBuilder as any)
-        .addRequiredInput("prefix", z.string())
-        .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
-        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY) as any;
+    // Iterate over the field specs and add each one
+    let result = templateBuilder as any;
+    for (const [fieldName, schema] of Object.entries(TARGET_LATCH_FIELD_SPECS)) {
+        result = result.addRequiredInput(fieldName, schema);
+    }
+    return result;
 }
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     .addParams(CommonWorkflowParameters)
         // .addParams({foo: defineParam({ defaultValue: "foo" }),})
-    .addTemplate("init", t=>
-            addCommonTargetLatchFields(t.addOptionalInput("firstThing", s => ""))
-            .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
-                .addOptionalInput("o", s => s.currentScope.firstThing)
+    .addTemplate("init", ot=> {
+            const o = ot
+                .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
+                //.addOptionalInput("firstThing2", s => "")
+                .addOptionalInput("firstThing2", s => "")
+                .addOptionalInput("second", s=>"")
+                //.addOptionalInput("third", s => s.currentScope.firstThing);
+            return addCommonTargetLatchFields(o, true)
+                .addOptionalInput("fourth", s=>s.currentScope.firstThing)
+                .addOptionalInput("fifth", s=>s.currentScope.prefix);
+        }
         // .addContainer(...)
         // .addOutput(...)
     )
@@ -87,6 +103,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
            .addStep("main", TargetLatchHelpers, "init", {
                 prefix: "foo",
                 targets: [],
+               firstThing: "",
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: ""
            })

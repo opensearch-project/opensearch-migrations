@@ -14,7 +14,7 @@ declare global {
     // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
     const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME__: boolean;
 }
-declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: true;
+declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
 type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
@@ -242,9 +242,9 @@ export class TemplateBuilder<
         return this.extendWithParam(name as any, param) as any;
     }
 
-    addSteps<SB extends StepsBuilder<ContextualScope, any>>(
+    addSteps<SB extends StepsBuilder<ContextualScope, InputParamsScope, any>>(
         builderFn: ScopeIsEmptyConstraint<BodyScope, (
-            b: StepsBuilder<ContextualScope, {}>) => SB>
+            b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SB>
     ): TemplateBuilder<
         ContextualScope,
         ReturnType<SB["getSteps"]>,
@@ -252,8 +252,8 @@ export class TemplateBuilder<
         OutputParamsScope
     >
     {
-        const fn = builderFn as (b: StepsBuilder<ContextualScope, {}>) => SB;
-        const steps = fn(new StepsBuilder(this.contextualScope, {}, [])).getSteps();
+        const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SB;
+        const steps = fn(new StepsBuilder(this.contextualScope, this.inputScopeBuilder.getScope(), {}, [])).getSteps();
         return new TemplateBuilder(
             this.contextualScope,
             steps,
@@ -308,14 +308,20 @@ export interface StepTask {
 
 class StepsBuilder<
     ContextualScope extends Scope,
+    InputParamsScope  extends Scope,
     StepsScope extends Scope
 > {
     readonly contextualScope: ContextualScope;
+    readonly inputsScope: InputParamsScope;
     private readonly stepsScope: StepsScope;
     private readonly stepGroups: StepGroup[] = []; // Runtime ordering
 
-    constructor(contextualScope: ContextualScope, stepsScope: StepsScope, stepGroups: StepGroup[]) {
+    constructor(contextualScope: ContextualScope,
+                inputsScope: InputParamsScope,
+                stepsScope: StepsScope,
+                stepGroups: StepGroup[]) {
         this.contextualScope = contextualScope;
+        this.inputsScope = inputsScope;
         this.stepsScope = stepsScope;
         this.stepGroups = stepGroups;
     }
@@ -327,12 +333,13 @@ class StepsBuilder<
         builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => GB
     ): StepsBuilder<
         ContextualScope,
+        InputParamsScope,
         ExtendScope<StepsScope, StepsGroup>
     > {
         // TODO - add the other steps into the contextual scope
         const newSteps = builderFn(new StepGroupBuilder(this.contextualScope, this.stepsScope, []));
         const results = newSteps.getStepTasks();
-        return new StepsBuilder(this.contextualScope, results.scope,
+        return new StepsBuilder(this.contextualScope, this.inputsScope, results.scope,
             [...this.stepGroups, {steps: results.taskList}]) as any;
     }
 
@@ -351,6 +358,7 @@ class StepsBuilder<
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
+            InputParamsScope,
             ExtendScope<StepsScope, { [K in Name]: StepDef }>
         >
     > {
