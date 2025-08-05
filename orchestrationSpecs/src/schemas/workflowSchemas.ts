@@ -7,18 +7,14 @@ import {
 } from "@/schemas/parameterSchemas";
 import {Scope, ScopeFn, ExtendScope, TemplateSigEntry} from "@/schemas/workflowTypes";
 import {z, ZodType, ZodTypeAny} from "zod";
-
-type TypescriptError<Message extends string> = {
-    readonly __error: Message;
-    readonly __never: never;
-};
+import {TypescriptError} from "@/utils";
 
 declare global {
     // true: worse LSP, but squigglies under the name declaration
     // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
     const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME__: boolean;
 }
-declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
+declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: true;
 
 type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
@@ -79,19 +75,21 @@ export class WFBuilder<
 
     addParams<P extends InputParametersRecord>(
         params: P
-    ): WFBuilder<
-        MetadataScope,
-        ExtendScope<WorkflowInputsScope, P>,
-        TemplateSigScope,
-        TemplateFullScope
-    > {
+    ): keyof WorkflowInputsScope & keyof P extends never
+        ? WFBuilder<
+            MetadataScope,
+            ExtendScope<WorkflowInputsScope, P>,
+            TemplateSigScope,
+            TemplateFullScope
+        >
+        : TypescriptError<`Parameter name '${keyof WorkflowInputsScope & keyof P & string}' already exists in workflow inputs`> {
         const newInputs = { ...this.inputsScope, ...params } as ExtendScope<WorkflowInputsScope, P>;
         return new WFBuilder(
             this.metadataScope,
             newInputs,
             this.templateSigScope,
             this.templateFullScope
-        );
+        ) as any;
     }
 
     addTemplate<
@@ -199,7 +197,7 @@ export class TemplateBuilder<
         return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScopeBuilder.getScope());
     }
 
-    optionalInput<T, Name extends string>(
+    addOptionalInput<T, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
             (s: { context: ContextualScope; currentScope: InputParamsScope }) => T>,

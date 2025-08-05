@@ -1,3 +1,8 @@
+export type TypescriptError<Message extends string> = {
+    readonly __error: Message;
+    readonly __never: never;
+};
+
 export function getKeyAndValue<T extends Record<string, any>, K extends keyof T>(
     obj: T,
     key: K

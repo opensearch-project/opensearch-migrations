@@ -1,28 +1,51 @@
 import { z } from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {WFBuilder} from "@/schemas/workflowSchemas";
+import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
+import {Scope, ExtendScope} from "@/schemas/workflowTypes";
+import {defineParam, InputParamDef} from "@/schemas/parameterSchemas";
+import {TypescriptError} from "@/utils";
 
 
-export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
-    //.addParams(CommonWorkflowParameters)
-        // .addParams({foo: defineParam({ defaultValue: "foo" }),})
-    .addTemplate("init", t=> t
-        .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
+function addCommonTargetLatchFields<
+    TB extends TemplateBuilder<any, any, any, any>
+>(
+    templateBuilder: TB extends TemplateBuilder<any, any, infer CurrentInputs, any>
+        ? keyof CurrentInputs & ("prefix" | "etcdUtilsImage" | "etcdUtilsImagePullPolicy") extends never
+            ? TB  // If no conflicts, accept the template builder
+            : TypescriptError<`Cannot add common fields: '${keyof CurrentInputs & ("prefix" | "etcdUtilsImage" | "etcdUtilsImagePullPolicy") & string}' already exists`>
+        : never
+): TB extends TemplateBuilder<infer Context, infer Body, infer Inputs, infer Outputs>
+    ? TemplateBuilder<
+        Context,
+        Body,
+        ExtendScope<Inputs, {
+            prefix: InputParamDef<string, true>;
+            etcdUtilsImage: InputParamDef<any, true>;
+            etcdUtilsImagePullPolicy: InputParamDef<any, true>;
+        }>,
+        Outputs
+    >
+    : never {
+
+    return (templateBuilder as any)
         .addRequiredInput("prefix", z.string())
         .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
-        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
-        .addSteps(sb => sb
-                // .addSingleStep("a", TargetLatchHelpers.templates, "init", { prefix: "a", targets: [], etcdUtilsImage: "", etcdUtilsImagePullPolicy: "" })
-                // .addSingleStep("b", TargetLatchHelpers.templates, "init", { prefix: "b", targets: [], etcdUtilsImage: "", etcdUtilsImagePullPolicy: "" })
-                // .addSingleStep("c", TargetLatchHelpers.templates, "init", { prefix: "c", targets: [], etcdUtilsImage: "", etcdUtilsImagePullPolicy: "" })
-                // .addStepGroup(gb => gb
-                //     .addStep("d1", "next")
-                //     //.addStep("first", "next"))
-                //     .addStep("d2", gb.getStepTasks().scope.a+"")
-                // )
-            )
+        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY) as any;
+}
+
+export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
+    .addParams(CommonWorkflowParameters)
+        // .addParams({foo: defineParam({ defaultValue: "foo" }),})
+    .addTemplate("init", t=>
+            addCommonTargetLatchFields(t.addOptionalInput("firstThing", s => ""))
+            .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
+                .addOptionalInput("o", s => s.currentScope.firstThing)
+        // .addContainer(...)
+        // .addOutput(...)
     )
+    // .addTemplate("decrementLatch", t => t.
+    //     addRequiredInput(""))
     .addTemplate("cleanup", t => t
         .addRequiredInput("prefix", z.string())
         .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
@@ -40,33 +63,42 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 ;
 
 export const FullMigration = WFBuilder.create("FullMigration")
-    .addParams(CommonWorkflowParameters)
+    //.addParams(CommonWorkflowParameters)
+    .addParams({a: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
+        b: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" })})
+    .addParams({d: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
+        c: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" })})
     .addTemplate("main", t=> t
         .addRequiredInput("sourceMigrationConfigs",
             SNAPSHOT_MIGRATION_CONFIG,
             "List of server configurations to direct migrated traffic toward")
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
             "List of server configurations to direct migrated traffic toward")
-        .optionalInput("imageParams",
+        .addOptionalInput("imageParams",
             scope =>
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
                         .flatMap((k) => [
                             [`${k}Image`, ""],
-                            [`${k}ImagePullPolicy`, ""]
+                            [`${k}ImagePullPolicy`, ""+scope.context.workflowParameters.a]
                         ])
                 ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
-           .addSingleStep("name", TargetLatchHelpers.templates, "init", {
-            prefix: "foo",
-            targets: [],
-            etcdUtilsImage: "",
-            etcdUtilsImagePullPolicy: ""
+           .addStep("main", TargetLatchHelpers, "init", {
+                prefix: "foo",
+                targets: [],
+                etcdUtilsImage: "",
+                etcdUtilsImagePullPolicy: ""
            })
+            .addStep("cleanup", TargetLatchHelpers, "cleanup", {
+                prefix: undefined,
+                etcdUtilsImage: undefined,
+                etcdUtilsImagePullPolicy: undefined
+            })
         )
 //        .addOutput("name", stepsSignatures => ...)
     )
-    .addTemplate("main2", t => t
+    .addTemplate("cleanup", t => t
         //.addSteps("cleanup", b=>b)
     )
     .getFullScope();
