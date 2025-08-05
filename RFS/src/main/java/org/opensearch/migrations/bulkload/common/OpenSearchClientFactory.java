@@ -88,31 +88,37 @@ public class OpenSearchClientFactory {
     private Boolean getCompressionEnabled() {
         log.atInfo().setMessage("Checking compression on cluster").log();
         return client.getAsync("_cluster/settings?include_defaults=true", null)
-                .flatMap(this::checkCompressionFromResponse)
-                .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
-                .flatMap(hasCompressionEnabled -> {
-                    log.atInfo().setMessage("Checking Compression, was enabled? {}").addArgument(hasCompressionEnabled).log();
-                    return Mono.just(hasCompressionEnabled);
-                })
-                .block();
+            .flatMap(this::checkCompressionFromResponse)
+            .doOnError(e -> log.atWarn()
+                .setMessage("Check cluster compression failed")
+                .setCause(e)
+                .log())
+            .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+            .onErrorReturn(false)
+            .doOnNext(hasCompressionEnabled -> log.atInfo()
+                .setMessage("After querying target, compression={}")
+                .addArgument(hasCompressionEnabled).log())
+            .block();
     }
 
     public Version getClusterVersion() {
         var versionFromRootApi = client.getAsync("", null)
-                .flatMap(resp -> {
-                    if (resp.statusCode == 200) {
-                        return versionFromResponse(resp);
-                    }
-                    // If the root API doesn't exist, the cluster is OpenSearch Serverless
-                    if (resp.statusCode == 404) {
-                        return Mono.just(AMAZON_SERVERLESS_VERSION);
-                    }
-                    return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
-                })
-                .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
-                .block();
+            .flatMap(resp -> {
+                if (resp.statusCode == 200) {
+                    return versionFromResponse(resp);
+                }
+                // If the root API doesn't exist, the cluster is OpenSearch Serverless
+                if (resp.statusCode == 404) {
+                    return Mono.just(AMAZON_SERVERLESS_VERSION);
+                }
+                return Mono.error(new OpenSearchClient.UnexpectedStatusCode(resp));
+            })
+            .doOnError(e -> log.atWarn()
+                .setMessage("Check cluster version failed")
+                .setCause(e)
+                .log())
+            .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+            .block();
 
         // Compatibility mode is only enabled on OpenSearch clusters responding with the version of 7.10.2
         if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
@@ -123,8 +129,9 @@ public class OpenSearchClientFactory {
                 .doOnError(e -> log.error(e.getMessage()))
                 .retryWhen(OpenSearchClient.CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
                 .flatMap(hasCompatibilityModeEnabled -> {
-                    log.atInfo().setMessage("Checking CompatibilityMode, was enabled? {}").addArgument(hasCompatibilityModeEnabled).log();
+                    log.atInfo().setMessage("After querying target, compatibilityMode={}").addArgument(hasCompatibilityModeEnabled).log();
                     if (Boolean.FALSE.equals(hasCompatibilityModeEnabled)) {
+                        assert versionFromRootApi != null : "Expected version from root api to be set";
                         return Mono.just(versionFromRootApi);
                     }
                     return client.getAsync("_nodes/_all/nodes,version?format=json", null)
@@ -137,6 +144,7 @@ public class OpenSearchClientFactory {
                             .setCause(e)
                             .setMessage("Unable to determine CompatibilityMode or version from plugin, falling back to version {}")
                             .addArgument(versionFromRootApi).log();
+                    assert versionFromRootApi != null : "Expected version from root api to be set";
                     return Mono.just(versionFromRootApi);
                 })
                 .block();
