@@ -73,9 +73,33 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         return Collections.unmodifiableMap(merged);
     }
 
+    public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.4");
     public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.5");
+    public static final ContainerVersion ES_V8_16 = Elasticsearch8Version.fromTag("8.16.6");
+    public static final ContainerVersion ES_V8_15 = Elasticsearch8Version.fromTag("8.15.5");
+    public static final ContainerVersion ES_V8_14 = Elasticsearch8Version.fromTag("8.14.3");
+    public static final ContainerVersion ES_V8_13 = Elasticsearch8Version.fromTag("8.13.4");
+    public static final ContainerVersion ES_V8_12 = Elasticsearch8Version.fromTag("8.12.2");
+    public static final ContainerVersion ES_V8_11 = Elasticsearch8Version.fromTag("8.11.4");
+    public static final ContainerVersion ES_V8_10 = Elasticsearch8Version.fromTag("8.10.4");
+    public static final ContainerVersion ES_V8_9 = Elasticsearch8Version.fromTag("8.9.2");
+    public static final ContainerVersion ES_V8_8 = Elasticsearch8Version.fromTag("8.8.2");
+    public static final ContainerVersion ES_V8_7 = Elasticsearch8Version.fromTag("8.7.1");
+    public static final ContainerVersion ES_V8_6 = Elasticsearch8Version.fromTag("8.6.2");
+    public static final ContainerVersion ES_V8_5 = Elasticsearch8Version.fromTag("8.5.3");
+    public static final ContainerVersion ES_V8_4 = Elasticsearch8Version.fromTag("8.4.3");
+    public static final ContainerVersion ES_V8_3 = Elasticsearch8Version.fromTag("8.3.3");
+    public static final ContainerVersion ES_V8_2 = Elasticsearch8Version.fromTag("8.2.3");
+    public static final ContainerVersion ES_V8_1 = Elasticsearch8Version.fromTag("8.1.3");
+    public static final ContainerVersion ES_V8_0 = Elasticsearch8Version.fromTag("8.0.0");
 
     public static final ContainerVersion ES_V7_17 = ElasticsearchVersion.fromTag("7.17.22");
+    public static final ContainerVersion ES_V7_16 = ElasticsearchVersion.fromTag("7.16.3");
+    public static final ContainerVersion ES_V7_15 = ElasticsearchVersion.fromTag("7.15.2");
+    public static final ContainerVersion ES_V7_14 = ElasticsearchVersion.fromTag("7.14.2");
+    public static final ContainerVersion ES_V7_13 = ElasticsearchVersion.fromTag("7.13.4");
+    public static final ContainerVersion ES_V7_12 = ElasticsearchVersion.fromTag("7.12.1");
+    public static final ContainerVersion ES_V7_11 = ElasticsearchVersion.fromTag("7.11.2");
     public static final ContainerVersion ES_V7_10_2 = ElasticsearchOssVersion.fromTag("7.10.2");
     public static final ContainerVersion ES_V7_9 = ElasticsearchOssVersion.fromTag("7.9.3");
     public static final ContainerVersion ES_V7_8 = ElasticsearchOssVersion.fromTag("7.8.1");

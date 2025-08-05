@@ -25,13 +25,37 @@ public class SupportedClusters {
             SearchClusterContainer.ES_V6_8_23,
             SearchClusterContainer.ES_V7_10_2,
             SearchClusterContainer.ES_V7_17,
-            SearchClusterContainer.ES_V8_17,
+            SearchClusterContainer.ES_V8_18,
             SearchClusterContainer.OS_V1_3_16
         );
     }
 
     public static List<ContainerVersion> extendedSources() {
         return List.of(
+                SearchClusterContainer.ES_V8_17,
+                SearchClusterContainer.ES_V8_16,
+                SearchClusterContainer.ES_V8_15,
+                SearchClusterContainer.ES_V8_14,
+                SearchClusterContainer.ES_V8_13,
+                SearchClusterContainer.ES_V8_12,
+                SearchClusterContainer.ES_V8_11,
+                SearchClusterContainer.ES_V8_10,
+                SearchClusterContainer.ES_V8_9,
+                SearchClusterContainer.ES_V8_8,
+                SearchClusterContainer.ES_V8_7,
+                SearchClusterContainer.ES_V8_6,
+                SearchClusterContainer.ES_V8_5,
+                SearchClusterContainer.ES_V8_4,
+                SearchClusterContainer.ES_V8_3,
+                SearchClusterContainer.ES_V8_2,
+                SearchClusterContainer.ES_V8_1,
+                SearchClusterContainer.ES_V8_0,
+                SearchClusterContainer.ES_V7_16,
+                SearchClusterContainer.ES_V7_15,
+                SearchClusterContainer.ES_V7_14,
+                SearchClusterContainer.ES_V7_13,
+                SearchClusterContainer.ES_V7_12,
+                SearchClusterContainer.ES_V7_11,
                 SearchClusterContainer.ES_V7_9,
                 SearchClusterContainer.ES_V7_8,
                 SearchClusterContainer.ES_V7_7,
