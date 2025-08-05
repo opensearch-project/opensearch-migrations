@@ -1,12 +1,7 @@
 "use client";
 
 import React, { Suspense } from "react";
-import {
-  Header,
-  Button,
-  Spinner,
-} from "@cloudscape-design/components";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
+import { Header, Spinner } from "@cloudscape-design/components";
 import { useSearchParams } from "next/navigation";
 import SessionOverviewView from "@/components/session/SessionOverviewView";
 import SnapshotStatusView from "@/components/session/SnapshotStatusView";
