@@ -52,8 +52,8 @@ public abstract class MigratorEvaluatorBase {
         return clusters.build();
     }
 
-    protected Transformers getCustomTransformer(Version sourceVersion) {
-        var versionSpecificCustomTransforms = MetadataTransformationRegistry.getCustomTransformationBySourceVersion(sourceVersion);
+    protected Transformers getCustomTransformer(Version sourceVersion, Version targetVersion) {
+        var versionSpecificCustomTransforms = MetadataTransformationRegistry.getCustomTransformationByClusterVersions(sourceVersion, targetVersion);
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
             MetadataTransformationRegistry.logTransformerConfig("User supplied custom transform", transformerConfig);
@@ -82,7 +82,7 @@ public abstract class MigratorEvaluatorBase {
                 arguments.metadataTransformationParams,
                 allowLooseVersionMatches
         );
-        var customTransformer = getCustomTransformer(clusters.getSource().getVersion());
+        var customTransformer = getCustomTransformer(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
         log.atInfo().setMessage("Selected transformer composite: custom = {}, version = {}")
                 .addArgument(customTransformer.getClass().getSimpleName())
                 .addArgument(versionTransformer.getClass().getSimpleName())
