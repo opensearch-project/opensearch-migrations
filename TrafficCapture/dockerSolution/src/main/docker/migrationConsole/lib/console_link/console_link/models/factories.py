@@ -45,7 +45,7 @@ class UnsupportedBackfillTypeError(Exception):
         super().__init__("Unsupported backfill type", supplied_backfill)
 
 
-def get_snapshot(config: Dict, source_cluster: Cluster):
+def get_snapshot(config: Dict, source_cluster: Optional[Cluster]):
     if 'fs' in config:
         return FileSystemSnapshot(config, source_cluster)
     elif 's3' in config:

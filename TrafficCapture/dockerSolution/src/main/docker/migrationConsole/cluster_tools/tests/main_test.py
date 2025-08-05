@@ -11,7 +11,7 @@ def test_list_tools(caplog):
     """Test the list_tools function to ensure it lists available tools."""
     caplog.set_level(logging.INFO)
     logger.info(caplog.text)
-    main(argparse.Namespace(tool=None, config_file='/config/migration_services.yaml'))
+    main(argparse.Namespace(tool=None)
     violating_logs = [record for record in caplog.records if record.levelno >= logging.WARNING]
     assert not violating_logs, f"Warnings or errors were logged during test_list_tools: {violating_logs}"
     assert "Available tools:" in caplog.text
@@ -36,7 +36,7 @@ def test_main_with_tool(caplog, env, monkeypatch):
     monkeypatch.setattr("src.cluster_tools.base.main.Environment", mock_environment_init)
     
     args = argparse.Namespace(tool="create_index", index_name="test-index",
-                              primary_shards=10, config_file='/config/migration_services.yaml')
+                              primary_shards=10)
     args.func = create_index.main
     main(args)
 

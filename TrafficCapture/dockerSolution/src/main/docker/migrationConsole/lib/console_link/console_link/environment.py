@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
     get_metrics_source
 from console_link.models.cluster import Cluster
@@ -44,7 +44,7 @@ class Environment:
     client_options: Optional[ClientOptions] = None
     config: Dict
 
-    def __init__(self, config: Dict | None = None, config_file: str | Path | None = None):
+    def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None):
         """
         Initialize the environment either from a configuration file or a direct configuration object.
         
@@ -110,14 +110,12 @@ class Environment:
             logger.info(f"Replay initialized: {self.replay}")
 
         if 'snapshot' in self.config:
-            if self.source_cluster is None:
-                raise ValueError("Snapshot commands require a source cluster to be defined")
             self.snapshot = get_snapshot(self.config["snapshot"],
                                          source_cluster=self.source_cluster)
             logger.info(f"Snapshot initialized: {self.snapshot}")
         else:
             logger.info("No snapshot provided")
-        if 'metadata_migration' in self.config and self.target_cluster and self.snapshot:
+        if 'metadata_migration' in self.config:
             self.metadata = Metadata(self.config["metadata_migration"],
                                      target_cluster=self.target_cluster,
                                      snapshot=self.snapshot)

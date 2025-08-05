@@ -294,3 +294,11 @@ class Cluster:
                 session=session,
                 raise_error=False
             )
+
+class NoSourceClusterDefinedError(Exception):
+    def __init__(self):
+        super().__init__("Unable to process without a source cluster")
+    
+class NoTargetClusterDefinedError(Exception):
+    def __init__(self):
+        super().__init__("Unable to process without a target cluster")
