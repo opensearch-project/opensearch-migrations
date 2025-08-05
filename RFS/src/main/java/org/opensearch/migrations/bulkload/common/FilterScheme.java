@@ -30,15 +30,16 @@ public class FilterScheme {
 
     private static final List<String> EXCLUDED_SUFFIXES = Arrays.asList(
             "@ilm",
+            "@lifecycle",
             "@mappings",
             "@package",
             "@settings",
             "@template",
-            "@tsdb-settings",
-            "@lifecycle"
+            "@tsdb-settings"
         );
 
     private static final List<String> EXCLUDED_NAMES = Arrays.asList(
+            "agentless",
             "elastic-connectors",
             "ilm-history",
             "logs",
@@ -58,8 +59,7 @@ public class FilterScheme {
             "traces-tsdb-settings",
             "triggered_watches",
             "watches",
-            "watch_history_3",
-            "agentless"
+            "watch_history_3"
     );
 
     public static Predicate<String> filterByAllowList(List<String> allowlist) {
