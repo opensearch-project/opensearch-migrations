@@ -339,16 +339,16 @@ class StepsBuilder<
     }
 
     // Convenience method for single step
-    addSingleStep<
+    addStep<
         Name extends string, 
         StepDef,
-        TClass extends Record<string, any>,
-        TKey extends Extract<keyof TClass, string>
+        TWorkflow extends { templates: Record<string, any> },
+        TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        classConstructor: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TClass>,
+        workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>>,
+        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>,
         dependencies?: string[]
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
@@ -358,7 +358,7 @@ class StepsBuilder<
     > {
         return this.addStepGroup(groupBuilder => {
             // addStep returns a constrained type, so we need to cast it for internal use
-            return groupBuilder.addStep(name, classConstructor, key, params, dependencies) as any;
+            return groupBuilder.addStep(name, workflowBuilder, key, params, dependencies) as any;
         }) as any;
     }
 
@@ -390,13 +390,13 @@ class StepGroupBuilder<
     addStep<
         Name extends string, 
         StepDef,
-        TClass extends Record<string, any>,
-        TKey extends Extract<keyof TClass, string>
+        TWorkflow extends { templates: Record<string, any> },
+        TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        classConstructor: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TClass>,
+        workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>>,
+        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>,
         dependencies?: string[]
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, { [K in Name]: StepDef }>>>
@@ -406,9 +406,9 @@ class StepGroupBuilder<
         
         // Call callTemplate to get the template reference and arguments
         const templateCall = callTemplate(
-            classConstructor as TClass,
+            (workflowBuilder as TWorkflow).templates,
             key as TKey,
-            params as z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
+            params as z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
         );
 
         // Add to runtime structure
