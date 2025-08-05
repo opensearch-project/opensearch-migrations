@@ -34,7 +34,8 @@ public class FilterScheme {
             "@package",
             "@settings",
             "@template",
-            "@tsdb-settings"
+            "@tsdb-settings",
+            "@lifecycle"
         );
 
     private static final List<String> EXCLUDED_NAMES = Arrays.asList(
@@ -57,7 +58,8 @@ public class FilterScheme {
             "traces-tsdb-settings",
             "triggered_watches",
             "watches",
-            "watch_history_3"
+            "watch_history_3",
+            "agentless"
     );
 
     public static Predicate<String> filterByAllowList(List<String> allowlist) {
