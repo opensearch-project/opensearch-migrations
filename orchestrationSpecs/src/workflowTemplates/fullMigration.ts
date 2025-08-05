@@ -1,62 +1,27 @@
-import { z } from 'zod';
+import {z, ZodTypeAny} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
-import {Scope, ExtendScope} from "@/schemas/workflowTypes";
 import {defineParam, InputParamDef} from "@/schemas/parameterSchemas";
-import {TypescriptError} from "@/utils";
 
-
-// Define the common fields with their schemas in one place
 const TARGET_LATCH_FIELD_SPECS = {
     prefix: z.string(),
     etcdUtilsImage: IMAGE_SPECIFIER,
     etcdUtilsImagePullPolicy: IMAGE_PULL_POLICY,
-    firstThing: ""
+    firstThing: z.string()
 } as const;
-
-type TargetLatchFieldNames = keyof typeof TARGET_LATCH_FIELD_SPECS;
-
-// Generate the type from the specs
-type TargetLatchFields = {
-    [K in TargetLatchFieldNames]: InputParamDef<any, true>;
-};
-
-function addCommonTargetLatchFields<
-    TB extends TemplateBuilder<any, any, any, any>
->(
-    templateBuilder: TB,
-    isRequired: TB extends TemplateBuilder<any, any, infer CurrentInputs, any>
-        ? keyof CurrentInputs & TargetLatchFieldNames extends never
-            ? boolean
-            : TypescriptError<`Cannot add common fields: '${keyof CurrentInputs & TargetLatchFieldNames & string}' already exists`>
-        : never
-): TB extends TemplateBuilder<infer Context, infer Body, infer Inputs, infer Outputs>
-    ? TemplateBuilder<Context, Body, ExtendScope<Inputs, TargetLatchFields>, Outputs>
-    : never {
-
-    // Iterate over the field specs and add each one
-    let result = templateBuilder as any;
-    for (const [fieldName, schema] of Object.entries(TARGET_LATCH_FIELD_SPECS)) {
-        result = result.addRequiredInput(fieldName, schema);
-    }
-    return result;
-}
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     .addParams(CommonWorkflowParameters)
         // .addParams({foo: defineParam({ defaultValue: "foo" }),})
-    .addTemplate("init", ot=> {
-            const o = ot
-                .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
-                //.addOptionalInput("firstThing2", s => "")
-                .addOptionalInput("firstThing2", s => "")
-                .addOptionalInput("second", s=>"")
-                //.addOptionalInput("third", s => s.currentScope.firstThing);
-            return addCommonTargetLatchFields(o, true)
-                .addOptionalInput("fourth", s=>s.currentScope.firstThing)
-                .addOptionalInput("fifth", s=>s.currentScope.prefix);
-        }
+    .addTemplate("init", ot=> ot
+        .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
+        //.addOptionalInput("firstThing2", s => "")
+        .addOptionalInput("firstThing2", s => "")
+        .addOptionalInput("second", s=>"")
+        .addMultipleRequiredInputs(TARGET_LATCH_FIELD_SPECS, true)
+        .addOptionalInput("", s=>s.currentScope.firstThing)
+        .addOptionalInput("fifth", s=>s.currentScope.second)
         // .addContainer(...)
         // .addOutput(...)
     )

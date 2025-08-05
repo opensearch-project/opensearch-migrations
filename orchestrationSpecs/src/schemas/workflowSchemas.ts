@@ -5,15 +5,18 @@ import {
     OutputParametersRecord,
     paramsToCallerSchema
 } from "@/schemas/parameterSchemas";
-import {Scope, ScopeFn, ExtendScope, TemplateSigEntry} from "@/schemas/workflowTypes";
+import {
+    Scope,
+    ScopeFn,
+    ExtendScope,
+    TemplateSigEntry,
+    FieldSpecs,
+    FieldGroupConstraint,
+    FieldSpecsToInputParams
+} from "@/schemas/workflowTypes";
 import {z, ZodType, ZodTypeAny} from "zod";
 import {TypescriptError} from "@/utils";
 
-declare global {
-    // true: worse LSP, but squigglies under the name declaration
-    // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
-    const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME__: boolean;
-}
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
 type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
@@ -240,6 +243,35 @@ export class TemplateBuilder<
         };
 
         return this.extendWithParam(name as any, param) as any;
+    }
+
+    /**
+     * Add multiple fields at once from a field specification object
+     * Provides type safety by checking for name conflicts with existing fields
+     */
+    addMultipleRequiredInputs<T extends FieldSpecs>(
+        fieldSpecs: FieldGroupConstraint<T, InputParamsScope, T>,
+        checkTypes: keyof InputParamsScope & keyof T extends never
+            ? any
+            : TypescriptError<`Cannot add field group: '${keyof InputParamsScope & keyof T & string}' already exists`>
+    ): ScopeIsEmptyConstraint<BodyScope,
+        FieldGroupConstraint<T, InputParamsScope,
+            TemplateBuilder<
+                ContextualScope,
+                BodyScope,
+                ExtendScope<InputParamsScope, FieldSpecsToInputParams<T>>,
+                OutputParamsScope
+            >
+        >
+    > {
+        const specs = fieldSpecs as T;
+
+        // Iterate over the field specs and add each one
+        let result = this as any;
+        for (const [fieldName, schema] of Object.entries(specs)) {
+            result = result.addRequiredInput(fieldName, schema);
+        }
+        return result as any;
     }
 
     addSteps<SB extends StepsBuilder<ContextualScope, InputParamsScope, any>>(
