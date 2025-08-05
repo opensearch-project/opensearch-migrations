@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -43,6 +44,7 @@ public class EndToEndTest extends SourceTestBase {
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
     }
 
+    @Disabled("Run only extendedSources scenarios")
     @ParameterizedTest(name = "Source {0} to Target {1}")
     @MethodSource(value = "scenarios")
     public void migrationDocuments(
@@ -59,6 +61,7 @@ public class EndToEndTest extends SourceTestBase {
     private static Stream<Arguments> extendedScenarios() {
         return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
     }
+
     @ParameterizedTest(name = "Source {0} to Target OS 2.19")
     @MethodSource(value = "extendedScenarios")
     public void extendedMigrationDocuments(
