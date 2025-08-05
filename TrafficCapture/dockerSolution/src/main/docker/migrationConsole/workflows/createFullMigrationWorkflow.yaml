@@ -15,6 +15,7 @@ spec:
                   "source": {
                       "endpoint": "https://elasticsearch-master-headless:9200",
                       "allow_insecure": true,
+                      "version": "ES_7.10",
                       "basic_auth": {
                           "username": "admin",
                           "password": "admin"
@@ -29,13 +30,12 @@ spec:
                           "migrations": [
                               {
                                   "metadata": {
-                                      "mappings": {
-                                          "properties": {}
-                                      },
-                                      "settings": {}
+                                      "from_snapshot": null,
+                                      "transformer_config_base64": ""
                                   },
                                   "documentBackfillConfigs": [
                                       {
+                                          "transformer_config_base64": "",
                                           "indices": [
                                               "index_3",
                                               "index_4"

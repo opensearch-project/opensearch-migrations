@@ -7,6 +7,7 @@ from console_link.models.client_options import ClientOptions
 def create_valid_cluster(endpoint: str = "https://opensearchtarget:9200",
                          allow_insecure: bool = True,
                          auth_type: AuthMethod = AuthMethod.BASIC_AUTH,
+                         version: Optional[str] = None,
                          details: Optional[Dict] = None,
                          client_options: Optional[ClientOptions] = None):
 
@@ -18,4 +19,6 @@ def create_valid_cluster(endpoint: str = "https://opensearchtarget:9200",
         "allow_insecure": allow_insecure,
         auth_type.name.lower(): details if details else {}
     }
+    if version:
+        custom_cluster_config["version"] = version
     return Cluster(config=custom_cluster_config, client_options=client_options)

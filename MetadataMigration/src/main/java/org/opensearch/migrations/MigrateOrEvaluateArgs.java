@@ -41,6 +41,12 @@ public class MigrateOrEvaluateArgs {
         "--s3-region" }, description = "The AWS Region the S3 bucket is in, like: us-east-2")
     public String s3Region;
 
+    @Parameter(required = false,
+            names = { "--s3-endpoint", "--s3Endpoint" },
+            description = ("The endpoint URL to use for S3 calls.  " +
+                    "For use when the default AWS ones won't work for a particular context."))
+    public String s3Endpoint = null;
+
     @ParametersDelegate
     public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 
