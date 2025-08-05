@@ -367,7 +367,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 100 --target-compression --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 94489280512 --max-connections 100 --source-version \"ES_7.10\"",
             ],
           ],
         }
