@@ -136,7 +136,7 @@ public class ClusterOperations {
         var response = put("/" + index, body);
         assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
 
-        // Automatically apply ES 8.x specific index tweaks
+        // Automatically apply index tweaks if ES 8x is equalOrBetween_ES_8_5_and_8_18
         if (VersionMatchers.equalOrBetween_ES_8_5_and_8_18.test(clusterVersion)) {
             log.info("Cluster is ES 8.x — applying disableBloom setting on index: {}", index);
             disableBloom(index);
