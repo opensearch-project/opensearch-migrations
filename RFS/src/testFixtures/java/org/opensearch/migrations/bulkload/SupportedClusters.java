@@ -32,7 +32,6 @@ public class SupportedClusters {
 
     public static List<ContainerVersion> extendedSources() {
         return List.of(
-                SearchClusterContainer.ES_V8_18,
                 SearchClusterContainer.ES_V8_17,
                 SearchClusterContainer.ES_V8_16,
                 SearchClusterContainer.ES_V8_15,
