@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
@@ -17,9 +18,12 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.Logger;
+import reactor.util.Loggers;
 
 @Slf4j
 public class LuceneReader {
+    private static final Logger REACTOR_LOGGER = Loggers.getLogger(LuceneReader.class);
 
     private LuceneReader() {}
 
@@ -44,7 +48,12 @@ public class LuceneReader {
                     reader.getIndexDirectoryPath())
             )
             .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
-            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+            .log(REACTOR_LOGGER, Level.INFO, true) // Add to validate scheduler unavailable error
+            .doFinally(s -> {
+                log.atInfo().setMessage("Running sharedSegmentReaderScheduler dispose").log();
+                sharedSegmentReaderScheduler.dispose();
+            })
+            .log(REACTOR_LOGGER, Level.INFO, true); // Add to validate scheduler unavailable error;
     }
 
     /**
