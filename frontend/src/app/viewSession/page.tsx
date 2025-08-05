@@ -37,11 +37,6 @@ function ViewSessionPageInner() {
           <BackfillStatusView sessionName={sessionName} />
         </SpaceBetween>
       )}
-      <DebugCommands>
-        <SpaceBetween size="xs" direction="horizontal">
-          <Button onClick={() => window.location.reload()}>Reload</Button>
-        </SpaceBetween>
-      </DebugCommands>
     </SpaceBetween>
   );
 }
