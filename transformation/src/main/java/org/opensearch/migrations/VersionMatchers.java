@@ -22,6 +22,8 @@ public class VersionMatchers {
     public static final Predicate<Version> isES_7_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 7.10"));
     public static final Predicate<Version> isES_7_10 = VersionMatchers.matchesMinorVersion(Version.fromString("ES 7.10.2"));
     public static final Predicate<Version> isES_8_X = VersionMatchers.matchesMajorVersion(Version.fromString("ES 8.17"));
+    public static final Predicate<Version> equalOrBetween_ES_8_5_and_8_18 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 8.5"))
+                                                                .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 8.18")));
     public static final Predicate<Version> equalOrBetween_ES_7_0_and_7_8 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.0"))
                                                                 .and(VersionMatchers.equalOrLessThanMinorVersion(Version.fromString("ES 7.8")));
     public static final Predicate<Version> equalOrGreaterThanES_7_9 = VersionMatchers.equalOrGreaterThanMinorVersion(Version.fromString("ES 7.9"));

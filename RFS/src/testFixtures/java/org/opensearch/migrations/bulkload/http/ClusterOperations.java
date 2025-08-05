@@ -137,7 +137,7 @@ public class ClusterOperations {
         assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
 
         // Automatically apply ES 8.x specific index tweaks
-        if (VersionMatchers.isES_8_X.test(clusterVersion)) {
+        if (VersionMatchers.equalOrBetween_ES_8_5_and_8_18.test(clusterVersion)) {
             log.info("Cluster is ES 8.x — applying disableBloom setting on index: {}", index);
             disableBloom(index);
         }
