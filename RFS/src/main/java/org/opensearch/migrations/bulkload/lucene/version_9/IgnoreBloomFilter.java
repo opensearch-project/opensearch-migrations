@@ -24,7 +24,7 @@ public class IgnoreBloomFilter extends PostingsFormat {
 
     @Override
     public FieldsConsumer fieldsConsumer(SegmentWriteState state) throws IOException {
-        throw new UnsupportedOperationException(getName() + " is read-only fallback");
+        throw new UnsupportedOperationException(this.getClass().getSimpleName() + " is read-only fallback");
     }
 
     @Override
