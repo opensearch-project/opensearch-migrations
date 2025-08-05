@@ -11,7 +11,7 @@ def test_list_tools(caplog):
     """Test the list_tools function to ensure it lists available tools."""
     caplog.set_level(logging.INFO)
     logger.info(caplog.text)
-    main(argparse.Namespace(tool=None)
+    main(argparse.Namespace(tool=None))
     violating_logs = [record for record in caplog.records if record.levelno >= logging.WARNING]
     assert not violating_logs, f"Warnings or errors were logged during test_list_tools: {violating_logs}"
     assert "Available tools:" in caplog.text
