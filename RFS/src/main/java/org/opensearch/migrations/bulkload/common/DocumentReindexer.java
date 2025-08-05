@@ -7,7 +7,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -22,13 +21,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.Logger;
-import reactor.util.Loggers;
 
 @Slf4j
 public class DocumentReindexer {
     private static final Supplier<IJsonTransformer> NOOP_TRANSFORMER_SUPPLIER = () -> new NoopTransformerProvider().createTransformer(null);
-    private static final Logger REINDEXER_REACTOR_LOGGER = Loggers.getLogger(DocumentReindexer.class);
+
     protected final OpenSearchClient client;
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
@@ -37,10 +34,10 @@ public class DocumentReindexer {
     private final boolean isNoopTransformer;
 
     public DocumentReindexer(OpenSearchClient client,
-                             int maxDocsPerBulkRequest,
-                             long maxBytesPerBulkRequest,
-                             int maxConcurrentWorkItems,
-                             Supplier<IJsonTransformer> transformerSupplier) {
+               int maxDocsPerBulkRequest,
+               long maxBytesPerBulkRequest,
+               int maxConcurrentWorkItems,
+               Supplier<IJsonTransformer> transformerSupplier) {
         this.client = client;
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
@@ -65,18 +62,14 @@ public class DocumentReindexer {
         });
         Scheduler scheduler = Schedulers.fromExecutor(executor);
         var rfsDocs = documentStream
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true)
             .publishOn(scheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true)
             .concatMapIterable(docList -> transformDocumentBatch(threadSafeTransformer, docList, indexName));
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true)
             .doFinally(signalType -> {
                 scheduler.dispose();
                 executor.shutdown();
-            })
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true);
+            });
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
@@ -87,20 +80,17 @@ public class DocumentReindexer {
 
         return bulkDocsBatches
             .limitRate(bulkDocsToBuffer, 1) // Bulk Doc Buffer, Keep Full
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true)
             .publishOn(scheduler, 1) // Switch scheduler
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true)
             .flatMapSequential(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
                 maxConcurrentWorkItems)
-            .doFinally(s -> scheduler.dispose())
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true);
+            .doFinally(s -> scheduler.dispose());
     }
 
     @SneakyThrows
     List<RfsDocument> transformDocumentBatch(IJsonTransformer transformer, List<RfsLuceneDocument> docs, String indexName) {
         var originalDocs = docs.stream().map(doc ->
-                RfsDocument.fromLuceneDocument(doc, indexName))
-            .collect(Collectors.toList());
+                        RfsDocument.fromLuceneDocument(doc, indexName))
+                .collect(Collectors.toList());
         if (!isNoopTransformer) {
             return RfsDocument.transform(transformer, originalDocs);
         }
@@ -116,8 +106,8 @@ public class DocumentReindexer {
         log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.progressCheckpointNum).log();
 
         List<BulkDocSection> bulkDocSections = docsBatch.stream()
-            .map(rfsDocument -> rfsDocument.document)
-            .collect(Collectors.toList());
+                .map(rfsDocument -> rfsDocument.document)
+                .collect(Collectors.toList());
 
         return client.sendBulkRequest(indexName, bulkDocSections, context.createBulkRequest()) // Send the request
             .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
@@ -130,10 +120,9 @@ public class DocumentReindexer {
                 .addArgument(error::getMessage)
                 .log())
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
-            .log(REINDEXER_REACTOR_LOGGER, Level.INFO, true)
             .onErrorResume(e -> Mono.empty())
             .then(Mono.just(new WorkItemCursor(lastDoc.progressCheckpointNum))
-                .subscribeOn(scheduler));
+            .subscribeOn(scheduler));
     }
 
     Flux<List<RfsDocument>> batchDocsBySizeOrCount(Flux<RfsDocument> docs) {
