@@ -8,7 +8,6 @@ import { StatusFieldDefinition } from './statusUtils';
 export default function SessionOverviewView({ sessionName }: SessionStatusProps) {
   const { isLoading, data: sessionData, error } = useSessionOverview(sessionName);
 
-  // Define the fields once, used for both loading and data display
   const fields: StatusFieldDefinition<typeof sessionData>[] = [
     { 
       label: 'Session',

@@ -9,9 +9,7 @@ import { mapStatus, durationFromTimes, StatusFieldDefinition } from './statusUti
 import { useSnapshotStatus } from './apiHooks';
 import StatusContainer from './StatusContainer';
 import { StepState } from '@/generated/api/types.gen';
-import { SnapshotStatus } from '@/generated/api/types.gen';
 
-// We'll use the API's SnapshotStatus type, but make our own type to handle both API and debug data
 type SnapshotData = {
   status: StepState;
   percentage_completed: number;
