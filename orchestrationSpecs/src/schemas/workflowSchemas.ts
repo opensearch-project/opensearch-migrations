@@ -19,17 +19,17 @@ import {TypescriptError} from "@/utils";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
-type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
+export type UniqueNameConstraintOutsideDeclaration<Name extends string, S, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends false
         ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within ${keyof S & string}`> : TypeWhenValid
         : TypeWhenValid;
 
-type UniqueNameConstraintAtDeclaration<Name extends string, S> =
+export type UniqueNameConstraintAtDeclaration<Name extends string, S> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
         ? Name extends keyof S ? TypescriptError<`Name '${Name}' exists within  ${keyof S & string}.`> : Name
         : Name;
 
-type ScopeIsEmptyConstraint<S, T> =
+export type ScopeIsEmptyConstraint<S, T> =
     keyof S extends never
         ? T
         : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
@@ -211,8 +211,7 @@ export class TemplateBuilder<
             BodyScope,
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
             OutputParamsScope
-        > > >
-    {
+        >>> {
         const fn = defaultValueFromScopeFn as (s: { context: ContextualScope; currentScope: InputParamsScope }) => T;
         const param = defineParam({
             defaultValue: fn({
@@ -233,10 +232,9 @@ export class TemplateBuilder<
         TemplateBuilder<
             ContextualScope,
             BodyScope,
-            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> } >,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> }>,
             OutputParamsScope
-        >>
-    {
+        >> {
         const param: InputParamDef<any, true> = {
             type: t as any,
             description
@@ -246,8 +244,9 @@ export class TemplateBuilder<
     }
 
     /**
-     * Add multiple fields at once from a field specification object
-     * Provides type safety by checking for name conflicts with existing fields
+     * Add multiple fields at once from a field specification object.
+     * Provides type safety by checking for name conflicts with existing fields.
+     * NB: Unlike most of the other builder methods, this does NOT
      */
     addMultipleRequiredInputs<T extends FieldSpecs>(
         fieldSpecs: FieldGroupConstraint<T, InputParamsScope, T>,
@@ -255,13 +254,11 @@ export class TemplateBuilder<
             ? any
             : TypescriptError<`Cannot add field group: '${keyof InputParamsScope & keyof T & string}' already exists`>
     ): ScopeIsEmptyConstraint<BodyScope,
-        FieldGroupConstraint<T, InputParamsScope,
-            TemplateBuilder<
-                ContextualScope,
-                BodyScope,
-                ExtendScope<InputParamsScope, FieldSpecsToInputParams<T>>,
-                OutputParamsScope
-            >
+        TemplateBuilder<
+            ContextualScope,
+            BodyScope,
+            ExtendScope<InputParamsScope, FieldSpecsToInputParams<T>>,
+            OutputParamsScope
         >
     > {
         const specs = fieldSpecs as T;
@@ -272,6 +269,43 @@ export class TemplateBuilder<
             result = result.addRequiredInput(fieldName, schema);
         }
         return result as any;
+    }
+
+    /**
+     * Add multiple inputs using a function that operates on this TemplateBuilder
+     * The function can only modify inputs - other scopes must remain unchanged
+     */
+    addInputs<NewInputScope extends Scope>(
+        builderFn:
+        (tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, {}>) =>
+            TemplateBuilder<ContextualScope, {}, NewInputScope, {}>
+    ): ScopeIsEmptyConstraint<BodyScope, ScopeIsEmptyConstraint<InputParamsScope,
+        TemplateBuilder<ContextualScope, BodyScope, NewInputScope, OutputParamsScope>
+    >> {
+        const fn = builderFn as (
+            tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, {}>
+        ) => TemplateBuilder<ContextualScope, {}, NewInputScope, {}>;
+
+        return fn(this as any) as any;
+    }
+
+    /**
+     * Add multiple outputs using a function that operates on this TemplateBuilder
+     * The function can only modify outputs - other scopes must remain unchanged
+     */
+    addOutputs<NewOuputScope extends Scope>(
+        builderFn:
+        (tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, OutputParamsScope>) =>
+            TemplateBuilder<ContextualScope, {}, InputParamsScope, NewOuputScope>,
+        check: ScopeIsEmptyConstraint<BodyScope, ScopeIsEmptyConstraint<InputParamsScope, boolean >>
+    ): ScopeIsEmptyConstraint<NewOuputScope,
+        TemplateBuilder<ContextualScope, BodyScope, InputParamsScope, NewOuputScope>
+    > {
+        const fn = builderFn as (
+            tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, OutputParamsScope>
+        ) => TemplateBuilder<ContextualScope, {}, InputParamsScope, NewOuputScope>;
+
+        return fn(this as any) as any;
     }
 
     addSteps<SB extends StepsBuilder<ContextualScope, InputParamsScope, any>>(
