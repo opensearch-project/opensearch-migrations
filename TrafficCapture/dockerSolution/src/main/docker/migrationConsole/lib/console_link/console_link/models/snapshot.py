@@ -127,7 +127,8 @@ class S3Snapshot(Snapshot):
         self.s3_region = config['s3']['aws_region']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         s3_command_args = {
@@ -195,7 +196,8 @@ class FileSystemSnapshot(Snapshot):
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()
