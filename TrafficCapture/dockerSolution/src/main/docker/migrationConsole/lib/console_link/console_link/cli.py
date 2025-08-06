@@ -61,6 +61,15 @@ def cli(ctx, config_file, json, verbose, version):
     ctx.obj.json = json
 
 
+# Create a wrapper to handle exceptions for the CLI
+def main():
+    try:
+        cli()
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+
+
 # ##################### CLUSTERS ###################
 
 
@@ -646,4 +655,4 @@ def show(inputfile, outputfile):
 #################################################
 
 if __name__ == "__main__":
-    cli()
+    main()
