@@ -9,12 +9,12 @@ import { KeyValuePairs } from '@cloudscape-design/components';
 import { StatusFieldDefinition, generateLoadingItems, generateDataItems } from './statusUtils';
 
 interface StatusContainerProps<T> {
-  title: string;
-  isLoading: boolean;
-  error: string | null;
-  data: T | null;
-  fields: StatusFieldDefinition<T>[];
-  columns?: number;
+  readonly title: string;
+  readonly isLoading: boolean;
+  readonly error: string | null;
+  readonly data: T | null;
+  readonly fields: StatusFieldDefinition<T>[];
+  readonly columns?: number;
 }
 
 export default function StatusContainer<T>({ 

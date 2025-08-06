@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { StatusIndicatorProps, StatusIndicator } from '@cloudscape-design/components';
+import { StatusIndicatorProps } from '@cloudscape-design/components';
 import { StepState } from '@/generated/api/types.gen';
 import Spinner from '@cloudscape-design/components/spinner';
 import Box from '@cloudscape-design/components/box';

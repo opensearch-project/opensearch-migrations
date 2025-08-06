@@ -1,3 +1,3 @@
 export interface SessionStatusProps {
-  sessionName: string;
+  readonly sessionName: string;
 }
