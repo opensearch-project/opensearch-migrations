@@ -92,7 +92,21 @@ tasks.register('cleanDockerImage') {
         def removeCommand = ['docker', 'rmi', dockerImageName]
         def proc = removeCommand.execute(null, projectDirRef)
         proc.waitFor()
-        logger.info("Cleaned Docker image: ${dockerImageName}")
+        def stdout = new ByteArrayOutputStream()
+        def stderr = new ByteArrayOutputStream()
+        proc.consumeProcessOutput(stdout, stderr)
+        def exitCode = proc.waitFor()
+        if (exitCode == 0) {
+            logger.lifecycle("Cleaned Docker image: ${dockerImageName}")
+        } else {
+            def errMsg = stderr.toString("UTF-8")
+            if (errMsg.contains("No such image") || errMsg.contains("Error: No such image")) {
+                logger.info("Docker image not found (already removed): ${dockerImageName}")
+            } else {
+                logger.error("Failed to remove Docker image: ${dockerImageName}\n${errMsg}")
+                throw new GradleException("Failed to remove Docker image: ${dockerImageName}")
+            }
+        }
     }
 }
 
