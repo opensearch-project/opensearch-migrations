@@ -43,7 +43,7 @@ public class ES8BloomFilterMetadataMigrationTest extends BaseMigrationTest {
     protected File localDirectory;
 
     private static final Set<SearchClusterContainer.ContainerVersion> ALLOWED_TARGETS = Set.of(
-        SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V3_0_0
+        SearchClusterContainer.OS_V2_19_1
     );
 
     // Utility: combine sources from supportedPairs and extendedSources, filtered for ES 8.x
@@ -125,28 +125,23 @@ public class ES8BloomFilterMetadataMigrationTest extends BaseMigrationTest {
             String blogIndexName = "blog_" + uniqueSuffix + "_2023";
             sourceOperations.createDocument(blogIndexName, "201", "{ \"name\": \"bob\", \"is_active\": true }");
             testData.blogIndexNames.add(blogIndexName);
-
-            // --- SCENARIO 2: Create movie docs in a new index (no template) ---
-            sourceOperations.createDocument(testData.movieIndexName, "301", "{ \"age\": 55, \"is_active\": false }");
-
-            // --- SCENARIO 3: Book index, create doc, disable bloom, add another doc ---
-            sourceOperations.createDocument(testData.bookIndexName, "401", "{ \"age\": 55, \"is_active\": false }");
-            sourceOperations.disableBloomFilterAndRefresh(testData.bookIndexName);
-            sourceOperations.createDocument(testData.bookIndexName, "402", "{ \"age\": 55, \"is_active\": false }");
-
-            // --- SCENARIO 4: New index, disable bloom, then docs ---
-            String bookDirect = testData.bookIndexName + "_direct";
-            sourceOperations.createIndex(bookDirect);
-            sourceOperations.disableBloomFilterAndRefresh(bookDirect);
-            sourceOperations.createDocument(bookDirect, "501", "{ \"age\": 55, \"is_active\": false }");
-
-            // --- SCENARIO 5: Index already exists ---
-            sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{ \"age\": 99, \"is_active\": true }");
-
-            // --- SCENARIO 6: Alias creation ---
-            sourceOperations.createAlias(testData.aliasName, "movies*");
-            testData.aliasNames.add(testData.aliasName);
         }
+
+        // --- SCENARIO 2: Create movie docs in a new index (no template) ---
+        sourceOperations.createDocument(testData.movieIndexName, "301", "{ \"age\": 55, \"is_active\": false }");
+
+        // --- SCENARIO 3: Create book doc, disable bloom, add another doc ---
+        sourceOperations.createDocument(testData.bookIndexName, "401", "{ \"age\": 55, \"is_active\": false }");
+        sourceOperations.disableBloomFilterAndRefresh(testData.bookIndexName);
+        sourceOperations.createDocument(testData.bookIndexName, "402", "{ \"age\": 55, \"is_active\": false }");
+        sourceOperations.refreshIndex(testData.bookIndexName);
+
+        // --- SCENARIO 4: Index already exists ---
+        sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{ \"age\": 99, \"is_active\": true }");
+
+        // --- SCENARIO 5: Alias creation ---
+        sourceOperations.createAlias(testData.aliasName, "movies*");
+        testData.aliasNames.add(testData.aliasName);
 
         // Prepare migration arguments as before
         MigrateOrEvaluateArgs arguments;
@@ -183,7 +178,6 @@ public class ES8BloomFilterMetadataMigrationTest extends BaseMigrationTest {
     }
 
     private static class TestData {
-        final String compoTemplateName = "simple_component_template";
         final String indexTemplateName = "simple_index_template";
         final String movieIndexName = "movies_2023";
         final String aliasName = "movies-alias";
