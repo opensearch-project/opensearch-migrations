@@ -333,6 +333,7 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str, wait_
     logger.info(f"Initiated deletion of snapshot: {snapshot_name} from repository '{repository}'.")
 
     if wait_for_completion:
+        logger.info(f"Waiting up to {timeout_seconds} seconds for deletion to complete...")
         end_time = time.time() + timeout_seconds
         while time.time() < end_time:
             check_response = cluster.call_api(path, raise_error=False)
