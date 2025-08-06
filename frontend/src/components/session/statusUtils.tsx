@@ -51,7 +51,7 @@ export function generateLoadingItems<T>(fields: StatusFieldDefinition<T>[]) {
     label: field.label,
     value: (
       <Box padding="xxs">
-        {field.placeholder || <Spinner size="normal" />}
+        {field.placeholder ?? <Spinner size="normal" />}
       </Box>
     )
   }));

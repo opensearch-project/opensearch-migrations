@@ -57,7 +57,7 @@ const SNAPSHOT_SCENARIOS = {
   }
 };
 
-export default function SnapshotStatusView({ sessionName }: SessionStatusProps) {
+export default function SnapshotStatusView({ sessionName }: Readonly<SessionStatusProps>) {
   const { isLoading: apiLoading, data: apiSnapshotData, error } = useSnapshotStatus(sessionName);
   
   // Override data for debug mode

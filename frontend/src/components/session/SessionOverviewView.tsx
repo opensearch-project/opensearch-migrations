@@ -5,7 +5,7 @@ import { useSessionOverview } from './apiHooks';
 import StatusContainer from './StatusContainer';
 import { StatusFieldDefinition } from './statusUtils';
 
-export default function SessionOverviewView({ sessionName }: SessionStatusProps) {
+export default function SessionOverviewView({ sessionName }: Readonly<SessionStatusProps>) {
   const { isLoading, data: sessionData, error } = useSessionOverview(sessionName);
 
   const fields: StatusFieldDefinition<typeof sessionData>[] = [
