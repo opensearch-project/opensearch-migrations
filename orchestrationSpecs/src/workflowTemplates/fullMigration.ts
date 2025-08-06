@@ -1,10 +1,7 @@
 import {z} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {
-    TemplateBuilder,
-    WFBuilder
-} from "@/schemas/workflowSchemas";
+import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 import {defineParam, paramsToCallerSchema} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
 
@@ -25,7 +22,7 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
         .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
-        .addOptionalInput("a", s=>s.currentScope.targets)
+        .addContainer(t=>t)
     )
     .addTemplate("decrementLatch", t => t
         .addInputs(addCommonTargetLatchInputs)
@@ -34,16 +31,8 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     )
     .addTemplate("cleanup", t => t
         .addInputs(addCommonTargetLatchInputs)
-
     )
     .getFullScope();
-// .
-// .add(s=> ({}))
-// .add(s => ({ "params": CommonWorkflowParameters}))
-//
-// .addParams(CommonWorkflowParameters)
-// .
-//.build();
 ;
 
 export const FullMigration = WFBuilder.create("FullMigration")
@@ -68,26 +57,25 @@ export const FullMigration = WFBuilder.create("FullMigration")
                 ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
-           .addStep("main", TargetLatchHelpers, "init", {
-               prefix: "foo",
-               targets: [],
-               etcdUtilsImage: "",
-               etcdUtilsImagePullPolicy: "",
-               configuration: {
-                   indices: [],
-                   migrations: []
-               }
-           })
+            .addStep("main", TargetLatchHelpers, "init", {
+                prefix: "foo",
+                targets: [],
+                etcdUtilsImage: "",
+                etcdUtilsImagePullPolicy: "",
+                configuration: {
+                    indices: [],
+                    migrations: []
+                }
+            })
             .addStep("cleanup", TargetLatchHelpers, "cleanup", {
                 prefix: undefined,
                 etcdUtilsImage: undefined,
                 etcdUtilsImagePullPolicy: undefined
             })
         )
-//        .addOutput("name", stepsSignatures => ...)
     )
     .addTemplate("cleanup", t => t
-        //.addSteps("cleanup", b=>b)
+
     )
     .getFullScope();
 
