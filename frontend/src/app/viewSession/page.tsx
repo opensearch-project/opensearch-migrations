@@ -28,8 +28,6 @@ function ViewSessionPageInner() {
         <SpaceBetween size="l">
           <SessionOverviewView sessionName={sessionName} />
           <SnapshotStatusView sessionName={sessionName} />
-          <MetadataStatusView sessionName={sessionName} />
-          <BackfillStatusView sessionName={sessionName} />
         </SpaceBetween>
       )}
     </SpaceBetween>
