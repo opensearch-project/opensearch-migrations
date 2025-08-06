@@ -116,6 +116,11 @@ public class ClusterOperations {
         createIndex(index, body);
     }
 
+    public void disableBloomFilterAndRefresh(final String index) {
+        disableBloom(index);
+        refreshIndex(index); // assuming you have a refresh method
+    }
+
     // Bloom Filter is a relatively new default index setting introduced in ES 8x
     @SneakyThrows
     public void disableBloom(final String index) {
@@ -132,15 +137,15 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
+    public void refreshIndex(final String index) {
+        var response = post("/" + index + "/_refresh", "");
+        assertThat("Refreshing index failed", response.getKey(), equalTo(200));
+    }
+
+    @SneakyThrows
     public void createIndex(final String index, final String body) {
         var response = put("/" + index, body);
         assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
-
-        // Automatically apply index tweaks if ES 8x is equalOrBetween_ES_8_5_and_8_18
-        if (VersionMatchers.equalOrBetween_ES_8_5_and_8_18.test(clusterVersion)) {
-            log.info("Cluster is ES 8.x — applying disableBloom setting on index: {}", index);
-            disableBloom(index);
-        }
     }
 
     @SneakyThrows
