@@ -1,4 +1,5 @@
 import json
+import logging
 import pathlib
 import os
 import time
@@ -8,7 +9,7 @@ from click.testing import CliRunner
 from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
-from console_link.cli import cli
+from console_link.cli import cli, main
 from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
@@ -865,3 +866,133 @@ def test_tuple_converter(runner, tmp_path):
     expected_output_as_ndjson = [json.dumps(record) + "\n" for record in output_tuples]
 
     assert open(ndjson_output_file).readlines() == expected_output_as_ndjson
+
+
+# Tests for exception handling functionality
+
+class CustomTestException(Exception):
+    """Custom exception for testing exception handling"""
+    pass
+
+
+def test_main_exception_handling_normal_mode(runner, mocker):
+    """Test that main() shows clean error messages in normal mode"""
+    # Mock cli to raise an exception
+    mock_cli = mocker.patch('console_link.cli.cli', side_effect=CustomTestException("Test error message"))
+    
+    # Test the main function directly
+    result = runner.invoke(main, [], catch_exceptions=False)
+    
+    # Verify behavior
+    assert result.exit_code == 1
+    assert "Error: Test error message" in result.output
+    assert "Traceback" not in result.output
+    mock_cli.assert_called_once()
+
+
+def test_main_exception_handling_verbose_mode(runner, mocker):
+    """Test that main() shows full traceback in verbose mode"""
+    # Set up logging to verbose level (INFO) to simulate verbose mode
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(logging.INFO)
+    
+    try:
+        # Mock cli to raise an exception
+        mock_cli = mocker.patch('console_link.cli.cli', side_effect=CustomTestException("Test error message"))
+        
+        # Test the main function directly
+        result = runner.invoke(main, [], catch_exceptions=False)
+        
+        # Verify behavior
+        assert result.exit_code == 1
+        assert "Error occurred with verbose mode enabled, showing full traceback:" in result.output
+        assert "CustomTestException: Test error message" in result.output
+        assert "Traceback" in result.output
+        mock_cli.assert_called_once()
+    finally:
+        # Restore original logging level
+        root_logger.setLevel(original_level)
+
+
+def test_main_exception_handling_debug_mode(runner, mocker):
+    """Test that main() shows full traceback in debug mode (even more verbose)"""
+    # Set up logging to debug level to simulate -vv verbose mode
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(logging.DEBUG)
+    
+    try:
+        # Mock cli to raise an exception
+        mock_cli = mocker.patch('console_link.cli.cli', side_effect=CustomTestException("Test error message"))
+        
+        # Test the main function directly
+        result = runner.invoke(main, [], catch_exceptions=False)
+        
+        # Verify behavior
+        assert result.exit_code == 1
+        assert "Error occurred with verbose mode enabled, showing full traceback:" in result.output
+        assert "CustomTestException: Test error message" in result.output
+        assert "Traceback" in result.output
+        mock_cli.assert_called_once()
+    finally:
+        # Restore original logging level
+        root_logger.setLevel(original_level)
+
+
+def test_main_exception_handling_warn_level_shows_clean_message(runner, mocker):
+    """Test that main() shows clean messages when logging is at WARN level"""
+    # Set up logging to WARN level (default/normal mode)
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(logging.WARN)
+    
+    try:
+        # Mock cli to raise an exception
+        mock_cli = mocker.patch('console_link.cli.cli', side_effect=CustomTestException("Test error message"))
+        
+        # Test the main function directly
+        result = runner.invoke(main, [], catch_exceptions=False)
+        
+        # Verify behavior - should show clean error message
+        assert result.exit_code == 1
+        assert "Error: Test error message" in result.output
+        assert "Traceback" not in result.output
+        assert "Error occurred with verbose mode enabled" not in result.output
+        mock_cli.assert_called_once()
+    finally:
+        # Restore original logging level
+        root_logger.setLevel(original_level)
+
+
+def test_cli_integration_with_exception_normal_mode(runner, mocker):
+    """Test CLI integration where an actual CLI command raises an exception in normal mode"""
+    # Mock a specific CLI command to raise an exception
+    mock_cat_indices = mocker.patch('console_link.middleware.clusters.cat_indices', 
+                                   side_effect=CustomTestException("Connection failed"))
+    
+    # Use the main function (which includes exception handling) 
+    result = runner.invoke(main, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'cat-indices'], 
+                          catch_exceptions=False)
+    
+    assert result.exit_code == 1
+    assert "Error: Connection failed" in result.output
+    assert "Traceback" not in result.output
+    mock_cat_indices.assert_called()
+
+
+def test_cli_integration_with_exception_verbose_mode(runner, mocker):
+    """Test CLI integration where an actual CLI command raises an exception in verbose mode"""
+    # Mock a specific CLI command to raise an exception
+    mock_cat_indices = mocker.patch('console_link.middleware.clusters.cat_indices', 
+                                   side_effect=CustomTestException("Connection failed"))
+    
+    # Use the main function with verbose flag
+    result = runner.invoke(main, ['-v', '--config-file', str(VALID_SERVICES_YAML), 'clusters', 'cat-indices'], 
+                          catch_exceptions=False)
+    
+    assert result.exit_code == 1
+    assert "Error occurred with verbose mode enabled, showing full traceback:" in result.output
+    assert "CustomTestException: Connection failed" in result.output
+    assert "Traceback" in result.output
+    mock_cat_indices.assert_called()
