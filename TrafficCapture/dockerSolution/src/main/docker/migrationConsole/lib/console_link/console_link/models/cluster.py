@@ -299,6 +299,7 @@ class Cluster:
 class NoSourceClusterDefinedError(Exception):
     def __init__(self):
         super().__init__("Unable to continue without a source cluster specified")
+
     
 class NoTargetClusterDefinedError(Exception):
     def __init__(self):
