@@ -101,37 +101,12 @@ def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
 # Snapshot status endpoint
 @snapshot_router.get("/status", response_model=SnapshotStatus, operation_id="snapshotStatus")
 def get_snapshot_status(session_name: str):
-    if session_name == 'fake':
-        return SnapshotStatus.from_snapshot_info({
-            "snapshot": "rfs-snapshot",
-            "repository": "migration_assistant_repo",
-            "uuid": "7JFrWqraSJ20anKfiSIj1Q",
-            "state": "SUCCESS",
-            "include_global_state": True,
-            "shards_stats": {
-                "initializing": 0,
-                "started": 0,
-                "finalizing": 0,
-                "done": 304,
-                "failed": 0,
-                "total": 304
-            },
-            "stats": {
-                "incremental": {
-                    "file_count": 67041,
-                    "size_in_bytes": 67108864
-                },
-                "total": {
-                    "file_count": 67041,
-                    "size_in_bytes": 67108864
-                },
-                "start_time_in_millis": 1719343996753,
-                "time_in_millis": 79426
-            }
-        })
-
     session = existance_check(find_session(session_name))
     env = session.env
+
+    if not env.snapshot:
+        raise HTTPException(status_code=400,
+                            detail=f"No snapshot defined in the configuration: {env}")
     if not env.source_cluster:
         raise HTTPException(status_code=400,
                             detail=f"No source cluster defined in the configuration: {env}")

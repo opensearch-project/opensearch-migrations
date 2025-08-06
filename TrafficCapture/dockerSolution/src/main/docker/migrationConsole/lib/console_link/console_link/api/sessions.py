@@ -68,16 +68,6 @@ class StepState(str, Enum):
     FAILED = "Failed"
 
 
-class StepDetail(BaseModel):
-    started: datetime | None = None
-    finished: datetime | None = None
-    status: StepState
-
-    @field_serializer("started", "finished")
-    def serialize_completed(self, dt: datetime | None) -> str | None:
-        return dt.isoformat() if dt else None
-
-
 class SessionDeleteResponse(BaseModel):
     detail: str
 
