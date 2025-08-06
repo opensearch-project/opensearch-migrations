@@ -26,7 +26,16 @@ tasks.register('buildOpenApiDockerImage') {
         def proc = ['docker', 'images', '-q', dockerImageName].execute()
         proc.waitFor()
         def imageId = proc.text.trim()
-        return !imageId.isEmpty()
+        // Check if Docker image exists, with error handling
+        try {
+            def proc = ['docker', 'images', '-q', dockerImageName].execute()
+            proc.waitFor()
+            def imageId = proc.text.trim()
+            return !imageId.isEmpty()
+        } catch (Exception e) {
+            logger.error("Failed to check if Docker image exists. Is Docker installed and running? Error: ${e.message}")
+            return false
+        }
     }
 
     doLast {
