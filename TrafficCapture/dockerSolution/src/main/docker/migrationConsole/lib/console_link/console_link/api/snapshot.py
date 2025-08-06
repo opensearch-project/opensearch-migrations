@@ -39,7 +39,8 @@ class SnapshotStatus(BaseModel):
             # OpenSearch: byte-level stats
             total_units = stats.get("total", {}).get("size_in_bytes", 0)
             processed_units = (
-                stats.get("processed", {}).get("size_in_bytes", 0) + stats.get("incremental", {}).get("size_in_bytes", 0)
+                (stats.get("processed", {}).get("size_in_bytes", 0) +
+                 stats.get("incremental", {}).get("size_in_bytes", 0))
             )
             start_ms = stats.get("start_time_in_millis", 0)
             elapsed_ms = stats.get("time_in_millis", 0)

@@ -10,7 +10,6 @@ from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
-from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +164,7 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
-        if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -247,7 +244,7 @@ class FileSystemSnapshot(Snapshot):
 def format_date(millis: int) -> str:
     if millis == 0:
         return "N/A"
-    return datetime.datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_duration(millis: int) -> str:
