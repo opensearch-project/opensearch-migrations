@@ -5,44 +5,29 @@ import Header from '@cloudscape-design/components/header';
 import Container from '@cloudscape-design/components/container';
 import Alert from '@cloudscape-design/components/alert';
 import ExpandableSection from '@cloudscape-design/components/expandable-section';
-import Spinner from '@cloudscape-design/components/spinner';
-import Box from '@cloudscape-design/components/box';
 import { KeyValuePairs } from '@cloudscape-design/components';
+import { StatusFieldDefinition, generateLoadingItems, generateDataItems } from './statusUtils';
 
-interface StatusContainerProps {
+interface StatusContainerProps<T> {
   title: string;
   isLoading: boolean;
   error: string | null;
-  children: React.ReactNode;
-  loadingItems?: Array<{ label: string; placeholder?: string }>;
+  data: T | null;
+  fields: StatusFieldDefinition<T>[];
   columns?: number;
 }
 
-export default function StatusContainer({ 
+export default function StatusContainer<T>({ 
   title, 
   isLoading, 
-  error, 
-  children,
-  loadingItems = [
-    { label: 'Status' },
-    { label: 'Started' },
-    { label: 'Finished' },
-    { label: 'Duration' }
-  ],
+  error,
+  data,
+  fields,
   columns = 2
-}: StatusContainerProps) {
+}: StatusContainerProps<T>) {
   const renderLoadingState = () => {
-    const items = loadingItems.map(item => ({
-      label: item.label,
-      value: (
-        <Box padding="xxs">
-          {item.placeholder || <Spinner size="normal" />}
-        </Box>
-      )
-    }));
-
     return (
-      <KeyValuePairs columns={columns} items={items} />
+      <KeyValuePairs columns={columns} items={generateLoadingItems(fields)} />
     );
   };
 
@@ -55,9 +40,19 @@ export default function StatusContainer({
     </Alert>
   );
 
+  const renderDataState = () => {
+    if (data) {
+      return (
+        <KeyValuePairs columns={columns} items={generateDataItems(fields, data)} />
+      );
+    }
+    
+    return null;
+  };
+
   return (
     <Container header={<Header variant="h2">{title}</Header>}>
-      {isLoading ? renderLoadingState() : error ? renderErrorState() : children}
+      {isLoading ? renderLoadingState() : error ? renderErrorState() : renderDataState()}
     </Container>
   );
 }

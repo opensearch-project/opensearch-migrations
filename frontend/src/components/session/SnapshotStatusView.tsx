@@ -1,19 +1,24 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-  KeyValuePairs,
-  StatusIndicator,
-  Button,
-  ButtonDropdown
-} from '@cloudscape-design/components';
+import { StatusIndicator, Button, ButtonDropdown } from '@cloudscape-design/components';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import DebugCommands from '@/components/playground/debug/DebugCommands';
 import { SessionStatusProps } from './types';
-import { mapStatus, durationFromTimes } from './statusUtils';
+import { mapStatus, durationFromTimes, StatusFieldDefinition } from './statusUtils';
 import { useSnapshotStatus } from './apiHooks';
 import StatusContainer from './StatusContainer';
 import { StepState } from '@/generated/api/types.gen';
+import { SnapshotStatus } from '@/generated/api/types.gen';
+
+// We'll use the API's SnapshotStatus type, but make our own type to handle both API and debug data
+type SnapshotData = {
+  status: StepState;
+  percentage_completed: number;
+  eta_ms: number | null;
+  started?: string;
+  finished?: string;
+};
 
 // Debug scenario mock data
 const SNAPSHOT_SCENARIOS = {
@@ -58,14 +63,19 @@ export default function SnapshotStatusView({ sessionName }: SessionStatusProps) 
   const { isLoading: apiLoading, data: apiSnapshotData, error } = useSnapshotStatus(sessionName);
   
   // Override data for debug mode
-  const [debugData, setDebugData] = useState<any>(null);
+  const [debugData, setDebugData] = useState<SnapshotData | null>(null);
   const [isLoading, setIsLoading] = useState(apiLoading);
-  const [snapshotData, setSnapshotData] = useState(apiSnapshotData);
+  const [snapshotData, setSnapshotData] = useState<SnapshotData | null>(null);
   
   // Use effect to update from API unless we're in debug mode
   useEffect(() => {
     if (!debugData) {
-      setSnapshotData(apiSnapshotData);
+      // Only update if there's actual API data
+      if (apiSnapshotData) {
+        setSnapshotData(apiSnapshotData as unknown as SnapshotData);
+      } else {
+        setSnapshotData(null);
+      }
       setIsLoading(apiLoading);
     }
   }, [apiSnapshotData, apiLoading, debugData]);
@@ -76,13 +86,32 @@ export default function SnapshotStatusView({ sessionName }: SessionStatusProps) 
     setIsLoading(false);
   };
 
-  const loadingItems = [
-    { label: 'Status' },
-    { label: 'Started' },
-    { label: 'Finished' },
-    { label: 'Duration' },
-    { label: 'Progress' },
-    { label: 'ETA' }
+  // Define the fields once for both loading and data display
+  const fields: StatusFieldDefinition<SnapshotData>[] = [
+    {
+      label: 'Status',
+      valueSupplier: (data) => <StatusIndicator type={mapStatus(data.status)}></StatusIndicator>
+    },
+    {
+      label: 'Started',
+      valueSupplier: (data) => data.started != undefined && new Date(data.started).toLocaleString() || '-'
+    },
+    {
+      label: 'Finished',
+      valueSupplier: (data) => data.finished != undefined && new Date(data.finished).toLocaleString() || '-'
+    },
+    {
+      label: 'Duration',
+      valueSupplier: (data) => durationFromTimes(data.started, data.finished) || '-'
+    },
+    {
+      label: 'Progress',
+      valueSupplier: (data) => `${data.percentage_completed}%`
+    },
+    {
+      label: 'ETA',
+      valueSupplier: (data) => data.eta_ms ? `${Math.floor(data.eta_ms / 60000)} minutes` : 'N/A'
+    }
   ];
 
   return (
@@ -91,41 +120,10 @@ export default function SnapshotStatusView({ sessionName }: SessionStatusProps) 
         title="Snapshot"
         isLoading={isLoading}
         error={error}
-        loadingItems={loadingItems}
+        data={snapshotData}
+        fields={fields}
         columns={2}
-      >
-        {snapshotData && (
-        <KeyValuePairs
-          columns={2}
-          items={[
-            {
-              label: 'Status',
-              value: <StatusIndicator type={mapStatus(snapshotData.status)}></StatusIndicator>
-            },
-            {
-              label: 'Started',
-              value: snapshotData.started != undefined && new Date(snapshotData.started).toLocaleString()
-            },
-            {
-              label: 'Finished',
-              value: snapshotData.finished != undefined && new Date(snapshotData.finished).toLocaleString()
-            },
-            {
-              label: 'Duration',
-              value: durationFromTimes(snapshotData.started, snapshotData.finished)
-            },
-            {
-              label: 'Progress',
-              value: `${snapshotData.percentage_completed}%`
-            },
-            {
-              label: 'ETA',
-              value: snapshotData.eta_ms ? `${Math.floor(snapshotData.eta_ms / 60000)} minutes` : 'N/A'
-            }
-          ]}
-        />
-        )}
-      </StatusContainer>
+      />
       
       <DebugCommands>
         <SpaceBetween size="xs" direction="horizontal">
