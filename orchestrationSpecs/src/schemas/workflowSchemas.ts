@@ -224,19 +224,19 @@ export class TemplateBuilder<
         return this.extendWithParam(name as string, param) as any;
     }
 
-    addRequiredInput<Name extends string>(
+    addRequiredInput<Name extends string, T>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
-        t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, any>>,
+        t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, ZodType<T>>>,
         description?: string
     ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
             ContextualScope,
             BodyScope,
-            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<any, true> }>,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, true> }>,
             OutputParamsScope
         >> {
-        const param: InputParamDef<any, true> = {
-            type: t as any,
+        const param: InputParamDef<T, true> = {
+            type: t as ZodType<T>,
             description
         };
 
@@ -413,13 +413,14 @@ class StepsBuilder<
     addStep<
         Name extends string, 
         StepDef,
-        TWorkflow extends { templates: Record<string, any> },
+        TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
         TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>,
+        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+            z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>,
         dependencies?: string[]
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
@@ -462,7 +463,7 @@ class StepGroupBuilder<
     addStep<
         Name extends string, 
         StepDef,
-        TWorkflow extends { templates: Record<string, any> },
+        TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
         TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
@@ -544,16 +545,16 @@ export type WorkflowTask<
 }
 
 export function callTemplate<
-    TClass extends Record<string, any>,
+    TClass extends Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }>,
     TKey extends Extract<keyof TClass, string>
 >(
     classConstructor: TClass,
     key: TKey,
     params: z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
-): WorkflowTask<TClass[TKey]["inputs"], TClass[TKey]["outputs"]> {
+): WorkflowTask<TClass[TKey]["inputs"], TClass[TKey]["outputs"] extends OutputParametersRecord ? TClass[TKey]["outputs"] : {}> {
     const value = classConstructor[key];
     return {
         templateRef: { key, value },
         arguments: { parameters: params }
-    };
+    } as any;
 }

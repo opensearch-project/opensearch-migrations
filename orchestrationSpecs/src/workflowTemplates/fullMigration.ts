@@ -1,64 +1,39 @@
-import {z, ZodTypeAny} from 'zod';
+import {z} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {
-    ScopeIsEmptyConstraint,
     TemplateBuilder,
-    UniqueNameConstraintOutsideDeclaration,
     WFBuilder
 } from "@/schemas/workflowSchemas";
-import {defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
-import {ExtendScope, Scope} from "@/schemas/workflowTypes";
-import {TypescriptError} from "@/utils";
+import {defineParam, paramsToCallerSchema} from "@/schemas/parameterSchemas";
+import {Scope} from "@/schemas/workflowTypes";
 
 const TARGET_LATCH_FIELD_SPECS = {
     prefix: z.string(),
     etcdUtilsImage: IMAGE_SPECIFIER,
-    etcdUtilsImagePullPolicy: IMAGE_PULL_POLICY,
-    firstThing: z.string()
+    etcdUtilsImagePullPolicy: IMAGE_PULL_POLICY
 } as const;
 
-export const SampleParameters = {
-    optionalParam1: (s: { currentScope: { priorParameter: any; }; }) => defineParam({defaultValue: s.currentScope.priorParameter}),
-    optionalParam2: (s: { currentScope: { optionalParam1: any; }; }) => defineParam({defaultValue: s.currentScope.optionalParam1}),
-    reqParam1: defineRequiredParam({type: z.string()})
-};
 
 // just to show off addInputs, which can only work when InputParamsScope is {}
 const addCommonTargetLatchInputs = <C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) =>
-    tb.addInputs(tb=>tb.addOptionalInput("baseThing", s=>""))
-        .addMultipleRequiredInputs(TARGET_LATCH_FIELD_SPECS, true)
-        .addOptionalInput("a", s => s.currentScope.firstThing);
-
-const tb1 = new TemplateBuilder({}, {}, {}, {})
-    .addMultipleRequiredInputs(TARGET_LATCH_FIELD_SPECS, true)
-    .addOptionalInput("a", s => s.currentScope.firstThing);
-const tb2 = new TemplateBuilder({}, {}, {}, {})
-    .addInputs(tb=>tb)
-    .addOptionalInput("firstThing", s => "")
-    .addOptionalInput("a", s => s.currentScope.firstThing);
+    tb.addMultipleRequiredInputs(TARGET_LATCH_FIELD_SPECS, true);
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     .addParams(CommonWorkflowParameters)
-        // .addParams({foo: defineParam({ defaultValue: "foo" }),})
     .addTemplate("init", t=> t
-            //.addMultipleRequiredInputs(TARGET_LATCH_FIELD_SPECS, true)
-            .addInputs(addCommonTargetLatchInputs)
-            .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
-            //.addOptionalInput("firstThing2", s => "")
-            .addOptionalInput("firstThing2", s => "")
-            .addOptionalInput("second", s => "")
-            .addOptionalInput("", s => s.currentScope.baseThing)
-            .addOptionalInput("fifth", s => s.currentScope.a)
-        // .addContainer(...)
-        // .addOutput(...)
+        .addInputs(addCommonTargetLatchInputs)
+        .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
+        .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
+        .addOptionalInput("a", s=>s.currentScope.targets)
     )
-    // .addTemplate("decrementLatch", t => t.
-    //     addRequiredInput(""))
+    .addTemplate("decrementLatch", t => t
+        .addInputs(addCommonTargetLatchInputs)
+        .addRequiredInput("target", CLUSTER_CONFIG)
+        .addRequiredInput("processor", z.string())
+    )
     .addTemplate("cleanup", t => t
-        .addRequiredInput("prefix", z.string())
-        .addRequiredInput("etcdUtilsImage", IMAGE_SPECIFIER)
-        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
+        .addInputs(addCommonTargetLatchInputs)
 
     )
     .getFullScope();
@@ -94,11 +69,14 @@ export const FullMigration = WFBuilder.create("FullMigration")
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
            .addStep("main", TargetLatchHelpers, "init", {
-                prefix: "foo",
-                targets: [],
-               firstThing: "",
-                etcdUtilsImage: "",
-                etcdUtilsImagePullPolicy: ""
+               prefix: "foo",
+               targets: [],
+               etcdUtilsImage: "",
+               etcdUtilsImagePullPolicy: "",
+               configuration: {
+                   indices: [],
+                   migrations: []
+               }
            })
             .addStep("cleanup", TargetLatchHelpers, "cleanup", {
                 prefix: undefined,
