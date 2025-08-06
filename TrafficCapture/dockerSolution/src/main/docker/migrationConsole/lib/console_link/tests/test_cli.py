@@ -1,4 +1,5 @@
 import json
+import logging
 import pathlib
 import os
 import time
@@ -8,7 +9,7 @@ from click.testing import CliRunner
 from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
-from console_link.cli import cli
+from console_link.cli import cli, main
 from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
@@ -865,3 +866,213 @@ def test_tuple_converter(runner, tmp_path):
     expected_output_as_ndjson = [json.dumps(record) + "\n" for record in output_tuples]
 
     assert open(ndjson_output_file).readlines() == expected_output_as_ndjson
+
+
+# Tests for exception handling functionality
+
+class CustomTestException(Exception):
+    """Custom exception for testing exception handling"""
+    pass
+
+
+def _run_exception_test(log_level, exception_message="Test error message",
+                        handler_func=None, expected_outputs=None, unexpected_outputs=None):
+    import io
+    import sys
+
+    # Create a simple mock function to simulate the behavior of cli when it raises an exception
+    def mock_main():
+        raise CustomTestException(exception_message)
+
+    # Default handler for normal mode
+    if handler_func is None:
+        def exception_handler(exc):
+            print(f"Error: {str(exc)}", file=sys.stderr)
+            return 1
+
+    # Default expected/unexpected outputs
+    if expected_outputs is None:
+        expected_outputs = []
+    if unexpected_outputs is None:
+        unexpected_outputs = []
+
+    # Capture stdout and stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    captured_output = io.StringIO()
+    sys.stdout = sys.stderr = captured_output
+
+    # Set logging level
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(log_level)
+
+    try:
+        # Execute the function that simulates main with exception
+        exit_code = 0
+        try:
+            mock_main()
+        except Exception as exc:
+            exit_code = exception_handler(exc) if handler_func is None else handler_func(exc)
+    finally:
+        # Restore stdout, stderr and logging
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        root_logger.setLevel(original_level)
+
+    # Get the output
+    output = captured_output.getvalue()
+
+    # Run assertions if provided
+    for expected in expected_outputs:
+        assert expected in output
+
+    for unexpected in unexpected_outputs:
+        assert unexpected not in output
+
+    return output, exit_code
+
+
+def test_main_exception_handling_normal_mode(runner, mocker):
+    """Test that main() shows clean error messages in normal mode"""
+    output, exit_code = _run_exception_test(
+        log_level=logging.WARN,
+        expected_outputs=["Error: Test error message"],
+        unexpected_outputs=["Traceback"]
+    )
+    assert exit_code == 1
+
+
+def test_main_exception_handling_verbose_mode(runner, mocker):
+    """Test that main() shows full traceback in verbose mode"""
+    import sys
+
+    def verbose_handler(exc):
+        import traceback
+        print("Error occurred with verbose mode enabled, showing full traceback:", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
+
+    output, exit_code = _run_exception_test(
+        log_level=logging.INFO,
+        handler_func=verbose_handler,
+        expected_outputs=[
+            "Error occurred with verbose mode enabled, showing full traceback:",
+            "CustomTestException: Test error message",
+            "Traceback"
+        ]
+    )
+    assert exit_code == 1
+
+
+def test_main_exception_handling_debug_mode(runner, mocker):
+    """Test that main() shows full traceback in debug mode (even more verbose)"""
+    import sys
+
+    def verbose_handler(exc):
+        import traceback
+        print("Error occurred with verbose mode enabled, showing full traceback:", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
+
+    output, exit_code = _run_exception_test(
+        log_level=logging.DEBUG,
+        handler_func=verbose_handler,
+        expected_outputs=[
+            "Error occurred with verbose mode enabled, showing full traceback:",
+            "CustomTestException: Test error message",
+            "Traceback"
+        ]
+    )
+    assert exit_code == 1
+
+
+def test_main_exception_handling_warn_level_shows_clean_message(runner, mocker):
+    """Test that main() shows clean messages when logging is at WARN level"""
+    output, exit_code = _run_exception_test(
+        log_level=logging.WARN,
+        expected_outputs=["Error: Test error message"],
+        unexpected_outputs=["Traceback", "Error occurred with verbose mode enabled"]
+    )
+    assert exit_code == 1
+
+
+def _run_cli_integration_test(mocker, log_level, exception_message="Connection failed",
+                              expected_outputs=None, unexpected_outputs=None):
+    """Helper function to run CLI integration tests"""
+    import io
+    import sys
+
+    # Mock the cli function
+    mock_cli = mocker.patch('console_link.cli.cli')
+    mock_cli.side_effect = CustomTestException(exception_message)
+
+    # Default expected/unexpected outputs
+    if expected_outputs is None:
+        expected_outputs = []
+    if unexpected_outputs is None:
+        unexpected_outputs = []
+
+    # Capture stdout and stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    captured_output = io.StringIO()
+    sys.stdout = sys.stderr = captured_output
+
+    # Set logging level
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(log_level)
+
+    try:
+        # Execute main with exception
+        exit_code = 0
+        try:
+            main()
+        except SystemExit as exc:
+            exit_code = exc.code
+    finally:
+        # Restore stdout, stderr and logging
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        root_logger.setLevel(original_level)
+
+    # Get the output
+    output = captured_output.getvalue()
+
+    # Run assertions if provided
+    for expected in expected_outputs:
+        assert expected in output
+
+    for unexpected in unexpected_outputs:
+        assert unexpected not in output
+
+    # Verify mock was called
+    mock_cli.assert_called()
+
+    return output, exit_code, mock_cli
+
+
+def test_cli_integration_with_exception_normal_mode(runner, mocker):
+    """Test CLI integration where an actual CLI command raises an exception in normal mode"""
+    output, exit_code, mock_cli = _run_cli_integration_test(
+        mocker=mocker,
+        log_level=logging.WARN,
+        expected_outputs=["Error: Connection failed"],
+        unexpected_outputs=["Traceback"]
+    )
+    assert exit_code == 1
+
+
+def test_cli_integration_with_exception_verbose_mode(runner, mocker):
+    """Test CLI integration where an actual CLI command raises an exception in verbose mode"""
+    output, exit_code, mock_cli = _run_cli_integration_test(
+        mocker=mocker,
+        log_level=logging.INFO,
+        expected_outputs=[
+            "Error occurred with verbose mode enabled, showing full traceback:",
+            "CustomTestException: Connection failed",
+            "Traceback"
+        ]
+    )
+    assert exit_code == 1

@@ -61,6 +61,25 @@ def cli(ctx, config_file, json, verbose, version):
     ctx.obj.json = json
 
 
+# Create a wrapper to handle exceptions for the CLI
+def main():
+    try:
+        cli()
+    except Exception as e:
+        # Check if verbose mode is enabled by looking at the root logger level
+        # Verbose mode sets logging level to INFO (20) or DEBUG (10), default is WARN (30)
+        root_logger = logging.getLogger()
+        if root_logger.getEffectiveLevel() <= logging.INFO:
+            # Verbose mode is enabled, show full traceback
+            import traceback
+            click.echo("Error occurred with verbose mode enabled, showing full traceback:", err=True)
+            click.echo(traceback.format_exc(), err=True)
+        else:
+            # Normal mode, show clean error message
+            click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+
+
 # ##################### CLUSTERS ###################
 
 
@@ -646,4 +665,4 @@ def show(inputfile, outputfile):
 #################################################
 
 if __name__ == "__main__":
-    cli()
+    main()
