@@ -22,10 +22,6 @@ tasks.register('buildOpenApiDockerImage') {
     inputs.files(pythonSources)
     inputs.files(dependencyFiles)
     outputs.upToDateWhen {
-        // Check if Docker image exists
-        def proc = ['docker', 'images', '-q', dockerImageName].execute()
-        proc.waitFor()
-        def imageId = proc.text.trim()
         // Check if Docker image exists, with error handling
         try {
             def proc = ['docker', 'images', '-q', dockerImageName].execute()
