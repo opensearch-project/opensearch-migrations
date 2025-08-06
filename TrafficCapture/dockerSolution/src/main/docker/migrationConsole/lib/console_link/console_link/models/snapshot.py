@@ -246,7 +246,7 @@ class FileSystemSnapshot(Snapshot):
 def format_date(millis: int) -> str:
     if millis == 0:
         return "N/A"
-    return datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_duration(millis: int) -> str:
