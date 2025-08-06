@@ -48,6 +48,7 @@ tasks.register('syncBackendClientDefinition', Sync) {
 tasks.register('generateBackendClient', NpmTask) {
     dependsOn 'npmInstall'
     dependsOn 'syncBackendClientDefinition'
+    dependsOn 'copyVersionFile_frontend'
     group = 'build'
     description = 'Generates the TypeScript API client from openapi.json'
 
