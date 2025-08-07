@@ -44,16 +44,15 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "path.repo: \"/tmp/snapshots\""
     );
 
-    public static final Map<String, String> DISK_WATERMARK_SETTINGS = Map.of(
-            "cluster.routing.allocation.disk.watermark.low", "97%",
-            "cluster.routing.allocation.disk.watermark.high", "98%",
-            "cluster.routing.allocation.disk.watermark.flood_stage", "99%"
+    private static final Map<String, String> DISK_WATERMARK_COMMON = Map.of(
+        "cluster.routing.allocation.disk.watermark.low", "97%",
+        "cluster.routing.allocation.disk.watermark.high", "98%"
     );
 
-    public static final Map<String, String> DISK_WATERMARK_SETTINGS_LEGACY = Map.of(
-            "cluster.routing.allocation.disk.watermark.low", "97%",
-            "cluster.routing.allocation.disk.watermark.high", "98%"
-    );
+    public static final Map<String, String> DISK_WATERMARK_SETTINGS = new HashMap<>() {{
+        putAll(DISK_WATERMARK_COMMON);
+        put("cluster.routing.allocation.disk.watermark.flood_stage", "99%");
+    }};
 
     private static List<String> buildWatermarkLines(Map<String, String> watermark) {
         return watermark.entrySet().stream()
@@ -79,12 +78,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     private static final String ES_5_0_AND_5_1_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES,
-        String.join("\n", buildWatermarkLines(DISK_WATERMARK_SETTINGS_LEGACY))
+        String.join("\n", buildWatermarkLines(DISK_WATERMARK_COMMON))
     );
     private static final String ES_5_2_AND_5_3_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES,
         "bootstrap.system_call_filter: false",
-        String.join("\n", buildWatermarkLines(DISK_WATERMARK_SETTINGS_LEGACY))
+        String.join("\n", buildWatermarkLines(DISK_WATERMARK_COMMON))
     );
 
     private static Map<String, String> overrideAndRemoveEnv(
