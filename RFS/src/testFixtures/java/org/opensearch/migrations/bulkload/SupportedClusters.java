@@ -147,8 +147,8 @@ public class SupportedClusters {
 
     public static List<SearchClusterContainer.ContainerVersion> supportedSourcesOrTargets(boolean includeRFSOnly) {
         return Stream.concat(supportedSources(includeRFSOnly).stream(),
-                supportedTargets(includeRFSOnly).stream())
-                .distinct()
-                .toList();
+            supportedTargets(includeRFSOnly).stream())
+            .distinct()
+            .toList();
     }
 }
