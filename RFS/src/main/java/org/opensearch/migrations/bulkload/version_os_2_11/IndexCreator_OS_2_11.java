@@ -122,6 +122,9 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 throw invalidResponse;
             }
 
+            log.info("Index creation failed for '{}' due to illegal arguments: {}. Attempting retry after removing these settings.", 
+                     index.getName(), illegalArguments);
+
             for (var illegalArgument : illegalArguments) {
                 if (!illegalArgument.startsWith("index.")) {
                     log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
@@ -129,10 +132,11 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 }
 
                 var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+                log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, index.getName());
                 ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
             }
 
-            log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
+            log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", index.getName(), illegalArguments);
             client.createIndex(index.getName(), body, context);
         }
     }
