@@ -57,7 +57,7 @@ const SNAPSHOT_SCENARIOS = {
   }
 };
 
-function StatusDisplay({ status }: { status: StepState }) {
+function StatusDisplay({ status }: Readonly<{ status: StepState }>) {
   return <StatusIndicator type={mapStatus(status)}></StatusIndicator>;
 }
 
