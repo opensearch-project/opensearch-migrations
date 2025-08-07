@@ -57,6 +57,10 @@ const SNAPSHOT_SCENARIOS = {
   }
 };
 
+function StatusDisplay({ status }: { status: StepState }) {
+  return <StatusIndicator type={mapStatus(status)}></StatusIndicator>;
+}
+
 export default function SnapshotStatusView({ sessionName }: Readonly<SessionStatusProps>) {
   const { isLoading: apiLoading, data: apiSnapshotData, error } = useSnapshotStatus(sessionName);
   
@@ -88,15 +92,15 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
   const fields: StatusFieldDefinition<SnapshotData>[] = [
     {
       label: 'Status',
-      valueSupplier: (data) => <StatusIndicator type={mapStatus(data.status)}></StatusIndicator>
+      valueSupplier: (data) => <StatusDisplay status={data.status} />
     },
     {
       label: 'Started',
-      valueSupplier: (data) => data.started != undefined && new Date(data.started).toLocaleString() || '-'
+      valueSupplier: (data) => data.started != undefined ? new Date(data.started).toLocaleString() : '-'
     },
     {
       label: 'Finished',
-      valueSupplier: (data) => data.finished != undefined && new Date(data.finished).toLocaleString() || '-'
+      valueSupplier: (data) => data.finished != undefined ? new Date(data.finished).toLocaleString() : '-'
     },
     {
       label: 'Duration',
