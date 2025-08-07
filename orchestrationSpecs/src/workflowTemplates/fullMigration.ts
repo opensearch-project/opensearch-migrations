@@ -4,13 +4,13 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 import {defineParam, paramsToCallerSchema} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
+import {concat, inputParams, literal} from "@/schemas/expression";
 
 const TARGET_LATCH_FIELD_SPECS = {
     prefix: z.string(),
     etcdUtilsImage: IMAGE_SPECIFIER,
     etcdUtilsImagePullPolicy: IMAGE_PULL_POLICY
 } as const;
-
 
 // just to show off addInputs, which can only work when InputParamsScope is {}
 const addCommonTargetLatchInputs = <C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) =>
@@ -22,7 +22,10 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
         .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
-        .addContainer(t=>t)
+        // .addSteps(sb=>sb.inputsScope.prefix)
+        .addContainer(b=>b
+            .addImage(b.getInputParam("etcdUtilsImage"))
+        )
     )
     .addTemplate("decrementLatch", t => t
         .addInputs(addCommonTargetLatchInputs)
@@ -59,9 +62,9 @@ export const FullMigration = WFBuilder.create("FullMigration")
         .addSteps(b => b
             .addStep("main", TargetLatchHelpers, "init", {
                 prefix: "foo",
-                targets: [],
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "",
+                targets: [],
                 configuration: {
                     indices: [],
                     migrations: []

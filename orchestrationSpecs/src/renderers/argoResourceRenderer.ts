@@ -3,6 +3,31 @@ import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
 import {StepGroup} from "@/schemas/workflowSchemas";
 
+
+export function renderWorkflowTemplate(wf: Scope) {
+    return {
+        apiVersion: "argoproj.io/v1alpha1",
+        kind: "WorkflowTemplate",
+
+        metadata: {
+            name: wf.name,
+        },
+        spec: {
+            serviceAccountName: wf.serviceAccountName,
+            entrypoint: "main",
+            parallelism: 100,
+            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
+            templates: (() => {
+                const list = [];
+                for (const k in wf.templates) {
+                    list.push({[k]: formatTemplate(wf.templates[k]) });
+                }
+                return list;
+            })()
+        }
+    };
+}
+
 function formatParameterDefinition<P extends InputParamDef<ZodTypeAny, boolean>>(inputs : P) {
     return {
         ...(inputs.description != null && { description: inputs.description }),
@@ -37,26 +62,3 @@ function formatTemplate(template: Scope) {
     }
 }
 
-export function renderWorkflowTemplate(wf: Scope) {
-    return {
-        apiVersion: "argoproj.io/v1alpha1",
-        kind: "WorkflowTemplate",
-
-        metadata: {
-            name: wf.name,
-        },
-        spec: {
-            serviceAccountName: wf.serviceAccountName,
-            entrypoint: "main",
-            parallelism: 100,
-            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
-            templates: (() => {
-                const list = [];
-                for (const k in wf.templates) {
-                    list.push({[k]: formatTemplate(wf.templates[k]) });
-                }
-                return list;
-            })()
-        }
-    };
-}

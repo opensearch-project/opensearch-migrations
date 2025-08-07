@@ -1,6 +1,6 @@
-import {renderWorkflowTemplate} from "@/renderers/argoConfigRenderer";
 import {FullMigration, TargetLatchHelpers} from "@/workflowTemplates/fullMigration";
 import { FieldCount } from "@/utils";
+import {renderWorkflowTemplate} from "@/renderers/argoResourceRenderer";
 
 // console.log("TargetLatchHelper: " + JSON.stringify(TargetLatchHelpers, null, 2));
 // console.log("FullMigration: " + JSON.stringify(FullMigration, null, 2));

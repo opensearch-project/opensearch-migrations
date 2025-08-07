@@ -26,7 +26,6 @@ type UnionToTuple<T> = UnionToIntersection<
     ? [...UnionToTuple<Exclude<T, R>>, R]
     : []
 
-// Fixed FieldCount that actually works
 export type FieldCount<T> = keyof T extends never
     ? 0
     : UnionToTuple<keyof T>['length']

@@ -16,6 +16,7 @@ import {
 } from "@/schemas/workflowTypes";
 import {z, ZodType, ZodTypeAny} from "zod";
 import {TypescriptError} from "@/utils";
+import {Expression, inputParam, inputParams} from "@/schemas/expression";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
@@ -309,19 +310,22 @@ export class TemplateBuilder<
     }
 
     addSteps<
-        SB extends StepsBuilder<ContextualScope, InputParamsScope, any>
+        SBFirst extends StepsBuilder<ContextualScope, InputParamsScope, any>,
+        SBFinal extends StepsBuilder<ContextualScope, InputParamsScope, any>
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope, (
-            b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SB>
+            b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SBFinal>,
+        factory?: (context:ContextualScope, inputs:InputParamsScope) => SBFirst
     ): TemplateBuilder<
         ContextualScope,
-        ReturnType<SB["getSteps"]>,
+        ReturnType<SBFinal["getSteps"]>,
         InputParamsScope,
         OutputParamsScope
     >
     {
-        const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SB;
-        const steps = fn(new StepsBuilder(this.contextualScope, this.inputScopeBuilder.getScope(), {}, [])).getSteps();
+        const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SBFinal;
+        const steps = fn((factory ??
+            ((c,i) => new StepsBuilder(c,i,{},[])))(this.contextualScope, this.inputScopeBuilder.getScope())).getSteps();
         return new TemplateBuilder(
             this.contextualScope,
             steps,
@@ -331,23 +335,31 @@ export class TemplateBuilder<
     }
 
     addDag<
-        DB extends DagBuilder<ContextualScope, InputParamsScope, any>
+        DBFirst extends DagBuilder<ContextualScope, InputParamsScope, any>,
+        DBFinal extends DagBuilder<ContextualScope, InputParamsScope, any>
     >(builderFn: ScopeIsEmptyConstraint<BodyScope,
-        (b: DagBuilder<ContextualScope, InputParamsScope, {}>) => DB>
-    ): TemplateBuilder<ContextualScope, ReturnType<DB["getDag"]>, InputParamsScope, OutputParamsScope>
+        (b: DagBuilder<ContextualScope, InputParamsScope, {}>) => DBFinal>,
+      factory?: (context:ContextualScope, inputs:InputParamsScope) => DBFirst
+    ): TemplateBuilder<ContextualScope, ReturnType<DBFinal["getDag"]>, InputParamsScope, OutputParamsScope>
     {
-        const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}>) => DB;
-        const steps = fn(new DagBuilder(this.contextualScope, this.inputScopeBuilder.getScope(), {})).getDag();
+        const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}>) => DBFinal;
+        const steps = fn((factory ??
+            ((c, i) => new DagBuilder(c, i, {})))(this.contextualScope, this.inputScopeBuilder.getScope())).getDag();
         return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
     }
 
     addContainer<
-        CB extends ContainerBuilder<ContextualScope, InputParamsScope, any>
+        CBFirst extends ContainerBuilder<ContextualScope, InputParamsScope, any>,
+        CBFinal extends ContainerBuilder<ContextualScope, InputParamsScope, any>
     >(
-        builderFn: ScopeIsEmptyConstraint<BodyScope, (b: ContainerBuilder<ContextualScope, InputParamsScope, {}>) => CB>
-    ): TemplateBuilder<ContextualScope, ReturnType<CB["getContainer"]>, InputParamsScope, OutputParamsScope> {
-        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}>) => CB;
-        const steps = fn(new ContainerBuilder(this.contextualScope, this.inputScopeBuilder.getScope(), {})).getContainer();
+        builderFn: ScopeIsEmptyConstraint<BodyScope,
+            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}>) => CBFinal>,
+        factory?: (context:ContextualScope, inputs:InputParamsScope) => CBFirst
+    ): TemplateBuilder<ContextualScope, ReturnType<CBFinal["getContainer"]>, InputParamsScope, OutputParamsScope> {
+        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}>) => CBFinal;
+        const steps = fn((factory ??
+            ((c, i) => new ContainerBuilder(c, i, {})))
+        (this.contextualScope, this.inputScopeBuilder.getScope())).getContainer();
         return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
     }
 
@@ -417,7 +429,7 @@ class StepsBuilder<
 
     // Convenience method for single step
     addStep<
-        Name extends string, 
+        Name extends string,
         StepDef,
         TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
         TKey extends Extract<keyof TWorkflow["templates"], string>
@@ -467,7 +479,7 @@ class StepGroupBuilder<
     }
 
     addStep<
-        Name extends string, 
+        Name extends string,
         StepDef,
         TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
         TKey extends Extract<keyof TWorkflow["templates"], string>
@@ -482,7 +494,7 @@ class StepGroupBuilder<
     {
         // Use type assertions since constraints prevent invalid calls at compile time
         const nameStr = name as string;
-        
+
         // Call callTemplate to get the template reference and arguments
         const templateCall = callTemplate(
             (workflowBuilder as TWorkflow).templates,
@@ -516,8 +528,8 @@ class DagBuilder<
     InputParamsScope  extends Scope,
     DagScope extends Scope
 > {
-    private readonly contextualScope: ContextualScope;
-    private readonly inputsScope: InputParamsScope;
+    readonly contextualScope: ContextualScope;
+    readonly inputsScope: InputParamsScope;
     private readonly dagScope: DagScope;
 
     constructor(contextualScope: ContextualScope, inputsScope: InputParamsScope, dagScope: DagScope) {
@@ -525,6 +537,7 @@ class DagBuilder<
         this.inputsScope = inputsScope;
         this.dagScope = dagScope;
     }
+
     addTask() {}
 
     getDag(): { steps: DagScope } {
@@ -537,14 +550,32 @@ class ContainerBuilder<
     InputParamsScope  extends Scope,
     ContainerScope extends Scope
 > {
-    private readonly contextualScope: ContextualScope;
-    private readonly inputsScope: InputParamsScope;
+    readonly contextualScope: ContextualScope;
+    readonly inputsScope: InputParamsScope;
     private readonly containerScope: ContainerScope;
 
     constructor(contextualScope: ContextualScope, inputsScope: InputParamsScope, containerScope: ContainerScope) {
         this.contextualScope = contextualScope;
         this.inputsScope = inputsScope;
         this.containerScope = containerScope;
+    }
+
+    addImage(imageExp: Expression<string>): ContainerBuilder<ContextualScope, InputParamsScope,
+        ExtendScope<ContainerScope, {image: Expression<string> }>> {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+            ...this.containerScope,
+            image: imageExp
+        });
+    }
+
+    get paramExpressions() {
+        return inputParams(this.inputsScope);
+    }
+
+    getInputParam<K extends keyof InputParamsScope>(
+        key: K
+    ): Expression<InputParamsScope[K] extends InputParamDef<infer T, any> ? T : never> {
+        return inputParam(key as string) as any;
     }
 
     getContainer() : { container: ContainerScope } {
