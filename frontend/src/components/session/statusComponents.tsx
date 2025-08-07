@@ -7,8 +7,8 @@ import { StepState } from '@/generated/api/types.gen';
 /**
  * Displays a status indicator based on the status state
  */
-export function StatusDisplay({ status }: Readonly<{ status: StepState }>) {
-  return <StatusIndicator type={mapStatus(status)}></StatusIndicator>;
+export function StatusDisplay({ status }: Readonly<{ status?: StepState | null }>) {
+  return status ? <StatusIndicator type={mapStatus(status)}></StatusIndicator> : <span>-</span>;
 }
 
 /**
@@ -28,13 +28,20 @@ export function DurationDisplay({ started, finished }: Readonly<{ started?: stri
 /**
  * Displays a percentage value
  */
-export function ProgressDisplay({ percentage }: Readonly<{ percentage: number }>) {
-  return <>{`${percentage}%`}</>;
+export function ProgressDisplay({ percentage }: Readonly<{ percentage?: number | null }>) {
+  return <>{percentage !== undefined && percentage !== null ? `${percentage}%` : '-'}</>;
 }
 
 /**
  * Displays estimated time to completion
  */
-export function ETADisplay({ etaMs }: Readonly<{ etaMs: number | null }>) {
+export function ETADisplay({ etaMs }: Readonly<{ etaMs?: number | null }>) {
   return <>{etaMs ? `${Math.floor(etaMs / 60000)} minutes` : 'N/A'}</>;
+}
+
+/**
+ * Displays a simple text value or a default if undefined
+ */
+export function TextDisplay({ text }: Readonly<{ text?: string | null }>) {
+  return <>{text || '-'}</>;
 }

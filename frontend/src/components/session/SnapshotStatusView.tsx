@@ -47,27 +47,27 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
   const fields: StatusFieldDefinition<SnapshotData>[] = [
     {
       label: 'Status',
-      valueSupplier: (data) => <StatusDisplay status={data.status} />
+      value: <StatusDisplay status={snapshotData?.status} />
     },
     {
       label: 'Started',
-      valueSupplier: (data) => <DateDisplay date={data.started} />
+      value: <DateDisplay date={snapshotData?.started} />
     },
     {
       label: 'Finished',
-      valueSupplier: (data) => <DateDisplay date={data.finished} />
+      value: <DateDisplay date={snapshotData?.finished} />
     },
     {
       label: 'Duration',
-      valueSupplier: (data) => <DurationDisplay started={data.started} finished={data.finished} />
+      value: <DurationDisplay started={snapshotData?.started} finished={snapshotData?.finished} />
     },
     {
       label: 'Progress',
-      valueSupplier: (data) => <ProgressDisplay percentage={data.percentage_completed} />
+      value: <ProgressDisplay percentage={snapshotData?.percentage_completed} />
     },
     {
       label: 'ETA',
-      valueSupplier: (data) => <ETADisplay etaMs={data.eta_ms} />
+      value: <ETADisplay etaMs={snapshotData?.eta_ms} />
     }
   ];
 

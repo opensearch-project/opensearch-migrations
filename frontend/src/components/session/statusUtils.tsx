@@ -12,9 +12,7 @@ import Box from '@cloudscape-design/components/box';
 export interface StatusFieldDefinition<T> {
   label: string;
   /** Function that extracts and formats the value from data */
-  valueSupplier: (data: T) => React.ReactNode;
-  /** Optional placeholder to display during loading instead of spinner */
-  placeholder?: React.ReactNode;
+  value: React.ReactNode;
 }
 
 function formatDuration(seconds: number): string {
@@ -51,7 +49,7 @@ export function generateLoadingItems<T>(fields: StatusFieldDefinition<T>[]) {
     label: field.label,
     value: (
       <Box padding="xxs">
-        {field.placeholder ?? <Spinner size="normal" />}
+        <Spinner size="normal" />
       </Box>
     )
   }));
@@ -63,6 +61,6 @@ export function generateLoadingItems<T>(fields: StatusFieldDefinition<T>[]) {
 export function generateDataItems<T>(fields: StatusFieldDefinition<T>[], data: T) {
   return fields.map(field => ({
     label: field.label,
-    value: field.valueSupplier(data)
+    value: field.value
   }));
 }
