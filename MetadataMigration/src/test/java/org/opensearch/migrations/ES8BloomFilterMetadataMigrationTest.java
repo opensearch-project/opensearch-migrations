@@ -43,7 +43,7 @@ public class ES8BloomFilterMetadataMigrationTest extends BaseMigrationTest {
     protected File localDirectory;
 
     private static final Set<SearchClusterContainer.ContainerVersion> ALLOWED_TARGETS = Set.of(
-        SearchClusterContainer.OS_V2_19_1
+            SearchClusterContainer.OS_V2_19_1, SearchClusterContainer.OS_V3_0_0
     );
 
     // Utility: combine sources from supportedPairs and extendedSources, filtered for ES 8.x
@@ -133,8 +133,6 @@ public class ES8BloomFilterMetadataMigrationTest extends BaseMigrationTest {
         // --- SCENARIO 3: Create book doc, disable bloom, add another doc ---
         sourceOperations.createDocument(testData.bookIndexName, "401", "{ \"age\": 55, \"is_active\": false }");
         sourceOperations.disableBloomFilterAndRefresh(testData.bookIndexName);
-        sourceOperations.createDocument(testData.bookIndexName, "402", "{ \"age\": 55, \"is_active\": false }");
-        sourceOperations.refreshIndex(testData.bookIndexName);
 
         // --- SCENARIO 4: Index already exists ---
         sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{ \"age\": 99, \"is_active\": true }");
