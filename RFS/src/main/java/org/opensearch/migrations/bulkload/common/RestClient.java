@@ -52,7 +52,7 @@ public class RestClient {
     public static final String READ_METERING_HANDLER_NAME = "REST_CLIENT_READ_METERING_HANDLER";
     public static final String WRITE_METERING_HANDLER_NAME = "REST_CLIENT_WRITE_METERING_HANDLER";
 
-    private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(1);
+    private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
     // Longer than the default OpenSearch request timeout of 1 minute
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(65);
 
