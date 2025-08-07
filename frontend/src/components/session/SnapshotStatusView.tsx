@@ -1,85 +1,27 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, ButtonDropdown } from '@cloudscape-design/components';
-import SpaceBetween from '@cloudscape-design/components/space-between';
-import DebugCommands from '@/components/playground/debug/DebugCommands';
-import { SessionStatusProps } from './types';
-import { durationFromTimes, StatusFieldDefinition } from './statusUtils';
+import { SessionStatusProps, SnapshotData } from './types';
+import { StatusFieldDefinition } from './statusUtils';
 import { useSnapshotStatus } from './apiHooks';
 import StatusContainer from './StatusContainer';
-import { StatusDisplay, DateDisplay } from './statusComponents';
-import { StepState } from '@/generated/api/types.gen';
-
-type SnapshotData = {
-  status: StepState;
-  percentage_completed: number;
-  eta_ms: number | null;
-  started?: string;
-  finished?: string;
-};
-
-// Debug scenario mock data
-const SNAPSHOT_SCENARIOS = {
-  notStarted: {
-    status: "Pending" as StepState,
-    percentage_completed: 0,
-    eta_ms: null,
-    started: undefined,
-    finished: undefined,
-  },
-  inProgress: {
-    status: "Running" as StepState,
-    percentage_completed: 25,
-    eta_ms: 7200000, // 2 hours in milliseconds
-    started: new Date(Date.now() - 1800000).toISOString(), // Started 30 minutes ago
-    finished: undefined,
-  },
-  almostDone: {
-    status: "Running" as StepState,
-    percentage_completed: 99,
-    eta_ms: 60000, // 1 minute in milliseconds
-    started: new Date(Date.now() - 3600000).toISOString(), // Started 1 hour ago
-    finished: undefined,
-  },
-  completed: {
-    status: "Completed" as StepState,
-    percentage_completed: 100,
-    eta_ms: null,
-    started: new Date(Date.now() - 3600000).toISOString(), // Started 1 hour ago
-    finished: new Date().toISOString(), // Just finished
-  },
-  failed: {
-    status: "Failed" as StepState,
-    percentage_completed: 45,
-    eta_ms: null,
-    started: new Date(Date.now() - 1800000).toISOString(), // Started 30 minutes ago
-    finished: new Date(Date.now() - 600000).toISOString(), // Failed 10 minutes ago
-  }
-};
-
-
-function DurationDisplay({ started, finished }: Readonly<{ started?: string, finished?: string }>) {
-  return <>{durationFromTimes(started, finished) || '-'}</>;
-}
-
-function ProgressDisplay({ percentage }: Readonly<{ percentage: number }>) {
-  return <>{`${percentage}%`}</>;
-}
-
-function ETADisplay({ etaMs }: Readonly<{ etaMs: number | null }>) {
-  return <>{etaMs ? `${Math.floor(etaMs / 60000)} minutes` : 'N/A'}</>;
-}
+import { 
+  StatusDisplay, 
+  DateDisplay,
+  DurationDisplay,
+  ProgressDisplay,
+  ETADisplay 
+} from './statusComponents';
+import { SNAPSHOT_SCENARIOS } from './mockData/snapshotScenarios';
+import { SnapshotDebugControls } from './debug/SnapshotDebugControls';
 
 export default function SnapshotStatusView({ sessionName }: Readonly<SessionStatusProps>) {
   const { isLoading: apiLoading, data: apiSnapshotData, error } = useSnapshotStatus(sessionName);
   
-  // Override data for debug mode
   const [debugData, setDebugData] = useState<SnapshotData | null>(null);
   const [isLoading, setIsLoading] = useState(apiLoading);
   const [snapshotData, setSnapshotData] = useState<SnapshotData | null>(null);
   
-  // Use effect to update from API unless we're in debug mode
   useEffect(() => {
     if (!debugData) {
       // Only update if there's actual API data
@@ -97,8 +39,11 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
     setSnapshotData(SNAPSHOT_SCENARIOS[scenario]);
     setIsLoading(false);
   };
+  
+  const resetToApiData = () => {
+    setDebugData(null);
+  };
 
-  // Define the fields once for both loading and data display
   const fields: StatusFieldDefinition<SnapshotData>[] = [
     {
       label: 'Status',
@@ -137,23 +82,10 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
         columns={2}
       />
       
-      <DebugCommands>
-        <SpaceBetween size="xs" direction="horizontal">
-          <ButtonDropdown
-            items={[
-              { id: "notStarted", text: "Not Started" },
-              { id: "inProgress", text: "In Progress (2hr ETA)" },
-              { id: "almostDone", text: "Almost Done (99%)" },
-              { id: "completed", text: "Completed" },
-              { id: "failed", text: "Failed" },
-            ]}
-            onItemClick={({ detail }) => applyDebugScenario(detail.id as keyof typeof SNAPSHOT_SCENARIOS)}
-          >
-            Simulate Scenario
-          </ButtonDropdown>
-          <Button onClick={() => {setDebugData(null)}}>Reset to API Data</Button>
-        </SpaceBetween>
-      </DebugCommands>
+      <SnapshotDebugControls 
+        onScenarioSelect={applyDebugScenario} 
+        onReset={resetToApiData} 
+      />
     </>
   );
 }
