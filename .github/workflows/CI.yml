@@ -303,7 +303,6 @@ jobs:
             --exclude "http://capture-proxy*"
             --exclude "https://capture-proxy*"
             --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
-            --exclude-mail
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
