@@ -1,0 +1,208 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: elasticsearch-5-6-single-node
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: main
+  
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: alpine/helm:latest
+        command: [sh, -c]
+        args:
+          - |
+            # Add Elasticsearch Helm repository
+            helm repo add elastic https://helm.elastic.co
+            helm repo update
+            
+            # Get localstack service IP dynamically
+            LOCALSTACK_IP=$(kubectl get svc localstack -n {{inputs.parameters.namespace}} -o jsonpath='{.spec.clusterIP}')
+            
+            # Create Elasticsearch configuration for ES 5.6.16 with S3 settings
+            cat > /tmp/elasticsearch.yml << EOF
+            bootstrap.system_call_filter: false
+            network.host: 0.0.0.0
+            cloud.aws.access_key: test
+            cloud.aws.secret_key: test
+            cloud.aws.region: us-east-2
+            cloud.aws.s3.endpoint: ${LOCALSTACK_IP}:4566
+            cloud.aws.protocol: http
+            discovery.zen.minimum_master_nodes: 1
+            EOF
+            
+            # Create Helm values file for ES 5.6.16 with S3 plugin
+            cat > /tmp/es-values.yaml << 'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            image: "docker.elastic.co/elasticsearch/elasticsearch"
+            imageTag: "5.6.16"
+            antiAffinity: "soft"
+            esJavaOpts: "-Xmx128m -Xms128m"
+            protocol: "http"
+            replicas: 1
+            createCert: false
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            readinessProbe:
+              failureThreshold: 5
+              successThreshold: 2
+            extraEnvs:
+              - name: "cluster.initial_master_nodes"
+                value: ""
+              - name: "node.roles"
+                value: ""
+            persistence:
+              enabled: false
+            
+            extraInitContainers:
+              - name: install-s3-plugin
+                image: docker.elastic.co/elasticsearch/elasticsearch:5.6.16
+                command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                volumeMounts:
+                  - name: plugins
+                    mountPath: /usr/share/elasticsearch/plugins
+            
+            extraVolumes:
+              - name: plugins
+                emptyDir: {}
+            
+            extraVolumeMounts:
+              - name: plugins
+                mountPath: /usr/share/elasticsearch/plugins
+            EOF
+            
+            # Install Elasticsearch 5.6.16 with S3 plugin
+            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch \
+              --version 8.5.1 \
+              --namespace {{inputs.parameters.namespace}} \
+              --values /tmp/es-values.yaml \
+              --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
+            
+            # Generate cluster configuration output
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "no_auth": null,
+              "version": "ES_5.6"
+            }
+            EOF
+            
+            echo "Elasticsearch 5.6.16 cluster"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+          - name: cluster-endpoint
+            value: "http://{{inputs.parameters.cluster-name}}:9200"
+          - name: cluster-name
+            value: "{{inputs.parameters.cluster-name}}"
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: opensearch-2-19-single-node
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: main
+  
+  arguments:
+    parameters:
+      - name: cluster-name
+        value: "opensearch-cluster"
+      - name: namespace
+        value: "ma"
+
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: alpine/helm:latest
+        command: [sh, -c]
+        args:
+          - |
+            # Add OpenSearch Helm repository
+            helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+            helm repo update
+            
+            # Create OpenSearch configuration
+            cat > /tmp/opensearch.yml << EOF
+            cluster.name: {{inputs.parameters.cluster-name}}
+            network.host: 0.0.0.0
+            discovery.type: single-node
+            plugins.security.disabled: true
+            s3.client.default.endpoint: "http://localstack:4566"
+            s3.client.default.path_style_access: true
+            EOF
+            
+            # Create OpenSearch values file with S3 plugin
+            cat > /tmp/opensearch-values.yaml << 'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            nodeGroup: ""
+            image:
+              repository: "opensearchproject/opensearch"
+              tag: "2.19.1"
+            singleNode: true
+            replicas: 1
+            extraEnvs:
+              - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
+                value: "myStrongPassword123!"
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+              limits:
+                cpu: "1000m"
+                memory: "2Gi"
+            persistence:
+              enabled: false
+            opensearchJavaOpts: "-Xmx1g -Xms1g"
+            plugins:
+              enabled: true
+              installList:
+                - "repository-s3"
+            EOF
+            
+            # Install OpenSearch 2.19.1
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch \
+              --namespace {{inputs.parameters.namespace}} \
+              --values /tmp/opensearch-values.yaml \
+              --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            # Generate cluster configuration output
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "version": "OS_2.19",
+              "basic_auth": {
+                "username": "admin",
+                "password": "myStrongPassword123!"
+              }
+            }
+            EOF
+            
+            echo "OpenSearch 2.19.1 cluster created successfully"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+          - name: cluster-endpoint
+            value: "https://{{inputs.parameters.cluster-name}}:9200"
+          - name: cluster-name
+            value: "{{inputs.parameters.cluster-name}}"

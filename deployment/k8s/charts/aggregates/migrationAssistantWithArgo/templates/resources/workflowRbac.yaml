@@ -14,7 +14,7 @@ metadata:
 rules:
   # Existing permissions for deployments and replicasets
   - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Add permissions for Argo workflows
@@ -22,9 +22,34 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
-  # Add permissions for pods and pod logs (needed for Argo workflow execution)
+  # Core Kubernetes resources needed for Helm operations
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services"]
+    resources: ["pods", "pods/log", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Events for Helm status reporting
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  # RBAC resources that Helm charts might create
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Network policies and ingress
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies", "ingresses"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Policy resources
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Autoscaling
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # For services
