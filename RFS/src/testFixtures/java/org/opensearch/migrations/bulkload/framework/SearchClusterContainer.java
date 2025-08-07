@@ -49,6 +49,21 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     private static final String OLDER_ES_CONFIG = "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\"";
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
 
+    /**
+     * Creates disk watermark settings with higher thresholds suitable for CI environments.
+     * Can be overridden via system properties for different environments.
+     */
+    private static Map<String, String> getDiskWatermarkSettings() {
+        return Map.of(
+            "cluster.routing.allocation.disk.watermark.low", 
+                System.getProperty("es.disk.watermark.low", "97%"),
+            "cluster.routing.allocation.disk.watermark.high", 
+                System.getProperty("es.disk.watermark.high", "98%"),
+            "cluster.routing.allocation.disk.watermark.flood_stage", 
+                System.getProperty("es.disk.watermark.flood", "99%")
+        );
+    }
+
     private static String buildEs5ConfigYml(List<String> baseLines, String... extraLines) {
         List<String> allLines = new ArrayList<>(baseLines);
         Collections.addAll(allLines, extraLines);
@@ -147,12 +162,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     public enum INITIALIZATION_FLAVOR {
-        BASE(Map.of("discovery.type", "single-node",
-            "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "index.store.type", "mmapfs",
-            "bootstrap.system_call_filter", "false",
-            "ES_JAVA_OPTS", "-Xms2g -Xmx2g"
-        )),
+        BASE(new HashMap<String, String>() {{
+            put("discovery.type", "single-node");
+            put("path.repo", CLUSTER_SNAPSHOT_DIR);
+            put("index.store.type", "mmapfs");
+            put("bootstrap.system_call_filter", "false");
+            put("ES_JAVA_OPTS", "-Xms2g -Xmx2g");
+            putAll(getDiskWatermarkSettings());
+        }}),
         ELASTICSEARCH(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
@@ -171,7 +188,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 overrideAndRemoveEnv(
                         BASE.getEnvVariables(),
                         Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
-                        Set.of("discovery.type","ES_JAVA_OPTS")
+                        Set.of("discovery.type","ES_JAVA_OPTS",
+                               "cluster.routing.allocation.disk.watermark.low",
+                               "cluster.routing.allocation.disk.watermark.high", 
+                               "cluster.routing.allocation.disk.watermark.flood_stage")
                 )),
         ELASTICSEARCH_6(
             overrideAndRemoveEnv(
@@ -190,10 +210,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                     Map.entry("cluster.name", "docker-test-cluster"),
                     Map.entry("node.name", "test-node"),
                     Map.entry("xpack.ml.enabled", "false"),
-                    Map.entry("xpack.watcher.enabled", "false"),
-                    Map.entry("cluster.routing.allocation.disk.watermark.low", "95%"),
-                    Map.entry("cluster.routing.allocation.disk.watermark.high", "98%"),
-                    Map.entry("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
+                    Map.entry("xpack.watcher.enabled", "false")
                 ),
                 Set.of("bootstrap.system_call_filter")  // don't set it for ES 8x
             )),
