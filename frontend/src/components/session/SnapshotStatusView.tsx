@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { StatusIndicator, Button, ButtonDropdown } from '@cloudscape-design/components';
+import { Button, ButtonDropdown } from '@cloudscape-design/components';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import DebugCommands from '@/components/playground/debug/DebugCommands';
 import { SessionStatusProps } from './types';
-import { mapStatus, durationFromTimes, StatusFieldDefinition } from './statusUtils';
+import { durationFromTimes, StatusFieldDefinition } from './statusUtils';
 import { useSnapshotStatus } from './apiHooks';
 import StatusContainer from './StatusContainer';
+import { StatusDisplay, DateDisplay } from './statusComponents';
 import { StepState } from '@/generated/api/types.gen';
 
 type SnapshotData = {
@@ -57,8 +58,17 @@ const SNAPSHOT_SCENARIOS = {
   }
 };
 
-function StatusDisplay({ status }: Readonly<{ status: StepState }>) {
-  return <StatusIndicator type={mapStatus(status)}></StatusIndicator>;
+
+function DurationDisplay({ started, finished }: Readonly<{ started?: string, finished?: string }>) {
+  return <>{durationFromTimes(started, finished) || '-'}</>;
+}
+
+function ProgressDisplay({ percentage }: Readonly<{ percentage: number }>) {
+  return <>{`${percentage}%`}</>;
+}
+
+function ETADisplay({ etaMs }: Readonly<{ etaMs: number | null }>) {
+  return <>{etaMs ? `${Math.floor(etaMs / 60000)} minutes` : 'N/A'}</>;
 }
 
 export default function SnapshotStatusView({ sessionName }: Readonly<SessionStatusProps>) {
@@ -96,23 +106,23 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
     },
     {
       label: 'Started',
-      valueSupplier: (data) => data.started != undefined ? new Date(data.started).toLocaleString() : '-'
+      valueSupplier: (data) => <DateDisplay date={data.started} />
     },
     {
       label: 'Finished',
-      valueSupplier: (data) => data.finished != undefined ? new Date(data.finished).toLocaleString() : '-'
+      valueSupplier: (data) => <DateDisplay date={data.finished} />
     },
     {
       label: 'Duration',
-      valueSupplier: (data) => durationFromTimes(data.started, data.finished) || '-'
+      valueSupplier: (data) => <DurationDisplay started={data.started} finished={data.finished} />
     },
     {
       label: 'Progress',
-      valueSupplier: (data) => `${data.percentage_completed}%`
+      valueSupplier: (data) => <ProgressDisplay percentage={data.percentage_completed} />
     },
     {
       label: 'ETA',
-      valueSupplier: (data) => data.eta_ms ? `${Math.floor(data.eta_ms / 60000)} minutes` : 'N/A'
+      valueSupplier: (data) => <ETADisplay etaMs={data.eta_ms} />
     }
   ];
 

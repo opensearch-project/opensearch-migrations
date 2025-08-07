@@ -4,6 +4,7 @@ import { SessionStatusProps } from './types';
 import { useSessionOverview } from './apiHooks';
 import StatusContainer from './StatusContainer';
 import { StatusFieldDefinition } from './statusUtils';
+import { DateDisplay } from './statusComponents';
 
 export default function SessionOverviewView({ sessionName }: Readonly<SessionStatusProps>) {
   const { isLoading, data: sessionData, error } = useSessionOverview(sessionName);
@@ -15,7 +16,7 @@ export default function SessionOverviewView({ sessionName }: Readonly<SessionSta
     },
     { 
       label: 'Created At',
-      valueSupplier: (data) => data?.created && new Date(data.created).toLocaleString() || '-'
+      valueSupplier: (data) => <DateDisplay date={data?.created} />
     }
   ];
   
