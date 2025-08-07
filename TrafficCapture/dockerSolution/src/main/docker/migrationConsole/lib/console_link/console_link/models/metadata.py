@@ -7,7 +7,7 @@ from cerberus import Validator
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import list_schema
-from console_link.models.cluster import AuthMethod, Cluster
+from console_link.models.cluster import AuthMethod, Cluster, NoTargetClusterDefinedError
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
 from typing import Any, Dict, List
 
@@ -62,7 +62,7 @@ def generate_tmp_dir(name: str) -> str:
 
 
 class Metadata:
-    def __init__(self, config, target_cluster: Cluster, snapshot: Optional[Snapshot] = None):
+    def __init__(self, config, target_cluster: Optional[Cluster], snapshot: Optional[Snapshot] = None):
         logger.debug(f"Initializing Metadata with config: {config}")
         v = Validator(SCHEMA)
         if not v.validate(config):
@@ -174,6 +174,9 @@ class Metadata:
         return self.migrate_or_evaluate("migrate", extra_args)
 
     def migrate_or_evaluate(self, command: str, extra_args=None) -> CommandResult:
+        if not self._target_cluster:
+            raise NoTargetClusterDefinedError()
+
         command_base = "/root/metadataMigration/bin/MetadataMigration"
         command_args = {}
 
