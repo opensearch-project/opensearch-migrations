@@ -8,6 +8,7 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -15,6 +16,7 @@ import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
@@ -80,7 +82,9 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
-                var sourceRepo = new FileSystemRepo(tempDir);
+                var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+                        sourceVersion.getVersion(), true);
+                var sourceRepo = new FileSystemRepo(tempDir, fileFinder);
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);
@@ -106,7 +110,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 }
                 var thrownException = Assertions.assertThrows(
                     ExecutionException.class,
-                    () -> CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get()
+                    () -> CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get(120, TimeUnit.SECONDS)
                 );
                 var numTotalRuns = workerFutures.stream().mapToInt(cf -> {
                     try {

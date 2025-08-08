@@ -10,9 +10,8 @@ public final class ElasticsearchConstants_ES_1_7 {
     public static final String SOFT_DELETES_FIELD = null;
     public static final boolean SOFT_DELETES_POSSIBLE = false;
     public static final String FIELD_SETTINGS = "settings";
-    public static final String FIELD_PRIMARY_TERMS = "primary_terms";
     public static final String FIELD_MAPPINGS = "mappings";
-    public static final String FIELD_COMPRESSED = "compressed";
-    public static final String FIELD_ALIASES = "aliases";
-    public static final String FIELD_ROUTING_NUM_SHARDS = "routing_num_shards";
+    public static final String INDICES_DIR_NAME = "indices";
+    public static final String METADATA_PREFIX = "metadata-";
+    public static final String SNAPSHOT_PREFIX = "snapshot-";
 }
