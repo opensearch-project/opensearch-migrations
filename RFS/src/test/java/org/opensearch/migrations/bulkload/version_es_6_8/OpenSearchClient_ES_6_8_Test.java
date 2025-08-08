@@ -6,6 +6,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
@@ -59,7 +60,7 @@ class OpenSearchClient_ES_6_8_Test {
 
     @BeforeEach
     void beforeTest() {
-        openSearchClient = spy(new OpenSearchClient_ES_6_8(restClient, failedRequestLogger, Version.fromString("ES_6_8")));
+        openSearchClient = spy(new OpenSearchClient_ES_6_8(restClient, failedRequestLogger, Version.fromString("ES_6_8"), CompressionMode.UNCOMPRESSED));
     }
 
     @SneakyThrows
@@ -94,7 +95,6 @@ class OpenSearchClient_ES_6_8_Test {
         var successResponse = bulkItemResponse(false, List.of(itemEntry(docId1), itemEntry(docId2)));
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(successResponse));
-        when(restClient.supportsGzipCompression()).thenReturn(false);
 
         var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
 

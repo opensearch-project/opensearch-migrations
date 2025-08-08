@@ -2,9 +2,11 @@ package org.opensearch.migrations;
 
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -14,6 +16,7 @@ import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -22,7 +25,13 @@ import org.apache.logging.log4j.core.appender.FileAppender;
 @Slf4j
 public class MetadataMigration {
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
+        new MetadataMigration().run(args);
+    }
+
+    private AtomicReference<OutputFormat> outputFormat = new AtomicReference<>();
+
+    protected void run(String[] args) {
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(
                 args,
                 ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
@@ -38,14 +47,12 @@ public class MetadataMigration {
         jCommander.parse(args);
         EnvArgs.injectFromEnv(migrateArgs);
         EnvArgs.injectFromEnv(evaluateArgs);
-
-        var context = new RootMetadataMigrationContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(metadataArgs.otelCollectorEndpoint, "metadata",
-                ProcessHelpers.getNodeInstanceName()),
-            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
-        );
-
-        var meta = new MetadataMigration();
+        
+        if (migrateArgs.outputFormat == OutputFormat.JSON || evaluateArgs.outputFormat == OutputFormat.JSON) {
+            outputFormat.set(OutputFormat.JSON);
+        } else {
+            outputFormat.set(OutputFormat.HUMAN_READABLE);
+        }
 
         if (metadataArgs.help || jCommander.getParsedCommand() == null) {
             printTopLevelHelp(jCommander);
@@ -57,37 +64,51 @@ public class MetadataMigration {
             return;
         }
 
+        var result = runCommand(jCommander, metadataArgs, migrateArgs, evaluateArgs);
+
+        // Output format determines which version is printed to the user
+        writeOutput(result.asCliOutput());
+        writeOutput(result.asJsonOutput());
+        reportLogPath();
+        reportTransformationPath();
+
+        exitWithCode(result.getExitCode());
+    }
+
+    private Result runCommand(JCommander jCommander, MetadataArgs metadataArgs, MigrateArgs migrateArgs, EvaluateArgs evaluateArgs) {
+        var context = new RootMetadataMigrationContext(
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(metadataArgs.otelCollectorEndpoint, "metadata",
+                ProcessHelpers.getNodeInstanceName()),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
+
         var command = Optional.ofNullable(jCommander.getParsedCommand())
             .map(MetadataCommands::fromString)
             .orElse(MetadataCommands.MIGRATE);
-        Result result;
+
         switch (command) {
             default:
             case MIGRATE:
                 if (migrateArgs.help) {
                     printCommandUsage(jCommander);
-                    return;
+                    exitWithCode(-1);
                 }
 
-                log.info("Starting Metadata Migration");
-                result = meta.migrate(migrateArgs).execute(context);
-                break;
+                writeOutput("Starting Metadata Migration");
+                return migrate(migrateArgs).execute(context);
             case EVALUATE:
                 if (evaluateArgs.help) {
                     printCommandUsage(jCommander);
-                    return;
+                    exitWithCode(-1);
                 }
 
-                log.info("Starting Metadata Evaluation");
-                result = meta.evaluate(evaluateArgs).execute(context);
-                break;
+                writeOutput("Starting Metadata Evaluation");
+                return evaluate(evaluateArgs).execute(context);
         }
-        log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
+    }
 
-        reportLogPath();
-        reportTransformationPath();
-
-        System.exit(result.getExitCode());
+    protected void exitWithCode(int code) {
+        System.exit(code);
     }
 
     public Configure configure() {
@@ -102,7 +123,19 @@ public class MetadataMigration {
         return new Migrate(arguments);
     }
 
-    private static void printTopLevelHelp(JCommander commander) {
+    protected void writeOutput(String humanReadableOutput) {
+        if (outputFormat.get() == OutputFormat.HUMAN_READABLE) {
+            log.atInfo().setMessage("{}").addArgument(humanReadableOutput).log();
+        }
+    }
+
+    protected void writeOutput(JsonNode output) {
+        if (outputFormat.get() == OutputFormat.JSON) {
+            log.atInfo().setMessage("{}").addArgument(output::toPrettyString).log();
+        }
+    }
+
+    private void printTopLevelHelp(JCommander commander) {
         var sb = new StringBuilder();
         sb.append("Usage: [options] [command] [commandOptions]");
         sb.append("Options:");
@@ -116,16 +149,17 @@ public class MetadataMigration {
             sb.append("  ").append(command.getKey());
         }
         sb.append("\nUse --help with a specific command for more information.");
-        log.info(sb.toString());
+        var usage = sb.toString();
+        writeOutput(usage);
     }
 
-    private static void printCommandUsage(JCommander jCommander) {
+    private void printCommandUsage(JCommander jCommander) {
         var sb = new StringBuilder();
         jCommander.getUsageFormatter().usage(jCommander.getParsedCommand(), sb);
-        log.info(sb.toString());
+        writeOutput(sb.toString());
     }
 
-    private static void reportLogPath() {
+    private void reportLogPath() {
         try {
             var loggingContext = (LoggerContext) LogManager.getContext(false);
             var loggingConfig = loggingContext.getConfiguration();
@@ -133,27 +167,21 @@ public class MetadataMigration {
             var metadataLogAppender = (FileAppender) loggingConfig.getAppender("MetadataRun");
             if (metadataLogAppender != null) {
                 var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
-                log.atInfo()
-                    .setMessage("Consult {} to see detailed logs for this run")
-                    .addArgument(logFilePath.toAbsolutePath())
-                    .log();
+                writeOutput("Consult " + logFilePath.toAbsolutePath() + " to see detailed logs for this run");
             }
         } catch (Exception e) {
             // Ignore any exceptions if we are unable to get the log configuration
         }
     }
 
-    private static void reportTransformationPath() {
+    private void reportTransformationPath() {
         try {
             var loggingContext = (LoggerContext) LogManager.getContext(false);
             var loggingConfig = loggingContext.getConfiguration();
             var metadataLogAppender = (FileAppender) loggingConfig.getAppender(MetadataTransformationRegistry.TRANSFORM_LOGGER_NAME);
             if (metadataLogAppender != null) {
                 var logFilePath = Path.of(metadataLogAppender.getFileName()).normalize();
-                log.atInfo()
-                        .setMessage("See transformations applied for this run at {}")
-                        .addArgument(logFilePath.toAbsolutePath())
-                        .log();
+                writeOutput("See transformations applied for this run at " + logFilePath.toAbsolutePath());
             }
         } catch (Exception e) {
             // Ignore any exceptions if we are unable to get the log configuration
