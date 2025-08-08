@@ -2,7 +2,7 @@ import datetime
 import logging
 from abc import ABC, abstractmethod
 from requests.exceptions import HTTPError
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
@@ -11,9 +11,7 @@ from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
-
 logger = logging.getLogger(__name__)
-
 
 SNAPSHOT_SCHEMA = {
     'snapshot': {
@@ -167,9 +165,7 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
-        if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -226,9 +222,7 @@ class FileSystemSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
-        if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -247,23 +241,6 @@ class FileSystemSnapshot(Snapshot):
             raise NoSourceClusterDefinedError()
 
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
-
-
-def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
-    path = f"/_snapshot/{repository}/{snapshot}"
-    try:
-        response = cluster.call_api(path, HttpMethod.GET)
-        logging.debug(f"Raw get snapshot status response: {response.text}")
-        response.raise_for_status()
-
-        snapshot_data = response.json()
-        snapshots = snapshot_data.get('snapshots', [])
-        if not snapshots:
-            return CommandResult(success=False, value="Snapshot not started")
-
-        return CommandResult(success=True, value=snapshots[0].get("state"))
-    except Exception as e:
-        return CommandResult(success=False, value=f"Failed to get snapshot status: {str(e)}")
 
 
 def format_date(millis: int) -> str:
@@ -322,33 +299,70 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
     )
 
 
-def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
+class SnapshotStateAndDetails:
+    def __init__(self, state: str, details: Any):
+        self.state = state
+        self.details = details
+
+
+class SnapshotNotStarted(Exception):
+    pass
+
+
+class SnapshotStatusUnavaliable(Exception):
+    pass
+
+
+def get_latest_snapshot_status_raw(cluster: Cluster,
+                                   snapshot: str,
+                                   repository: str,
+                                   deep: bool) -> SnapshotStateAndDetails:
     try:
         path = f"/_snapshot/{repository}/{snapshot}"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status response: {response.text}")
         response.raise_for_status()
+    except HTTPError:
+        raise SnapshotNotStarted()
 
-        snapshot_data = response.json()
-        snapshots = snapshot_data.get('snapshots', [])
-        if not snapshots:
-            return CommandResult(success=False, value="Snapshot not started")
+    snapshot_data = response.json()
+    snapshots = snapshot_data.get('snapshots', [])
+    if not snapshots:
+        raise SnapshotNotStarted()
 
-        snapshot_info = snapshots[0]
-        state = snapshot_info.get("state")
+    snapshot_info = snapshots[0]
+    state = snapshot_info.get("state")
 
+    if not deep:
+        return SnapshotStateAndDetails(state, None)
+
+    try:
         path = f"/_snapshot/{repository}/{snapshot}/_status"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
+    except HTTPError:
+        raise SnapshotStatusUnavaliable()
 
-        snapshot_data = response.json()
-        snapshots = snapshot_data.get('snapshots', [])
-        if not snapshots:
-            return CommandResult(success=False, value="Snapshot status not available")
+    snapshot_data = response.json()
+    snapshots = snapshot_data.get('snapshots', [])
+    if not snapshots or not snapshots[0]:
+        raise SnapshotStatusUnavaliable()
+    
+    return SnapshotStateAndDetails(state, snapshots[0])
 
-        message = get_snapshot_status_message(snapshots[0])
-        return CommandResult(success=True, value=f"{state}\n{message}")
+
+def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:
+    try:
+        latest_snapshot_status = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep=deep_check)
+        if deep_check:
+            message = get_snapshot_status_message(latest_snapshot_status.details)
+            return CommandResult(success=True, value=f"{latest_snapshot_status.state}\n{message}")
+        return CommandResult(success=True, value=latest_snapshot_status.state)
+    except SnapshotNotStarted:
+        return CommandResult(success=False, value="Snapshot not started")
+    except SnapshotStatusUnavaliable:
+        return CommandResult(success=False, value="Snapshot status not available")
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
