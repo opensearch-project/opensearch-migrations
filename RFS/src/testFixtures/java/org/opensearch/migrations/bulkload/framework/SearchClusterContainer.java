@@ -44,9 +44,30 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "path.repo: \"/tmp/snapshots\""
     );
 
+    private static final Map<String, String> DISK_WATERMARK_COMMON = Map.of(
+        "cluster.routing.allocation.disk.watermark.low", "97%",
+        "cluster.routing.allocation.disk.watermark.high", "98%"
+    );
+
+    public static final Map<String, String> DISK_WATERMARK_SETTINGS = new HashMap<>() {{
+        putAll(DISK_WATERMARK_COMMON);
+        put("cluster.routing.allocation.disk.watermark.flood_stage", "99%");
+    }};
+
+    private static List<String> buildWatermarkLines(Map<String, String> watermark) {
+        return watermark.entrySet().stream()
+            .map(e -> e.getKey() + ": " + e.getValue())
+            .toList();
+    }
+
     // This version of doesn't support path.repo based via env variables, passing this value via config
     private static final String OLDER_ES_CONFIG_PATH = "/usr/share/elasticsearch/config/elasticsearch.yml";
-    private static final String OLDER_ES_CONFIG = "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\"";
+    private static final String OLDER_ES_CONFIG = String.join(
+            "\n",
+            "network.host: 0.0.0.0",
+            "path.repo: \"/tmp/snapshots\"",
+            String.join("\n", buildWatermarkLines(DISK_WATERMARK_SETTINGS))
+    );
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
 
     private static String buildEs5ConfigYml(List<String> baseLines, String... extraLines) {
@@ -54,12 +75,15 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         Collections.addAll(allLines, extraLines);
         return String.join("\n", allLines);
     }
+
     private static final String ES_5_0_AND_5_1_CONFIG_YML = buildEs5ConfigYml(
-        ES_5_COMMON_CONFIG_LINES
+        ES_5_COMMON_CONFIG_LINES,
+        String.join("\n", buildWatermarkLines(DISK_WATERMARK_COMMON))
     );
     private static final String ES_5_2_AND_5_3_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES,
-        "bootstrap.system_call_filter: false"
+        "bootstrap.system_call_filter: false",
+        String.join("\n", buildWatermarkLines(DISK_WATERMARK_COMMON))
     );
 
     private static Map<String, String> overrideAndRemoveEnv(
@@ -73,9 +97,33 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         return Collections.unmodifiableMap(merged);
     }
 
+    public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.4");
     public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.5");
+    public static final ContainerVersion ES_V8_16 = Elasticsearch8Version.fromTag("8.16.6");
+    public static final ContainerVersion ES_V8_15 = Elasticsearch8Version.fromTag("8.15.5");
+    public static final ContainerVersion ES_V8_14 = Elasticsearch8Version.fromTag("8.14.3");
+    public static final ContainerVersion ES_V8_13 = Elasticsearch8Version.fromTag("8.13.4");
+    public static final ContainerVersion ES_V8_12 = Elasticsearch8Version.fromTag("8.12.2");
+    public static final ContainerVersion ES_V8_11 = Elasticsearch8Version.fromTag("8.11.4");
+    public static final ContainerVersion ES_V8_10 = Elasticsearch8Version.fromTag("8.10.4");
+    public static final ContainerVersion ES_V8_9 = Elasticsearch8Version.fromTag("8.9.2");
+    public static final ContainerVersion ES_V8_8 = Elasticsearch8Version.fromTag("8.8.2");
+    public static final ContainerVersion ES_V8_7 = Elasticsearch8Version.fromTag("8.7.1");
+    public static final ContainerVersion ES_V8_6 = Elasticsearch8Version.fromTag("8.6.2");
+    public static final ContainerVersion ES_V8_5 = Elasticsearch8Version.fromTag("8.5.3");
+    public static final ContainerVersion ES_V8_4 = Elasticsearch8Version.fromTag("8.4.3");
+    public static final ContainerVersion ES_V8_3 = Elasticsearch8Version.fromTag("8.3.3");
+    public static final ContainerVersion ES_V8_2 = Elasticsearch8Version.fromTag("8.2.3");
+    public static final ContainerVersion ES_V8_1 = Elasticsearch8Version.fromTag("8.1.3");
+    public static final ContainerVersion ES_V8_0 = Elasticsearch8Version.fromTag("8.0.0");
 
-    public static final ContainerVersion ES_V7_17 = ElasticsearchVersion.fromTag("7.17.22");
+    public static final ContainerVersion ES_V7_17 = Elasticsearch7Version.fromTag("7.17.22");
+    public static final ContainerVersion ES_V7_16 = Elasticsearch7Version.fromTag("7.16.3");
+    public static final ContainerVersion ES_V7_15 = Elasticsearch7Version.fromTag("7.15.2");
+    public static final ContainerVersion ES_V7_14 = Elasticsearch7Version.fromTag("7.14.2");
+    public static final ContainerVersion ES_V7_13 = Elasticsearch7Version.fromTag("7.13.4");
+    public static final ContainerVersion ES_V7_12 = Elasticsearch7Version.fromTag("7.12.1");
+    public static final ContainerVersion ES_V7_11 = Elasticsearch7Version.fromTag("7.11.2");
     public static final ContainerVersion ES_V7_10_2 = ElasticsearchOssVersion.fromTag("7.10.2");
     public static final ContainerVersion ES_V7_9 = ElasticsearchOssVersion.fromTag("7.9.3");
     public static final ContainerVersion ES_V7_8 = ElasticsearchOssVersion.fromTag("7.8.1");
@@ -123,19 +171,23 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final ContainerVersion OS_LATEST = OS_V2_19_1;
 
     public enum INITIALIZATION_FLAVOR {
-        BASE(Map.of("discovery.type", "single-node",
-            "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "index.store.type", "mmapfs",
-            "bootstrap.system_call_filter", "false",
-            "ES_JAVA_OPTS", "-Xms2g -Xmx2g"
-        )),
+        BASE(new HashMap<String, String>() {{
+            put("discovery.type", "single-node");
+            put("path.repo", CLUSTER_SNAPSHOT_DIR);
+            put("index.store.type", "mmapfs");
+            put("bootstrap.system_call_filter", "false");
+            put("ES_JAVA_OPTS", "-Xms2g -Xmx2g");
+            putAll(DISK_WATERMARK_SETTINGS);
+        }}),
         ELASTICSEARCH(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
                 Map.of(
                     "xpack.security.enabled", "false"
                 ),
-                Set.of()  // No keys to remove from BASE
+                Set.of(
+                    "cluster.routing.allocation.disk.watermark.flood_stage"
+                )
             )),
         ELASTICSEARCH_OSS(
             overrideAndRemoveEnv(
@@ -144,16 +196,28 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 Set.of() // No keys to remove from BASE
             )),
         ELASTICSEARCH_5(
-                overrideAndRemoveEnv(
-                        BASE.getEnvVariables(),
-                        Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
-                        Set.of("discovery.type","ES_JAVA_OPTS")
-                )),
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
+                Set.of(
+                    "discovery.type",
+                    "ES_JAVA_OPTS",
+                    "cluster.routing.allocation.disk.watermark.flood_stage"
+                )
+            )),
         ELASTICSEARCH_6(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
                 Map.of("ES_JAVA_OPTS", "-Xms2g -Xmx2g -Des.bootstrap.system_call_filter=false"),
                 Set.of("bootstrap.system_call_filter", "ES_JAVA_OPTS") // don't set it for older ES 6x
+            )),
+        ELASTICSEARCH_7(
+            overrideAndRemoveEnv(
+                BASE.getEnvVariables(),
+                Map.of(
+                        "xpack.security.enabled", "false"
+                ),
+                Set.of()
             )),
         ELASTICSEARCH_8(
             overrideAndRemoveEnv(
@@ -166,10 +230,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                     Map.entry("cluster.name", "docker-test-cluster"),
                     Map.entry("node.name", "test-node"),
                     Map.entry("xpack.ml.enabled", "false"),
-                    Map.entry("xpack.watcher.enabled", "false"),
-                    Map.entry("cluster.routing.allocation.disk.watermark.low", "95%"),
-                    Map.entry("cluster.routing.allocation.disk.watermark.high", "98%"),
-                    Map.entry("cluster.routing.allocation.disk.watermark.flood_stage", "99%")
+                    Map.entry("xpack.watcher.enabled", "false")
                 ),
                 Set.of("bootstrap.system_call_filter")  // don't set it for ES 8x
             )),
@@ -177,8 +238,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
                 Map.of(
-                        "plugins.security.disabled", "true",
-                        "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^"
+                    "plugins.security.disabled", "true",
+                    "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^"
                 ),
                 Set.of()  // No keys to remove from BASE
             )),
@@ -186,9 +247,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
                 Map.of(
-                    "plugins.security.disabled", "true",
-                    "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
-                    "search.insights.top_queries.exporter.type", "debug"
+                "plugins.security.disabled", "true",
+                "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
+                "search.insights.top_queries.exporter.type", "debug"
                 ),
                 Set.of()  // No keys to remove from BASE
             ));
@@ -278,14 +339,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     private void executeAndLog(ExecConfig command) throws UnsupportedOperationException, IOException, InterruptedException {
-            var result = this.execInContainer(command);
-            log.atInfo()
-                .setMessage("Command result: {} as <{}>\nStdOut:\n{}\nStdErr:\n{}")
-                .addArgument(command.getCommand())
-                .addArgument(command.getUser())
-                .addArgument(result.getStdout())
-                .addArgument(result.getStderr())
-                .log();
+        var result = this.execInContainer(command);
+        log.atInfo()
+            .setMessage("Command result: {} as <{}>\nStdOut:\n{}\nStdErr:\n{}")
+            .addArgument(command.getCommand())
+            .addArgument(command.getUser())
+            .addArgument(result.getStdout())
+            .addArgument(result.getStderr())
+            .log();
     }
 
 
@@ -363,6 +424,17 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new Elasticsearch8Version(imageName, version);
+        }
+    }
+
+    public static class Elasticsearch7Version extends ContainerVersion {
+        public Elasticsearch7Version(String imageName, Version version) {
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_7, "elasticsearch");
+        }
+        public static Elasticsearch7Version fromTag(String tag) {
+            String imageName = "docker.elastic.co/elasticsearch/elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new Elasticsearch7Version(imageName, version);
         }
     }
 

@@ -17,13 +17,14 @@ import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
  **/
 public class IgnoreBloomFilter extends PostingsFormat {
 
-    public IgnoreBloomFilter() {
-        super("ES87BloomFilter");
+    // Constructor accepts a codec name
+    public IgnoreBloomFilter(String codecName) {
+        super(codecName);
     }
 
     @Override
     public FieldsConsumer fieldsConsumer(SegmentWriteState state) throws IOException {
-        throw new UnsupportedOperationException("ES87BloomFilter is read-only fallback");
+        throw new UnsupportedOperationException(this.getClass().getSimpleName() + " is read-only fallback");
     }
 
     @Override

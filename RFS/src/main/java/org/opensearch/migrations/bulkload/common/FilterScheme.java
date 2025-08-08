@@ -30,6 +30,7 @@ public class FilterScheme {
 
     private static final List<String> EXCLUDED_SUFFIXES = Arrays.asList(
             "@ilm",
+            "@lifecycle",
             "@mappings",
             "@package",
             "@settings",
@@ -38,6 +39,7 @@ public class FilterScheme {
         );
 
     private static final List<String> EXCLUDED_NAMES = Arrays.asList(
+            "agentless",
             "elastic-connectors",
             "ilm-history",
             "logs",
