@@ -6,6 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -23,6 +26,7 @@ import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
+import software.amazon.awssdk.utils.ThreadFactoryBuilder;
 
 @Slf4j
 public class S3Repo implements SourceRepo {
@@ -150,7 +154,11 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public void prepBlobFiles(ShardMetadata shardMetadata) {
-        try (S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build()) {
+        ThreadPoolExecutor executor = createTransferManagerExecutor();
+        try (S3TransferManager transferManager = S3TransferManager.builder()
+            .s3Client(s3Client)
+            .executor(executor)
+            .build()) {
 
             Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
             ensureS3LocalDirectoryExists(shardDirPath);
@@ -181,7 +189,33 @@ public class S3Repo implements SourceRepo {
 
             // Print out any failed downloads
             completedDirectoryDownload.failedTransfers().forEach(x->log.error("{}", x));
+        } finally {
+            executor.shutdown();
         }
+    }
+
+    // Transfer Manager maintains buffers for CRT responses which without being careful can overload heap.
+    // A quick calculation for heap usage is:
+    //  MaxHeapUsedByCrtBuffers = (initialReadBufferSizeInBytes *  concurrentFileDownloads) +
+    //                                  minimalPartSizeInBytes * min(concurrentFileDownloads, maxConcurrency)
+    // The default values that we use are:
+    //      initialReadBufferSizeInBytes = 80MB
+    //      concurrentFileDownloads = 100 <- controlled by transfer manager executor thread pool
+    //      minimalPartSizeInBytes = 8MB
+    //      maxConcurrency = 100
+    //
+    //  To reduce memory usage to under 1GB we will set concurrentFileDownloads at 10
+    private static ThreadPoolExecutor createTransferManagerExecutor() {
+        // Modified from TransferManagerConfiguration#defaultExecutor
+        int maxPoolSize = 10;
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(0, maxPoolSize,
+            60, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(1_000),
+            new ThreadFactoryBuilder()
+                .threadNamePrefix("rfs-s3-transfer-manager").build());
+        // Allow idle core threads to time out
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 
     public static class CannotFindSnapshotRepoRoot extends RfsException {
