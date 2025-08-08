@@ -561,8 +561,10 @@ class ContainerBuilder<
     }
 
     addImageInfo(image: Expression<string>,
-                  pullPolicy: Expression<z.infer<typeof IMAGE_PULL_POLICY>>): ContainerBuilder<ContextualScope, InputParamsScope,
-        ExtendScope<ContainerScope, {image: Expression<string>, pullPolicy: Expression<string> }>> {
+                  pullPolicy: Expression<z.infer<typeof IMAGE_PULL_POLICY>>):
+        ContainerBuilder<ContextualScope, InputParamsScope,
+            ExtendScope<ContainerScope, {image: Expression<string>, pullPolicy: Expression<string> }>>
+    {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
             ...this.containerScope,
             'image': image,
@@ -570,8 +572,24 @@ class ContainerBuilder<
         });
     }
 
-    get paramExpressions() {
-        return inputParams(this.inputsScope);
+    addCommand(s: string[]):
+        ContainerBuilder<ContextualScope, InputParamsScope,
+            ExtendScope<ContainerScope, {command: string[]}>>
+    {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+            ...this.containerScope,
+            command: s}
+        );
+    }
+
+    addArgs(a: string[]):
+        ContainerBuilder<ContextualScope, InputParamsScope,
+            ExtendScope<ContainerScope, {args: string[]}>>
+    {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+            ...this.containerScope,
+            args: a}
+        );
     }
 
     getInputParam<K extends keyof InputParamsScope>(

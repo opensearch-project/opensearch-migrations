@@ -2,9 +2,9 @@ import {z} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
-import {defineParam, paramsToCallerSchema} from "@/schemas/parameterSchemas";
+import {defineParam} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
-import {concat, inputParam, inputParams, literal} from "@/schemas/expression";
+import initTlhScript from "resources/targetLatchHelper/init.sh";
 
 
 // const TARGET_LATCH_FIELD_SPECS = {
@@ -27,6 +27,8 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
         .addContainer(b=>b
             .addImageInfo(b.getInputParam("etcdUtilsImage"), b.getInputParam("etcdUtilsImagePullPolicy"))
+            .addCommand(["sh", "-c"])
+            .addArgs([initTlhScript])
         )
     )
     .addTemplate("decrementLatch", t => t
