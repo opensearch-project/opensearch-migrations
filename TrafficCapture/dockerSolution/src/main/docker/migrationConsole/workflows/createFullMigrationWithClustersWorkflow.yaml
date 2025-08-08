@@ -15,7 +15,10 @@ spec:
           [{
             "indices": ["index_3", "index_4"],
             "migrations": [{
-              "metadata": {"mappings": {"properties": {}}, "settings": {}},
+              "metadata": {
+                "from_snapshot": null,
+                "transformer_config_base64": ""
+              },
               "documentBackfillConfigs": [{"indices": ["index_3", "index_4"]}]
             }]
           }]

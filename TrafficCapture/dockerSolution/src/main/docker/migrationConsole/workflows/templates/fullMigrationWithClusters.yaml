@@ -21,7 +21,10 @@ spec:
           [{
             "indices": ["index_3", "index_4"],
             "migrations": [{
-              "metadata": {"mappings": {"properties": {}}, "settings": {}},
+              "metadata": {
+                "from_snapshot": null,
+                "transformer_config_base64": ""
+              },
               "documentBackfillConfigs": [{"indices": ["index_3", "index_4"]}]
             }]
           }]
@@ -49,8 +52,8 @@ spec:
 
         - - name: create-source-cluster
             templateRef:
-              name: "{{workflow.parameters.source-cluster-template}}"
-              template: main
+              name: cluster-templates
+              template: "{{workflow.parameters.source-cluster-template}}"
             arguments:
               parameters:
                 - name: cluster-name
@@ -60,8 +63,8 @@ spec:
 
           - name: create-target-cluster
             templateRef:
-              name: "{{workflow.parameters.target-cluster-template}}"
-              template: main
+              name: cluster-templates
+              template: "{{workflow.parameters.target-cluster-template}}"
             arguments:
               parameters:
                 - name: cluster-name
@@ -91,6 +94,10 @@ spec:
                 - name: namespace
                   value: "{{workflow.parameters.cluster-namespace}}"
 
+        # Pause for integration test data setup
+        - - name: pause-for-test-data
+            template: suspend-step
+
         # Generate migration configurations
         - - name: generate-migration-configs
             template: generate-migration-configs
@@ -117,36 +124,7 @@ spec:
                 - name: targets
                   value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
 
-
-    # Cleanup template that always runs on exit (success or failure)
-    - name: cleanup-all-clusters
-      container:
-        image: alpine/helm:latest
-        command: [sh, -c]
-        args:
-          - |
-            # Regenerate the same cluster names using workflow UID
-            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
-            SOURCE_CLUSTER_NAME="source-${SUFFIX}"
-            TARGET_CLUSTER_NAME="target-${SUFFIX}"
-            
-            echo "Cleaning up clusters: ${SOURCE_CLUSTER_NAME}, ${TARGET_CLUSTER_NAME}"
-            
-            # Cleanup source cluster
-            echo "Uninstalling source cluster: ${SOURCE_CLUSTER_NAME}"
-            helm uninstall ${SOURCE_CLUSTER_NAME} \
-              --namespace {{workflow.parameters.cluster-namespace}} \
-              --ignore-not-found || true
-            
-            # Cleanup target cluster  
-            echo "Uninstalling target cluster: ${TARGET_CLUSTER_NAME}"
-            helm uninstall ${TARGET_CLUSTER_NAME} \
-              --namespace {{workflow.parameters.cluster-namespace}} \
-              --ignore-not-found || true
-            
-            echo "Cluster cleanup completed"
-
-    # Template to generate unique cluster names
+    # Template to generate unique cluster names based on template types
     - name: generate-cluster-names
       container:
         image: alpine:latest
@@ -156,17 +134,21 @@ spec:
             # Generate unique suffix from workflow UID
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
-            # Generate cluster names
-            SOURCE_CLUSTER_NAME="source-${SUFFIX}"
-            TARGET_CLUSTER_NAME="target-${SUFFIX}"
+            SOURCE_TEMPLATE="{{workflow.parameters.source-cluster-template}}"
+            TARGET_TEMPLATE="{{workflow.parameters.target-cluster-template}}"
+            SOURCE_ID=$(echo "${SOURCE_TEMPLATE}" | cut -d'-' -f1-3)
+            TARGET_ID=$(echo "${TARGET_TEMPLATE}" | cut -d'-' -f1-3)
+            
+            SOURCE_CLUSTER_NAME="source-${SOURCE_ID}-${SUFFIX}"
+            TARGET_CLUSTER_NAME="target-${TARGET_ID}-${SUFFIX}"
             
             # Output parameters
             echo "${SOURCE_CLUSTER_NAME}" > /tmp/source-cluster-name
             echo "${TARGET_CLUSTER_NAME}" > /tmp/target-cluster-name
             
             echo "Generated cluster names:"
-            echo "Source: ${SOURCE_CLUSTER_NAME}"
-            echo "Target: ${TARGET_CLUSTER_NAME}"
+            echo "Source: ${SOURCE_CLUSTER_NAME} (from template: ${SOURCE_TEMPLATE})"
+            echo "Target: ${TARGET_CLUSTER_NAME} (from template: ${TARGET_TEMPLATE})"
       outputs:
         parameters:
           - name: source-cluster-name
@@ -197,6 +179,10 @@ spec:
             
             echo "{{inputs.parameters.cluster-type}} cluster pod is ready!"
 
+    # Generic suspend template for pausing workflow execution
+    - name: suspend-step
+      suspend: {}
+
     # Template to generate migration configurations from cluster configs using expressions
     - name: generate-migration-configs
       inputs:
@@ -221,19 +207,36 @@ spec:
                 '[' + inputs.parameters['target-config'] + ']'
       steps: [[]]  # no-op
 
-    # Unified template to cleanup any cluster using Helm
-    - name: cleanup-cluster
-      inputs:
-        parameters:
-          - name: cluster-name
-          - name: namespace
+    # Cleanup template that always runs on exit (success or failure)
+    - name: cleanup-all-clusters
       container:
         image: alpine/helm:latest
         command: [sh, -c]
         args:
           - |
-            echo "Uninstalling cluster: {{inputs.parameters.cluster-name}}"
-            helm uninstall {{inputs.parameters.cluster-name}} \
-              --namespace {{inputs.parameters.namespace}} \
+            # Regenerate the same cluster names using workflow UID and template names
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            SOURCE_TEMPLATE="{{workflow.parameters.source-cluster-template}}"
+            TARGET_TEMPLATE="{{workflow.parameters.target-cluster-template}}"
+            SOURCE_ID=$(echo "${SOURCE_TEMPLATE}" | cut -d'-' -f1-3)
+            TARGET_ID=$(echo "${TARGET_TEMPLATE}" | cut -d'-' -f1-3)
+            
+            SOURCE_CLUSTER_NAME="source-${SOURCE_ID}-${SUFFIX}"
+            TARGET_CLUSTER_NAME="target-${TARGET_ID}-${SUFFIX}"
+            
+            echo "Cleaning up clusters: ${SOURCE_CLUSTER_NAME}, ${TARGET_CLUSTER_NAME}"
+            
+            # Cleanup source cluster
+            echo "Uninstalling source cluster: ${SOURCE_CLUSTER_NAME}"
+            helm uninstall ${SOURCE_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
               --ignore-not-found || true
-            echo "Cluster cleanup completed for: {{inputs.parameters.cluster-name}}"
+            
+            # Cleanup target cluster  
+            echo "Uninstalling target cluster: ${TARGET_CLUSTER_NAME}"
+            helm uninstall ${TARGET_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
+            
+            echo "Cluster cleanup completed"

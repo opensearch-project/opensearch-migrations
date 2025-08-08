@@ -1,14 +1,13 @@
----
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: elasticsearch-5-6-single-node
+  name: cluster-templates
 spec:
   serviceAccountName: argo-workflow-executor
-  entrypoint: main
   
   templates:
-    - name: main
+    # Elasticsearch 5.6 Single Node Template
+    - name: elasticsearch-5-6-single-node
       inputs:
         parameters:
           - name: cluster-name
@@ -22,22 +21,17 @@ spec:
             helm repo add elastic https://helm.elastic.co
             helm repo update
             
-            # Get localstack service IP dynamically
-            LOCALSTACK_IP=$(kubectl get svc localstack -n {{inputs.parameters.namespace}} -o jsonpath='{.spec.clusterIP}')
-            
-            # Create Elasticsearch configuration for ES 5.6.16 with S3 settings
+            # Create Elasticsearch configuration for ES 5.6.16
             cat > /tmp/elasticsearch.yml << EOF
             bootstrap.system_call_filter: false
             network.host: 0.0.0.0
             cloud.aws.access_key: test
             cloud.aws.secret_key: test
             cloud.aws.region: us-east-2
-            cloud.aws.s3.endpoint: ${LOCALSTACK_IP}:4566
-            cloud.aws.protocol: http
             discovery.zen.minimum_master_nodes: 1
             EOF
             
-            # Create Helm values file for ES 5.6.16 with S3 plugin
+            # Create Helm values file for ES 5.6.16
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
             image: "docker.elastic.co/elasticsearch/elasticsearch"
@@ -76,7 +70,7 @@ spec:
                 mountPath: /usr/share/elasticsearch/plugins
             EOF
             
-            # Install Elasticsearch 5.6.16 with S3 plugin
+            # Install Elasticsearch 5.6.16
             helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch \
               --version 8.5.1 \
               --namespace {{inputs.parameters.namespace}} \
@@ -101,29 +95,9 @@ spec:
           - name: cluster-config
             valueFrom:
               path: /tmp/cluster-config.json
-          - name: cluster-endpoint
-            value: "http://{{inputs.parameters.cluster-name}}:9200"
-          - name: cluster-name
-            value: "{{inputs.parameters.cluster-name}}"
 
----
-apiVersion: argoproj.io/v1alpha1
-kind: WorkflowTemplate
-metadata:
-  name: opensearch-2-19-single-node
-spec:
-  serviceAccountName: argo-workflow-executor
-  entrypoint: main
-  
-  arguments:
-    parameters:
-      - name: cluster-name
-        value: "opensearch-cluster"
-      - name: namespace
-        value: "ma"
-
-  templates:
-    - name: main
+    # OpenSearch 2.19 Single Node Template
+    - name: opensearch-2-19-single-node
       inputs:
         parameters:
           - name: cluster-name
@@ -142,12 +116,9 @@ spec:
             cluster.name: {{inputs.parameters.cluster-name}}
             network.host: 0.0.0.0
             discovery.type: single-node
-            plugins.security.disabled: true
-            s3.client.default.endpoint: "http://localstack:4566"
-            s3.client.default.path_style_access: true
             EOF
             
-            # Create OpenSearch values file with S3 plugin
+            # Create OpenSearch values file
             cat > /tmp/opensearch-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
             nodeGroup: ""
@@ -202,7 +173,3 @@ spec:
           - name: cluster-config
             valueFrom:
               path: /tmp/cluster-config.json
-          - name: cluster-endpoint
-            value: "https://{{inputs.parameters.cluster-name}}:9200"
-          - name: cluster-name
-            value: "{{inputs.parameters.cluster-name}}"
