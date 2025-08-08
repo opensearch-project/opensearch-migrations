@@ -6,8 +6,8 @@ import DebugCommands from '@/components/playground/debug/DebugCommands';
 import { SNAPSHOT_SCENARIOS } from '../mockData/snapshotScenarios';
 
 interface SnapshotDebugControlsProps {
-  onScenarioSelect: (scenario: keyof typeof SNAPSHOT_SCENARIOS) => void;
-  onReset: () => void;
+  readonly onScenarioSelect: (scenario: keyof typeof SNAPSHOT_SCENARIOS) => void;
+  readonly onReset: () => void;
 }
 
 export function SnapshotDebugControls({ onScenarioSelect, onReset }: SnapshotDebugControlsProps) {

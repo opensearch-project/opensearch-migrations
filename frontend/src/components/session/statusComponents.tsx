@@ -43,5 +43,5 @@ export function ETADisplay({ etaMs }: Readonly<{ etaMs?: number | null }>) {
  * Displays a simple text value or a default if undefined
  */
 export function TextDisplay({ text }: Readonly<{ text?: string | null }>) {
-  return <>{text || '-'}</>;
+  return <>{text ?? '-'}</>;
 }

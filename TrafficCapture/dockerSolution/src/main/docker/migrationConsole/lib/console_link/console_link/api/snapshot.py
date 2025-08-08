@@ -25,7 +25,7 @@ class SnapshotStatus(BaseModel):
     finished: datetime | None = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
     @field_serializer("started", "finished")
     def serialize_completed(self, dt: datetime | None) -> str | None:

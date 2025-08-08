@@ -135,10 +135,22 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
 
     try:
         updated_session = Session.model_validate(existing)
+        session_dict = updated_session.model_dump()
+        
+        for key, value in data.items():
+            # Don't allow overriding creation date
+            if key == 'created':
+                continue
+                
+            # Allow updating any other field
+            if hasattr(updated_session, key):
+                session_dict[key] = value
+        
+        updated_session = Session.model_validate(session_dict)
+        # Always enforce update time
+        updated_session.updated = datetime.now(UTC)
     except ValidationError as e:
-        raise HTTPException(status_code=500, detail=f"Invalid session data: {e}")
-
-    updated_session.updated = datetime.now(UTC)
+        raise HTTPException(status_code=400, detail=f"Invalid session data: {e}")
 
     sessions_table.update(updated_session.model_dump(), session_query.name == session_name)
     return updated_session
