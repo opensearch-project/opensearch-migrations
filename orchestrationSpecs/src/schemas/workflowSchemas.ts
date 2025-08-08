@@ -17,6 +17,7 @@ import {
 import {z, ZodType, ZodTypeAny} from "zod";
 import {TypescriptError} from "@/utils";
 import {Expression, inputParam, inputParams} from "@/schemas/expression";
+import {IMAGE_PULL_POLICY} from "@/schemas/userSchemas";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
@@ -247,9 +248,8 @@ export class TemplateBuilder<
     /**
      * Add multiple fields at once from a field specification object.
      * Provides type safety by checking for name conflicts with existing fields.
-     * NB: Unlike most of the other builder methods, this does NOT
      */
-    addMultipleRequiredInputs<T extends FieldSpecs>(
+    addMultipleRequiredInputs_withoutStrongTypesYet<T extends FieldSpecs>(
         fieldSpecs: FieldGroupConstraint<T, InputParamsScope, T>,
         checkTypes: keyof InputParamsScope & keyof T extends never
             ? any
@@ -560,11 +560,13 @@ class ContainerBuilder<
         this.containerScope = containerScope;
     }
 
-    addImage(imageExp: Expression<string>): ContainerBuilder<ContextualScope, InputParamsScope,
-        ExtendScope<ContainerScope, {image: Expression<string> }>> {
+    addImageInfo(image: Expression<string>,
+                  pullPolicy: Expression<z.infer<typeof IMAGE_PULL_POLICY>>): ContainerBuilder<ContextualScope, InputParamsScope,
+        ExtendScope<ContainerScope, {image: Expression<string>, pullPolicy: Expression<string> }>> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
             ...this.containerScope,
-            image: imageExp
+            'image': image,
+            'pullPolicy': pullPolicy
         });
     }
 
@@ -574,8 +576,10 @@ class ContainerBuilder<
 
     getInputParam<K extends keyof InputParamsScope>(
         key: K
-    ): Expression<InputParamsScope[K] extends InputParamDef<infer T, any> ? T : never> {
-        return inputParam(key as string) as any;
+    ): ReturnType<typeof inputParam<
+        InputParamsScope[K] extends { type: ZodType<infer T> } ? T : never
+    >> {
+        return inputParam(key as string, this.inputsScope[key]);
     }
 
     getContainer() : { container: ContainerScope } {

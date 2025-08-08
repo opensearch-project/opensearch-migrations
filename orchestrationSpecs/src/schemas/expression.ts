@@ -133,7 +133,7 @@ export const workflowParam = <T>(
 
 export const inputParam = <T>(
     name: string,
-    paramDef?: InputParamDef<T, any>
+    paramDef: InputParamDef<T, any>
 ) => new FromParameterExpression<T>(
     { kind: 'input', parameterName: name },
     paramDef

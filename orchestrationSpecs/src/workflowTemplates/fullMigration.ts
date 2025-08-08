@@ -4,17 +4,20 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 import {defineParam, paramsToCallerSchema} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
-import {concat, inputParams, literal} from "@/schemas/expression";
+import {concat, inputParam, inputParams, literal} from "@/schemas/expression";
 
-const TARGET_LATCH_FIELD_SPECS = {
-    prefix: z.string(),
-    etcdUtilsImage: IMAGE_SPECIFIER,
-    etcdUtilsImagePullPolicy: IMAGE_PULL_POLICY
-} as const;
+
+// const TARGET_LATCH_FIELD_SPECS = {
+//     prefix: z.string(),
+//     etcdUtilsImage: IMAGE_SPECIFIER,
+//     etcdUtilsImagePullPolicy: z.number()
+// } as const;
 
 // just to show off addInputs, which can only work when InputParamsScope is {}
-const addCommonTargetLatchInputs = <C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) =>
-    tb.addMultipleRequiredInputs(TARGET_LATCH_FIELD_SPECS, true);
+const addCommonTargetLatchInputs = <C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) => tb
+    .addRequiredInput("prefix", z.string())
+    .addRequiredInput("etcdUtilsImage", z.string())
+    .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY);
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     .addParams(CommonWorkflowParameters)
@@ -22,9 +25,8 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
         .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
-        // .addSteps(sb=>sb.inputsScope.prefix)
         .addContainer(b=>b
-            .addImage(b.getInputParam("etcdUtilsImage"))
+            .addImageInfo(b.getInputParam("etcdUtilsImage"), b.getInputParam("etcdUtilsImagePullPolicy"))
         )
     )
     .addTemplate("decrementLatch", t => t
@@ -63,7 +65,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
             .addStep("main", TargetLatchHelpers, "init", {
                 prefix: "foo",
                 etcdUtilsImage: "",
-                etcdUtilsImagePullPolicy: "",
+                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                 targets: [],
                 configuration: {
                     indices: [],
@@ -71,9 +73,9 @@ export const FullMigration = WFBuilder.create("FullMigration")
                 }
             })
             .addStep("cleanup", TargetLatchHelpers, "cleanup", {
-                prefix: undefined,
-                etcdUtilsImage: undefined,
-                etcdUtilsImagePullPolicy: undefined
+                prefix: "",
+                etcdUtilsImage: "",
+                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
             })
         )
     )
