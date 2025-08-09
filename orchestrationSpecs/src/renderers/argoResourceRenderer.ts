@@ -48,10 +48,14 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
 }
 
 function formatBody(body: Scope) {
-    if (body.steps == undefined) {
-        return body;
+    if (body) {
+        if (body.steps == undefined) {
+            return body;
+        } else {
+            return {steps: (body.steps as StepGroup[]).map(g => g.steps)};
+        }
     } else {
-        return { steps: (body.stepGroups as StepGroup[]).map(g => g.steps) };
+        return {};
     }
 }
 

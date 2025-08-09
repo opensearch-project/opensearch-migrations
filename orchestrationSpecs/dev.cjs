@@ -1,26 +1,23 @@
+// dev.cjs
 const fs = require('fs');
-const path = require('path');
-
-// 1) Make Node understand your "fileResources/*" alias at runtime
 const { register: registerPaths } = require('tsconfig-paths');
 const tsconfig = require('./tsconfig.json');
+
+// make "resources/*" work at runtime
 registerPaths({
     baseUrl: __dirname,
     paths: tsconfig.compilerOptions.paths
 });
 
-// 2) Register esbuild for TS/TSX files (no custom loader here)
+// compile TS on the fly (source maps included)
 const { register } = require('esbuild-register/dist/node');
-register({
-    // leave loader alone; transform() only accepts a string,
-    // and esbuild-register will pick the loader from the file ext.
-});
+register();
 
-// 3) Add a require hook for .sh so `import ".../*.sh"` returns a string
+// load .sh files as strings
 require.extensions['.sh'] = function (module, filename) {
     const content = fs.readFileSync(filename, 'utf8');
     module._compile('module.exports = ' + JSON.stringify(content), filename);
 };
 
-// 4) Run your TS entry
+// start your app from src
 require('./src/index.ts');

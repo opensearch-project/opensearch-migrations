@@ -99,7 +99,7 @@ export class WFBuilder<
 
     addTemplate<
         Name extends string,
-        TB extends TemplateBuilder<any, any, any, any>,
+        TB extends { getFullTemplateScope(): any },
         FullTemplate extends ReturnType<TB["getFullTemplateScope"]>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TemplateSigScope>,
@@ -290,6 +290,76 @@ export class TemplateBuilder<
         return fn(this as any) as any;
     }
 
+    addSteps<
+        FirstBuilder extends StepsBuilder<ContextualScope, InputParamsScope, any, any>,
+        FinalBuilder extends StepsBuilder<ContextualScope, InputParamsScope, any, any>
+    >(
+        builderFn: ScopeIsEmptyConstraint<BodyScope, (
+            b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+        factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+    ): FinalBuilder
+    {
+        const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        return fn((factory ??
+            ((c, i) => new StepsBuilder(c, i, {}, [], {})))
+        (this.contextualScope, this.inputScopeBuilder.getScope()));
+    }
+
+    addDag<
+        FirstBuilder extends DagBuilder<ContextualScope, InputParamsScope, any, any>,
+        FinalBuilder extends DagBuilder<ContextualScope, InputParamsScope, any, any>
+    >(builderFn: ScopeIsEmptyConstraint<BodyScope,
+        (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+      factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+    ): FinalBuilder
+    {
+        const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        return fn((factory ??
+            ((c, i) => new DagBuilder(c, i, {}, {})))
+        (this.contextualScope, this.inputScopeBuilder.getScope()));
+    }
+
+    addContainer<
+        FirstBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any>,
+        FinalBuilder extends ContainerBuilder<ContextualScope, InputParamsScope, any, any>
+    >(
+        builderFn: ScopeIsEmptyConstraint<BodyScope,
+            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, OutputParamsScope>) => FinalBuilder>,
+        factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+    ): FinalBuilder {
+        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        return fn((factory ??
+            ((c, i) => new ContainerBuilder(c, i, {}, {})))
+        (this.contextualScope, this.inputScopeBuilder.getScope()));
+    }
+
+    getTemplateSignatureScope(): InputParamsScope {
+        return this.inputScopeBuilder.getScope();
+    }
+}
+
+abstract class TemplateBodyBuilder<
+    ContextualScope extends Scope,
+    BodyKey extends string,
+    InputParamsScope  extends Scope,
+    BodyScope extends Scope,
+    OutputParamsScope extends Scope
+> {
+    constructor(readonly bodyKey: BodyKey,
+                readonly contextualScope: ContextualScope,
+                readonly inputsScope: InputParamsScope,
+                readonly bodyScope: BodyScope,
+                readonly outputsScope: OutputParamsScope) {
+    }
+
+    getInputParam<K extends keyof InputParamsScope>(
+        key: K
+    ): ReturnType<typeof inputParam<
+        InputParamsScope[K] extends { type: ZodType<infer T> } ? T : never
+    >> {
+        return inputParam(key as string, this.inputsScope[key]);
+    }
+
     /**
      * Add multiple outputs using a function that operates on this TemplateBuilder
      * The function can only modify outputs - other scopes must remain unchanged
@@ -298,10 +368,10 @@ export class TemplateBuilder<
         builderFn:
         (tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, OutputParamsScope>) =>
             TemplateBuilder<ContextualScope, {}, InputParamsScope, NewOuputScope>,
-        check: ScopeIsEmptyConstraint<BodyScope, ScopeIsEmptyConstraint<InputParamsScope, boolean >>
-    ): ScopeIsEmptyConstraint<NewOuputScope,
-        TemplateBuilder<ContextualScope, BodyScope, InputParamsScope, NewOuputScope>
-    > {
+        check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
+    ): ScopeIsEmptyConstraint<OutputParamsScope,
+        TemplateBodyBuilder<ContextualScope, BodyKey, InputParamsScope, BodyScope, NewOuputScope>>
+    {
         const fn = builderFn as (
             tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, OutputParamsScope>
         ) => TemplateBuilder<ContextualScope, {}, InputParamsScope, NewOuputScope>;
@@ -309,71 +379,73 @@ export class TemplateBuilder<
         return fn(this as any) as any;
     }
 
-    addSteps<
-        SBFirst extends StepsBuilder<ContextualScope, InputParamsScope, any>,
-        SBFinal extends StepsBuilder<ContextualScope, InputParamsScope, any>
-    >(
-        builderFn: ScopeIsEmptyConstraint<BodyScope, (
-            b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SBFinal>,
-        factory?: (context:ContextualScope, inputs:InputParamsScope) => SBFirst
-    ): TemplateBuilder<
-        ContextualScope,
-        ReturnType<SBFinal["getSteps"]>,
-        InputParamsScope,
-        OutputParamsScope
-    >
-    {
-        const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}>) => SBFinal;
-        const steps = fn((factory ??
-            ((c,i) => new StepsBuilder(c,i,{},[])))(this.contextualScope, this.inputScopeBuilder.getScope())).getSteps();
-        return new TemplateBuilder(
-            this.contextualScope,
-            steps,
-            this.inputScopeBuilder.getScope(),
-            this.outputScopeBuilder.getScope()
-        ) as any;
-    }
-
-    addDag<
-        DBFirst extends DagBuilder<ContextualScope, InputParamsScope, any>,
-        DBFinal extends DagBuilder<ContextualScope, InputParamsScope, any>
-    >(builderFn: ScopeIsEmptyConstraint<BodyScope,
-        (b: DagBuilder<ContextualScope, InputParamsScope, {}>) => DBFinal>,
-      factory?: (context:ContextualScope, inputs:InputParamsScope) => DBFirst
-    ): TemplateBuilder<ContextualScope, ReturnType<DBFinal["getDag"]>, InputParamsScope, OutputParamsScope>
-    {
-        const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}>) => DBFinal;
-        const steps = fn((factory ??
-            ((c, i) => new DagBuilder(c, i, {})))(this.contextualScope, this.inputScopeBuilder.getScope())).getDag();
-        return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
-    }
-
-    addContainer<
-        CBFirst extends ContainerBuilder<ContextualScope, InputParamsScope, any>,
-        CBFinal extends ContainerBuilder<ContextualScope, InputParamsScope, any>
-    >(
-        builderFn: ScopeIsEmptyConstraint<BodyScope,
-            (b: ContainerBuilder<ContextualScope, InputParamsScope, {}>) => CBFinal>,
-        factory?: (context:ContextualScope, inputs:InputParamsScope) => CBFirst
-    ): TemplateBuilder<ContextualScope, ReturnType<CBFinal["getContainer"]>, InputParamsScope, OutputParamsScope> {
-        const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}>) => CBFinal;
-        const steps = fn((factory ??
-            ((c, i) => new ContainerBuilder(c, i, {})))
-        (this.contextualScope, this.inputScopeBuilder.getScope())).getContainer();
-        return new TemplateBuilder(this.contextualScope, steps, this.inputScopeBuilder.getScope(), this.outputScopeBuilder.getScope()) as any
-    }
-
-    getTemplateSignatureScope(): InputParamsScope {
-        return this.inputScopeBuilder.getScope();
+    getBody(): { body: { [K in BodyKey]: Record<string, any> } } {
+        const impl = { [this.bodyKey]: this.bodyScope } as Record<BodyKey, BodyScope>;
+        return { body: {...impl} };
     }
 
     getFullTemplateScope(): {
         inputs: InputParamsScope,
-        body: BodyScope
+        outputs: OutputParamsScope,
+        body: Record<string, any> // implementation of the body is purposefully type-erased
     } {
         return {
-            inputs: this.inputScopeBuilder.getScope(),
-            body: this.bodyScope}
+            inputs: this.inputsScope,
+            outputs: this.outputsScope,
+            ...this.getBody()
+        };
+    }
+}
+
+class ContainerBuilder<
+    ContextualScope extends Scope,
+    InputParamsScope  extends Scope,
+    ContainerScope extends Scope,
+    OutputParamsScope extends Scope
+> extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope> {
+
+    constructor(readonly contextualScope: ContextualScope,
+                readonly inputsScope: InputParamsScope,
+                readonly bodyScope: ContainerScope,
+                readonly outputsScope: OutputParamsScope) {
+        super("container", contextualScope, inputsScope, bodyScope, outputsScope)
+    }
+
+    addImageInfo(image: Expression<string>,
+                 pullPolicy: Expression<z.infer<typeof IMAGE_PULL_POLICY>>):
+        ContainerBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ExtendScope<ContainerScope, {image: Expression<string>, pullPolicy: Expression<string> }>,
+            OutputParamsScope>
+    {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+            ...this.bodyScope,
+            'image': image,
+            'pullPolicy': pullPolicy
+        }, this.outputsScope);
+    }
+
+    addCommand(s: string[]):
+        ContainerBuilder<ContextualScope, InputParamsScope,
+            ExtendScope<ContainerScope, {command: string[]}>, OutputParamsScope>
+    {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+                ...this.bodyScope,
+                command: s},
+            this.outputsScope
+        );
+    }
+
+    addArgs(a: string[]):
+        ContainerBuilder<ContextualScope, InputParamsScope,
+            ExtendScope<ContainerScope, {args: string[]}>, OutputParamsScope>
+    {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
+                ...this.bodyScope,
+                args: a},
+            this.outputsScope
+        );
     }
 }
 
@@ -393,20 +465,17 @@ export interface StepTask {
 class StepsBuilder<
     ContextualScope extends Scope,
     InputParamsScope  extends Scope,
-    StepsScope extends Scope
-> {
-    readonly contextualScope: ContextualScope;
-    readonly inputsScope: InputParamsScope;
-    private readonly stepsScope: StepsScope;
+    StepsScope extends Scope,
+    OutputParamsScope extends Scope
+> extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope> {
     private readonly stepGroups: StepGroup[] = []; // Runtime ordering
 
-    constructor(contextualScope: ContextualScope,
-                inputsScope: InputParamsScope,
-                stepsScope: StepsScope,
-                stepGroups: StepGroup[]) {
-        this.contextualScope = contextualScope;
-        this.inputsScope = inputsScope;
-        this.stepsScope = stepsScope;
+    constructor(readonly contextualScope: ContextualScope,
+                readonly inputsScope: InputParamsScope,
+                readonly bodyScope: StepsScope,
+                stepGroups: StepGroup[],
+                readonly outputsScope: OutputParamsScope) {
+        super("steps", contextualScope, inputsScope, bodyScope, outputsScope)
         this.stepGroups = stepGroups;
     }
 
@@ -418,13 +487,14 @@ class StepsBuilder<
     ): StepsBuilder<
         ContextualScope,
         InputParamsScope,
-        ExtendScope<StepsScope, StepsGroup>
+        ExtendScope<StepsScope, StepsGroup>,
+        OutputParamsScope
     > {
         // TODO - add the other steps into the contextual scope
-        const newSteps = builderFn(new StepGroupBuilder(this.contextualScope, this.stepsScope, []));
+        const newSteps = builderFn(new StepGroupBuilder(this.contextualScope, this.bodyScope, []));
         const results = newSteps.getStepTasks();
         return new StepsBuilder(this.contextualScope, this.inputsScope, results.scope,
-            [...this.stepGroups, {steps: results.taskList}]) as any;
+            [...this.stepGroups, {steps: results.taskList}], this.outputsScope) as any;
     }
 
     // Convenience method for single step
@@ -444,7 +514,8 @@ class StepsBuilder<
         StepsBuilder<
             ContextualScope,
             InputParamsScope,
-            ExtendScope<StepsScope, { [K in Name]: StepDef }>
+            ExtendScope<StepsScope, { [K in Name]: StepDef }>,
+            OutputParamsScope
         >
     > {
         return this.addStepGroup(groupBuilder => {
@@ -453,14 +524,10 @@ class StepsBuilder<
         }) as any;
     }
 
-    getSteps(): {
-        steps: StepsScope;
-        stepGroups: StepGroup[]; // Runtime structure for serialization
-    } {
-        return {
-            steps: this.stepsScope,
-            stepGroups: this.stepGroups
-        };
+    getBody(): { body: { steps: Record<string, any> } } {
+        // discard stepsScope as it was only necessary for building outputs.
+        // it isn't preserved as a map for the final, ordered representation
+        return { body: { steps: this.stepGroups } };
     }
 }
 
@@ -468,8 +535,8 @@ class StepGroupBuilder<
     ContextualScope extends Scope,
     StepsScope extends Scope
 > {
-    private readonly contextualScope: ContextualScope;
-    private readonly stepsScope: StepsScope;
+    readonly contextualScope: ContextualScope;
+    readonly stepsScope: StepsScope;
     private readonly stepTasks: StepTask[] = [];
 
     constructor(contextualScope: ContextualScope, stepsScope: StepsScope, stepTasks: StepTask[]) {
@@ -526,83 +593,17 @@ class StepGroupBuilder<
 class DagBuilder<
     ContextualScope extends Scope,
     InputParamsScope  extends Scope,
-    DagScope extends Scope
-> {
-    readonly contextualScope: ContextualScope;
-    readonly inputsScope: InputParamsScope;
-    private readonly dagScope: DagScope;
-
-    constructor(contextualScope: ContextualScope, inputsScope: InputParamsScope, dagScope: DagScope) {
-        this.contextualScope = contextualScope;
-        this.inputsScope = inputsScope;
-        this.dagScope = dagScope;
+    DagScope extends Scope,
+    OutputParamsScope extends Scope
+> extends TemplateBodyBuilder<ContextualScope, "dag", InputParamsScope, DagScope, OutputParamsScope>{
+    constructor(readonly contextualScope: ContextualScope,
+                readonly inputsScope: InputParamsScope,
+                readonly bodyScope: DagScope,
+                readonly outputsScope: OutputParamsScope) {
+        super("dag", contextualScope, inputsScope, bodyScope, outputsScope)
     }
 
     addTask() {}
-
-    getDag(): { steps: DagScope } {
-        return { steps: this.dagScope };
-    }
-}
-
-class ContainerBuilder<
-    ContextualScope extends Scope,
-    InputParamsScope  extends Scope,
-    ContainerScope extends Scope
-> {
-    readonly contextualScope: ContextualScope;
-    readonly inputsScope: InputParamsScope;
-    private readonly containerScope: ContainerScope;
-
-    constructor(contextualScope: ContextualScope, inputsScope: InputParamsScope, containerScope: ContainerScope) {
-        this.contextualScope = contextualScope;
-        this.inputsScope = inputsScope;
-        this.containerScope = containerScope;
-    }
-
-    addImageInfo(image: Expression<string>,
-                  pullPolicy: Expression<z.infer<typeof IMAGE_PULL_POLICY>>):
-        ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, {image: Expression<string>, pullPolicy: Expression<string> }>>
-    {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.containerScope,
-            'image': image,
-            'pullPolicy': pullPolicy
-        });
-    }
-
-    addCommand(s: string[]):
-        ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, {command: string[]}>>
-    {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.containerScope,
-            command: s}
-        );
-    }
-
-    addArgs(a: string[]):
-        ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, {args: string[]}>>
-    {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.containerScope,
-            args: a}
-        );
-    }
-
-    getInputParam<K extends keyof InputParamsScope>(
-        key: K
-    ): ReturnType<typeof inputParam<
-        InputParamsScope[K] extends { type: ZodType<infer T> } ? T : never
-    >> {
-        return inputParam(key as string, this.inputsScope[key]);
-    }
-
-    getContainer() : { container: ContainerScope } {
-        return {container: this.containerScope};
-    }
 }
 
 const TemplateDefSchema = z.object({
