@@ -1,4 +1,4 @@
-import {z, ZodType, ZodTypeAny} from 'zod';
+import {z, ZodEnum, ZodType, ZodTypeAny} from 'zod';
 
 export type InputParamDef<T, REQ extends boolean> = {
     type: ZodType<T>;
@@ -30,6 +30,7 @@ export function defineRequiredParam<T>(opts: {
 
 export type OutputParamDef<T> = {
     type: ZodType<T>;
+    fromWhere: "path" | "expression";
     description?: string | null;
 };
 

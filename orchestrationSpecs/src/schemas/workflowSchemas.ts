@@ -1,7 +1,7 @@
 import {
     defineParam,
     InputParamDef,
-    InputParametersRecord,
+    InputParametersRecord, OutputParamDef,
     OutputParametersRecord,
     paramsToCallerSchema
 } from "@/schemas/parameterSchemas";
@@ -341,15 +341,60 @@ export class TemplateBuilder<
 abstract class TemplateBodyBuilder<
     ContextualScope extends Scope,
     BodyKey extends string,
-    InputParamsScope  extends Scope,
+    InputParamsScope extends Scope,
     BodyScope extends Scope,
-    OutputParamsScope extends Scope
+    OutputParamsScope extends Scope,
+    // Key detail: Self is NOT fixed to a particular OutputParamsScope
+    Self extends TemplateBodyBuilder<
+        ContextualScope,
+        BodyKey,
+        InputParamsScope,
+        BodyScope,
+        any,     // <-- decouple Self from OutputParamsScope
+        Self
+    >
 > {
-    constructor(readonly bodyKey: BodyKey,
-                readonly contextualScope: ContextualScope,
-                readonly inputsScope: InputParamsScope,
-                readonly bodyScope: BodyScope,
-                readonly outputsScope: OutputParamsScope) {
+    constructor(
+        readonly bodyKey: BodyKey,
+        readonly contextualScope: ContextualScope,
+        readonly inputsScope: InputParamsScope,
+        readonly bodyScope: BodyScope,
+        readonly outputsScope: OutputParamsScope
+    ) {
+    }
+
+    addOutputs<NewOutputScope extends Scope>(
+        builderFn: (
+            tb: Self
+        ) => TemplateBodyBuilder<
+            ContextualScope,
+            BodyKey,
+            InputParamsScope,
+            BodyScope,
+            NewOutputScope,
+            Self
+        >,
+        check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
+    ): Self &
+        TemplateBodyBuilder<
+            ContextualScope,
+            BodyKey,
+            InputParamsScope,
+            BodyScope,
+            NewOutputScope,
+            Self
+        > {
+        // Keep the concrete subclass instance, but overlay the updated output scope type
+        return builderFn(this as unknown as Self) as unknown as
+            Self &
+            TemplateBodyBuilder<
+                ContextualScope,
+                BodyKey,
+                InputParamsScope,
+                BodyScope,
+                NewOutputScope,
+                Self
+            >;
     }
 
     getInputParam<K extends keyof InputParamsScope>(
@@ -360,30 +405,12 @@ abstract class TemplateBodyBuilder<
         return inputParam(key as string, this.inputsScope[key]);
     }
 
-    /**
-     * Add multiple outputs using a function that operates on this TemplateBuilder
-     * The function can only modify outputs - other scopes must remain unchanged.
-     */
-    addOutputs<NewOuputScope extends Scope>(
-        builderFn:
-        (tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, OutputParamsScope>) =>
-            TemplateBuilder<ContextualScope, {}, InputParamsScope, NewOuputScope>,
-        check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
-    ): ScopeIsEmptyConstraint<OutputParamsScope,
-        TemplateBodyBuilder<ContextualScope, BodyKey, InputParamsScope, BodyScope, NewOuputScope>>
-    {
-        const fn = builderFn as (
-            tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, OutputParamsScope>
-        ) => TemplateBuilder<ContextualScope, {}, InputParamsScope, NewOuputScope>;
-
-        return fn(this as any) as any;
-    }
-
     getBody(): { body: { [K in BodyKey]: Record<string, any> } } {
         const impl = { [this.bodyKey]: this.bodyScope } as Record<BodyKey, BodyScope>;
         return { body: {...impl} };
     }
 
+    // used by the TemplateBuilder!
     getFullTemplateScope(): {
         inputs: InputParamsScope,
         outputs: OutputParamsScope,
@@ -402,8 +429,9 @@ class ContainerBuilder<
     InputParamsScope  extends Scope,
     ContainerScope extends Scope,
     OutputParamsScope extends Scope
-> extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope> {
-
+> extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope,
+    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, any>>
+{
     constructor(readonly contextualScope: ContextualScope,
                 readonly inputsScope: InputParamsScope,
                 readonly bodyScope: ContainerScope,
@@ -447,6 +475,20 @@ class ContainerBuilder<
             this.outputsScope
         );
     }
+
+    addPathOutput<T, Name extends string>(name: Name, pathValue: string, t: ZodType<T>, descriptionValue?: string):
+        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
+            ...this.outputsScope,
+            [name as string]: {
+                type: t,
+                fromWhere: "path",
+                path: pathValue,
+                description: descriptionValue
+            }
+        });
+    }
 }
 
 export interface StepGroup {
@@ -466,7 +508,9 @@ class StepsBuilder<
     InputParamsScope  extends Scope,
     StepsScope extends Scope,
     OutputParamsScope extends Scope
-> extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope> {
+> extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope,
+    StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>>
+{
     private readonly stepGroups: StepGroup[] = []; // Runtime ordering
 
     constructor(readonly contextualScope: ContextualScope,
@@ -591,7 +635,9 @@ class DagBuilder<
     InputParamsScope  extends Scope,
     DagScope extends Scope,
     OutputParamsScope extends Scope
-> extends TemplateBodyBuilder<ContextualScope, "dag", InputParamsScope, DagScope, OutputParamsScope>{
+> extends TemplateBodyBuilder<ContextualScope, "dag", InputParamsScope, DagScope, OutputParamsScope,
+    DagBuilder<ContextualScope, InputParamsScope, DagScope, any>>
+{
     constructor(readonly contextualScope: ContextualScope,
                 readonly inputsScope: InputParamsScope,
                 readonly bodyScope: DagScope,

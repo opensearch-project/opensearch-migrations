@@ -49,6 +49,18 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
     }
 }
 
+function formatOutputParameters<IPR extends OutputParametersRecord>(outputs : OutputParametersRecord)  {
+    return outputs == undefined ? [] : {
+        parameters:
+            Object.entries(outputs).map(([fieldName, definition]) => {
+                return {
+                    name: fieldName,
+                    d: definition // TODO - do a better job
+                }
+            })
+    }
+}
+
 function formatBody(body: Scope) {
     if (body) {
         if (body.steps == undefined) {
@@ -64,7 +76,8 @@ function formatBody(body: Scope) {
 function formatTemplate(template: Scope) {
     return {
         inputs: formatParameters(template.inputs),
-        ...formatBody(template.body)
+        ...formatBody(template.body),
+        outputs: formatOutputParameters(template.outputs)
     }
 }
 
