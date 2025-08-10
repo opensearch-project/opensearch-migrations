@@ -39,10 +39,6 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 
 export const FullMigration = WFBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
-    .addParams({a: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
-        b: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" })})
-    .addParams({d: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
-        c: defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" })})
     .addTemplate("main", t=> t
         .addRequiredInput("sourceMigrationConfigs",
             SNAPSHOT_MIGRATION_CONFIG,
@@ -54,12 +50,12 @@ export const FullMigration = WFBuilder.create("FullMigration")
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
                         .flatMap((k) => [
                             [`${k}Image`, ""],
-                            [`${k}ImagePullPolicy`, ""+scope.context.workflowParameters.a]
+                            [`${k}ImagePullPolicy`, "IF_NOT_PRESENT"]
                         ])
                 ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
-            .addStep("main", TargetLatchHelpers, "init", {
+            .addStep("init", TargetLatchHelpers, "init", {
                 prefix: "foo",
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",

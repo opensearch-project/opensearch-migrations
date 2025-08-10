@@ -362,7 +362,7 @@ abstract class TemplateBodyBuilder<
 
     /**
      * Add multiple outputs using a function that operates on this TemplateBuilder
-     * The function can only modify outputs - other scopes must remain unchanged
+     * The function can only modify outputs - other scopes must remain unchanged.
      */
     addOutputs<NewOuputScope extends Scope>(
         builderFn:
@@ -459,7 +459,6 @@ export interface StepTask {
     arguments?: {
         parameters?: Record<string, any>;
     };
-    dependencies?: string[];
 }
 
 class StepsBuilder<
@@ -508,8 +507,7 @@ class StepsBuilder<
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>,
-        dependencies?: string[]
+            z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
@@ -520,7 +518,7 @@ class StepsBuilder<
     > {
         return this.addStepGroup(groupBuilder => {
             // addStep returns a constrained type, so we need to cast it for internal use
-            return groupBuilder.addStep(name, workflowBuilder, key, params, dependencies) as any;
+            return groupBuilder.addStep(name, workflowBuilder, key, params) as any;
         }) as any;
     }
 
@@ -554,8 +552,7 @@ class StepGroupBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>,
-        dependencies?: string[]
+        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, { [K in Name]: StepDef }>>>
     {
@@ -573,8 +570,7 @@ class StepGroupBuilder<
         this.stepTasks.push({
             name: nameStr,
             template: templateCall.templateRef.key,
-            arguments: templateCall.arguments,
-            dependencies
+            arguments: templateCall.arguments
         });
 
         // Return type-level representation - use 'as any' to bypass constraint checking in implementation
