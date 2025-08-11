@@ -273,7 +273,6 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
     duration_in_millis = snapshot_info.get('stats', {}).get('time_in_millis', 0)
 
     start_time_formatted = format_date(start_time)
-    duration_formatted = format_duration(duration_in_millis)
 
     anticipated_duration_remaining_formatted = (
         format_duration((duration_in_millis / percent_completed) * (100 - percent_completed))
@@ -286,16 +285,16 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
     )
 
     return (
-        f"Snapshot is {snapshot_state}.\n"
-        f"Percent completed: {percent_completed:.2f}%\n"
-        f"Data GiB done: {processed_size_gibibytes:.3f}/{total_size_gibibytes:.3f}\n"
-        f"Total shards: {total_shards}\n"
-        f"Successful shards: {successful_shards}\n"
-        f"Failed shards: {failed_shards}\n"
+        f"Snapshot status: {snapshot_state}.\n"
         f"Start time: {start_time_formatted}\n"
-        f"Duration: {duration_formatted}\n"
-        f"Anticipated duration remaining: {anticipated_duration_remaining_formatted}\n"
+        f"Finished time: {}\n"
+        f"Percent completed: {percent_completed:.2f}%\n"
+        f"Estimated time to completion: {anticipated_duration_remaining_formatted}\n"
+        f"Data processed: {processed_size_gibibytes:.3f}/{total_size_gibibytes:.3f} MiB\n"
         f"Throughput: {throughput_mib_per_sec:.2f} MiB/sec"
+        f"Total shards count: {total_shards}\n"
+        f"Successful shards count: {successful_shards}\n"
+        f"Failed shards count: {failed_shards}\n"
     )
 
 

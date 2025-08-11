@@ -115,9 +115,9 @@ def get_snapshot_status(session_name: str):
     snapshot = get_snapshot(env.snapshot.config, env.source_cluster)
     try:
         latest_status = get_latest_snapshot_status_raw(snapshot.source_cluster,
-                                                        snapshot.snapshot_name,
-                                                        snapshot.snapshot_repo_name,
-                                                        deep=True)
+                                                       snapshot.snapshot_name,
+                                                       snapshot.snapshot_repo_name,
+                                                       deep=True)
         return SnapshotStatus.from_snapshot_info(latest_status.details)
     except SnapshotNotStarted:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0, eta_ms=None)

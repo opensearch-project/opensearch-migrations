@@ -26,7 +26,7 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
     if (!debugData) {
       // Only update if there's actual API data
       if (apiSnapshotData) {
-        setSnapshotData(apiSnapshotData as unknown as SnapshotData);
+        setSnapshotData(apiSnapshotData as SnapshotData);
       } else {
         setSnapshotData(null);
       }
@@ -81,7 +81,7 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
         fields={fields}
         columns={2}
       />
-      
+
       <SnapshotDebugControls 
         onScenarioSelect={applyDebugScenario} 
         onReset={resetToApiData} 
