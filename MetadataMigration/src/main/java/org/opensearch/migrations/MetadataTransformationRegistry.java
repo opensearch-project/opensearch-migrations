@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.util.List;
+import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -35,55 +36,93 @@ public class MetadataTransformationRegistry {
     private static final List<TransformerConfigs> BAKED_IN_TRANSFORMER_CONFIGS = List.of(
         TransformerConfigs.builder()
             .filename("js/es-string-text-keyword-metadata.js")
-            .isRelevantForSourceVersion(UnboundVersionMatchers.isBelowES_6_X)
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                UnboundVersionMatchers.isBelowES_6_X,
+                UnboundVersionMatchers.isBelowES_5_X.negate()
+            ))
             .transformerInfo(Transformers.TransformerInfo.builder()
                 .name("Field Data Type Deprecation - string")
-                .descriptionLine("Convert mapping type string to text/keyword based on field data mappings")
+                .descriptionLine("Convert field data type string to text/keyword")
                 .build())
             .build(),
         TransformerConfigs.builder()
             .filename("js/es-vector-knn-metadata.js")
-            .isRelevantForSourceVersion(UnboundVersionMatchers.isGreaterOrEqualES_7_X)
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    UnboundVersionMatchers.isGreaterOrEqualES_7_X,
+                    UnboundVersionMatchers.anyOS
+            ))
             .transformerInfo(Transformers.TransformerInfo.builder()
                 .name("dense_vector to knn_vector")
-                .descriptionLine("Convert mapping type dense_vector to OpenSearch knn_vector")
+                .descriptionLine("Convert field data type dense_vector to OpenSearch knn_vector")
+                .build())
+            .build(),
+        TransformerConfigs.builder()
+            .filename("js/metadataUpdater.js")
+            .context(
+                "{" +
+                "  \"rules\": [" +
+                "    {" +
+                "      \"when\": { \"type\": \"flattened\" }," +
+                "      \"set\": { \"type\": \"flat_object\" }," +
+                "      \"remove\": [\"index\"]" +
+                "    }" +
+                "  ]" +
+                "}")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                UnboundVersionMatchers.isGreaterOrEqualES_7_3,
+                UnboundVersionMatchers.equalOrGreaterThanOS_2_7
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("flattened to flat_object")
+                .descriptionLine("Convert field data type flattened to OpenSearch flat_object")
                 .build())
             .build()
     );
 
+    private static BiPredicate<Version, Version> andSourceTargetVersionPredicate(
+        Predicate<Version> sourcePredicate,
+        Predicate<Version> targetPredicate
+    ) {
+        return (source, target) -> sourcePredicate.test(source) && targetPredicate.test(target);
+    }
 
     @Getter
     @Builder
     private static class TransformerConfigs {
         @NonNull private Transformers.TransformerInfo transformerInfo;
         @NonNull private String filename;
-        @NonNull private Predicate<Version> isRelevantForSourceVersion;
+        private String context;
+        @NonNull private BiPredicate<Version, Version> isRelevantForVersions;
     }
 
-    public static Transformers getCustomTransformationBySourceVersion(Version sourceVersion) {
+    public static Transformers getCustomTransformationByClusterVersions(Version sourceVersion, Version targetVersion) {
         var transformersBuilder = Transformers.builder();
         var bakedInTransformers = BAKED_IN_TRANSFORMER_CONFIGS
             .stream().filter(config ->
-                config.getIsRelevantForSourceVersion().test(sourceVersion))
+                config.isRelevantForVersions.test(sourceVersion, targetVersion))
             .toList();
         transformersBuilder.transformerInfos(bakedInTransformers.stream().map(TransformerConfigs::getTransformerInfo).collect(Collectors.toList()));
-        var config = getAggregateJSTransformer(bakedInTransformers.stream().map(TransformerConfigs::getFilename).toList());
+        var config = getAggregateJSTransformer(bakedInTransformers);
         logTransformerConfig("Default breaking changes transform config", config);
         transformersBuilder.transformer(configToTransformer(config));
         return transformersBuilder.build();
     }
 
-    private static String getAggregateJSTransformer(List<String> jsFilenames) {
-        return jsFilenames.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
-            jsFilenames.stream()
-                .map(filename ->
-                    "{" +
-                        "  \"JsonJSTransformerProvider\":{" +
-                        "    \"initializationResourcePath\":\"" + filename + "\"," +
-                        "    \"bindingsObject\":\"{}\"" +
-                        "  }" +
-                        "}")
+    private static String getAggregateJSTransformer(List<TransformerConfigs> transformerConfigs) {
+        return transformerConfigs.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
+            transformerConfigs.stream()
+                .map(config -> getJSTransform(config.getFilename(), config.getContext()))
                 .collect(Collectors.joining(",", "[", "]"));
+    }
+
+    private static String getJSTransform(String filename, String context) {
+        var bindings = context == null ? "{}" : context.replace("\"", "\\\"");
+        return  "{" +
+            "  \"JsonJSTransformerProvider\":{" +
+            "    \"initializationResourcePath\":\"" + filename + "\"," +
+            "    \"bindingsObject\": \"" + bindings + "\"" +
+            "  }" +
+            "}";
     }
 
     public static Transformer configToTransformer(String config) {

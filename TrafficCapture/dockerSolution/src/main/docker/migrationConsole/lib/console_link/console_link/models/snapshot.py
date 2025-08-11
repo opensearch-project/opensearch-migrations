@@ -2,10 +2,10 @@ import datetime
 import logging
 from abc import ABC, abstractmethod
 from requests.exceptions import HTTPError
-from typing import Dict
+from typing import Dict, Optional
 
 from cerberus import Validator
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
@@ -47,7 +47,7 @@ class Snapshot(ABC):
     """
     Interface for creating and managing snapshots.
     """
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         self.config = config
         self.source_cluster = source_cluster
         v = Validator(SNAPSHOT_SCHEMA)
@@ -83,6 +83,9 @@ class Snapshot(ABC):
         pass
 
     def _collect_universal_command_args(self) -> Dict:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         command_args = {
             "--snapshot-name": self.snapshot_name,
             "--snapshot-repo-name": self.snapshot_repo_name,
@@ -117,7 +120,7 @@ class Snapshot(ABC):
 
 
 class S3Snapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_role_arn = config['s3'].get('role')
@@ -125,7 +128,8 @@ class S3Snapshot(Snapshot):
         self.s3_endpoint = config['s3'].get('endpoint')
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         s3_command_args = {
@@ -161,27 +165,40 @@ class S3Snapshot(Snapshot):
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         if deep_check:
             return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
 class FileSystemSnapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()
@@ -207,17 +224,29 @@ class FileSystemSnapshot(Snapshot):
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         if deep_check:
             return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 

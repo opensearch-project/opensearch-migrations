@@ -286,7 +286,6 @@ public class SourceTestBase {
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
             var connectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
-                    .compressionEnabled(true)
                     .build()
                     .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
