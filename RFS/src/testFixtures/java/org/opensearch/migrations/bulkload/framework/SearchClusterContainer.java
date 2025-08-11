@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,18 +45,37 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "path.repo: \"/tmp/snapshots\""
     );
 
-    private static final Map<String, String> DISK_WATERMARK_COMMON = Map.of(
-        "cluster.routing.allocation.disk.watermark.low", "99%",
-        "cluster.routing.allocation.disk.watermark.high", "99%"
-    );
+    /**
+     * Watermark settings configuration based on version support.
+     * ES 1.x/2.x/5.x do not support flood_stage setting.
+     */
+    public enum WatermarkSupport {
+        // For ES 1.x, 2.x, 5.x - only low and high watermarks
+        BASIC_WATERMARKS(Map.of(
+            "cluster.routing.allocation.disk.watermark.low", "99%",
+            "cluster.routing.allocation.disk.watermark.high", "99%"
+        )),
+        
+        // For ES 6.x+, OpenSearch - all watermark settings including flood_stage
+        FULL_WATERMARKS(Map.of(
+            "cluster.routing.allocation.disk.watermark.low", "99%",
+            "cluster.routing.allocation.disk.watermark.high", "99%",
+            "cluster.routing.allocation.disk.watermark.flood_stage", "99%"
+        ));
 
-    public static final Map<String, String> DISK_WATERMARK_SETTINGS = new HashMap<>() {{
-        putAll(DISK_WATERMARK_COMMON);
-        put("cluster.routing.allocation.disk.watermark.flood_stage", "99%");
-    }};
+        private final Map<String, String> settings;
 
-    private static List<String> buildWatermarkLines(Map<String, String> watermark) {
-        return watermark.entrySet().stream()
+        WatermarkSupport(Map<String, String> settings) {
+            this.settings = Collections.unmodifiableMap(settings);
+        }
+
+        public Map<String, String> getSettings() {
+            return settings;
+        }
+    }
+
+    private static List<String> buildWatermarkLines(WatermarkSupport watermarkSupport) {
+        return watermarkSupport.getSettings().entrySet().stream()
             .map(e -> e.getKey() + ": " + e.getValue())
             .toList();
     }
@@ -66,7 +86,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "\n",
             "network.host: 0.0.0.0",
             "path.repo: \"/tmp/snapshots\"",
-            String.join("\n", buildWatermarkLines(DISK_WATERMARK_SETTINGS))
+            String.join("\n", buildWatermarkLines(WatermarkSupport.BASIC_WATERMARKS))
     );
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
 
@@ -78,12 +98,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     private static final String ES_5_0_AND_5_1_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES,
-        String.join("\n", buildWatermarkLines(DISK_WATERMARK_COMMON))
+        String.join("\n", buildWatermarkLines(WatermarkSupport.BASIC_WATERMARKS))
     );
     private static final String ES_5_2_AND_5_3_CONFIG_YML = buildEs5ConfigYml(
         ES_5_COMMON_CONFIG_LINES,
         "bootstrap.system_call_filter: false",
-        String.join("\n", buildWatermarkLines(DISK_WATERMARK_COMMON))
+        String.join("\n", buildWatermarkLines(WatermarkSupport.BASIC_WATERMARKS))
     );
 
     private static Map<String, String> overrideAndRemoveEnv(
@@ -95,6 +115,43 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         keysToRemove.forEach(merged::remove);
         merged.putAll(overrides);
         return Collections.unmodifiableMap(merged);
+    }
+
+    // Base environment variables for creating flavors
+    private static final Map<String, String> BASE_ENV_VARIABLES = new HashMap<String, String>() {{
+        put("discovery.type", "single-node");
+        put("path.repo", CLUSTER_SNAPSHOT_DIR);
+        put("index.store.type", "mmapfs");
+        put("bootstrap.system_call_filter", "false");
+        put("ES_JAVA_OPTS", "-Xms2g -Xmx2g");
+        putAll(WatermarkSupport.FULL_WATERMARKS.getSettings());
+    }};
+
+    /**
+     * Helper method to create a flavor with specific watermark settings.
+     * This replaces the BASE watermark settings with the specified ones.
+     */
+    private static Map<String, String> createFlavorWithWatermarks(
+            WatermarkSupport watermarkSupport,
+            Map<String, String> additionalOverrides,
+            Set<String> keysToRemove
+    ) {
+        // Start with BASE settings but remove all watermark settings first
+        Set<String> watermarkKeysToRemove = new HashSet<>(keysToRemove);
+        watermarkKeysToRemove.addAll(WatermarkSupport.FULL_WATERMARKS.getSettings().keySet());
+        
+        // Create the base without any watermark settings
+        Map<String, String> baseWithoutWatermarks = overrideAndRemoveEnv(
+            BASE_ENV_VARIABLES,
+            Map.of(),
+            watermarkKeysToRemove
+        );
+        
+        // Add the specific watermark settings and additional overrides
+        Map<String, String> finalOverrides = new HashMap<>(watermarkSupport.getSettings());
+        finalOverrides.putAll(additionalOverrides);
+        
+        return overrideAndRemoveEnv(baseWithoutWatermarks, finalOverrides, Set.of());
     }
 
     public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.4");
@@ -177,43 +234,33 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             put("index.store.type", "mmapfs");
             put("bootstrap.system_call_filter", "false");
             put("ES_JAVA_OPTS", "-Xms2g -Xmx2g");
-            putAll(DISK_WATERMARK_SETTINGS);
+            putAll(WatermarkSupport.FULL_WATERMARKS.getSettings());
         }}),
-        ELASTICSEARCH(
-            overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
-                Map.of(
-                    "xpack.security.enabled", "false"
-                ),
-                Set.of(
-                    "cluster.routing.allocation.disk.watermark.flood_stage"
-                )
-            )),
+        ELASTICSEARCH(createFlavorWithWatermarks(
+            WatermarkSupport.BASIC_WATERMARKS,
+            Map.of("xpack.security.enabled", "false"),
+            Set.of()
+        )),
         ELASTICSEARCH_OSS(
             overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
+                BASE_ENV_VARIABLES,
                 Map.of(), // No additional keys apart from BASE
                 Set.of() // No keys to remove from BASE
             )),
-        ELASTICSEARCH_5(
-            overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
-                Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
-                Set.of(
-                    "discovery.type",
-                    "ES_JAVA_OPTS",
-                    "cluster.routing.allocation.disk.watermark.flood_stage"
-                )
-            )),
+        ELASTICSEARCH_5(createFlavorWithWatermarks(
+            WatermarkSupport.BASIC_WATERMARKS,
+            Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
+            Set.of("discovery.type", "ES_JAVA_OPTS")
+        )),
         ELASTICSEARCH_6(
             overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
+                BASE_ENV_VARIABLES,
                 Map.of("ES_JAVA_OPTS", "-Xms2g -Xmx2g -Des.bootstrap.system_call_filter=false"),
                 Set.of("bootstrap.system_call_filter", "ES_JAVA_OPTS") // don't set it for older ES 6x
             )),
         ELASTICSEARCH_7(
             overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
+                BASE_ENV_VARIABLES,
                 Map.of(
                         "xpack.security.enabled", "false"
                 ),
@@ -221,7 +268,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             )),
         ELASTICSEARCH_8(
             overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
+                BASE_ENV_VARIABLES,
                 Map.ofEntries(
                     Map.entry("xpack.security.enabled", "false"),
                     Map.entry("xpack.security.enrollment.enabled", "false"),
@@ -236,7 +283,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             )),
         OPENSEARCH(
             overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
+                BASE_ENV_VARIABLES,
                 Map.of(
                     "plugins.security.disabled", "true",
                     "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^"
@@ -245,7 +292,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             )),
         OPENSEARCH_2_19_PLUS(
             overrideAndRemoveEnv(
-                BASE.getEnvVariables(),
+                BASE_ENV_VARIABLES,
                 Map.of(
                 "plugins.security.disabled", "true",
                 "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
