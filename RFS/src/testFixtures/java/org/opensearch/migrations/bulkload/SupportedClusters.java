@@ -85,8 +85,7 @@ public class SupportedClusters {
             SearchClusterContainer.ES_V2_1,
             SearchClusterContainer.ES_V2_0,
             SearchClusterContainer.ES_V1_6,
-            SearchClusterContainer.ES_V1_5,
-            SearchClusterContainer.ES_V1_0
+            SearchClusterContainer.ES_V1_5
         );
     }
 
@@ -147,8 +146,9 @@ public class SupportedClusters {
 
     public static List<SearchClusterContainer.ContainerVersion> supportedSourcesOrTargets(boolean includeRFSOnly) {
         return Stream.concat(supportedSources(includeRFSOnly).stream(),
-            supportedTargets(includeRFSOnly).stream())
-            .distinct()
-            .toList();
+                supportedTargets(includeRFSOnly).stream())
+                .distinct()
+                .toList();
     }
+
 }
