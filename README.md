@@ -109,7 +109,7 @@ https://opensearch.atlassian.net/
 
 ## User Guide Documentation
 
-User guide documentation is available in the [OpenSearch Migrations Wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
+User guide documentation is available in the [OpenSearch Migration Assistant documentation](https://docs.opensearch.org/latest/migration-assistant/).
 
 ## Getting Started
 
