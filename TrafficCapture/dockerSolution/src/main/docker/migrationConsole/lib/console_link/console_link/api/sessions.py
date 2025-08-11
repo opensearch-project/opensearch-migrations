@@ -82,7 +82,7 @@ def find_session(session_name: str) -> Any:
     return sessions_table.get(session_query.name == session_name)
 
 
-def existance_check(session: Any) -> Session:
+def existence_check(session: Any) -> Session:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
     try:
@@ -99,7 +99,7 @@ def list_sessions() -> List[Session]:
 
 @session_router.get("/{session_name}", response_model=Session, operation_id="sessionGet")
 def single_session(session_name: str) -> Session | None:
-    return existance_check(find_session(session_name))
+    return existence_check(find_session(session_name))
 
 
 @session_router.post("/", response_model=Session, status_code=201, operation_id="sessionCreate")
@@ -131,7 +131,7 @@ def create_session(session: SessionBase) -> Session:
 @session_router.put("/{session_name}", response_model=Session, operation_id="sessionUpdate")
 def update_session(session_name: str, data: Dict = Body(...)) -> Session:
     session_query = Query()
-    existing = existance_check(find_session(session_name))
+    existing = existence_check(find_session(session_name))
 
     try:
         updated_session = Session.model_validate(existing)
@@ -159,7 +159,7 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
 @session_router.delete("/{session_name}", response_model=SessionDeleteResponse, operation_id="sessionDelete")
 def delete_session(session_name: str) -> SessionDeleteResponse:
     # Make sure the session exists before we attempt to delete it
-    existance_check(find_session(session_name))
+    existence_check(find_session(session_name))
 
     session_query = Query()
     if sessions_table.remove(session_query.name == session_name):

@@ -3,8 +3,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_serializer
 from console_link.models.factories import get_snapshot
-from console_link.models.snapshot import SnapshotNotStarted, SnapshotStatusUnavaliable, get_latest_snapshot_status_raw
-from console_link.api.sessions import StepState, existance_check, find_session
+from console_link.models.snapshot import SnapshotNotStarted, SnapshotStatusUnavailable, get_latest_snapshot_status_raw
+from console_link.api.sessions import StepState, existence_check, find_session
 import logging
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
@@ -102,7 +102,7 @@ def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
 # Snapshot status endpoint
 @snapshot_router.get("/status", response_model=SnapshotStatus, operation_id="snapshotStatus")
 def get_snapshot_status(session_name: str):
-    session = existance_check(find_session(session_name))
+    session = existence_check(find_session(session_name))
     env = session.env
 
     if not env.snapshot:
@@ -114,14 +114,14 @@ def get_snapshot_status(session_name: str):
 
     snapshot = get_snapshot(env.snapshot.config, env.source_cluster)
     try:
-        lastest_status = get_latest_snapshot_status_raw(snapshot.source_cluster,
+        latest_status = get_latest_snapshot_status_raw(snapshot.source_cluster,
                                                         snapshot.snapshot_name,
                                                         snapshot.snapshot_repo_name,
                                                         deep=True)
-        return SnapshotStatus.from_snapshot_info(lastest_status.details)
+        return SnapshotStatus.from_snapshot_info(latest_status.details)
     except SnapshotNotStarted:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0, eta_ms=None)
-    except SnapshotStatusUnavaliable:
+    except SnapshotStatusUnavailable:
         raise HTTPException(status_code=500, detail="Snapshot status not available")
     except Exception as e:
         logger.error(f"Unable to lookup snapshot information: {type(e).__name__} {str(e)}")

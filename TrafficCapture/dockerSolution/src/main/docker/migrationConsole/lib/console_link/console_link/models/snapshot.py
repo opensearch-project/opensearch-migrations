@@ -309,7 +309,7 @@ class SnapshotNotStarted(Exception):
     pass
 
 
-class SnapshotStatusUnavaliable(Exception):
+class SnapshotStatusUnavailable(Exception):
     pass
 
 
@@ -342,12 +342,12 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
     except HTTPError:
-        raise SnapshotStatusUnavaliable()
+        raise SnapshotStatusUnavailable()
 
     snapshot_data = response.json()
     snapshots = snapshot_data.get('snapshots', [])
     if not snapshots or not snapshots[0]:
-        raise SnapshotStatusUnavaliable()
+        raise SnapshotStatusUnavailable()
     
     return SnapshotStateAndDetails(state, snapshots[0])
 
@@ -361,7 +361,7 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
         return CommandResult(success=True, value=latest_snapshot_status.state)
     except SnapshotNotStarted:
         return CommandResult(success=False, value="Snapshot not started")
-    except SnapshotStatusUnavaliable:
+    except SnapshotStatusUnavailable:
         return CommandResult(success=False, value="Snapshot status not available")
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
