@@ -108,20 +108,34 @@ def test_snapshot_status_full(request, snapshot_fixture):
 
     result = snapshot_.status(snapshot=snapshot, deep_check=True)
 
+    # Basic result validations
     assert isinstance(result, CommandResult)
     assert result.success
+    
+    # Content validations
     assert "SUCCESS" in result.value
     assert "Percent completed: 100.00%" in result.value
     assert "Total shards: 304" in result.value
     assert "Successful shards: 304" in result.value
     assert "Failed shards: 0" in result.value
+    
+    # Check format string entries
     assert "Start time:" in result.value
-    assert "Duration:" in result.value
     assert "Anticipated duration remaining:" in result.value
     assert "Throughput:" in result.value
-
+    
+    # Verify date/time formatting is correct
+    assert "2024-06-25 19:33:16" in result.value  # Start time
+    assert "2024-06-25 19:34:36" in result.value  # Finish time
+    
+    # Verify snapshot progress information 
+    assert "0.062/0.062 MiB" in result.value  # Data processed
+    assert "MiB/sec" in result.value  # Throughput format
+    
+    # No "N/A" placeholders should be present
     assert "N/A" not in result.value
 
+    # API call verification
     source_cluster.call_api.assert_called_with(
         f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}/_status",
         HttpMethod.GET

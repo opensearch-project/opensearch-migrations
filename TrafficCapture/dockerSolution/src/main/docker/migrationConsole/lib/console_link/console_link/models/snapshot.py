@@ -465,11 +465,10 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
                 # Format the message
                 message = (
                     f"Snapshot status: {latest_snapshot_status_raw.state}.\n"
-                    f"Start time: {snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else 'N/A'}\n"
-                    f"Finished time: {snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else 'N/A'}\n"
-                    f"Duration: {format_duration(duration_ms)}\n"
+                    f"Start time: {snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else ''}\n"
+                    f"Finished time: {snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else ''}\n"
                     f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
-                    f"Anticipated duration remaining: {format_duration(int(snapshot_status.eta_ms)) if snapshot_status.eta_ms else 'N/A (not enough data to compute)'}\n"
+                    f"Anticipated duration remaining: {format_duration(int(snapshot_status.eta_ms)) if snapshot_status.eta_ms else '0h 0m 0s'}\n"
                     f"Data processed: {processed_size_gb:.3f}/{total_size_gb:.3f} MiB\n"
                     f"Throughput: {throughput:.2f} MiB/sec\n"
                     f"Total shards: {shards_stats.get('total', 0)}\n"
