@@ -16,6 +16,11 @@ configurations {
     lucene6
     lucene7
     lucene9
+    
+    all {
+        // Exclude problematic GraalVM js-community dependency
+        exclude group: 'org.graalvm.js', module: 'js-community'
+    }
 }
 
 task shadowLucene5(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
