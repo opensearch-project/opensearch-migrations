@@ -134,7 +134,7 @@ def test_snapshot_status_full(request, snapshot_fixture):
     assert "2024-06-25 19:33:16" in result.value  # Start time
     assert "2024-06-25 19:34:36" in result.value  # Finish time
     
-    # Verify snapshot progress information 
+    # Verify snapshot progress information
     assert "64.000/64.000 MiB" in result.value  # Data processed
     assert "MiB/sec" in result.value  # Throughput format
     

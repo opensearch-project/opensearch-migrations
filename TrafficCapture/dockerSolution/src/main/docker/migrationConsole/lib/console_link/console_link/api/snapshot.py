@@ -4,7 +4,7 @@ from console_link.models.snapshot import (
     SnapshotNotStarted, SnapshotStatusUnavailable, get_latest_snapshot_status_raw,
     SnapshotStatus
 )
-from console_link.api.sessions import StepState, existence_check, find_session
+from console_link.api.sessions import existence_check, find_session
 import logging
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
