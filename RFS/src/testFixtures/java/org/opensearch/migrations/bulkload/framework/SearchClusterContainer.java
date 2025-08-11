@@ -45,8 +45,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     );
 
     private static final Map<String, String> DISK_WATERMARK_COMMON = Map.of(
-        "cluster.routing.allocation.disk.watermark.low", "97%",
-        "cluster.routing.allocation.disk.watermark.high", "98%"
+        "cluster.routing.allocation.disk.watermark.low", "99%",
+        "cluster.routing.allocation.disk.watermark.high", "99%"
     );
 
     public static final Map<String, String> DISK_WATERMARK_SETTINGS = new HashMap<>() {{
