@@ -1,10 +1,11 @@
-import datetime
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 from requests.exceptions import HTTPError
 from typing import Any, Dict, Optional
 
 from cerberus import Validator
+from pydantic import BaseModel, field_serializer
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
@@ -246,7 +247,7 @@ class FileSystemSnapshot(Snapshot):
 def format_date(millis: int) -> str:
     if millis == 0:
         return "N/A"
-    return datetime.datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_duration(millis: int) -> str:
@@ -256,45 +257,44 @@ def format_duration(millis: int) -> str:
     return f"{hours}h {minutes}m {seconds}s"
 
 
+# This function is now replaced by the logic in get_snapshot_status()
 def get_snapshot_status_message(snapshot_info: Dict) -> str:
-    snapshot_state = snapshot_info.get("state")
+    """Legacy function maintained for backward compatibility - now the logic is in get_snapshot_status()"""
+    # Create snapshot status object using our common method
+    snapshot_status = SnapshotStatus.from_snapshot_info(snapshot_info)
+    
+    # Generate a formatted status message using snapshot_status fields
     stats = snapshot_info.get("stats", {})
-    total_size_in_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-    processed_size_in_bytes = stats.get("processed", stats.get("incremental", {})).get("size_in_bytes", 0)
-    percent_completed = (processed_size_in_bytes / total_size_in_bytes) * 100 if total_size_in_bytes > 0 else 0
-    total_size_gibibytes = total_size_in_bytes / (1024 ** 3)
-    processed_size_gibibytes = processed_size_in_bytes / (1024 ** 3)
-
-    total_shards = snapshot_info.get('shards_stats', {}).get('total', 0)
-    successful_shards = snapshot_info.get('shards_stats', {}).get('done', 0)
-    failed_shards = snapshot_info.get('shards_stats', {}).get('failed', 0)
-
-    start_time = snapshot_info.get('stats', {}).get('start_time_in_millis', 0)
-    duration_in_millis = snapshot_info.get('stats', {}).get('time_in_millis', 0)
-
-    start_time_formatted = format_date(start_time)
-
-    anticipated_duration_remaining_formatted = (
-        format_duration((duration_in_millis / percent_completed) * (100 - percent_completed))
-        if percent_completed > 0 else "N/A (not enough data to compute)"
+    shards_stats = snapshot_info.get("shards_stats", {})
+    
+    total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+    processed_size_bytes = (
+        stats.get("processed", {}).get("size_in_bytes", 0) +
+        stats.get("incremental", {}).get("size_in_bytes", 0)
     )
-
-    throughput_mib_per_sec = (
-        (processed_size_in_bytes / (1024 ** 2)) / (duration_in_millis / 1000)
-        if duration_in_millis > 0 else 0
+    total_size_gb = total_size_bytes / (1024 ** 3)
+    processed_size_gb = processed_size_bytes / (1024 ** 3)
+    
+    # Calculate throughput
+    start_ms = stats.get("start_time_in_millis", 0)
+    duration_ms = stats.get("time_in_millis", 0)
+    throughput = (
+        (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
+        if duration_ms > 0 else 0
     )
-
+    
     return (
-        f"Snapshot status: {snapshot_state}.\n"
-        f"Start time: {start_time_formatted}\n"
-        f"Finished time: {}\n"
-        f"Percent completed: {percent_completed:.2f}%\n"
-        f"Estimated time to completion: {anticipated_duration_remaining_formatted}\n"
-        f"Data processed: {processed_size_gibibytes:.3f}/{total_size_gibibytes:.3f} MiB\n"
-        f"Throughput: {throughput_mib_per_sec:.2f} MiB/sec"
-        f"Total shards count: {total_shards}\n"
-        f"Successful shards count: {successful_shards}\n"
-        f"Failed shards count: {failed_shards}\n"
+        f"Snapshot status: {snapshot_info.get('state')}.\n"
+        f"Start time: {snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else 'N/A'}\n"
+        f"Finished time: {snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else 'N/A'}\n"
+        f"Duration: {format_duration(duration_ms)}\n"
+        f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
+        f"Anticipated duration remaining: {format_duration(int(snapshot_status.eta_ms)) if snapshot_status.eta_ms else 'N/A (not enough data to compute)'}\n"
+        f"Data processed: {processed_size_gb:.3f}/{total_size_gb:.3f} MiB\n"
+        f"Throughput: {throughput:.2f} MiB/sec\n"
+        f"Total shards: {shards_stats.get('total', 0)}\n"
+        f"Successful shards: {shards_stats.get('done', 0)}\n"
+        f"Failed shards: {shards_stats.get('failed', 0)}\n"
     )
 
 
@@ -310,6 +310,88 @@ class SnapshotNotStarted(Exception):
 
 class SnapshotStatusUnavailable(Exception):
     pass
+
+
+class SnapshotStatus(BaseModel):
+    status: str
+    percentage_completed: float
+    eta_ms: float | None
+    started: datetime | None = None
+    finished: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+    @field_serializer("started", "finished")
+    def serialize_completed(self, dt: datetime | None) -> str | None:
+        return dt.isoformat() if dt else None
+
+    @classmethod
+    def from_snapshot_info(cls, snapshot_info: dict) -> "SnapshotStatus":
+        # 1) Extract progress metrics
+        total_units = processed_units = 0
+        if stats := snapshot_info.get("stats"):
+            # OpenSearch: byte-level stats
+            total_units = stats.get("total", {}).get("size_in_bytes", 0)
+            processed_units = (
+                stats.get("processed", {}).get("size_in_bytes", 0) +
+                stats.get("incremental", {}).get("size_in_bytes", 0)
+            )
+            start_ms = stats.get("start_time_in_millis", 0)
+            elapsed_ms = stats.get("time_in_millis", 0)
+        elif shards_stats := snapshot_info.get("shards_stats"):
+            # ES ≥7.8 / OS: shard-level stats
+            total_units = shards_stats.get("total", 0)
+            processed_units = shards_stats.get("done", 0)
+            # these sometimes live at the top level
+            start_ms = snapshot_info.get("start_time_in_millis", 0)
+            elapsed_ms = snapshot_info.get("time_in_millis", 0)
+        else:
+            # ES <7.8: simple shards summary
+            shards = snapshot_info.get("shards", {})
+            total_units = shards.get("total", 0)
+            processed_units = shards.get("successful", 0)
+            start_ms = snapshot_info.get("start_time_in_millis", 0)
+            elapsed_ms = snapshot_info.get("time_in_millis", 0)
+
+        # 2) Compute percentage complete
+        percentage = (processed_units / total_units * 100) if total_units else 0.0
+
+        # 3) Compute ETA in ms (only once we've made some progress)
+        eta_ms: Optional[float] = None
+        if 0 < percentage < 100:
+            eta_ms = (elapsed_ms / percentage) * (100 - percentage)
+
+        # 4) Normalize finished time
+        finished_ms = start_ms + elapsed_ms
+
+        # 5) Map snapshot state to your status string
+        raw_state = snapshot_info.get("state", "")
+        state = convert_snapshot_state_to_step_state(raw_state)
+
+        # 6) If it's already done, clamp to 100%
+        if state == "COMPLETED":
+            percentage = 100.0
+            eta_ms = 0.0
+
+        return cls(
+            status=state,
+            percentage_completed=percentage,
+            eta_ms=eta_ms,
+            started=datetime.fromtimestamp(start_ms / 1000) if start_ms else None,
+            finished=datetime.fromtimestamp(finished_ms / 1000) if finished_ms else None,
+        )
+
+
+def convert_snapshot_state_to_step_state(snapshot_state: str) -> str:
+    state_mapping = {
+        "FAILED": "FAILED",
+        "IN_PROGRESS": "RUNNING",
+        "PARTIAL": "FAILED",
+        "SUCCESS": "COMPLETED",
+    }
+
+    return state_mapping.get(snapshot_state, "FAILED")
 
 
 def get_latest_snapshot_status_raw(cluster: Cluster,
@@ -353,11 +435,52 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
 
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:
     try:
-        latest_snapshot_status = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep=deep_check)
+        latest_snapshot_status_raw = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep=deep_check)
+        
         if deep_check:
-            message = get_snapshot_status_message(latest_snapshot_status.details)
-            return CommandResult(success=True, value=f"{latest_snapshot_status.state}\n{message}")
-        return CommandResult(success=True, value=latest_snapshot_status.state)
+            if latest_snapshot_status_raw.details:
+                # Create snapshot status object using our common method
+                snapshot_status = SnapshotStatus.from_snapshot_info(latest_snapshot_status_raw.details)
+                
+                # Generate a formatted status message using snapshot_status fields
+                stats = latest_snapshot_status_raw.details.get("stats", {})
+                shards_stats = latest_snapshot_status_raw.details.get("shards_stats", {})
+                
+                total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+                processed_size_bytes = (
+                    stats.get("processed", {}).get("size_in_bytes", 0) +
+                    stats.get("incremental", {}).get("size_in_bytes", 0)
+                )
+                total_size_gb = total_size_bytes / (1024 ** 3)
+                processed_size_gb = processed_size_bytes / (1024 ** 3)
+                
+                # Calculate throughput
+                start_ms = stats.get("start_time_in_millis", 0)
+                duration_ms = stats.get("time_in_millis", 0)
+                throughput = (
+                    (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
+                    if duration_ms > 0 else 0
+                )
+                
+                # Format the message
+                message = (
+                    f"Snapshot status: {latest_snapshot_status_raw.state}.\n"
+                    f"Start time: {snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else 'N/A'}\n"
+                    f"Finished time: {snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else 'N/A'}\n"
+                    f"Duration: {format_duration(duration_ms)}\n"
+                    f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
+                    f"Anticipated duration remaining: {format_duration(int(snapshot_status.eta_ms)) if snapshot_status.eta_ms else 'N/A (not enough data to compute)'}\n"
+                    f"Data processed: {processed_size_gb:.3f}/{total_size_gb:.3f} MiB\n"
+                    f"Throughput: {throughput:.2f} MiB/sec\n"
+                    f"Total shards: {shards_stats.get('total', 0)}\n"
+                    f"Successful shards: {shards_stats.get('done', 0)}\n"
+                    f"Failed shards: {shards_stats.get('failed', 0)}\n"
+                )
+                
+                return CommandResult(success=True, value=f"{latest_snapshot_status_raw.state}\n{message}")
+            else:
+                return CommandResult(success=True, value=latest_snapshot_status_raw.state)
+        return CommandResult(success=True, value=latest_snapshot_status_raw.state)
     except SnapshotNotStarted:
         return CommandResult(success=False, value="Snapshot not started")
     except SnapshotStatusUnavailable:
