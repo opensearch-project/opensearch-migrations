@@ -41,13 +41,19 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "discovery.zen.ping.unicast.hosts: []",
         "discovery.zen.minimum_master_nodes: 1",
         "node.max_local_storage_nodes: 2",
-        "path.repo: \"/tmp/snapshots\""
+        "path.repo: \"/tmp/snapshots\"",
+        "cluster.routing.allocation.disk.watermark.low: 99%",
+        "cluster.routing.allocation.disk.watermark.high: 99%"
     );
 
     // This version of doesn't support path.repo based via env variables, passing this value via config
     private static final String OLDER_ES_CONFIG_PATH = "/usr/share/elasticsearch/config/elasticsearch.yml";
-    private static final String OLDER_ES_CONFIG = "network.host: 0.0.0.0\npath.repo: \"/tmp/snapshots\"";
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
+    private static final String OLDER_ES_CONFIG =
+        "network.host: 0.0.0.0\n" +
+        "path.repo: \"" + CLUSTER_SNAPSHOT_DIR + "\"\n" +
+        "cluster.routing.allocation.disk.watermark.low: 99%\n" +
+        "cluster.routing.allocation.disk.watermark.high: 99%";
 
     private static String buildEs5ConfigYml(List<String> baseLines, String... extraLines) {
         List<String> allLines = new ArrayList<>(baseLines);
