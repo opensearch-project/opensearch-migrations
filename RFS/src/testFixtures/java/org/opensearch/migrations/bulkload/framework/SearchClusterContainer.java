@@ -149,13 +149,13 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     public enum INITIALIZATION_FLAVOR {
         BASE(Map.of("discovery.type", "single-node",
-                "path.repo", CLUSTER_SNAPSHOT_DIR,
-                "index.store.type", "mmapfs",
-                "bootstrap.system_call_filter", "false",
-                "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
-                "cluster.routing.allocation.disk.watermark.low", "99%",
-                "cluster.routing.allocation.disk.watermark.high", "99%",
-                "cluster.routing.allocation.disk.watermark.flood_stage", "99%"
+            "path.repo", CLUSTER_SNAPSHOT_DIR,
+            "index.store.type", "mmapfs",
+            "bootstrap.system_call_filter", "false",
+            "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
+            "cluster.routing.allocation.disk.watermark.low", "99%",
+            "cluster.routing.allocation.disk.watermark.high", "99%",
+            "cluster.routing.allocation.disk.watermark.flood_stage", "99%"
         )),
         ELASTICSEARCH(
             overrideAndRemoveEnv(
@@ -219,9 +219,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
                 Map.of(
-                "plugins.security.disabled", "true",
-                "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
-                "search.insights.top_queries.exporter.type", "debug"
+                    "plugins.security.disabled", "true",
+                    "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^",
+                    "search.insights.top_queries.exporter.type", "debug"
                 ),
                 Set.of()  // No keys to remove from BASE
             ));
