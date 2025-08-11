@@ -1,6 +1,8 @@
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
+from math import exp
+from sys import exec_prefix
 from requests.exceptions import HTTPError
 from typing import Any, Dict, Optional
 
@@ -162,11 +164,11 @@ class S3Snapshot(Snapshot):
             logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
-    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+    def status(self, *args, expert_mode=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, expert_mode)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -219,11 +221,11 @@ class FileSystemSnapshot(Snapshot):
             logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
-    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+    def status(self, *args, expert_mode=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, expert_mode)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -255,47 +257,6 @@ def format_duration(millis: int) -> str:
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes}m {seconds}s"
-
-
-# This function is now replaced by the logic in get_snapshot_status()
-def get_snapshot_status_message(snapshot_info: Dict) -> str:
-    """Legacy function maintained for backward compatibility - now the logic is in get_snapshot_status()"""
-    # Create snapshot status object using our common method
-    snapshot_status = SnapshotStatus.from_snapshot_info(snapshot_info)
-    
-    # Generate a formatted status message using snapshot_status fields
-    stats = snapshot_info.get("stats", {})
-    shards_stats = snapshot_info.get("shards_stats", {})
-    
-    total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-    processed_size_bytes = (
-        stats.get("processed", {}).get("size_in_bytes", 0) +
-        stats.get("incremental", {}).get("size_in_bytes", 0)
-    )
-    total_size_gb = total_size_bytes / (1024 ** 3)
-    processed_size_gb = processed_size_bytes / (1024 ** 3)
-    
-    # Calculate throughput
-    start_ms = stats.get("start_time_in_millis", 0)
-    duration_ms = stats.get("time_in_millis", 0)
-    throughput = (
-        (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
-        if duration_ms > 0 else 0
-    )
-    
-    return (
-        f"Snapshot status: {snapshot_info.get('state')}.\n"
-        f"Start time: {snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else 'N/A'}\n"
-        f"Finished time: {snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else 'N/A'}\n"
-        f"Duration: {format_duration(duration_ms)}\n"
-        f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
-        f"Anticipated duration remaining: {format_duration(int(snapshot_status.eta_ms)) if snapshot_status.eta_ms else 'N/A (not enough data to compute)'}\n"
-        f"Data processed: {processed_size_gb:.3f}/{total_size_gb:.3f} MiB\n"
-        f"Throughput: {throughput:.2f} MiB/sec\n"
-        f"Total shards: {shards_stats.get('total', 0)}\n"
-        f"Successful shards: {shards_stats.get('done', 0)}\n"
-        f"Failed shards: {shards_stats.get('failed', 0)}\n"
-    )
 
 
 class SnapshotStateAndDetails:
@@ -433,53 +394,68 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     return SnapshotStateAndDetails(state, snapshots[0])
 
 
-def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:
+def get_snapshot_status_message(latest_snapshot_status_raw: SnapshotStateAndDetails,
+                                basic_message: str) -> str:
+    # Extract snapshot details for formatting
+    stats = latest_snapshot_status_raw.details.get("stats", {})
+    shards_stats = latest_snapshot_status_raw.details.get("shards_stats", {})
+    
+    # Calculate size metrics
+    total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+    processed_size_bytes = (
+        stats.get("processed", {}).get("size_in_bytes", 0) +
+        stats.get("incremental", {}).get("size_in_bytes", 0)
+    )
+    total_size_mb = total_size_bytes / (1024 ** 2)
+    processed_size_mb = processed_size_bytes / (1024 ** 2)
+    
+    # Calculate throughput and duration
+    duration_ms = stats.get("time_in_millis", 0)
+    throughput = (
+        (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
+        if duration_ms > 0 else 0
+    )
+    
+    return (basic_message + "\n".join([
+        f"Data processed: {processed_size_mb:.3f}/{total_size_mb:.3f} MiB",
+        f"Throughput: {throughput:.2f} MiB/sec",
+        f"Total shards: {shards_stats.get('total', 0)}",
+        f"Successful shards: {shards_stats.get('done', 0)}",
+        f"Failed shards: {shards_stats.get('failed', 0)}",
+    ]) + "\n")
+
+
+def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, expert_mode: bool) -> CommandResult:
     try:
-        latest_snapshot_status_raw = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep=deep_check)
+        latest_snapshot_status_raw = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep=expert_mode)
+        snapshot_status = SnapshotStatus.from_snapshot_info(latest_snapshot_status_raw.details)
         
-        if deep_check:
-            if latest_snapshot_status_raw.details:
-                # Create snapshot status object using our common method
-                snapshot_status = SnapshotStatus.from_snapshot_info(latest_snapshot_status_raw.details)
-                
-                # Generate a formatted status message using snapshot_status fields
-                stats = latest_snapshot_status_raw.details.get("stats", {})
-                shards_stats = latest_snapshot_status_raw.details.get("shards_stats", {})
-                
-                total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-                processed_size_bytes = (
-                    stats.get("processed", {}).get("size_in_bytes", 0) +
-                    stats.get("incremental", {}).get("size_in_bytes", 0)
-                )
-                total_size_gb = total_size_bytes / (1024 ** 3)
-                processed_size_gb = processed_size_bytes / (1024 ** 3)
-                
-                # Calculate throughput
-                start_ms = stats.get("start_time_in_millis", 0)
-                duration_ms = stats.get("time_in_millis", 0)
-                throughput = (
-                    (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
-                    if duration_ms > 0 else 0
-                )
-                
-                # Format the message
-                message = (
-                    f"Snapshot status: {latest_snapshot_status_raw.state}.\n"
-                    f"Start time: {snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else ''}\n"
-                    f"Finished time: {snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else ''}\n"
-                    f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
-                    f"Anticipated duration remaining: {format_duration(int(snapshot_status.eta_ms)) if snapshot_status.eta_ms else '0h 0m 0s'}\n"
-                    f"Data processed: {processed_size_gb:.3f}/{total_size_gb:.3f} MiB\n"
-                    f"Throughput: {throughput:.2f} MiB/sec\n"
-                    f"Total shards: {shards_stats.get('total', 0)}\n"
-                    f"Successful shards: {shards_stats.get('done', 0)}\n"
-                    f"Failed shards: {shards_stats.get('failed', 0)}\n"
-                )
-                
-                return CommandResult(success=True, value=f"{latest_snapshot_status_raw.state}\n{message}")
-            else:
-                return CommandResult(success=True, value=latest_snapshot_status_raw.state)
-        return CommandResult(success=True, value=latest_snapshot_status_raw.state)
+        # Format datetime values for display
+        start_time = snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else ''
+        finish_time = snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else ''
+        
+        # Format the detailed status message
+        eta_ms = snapshot_status.eta_ms or 0
+        eta_str = format_duration(int(eta_ms)) if eta_ms else "0h 0m 0s"
+
+        basic_message = "\n".join([
+            f"Snapshot status: {latest_snapshot_status_raw.state}.",
+            f"Start time: {start_time}",
+            f"Finished time: {finish_time}",
+            f"Percent completed: {snapshot_status.percentage_completed:.2f}%",
+            f"Estimated time to completion: {eta_str}",
+        ]) + "\n"
+
+        if not expert_mode:
+            return CommandResult(success=True, value=basic_message)
+
+        if expert_mode:
+
+            
+            return CommandResult(success=True, value=expert_message)
+        else:
+            # No detailed status available
+            return CommandResult(success=True, value=latest_snapshot_status_raw.state)
     except SnapshotNotStarted:
         return CommandResult(success=False, value="Snapshot not started")
     except SnapshotStatusUnavailable:
