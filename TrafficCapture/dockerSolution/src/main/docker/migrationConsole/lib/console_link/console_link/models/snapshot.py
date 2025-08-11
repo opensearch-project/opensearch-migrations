@@ -1,8 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from math import exp
-from sys import exec_prefix
 from requests.exceptions import HTTPError
 from typing import Any, Dict, Optional
 
@@ -357,8 +355,7 @@ def convert_snapshot_state_to_step_state(snapshot_state: str) -> str:
 
 def get_latest_snapshot_status_raw(cluster: Cluster,
                                    snapshot: str,
-                                   repository: str,
-                                   deep: bool) -> SnapshotStateAndDetails:
+                                   repository: str) -> SnapshotStateAndDetails:
     try:
         path = f"/_snapshot/{repository}/{snapshot}"
         response = cluster.call_api(path, HttpMethod.GET)
@@ -374,9 +371,6 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
 
     snapshot_info = snapshots[0]
     state = snapshot_info.get("state")
-
-    if not deep:
-        return SnapshotStateAndDetails(state, None)
 
     try:
         path = f"/_snapshot/{repository}/{snapshot}/_status"
@@ -394,68 +388,64 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     return SnapshotStateAndDetails(state, snapshots[0])
 
 
-def get_snapshot_status_message(latest_snapshot_status_raw: SnapshotStateAndDetails,
-                                basic_message: str) -> str:
-    # Extract snapshot details for formatting
-    stats = latest_snapshot_status_raw.details.get("stats", {})
-    shards_stats = latest_snapshot_status_raw.details.get("shards_stats", {})
-    
-    # Calculate size metrics
-    total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-    processed_size_bytes = (
-        stats.get("processed", {}).get("size_in_bytes", 0) +
-        stats.get("incremental", {}).get("size_in_bytes", 0)
-    )
-    total_size_mb = total_size_bytes / (1024 ** 2)
-    processed_size_mb = processed_size_bytes / (1024 ** 2)
-    
-    # Calculate throughput and duration
-    duration_ms = stats.get("time_in_millis", 0)
-    throughput = (
-        (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
-        if duration_ms > 0 else 0
-    )
-    
-    return (basic_message + "\n".join([
-        f"Data processed: {processed_size_mb:.3f}/{total_size_mb:.3f} MiB",
-        f"Throughput: {throughput:.2f} MiB/sec",
-        f"Total shards: {shards_stats.get('total', 0)}",
-        f"Successful shards: {shards_stats.get('done', 0)}",
-        f"Failed shards: {shards_stats.get('failed', 0)}",
-    ]) + "\n")
-
-
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, expert_mode: bool) -> CommandResult:
     try:
-        latest_snapshot_status_raw = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep=expert_mode)
+        # Get raw snapshot status data
+        latest_snapshot_status_raw = get_latest_snapshot_status_raw(cluster, snapshot, repository)
         snapshot_status = SnapshotStatus.from_snapshot_info(latest_snapshot_status_raw.details)
         
         # Format datetime values for display
         start_time = snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else ''
         finish_time = snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else ''
         
-        # Format the detailed status message
+        # Format the ETA string
         eta_ms = snapshot_status.eta_ms or 0
         eta_str = format_duration(int(eta_ms)) if eta_ms else "0h 0m 0s"
-
-        basic_message = "\n".join([
-            f"Snapshot status: {latest_snapshot_status_raw.state}.",
-            f"Start time: {start_time}",
-            f"Finished time: {finish_time}",
-            f"Percent completed: {snapshot_status.percentage_completed:.2f}%",
-            f"Estimated time to completion: {eta_str}",
-        ]) + "\n"
-
+        
+        # Basic status message (used for non-expert_mode)
+        basic_message = (
+            f"Snapshot status: {latest_snapshot_status_raw.state}\n"
+            f"Start time: {start_time}\n"
+            f"Finished time: {finish_time}\n"
+            f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
+            f"Estimated time to completion: {eta_str}\n"
+        )
+        
+        # For simple status, just return the basic info
         if not expert_mode:
             return CommandResult(success=True, value=basic_message)
-
-        if expert_mode:
-
-            
-            return CommandResult(success=True, value=expert_message)
-        else:
-            # No detailed status available
-            return CommandResult(success=True, value=latest_snapshot_status_raw.state)
+        
+        # For detailed status, add additional information
+        stats = latest_snapshot_status_raw.details.get("stats", {})
+        shards_stats = latest_snapshot_status_raw.details.get("shards_stats", {})
+        
+        # Calculate size metrics
+        total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+        processed_size_bytes = (
+            stats.get("processed", {}).get("size_in_bytes", 0) +
+            stats.get("incremental", {}).get("size_in_bytes", 0)
+        )
+        total_size_mb = total_size_bytes / (1024 ** 2)
+        processed_size_mb = processed_size_bytes / (1024 ** 2)
+        
+        # Calculate throughput and duration
+        duration_ms = stats.get("time_in_millis", 0)
+        throughput = (
+            (processed_size_bytes / (1024 ** 2)) / (duration_ms / 1000)
+            if duration_ms > 0 else 0
+        )
+        
+        # Add the detailed information to the basic message
+        expert_message = basic_message + (
+            f"Duration: {format_duration(duration_ms)}\n"
+            f"Data processed: {processed_size_mb:.3f}/{total_size_mb:.3f} MiB\n"
+            f"Throughput: {throughput:.2f} MiB/sec\n"
+            f"Total shards: {shards_stats.get('total', 0)}\n"
+            f"Successful shards: {shards_stats.get('done', 0)}\n"
+            f"Failed shards: {shards_stats.get('failed', 0)}\n"
+        )
+        
+        return CommandResult(success=True, value=expert_message)
     except SnapshotNotStarted:
         return CommandResult(success=False, value="Snapshot not started")
     except SnapshotStatusUnavailable:

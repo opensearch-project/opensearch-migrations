@@ -270,7 +270,7 @@ def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node, extra_args):
 
 
 @snapshot_group.command(name="status")
-@click.option('--deep-check', is_flag=True, default=False, help='Perform a deep status check of the snapshot')
+@click.option('--expert-mode', is_flag=True, default=False, help='Perform a check of the snapshot with additional information for troubleshooting')
 @click.pass_obj
 def status_snapshot_cmd(ctx, expert_mode):
     """Check the status of the snapshot"""
