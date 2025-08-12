@@ -224,7 +224,7 @@ def test_from_snapshot_info_with_partial_snapshot(partial_snapshot_info):
     
     # Verify status
     assert status.status == "FAILED"  # PARTIAL maps to FAILED
-    assert status.percentage_completed == pytest.approx(75.0)
+    assert status.percentage_completed == pytest.approx(100.0)
     
     # Verify timestamps
     assert status.started == datetime.fromtimestamp(1627980000000 / 1000)
@@ -232,7 +232,7 @@ def test_from_snapshot_info_with_partial_snapshot(partial_snapshot_info):
     assert status.finished == expected_finished
     
     # Verify ETA
-    assert status.eta_ms == pytest.approx(20000.0)  # 20 seconds left
+    assert status.eta_ms == None
 
 
 def test_from_snapshot_info_with_zero_total_units():

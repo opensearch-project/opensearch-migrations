@@ -12,8 +12,6 @@ from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
-from TrafficCapture.dockerSolution.src.main.docker.migrationConsole.lib.console_link.tests.test_snapshot_status import failed_snapshot_info
-
 logger = logging.getLogger(__name__)
 
 SNAPSHOT_SCHEMA = {
@@ -221,11 +219,11 @@ class FileSystemSnapshot(Snapshot):
             logger.debug(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
-    def status(self, *args, expert_mode=False, **kwargs) -> CommandResult:
+    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, expert_mode)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -297,13 +295,14 @@ class SnapshotStatus(BaseModel):
     def from_snapshot_info(cls, snapshot_info: dict) -> "SnapshotStatus":
         # 1) Extract progress metrics
         total_bytes = processed_bytes = throughput_bytes = None
-        total_shards = complete_shards = failed_shards = None
+        total_shards = completed_shards = failed_shards = None
         total_units = processed_units = 0
         if shards_stats := snapshot_info.get("shards_stats"):
             # ES ≥7.8 / OS: shard-level stats
             total_units = total_shards = shards_stats.get("total", 0)
-            processed_units = shards_stats.get("done", 0)
-            processed_units = shards_stats.get("failed", 0)
+            completed_shards = shards_stats.get("done", 0)
+            failed_shards = shards_stats.get("failed", 0)
+            processed_units = completed_shards + failed_shards
             # these sometimes live at the top level
             start_ms = snapshot_info.get("start_time_in_millis", 0)
             elapsed_ms = snapshot_info.get("time_in_millis", 0)
@@ -311,8 +310,9 @@ class SnapshotStatus(BaseModel):
             # ES <7.8: simple shards summary
             shards = snapshot_info.get("shards", {})
             total_units = total_shards = shards.get("total", 0)
-            processed_units = shards.get("successful", 0)
-            processed_units = shards.get("failed", 0)
+            completed_shards = shards.get("successful", 0)
+            failed_shards = shards.get("failed", 0)
+            processed_units = completed_shards + failed_shards
             start_ms = snapshot_info.get("start_time_in_millis", 0)
             elapsed_ms = snapshot_info.get("time_in_millis", 0)
 
@@ -361,7 +361,7 @@ class SnapshotStatus(BaseModel):
             data_processed_bytes=processed_bytes,
             data_throughput_bytes_avg_sec=throughput_bytes,
             shard_total=total_shards,
-            shard_complete=complete_shards,
+            shard_complete=completed_shards,
             shard_failed=failed_shards
         )
 

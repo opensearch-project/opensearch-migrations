@@ -112,7 +112,7 @@ def test_snapshot_status_full(request, snapshot_fixture):
     
     source_cluster.call_api.side_effect = mock_call_api
 
-    result = snapshot_.status(snapshot=snapshot, expert_mode=True)
+    result = snapshot_.status(snapshot=snapshot, deep_check=True)
 
     # Basic result validations
     assert isinstance(result, CommandResult)
