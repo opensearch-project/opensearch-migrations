@@ -12,11 +12,11 @@ import {
     TemplateSigEntry,
     FieldSpecs,
     FieldGroupConstraint,
-    FieldSpecsToInputParams
+    FieldSpecsToInputParams, StepsScopeToStepsWithOutputs, StepWithOutputs
 } from "@/schemas/workflowTypes";
 import {z, ZodType, ZodTypeAny} from "zod";
 import {TypescriptError} from "@/utils";
-import {Expression, inputParam, inputParams} from "@/schemas/expression";
+import {Expression, inputParam, inputParams, stepOutput} from "@/schemas/expression";
 import {IMAGE_PULL_POLICY} from "@/schemas/userSchemas";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
@@ -483,8 +483,22 @@ class ContainerBuilder<
             ...this.outputsScope,
             [name as string]: {
                 type: t,
-                fromWhere: "path",
+                fromWhere: "path" as const,
                 path: pathValue,
+                description: descriptionValue
+            }
+        });
+    }
+
+    addExpressionOutput<T, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+        return new ContainerBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
+            ...this.outputsScope,
+            [name as string]: {
+                type: t,
+                fromWhere: "expression" as const,
+                expression: expression,
                 description: descriptionValue
             }
         });
@@ -543,27 +557,53 @@ class StepsBuilder<
     // Convenience method for single step
     addStep<
         Name extends string,
-        StepDef,
         TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
         TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>
+        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
             InputParamsScope,
-            ExtendScope<StepsScope, { [K in Name]: StepDef }>,
+            ExtendScope<StepsScope, { [K in Name]: StepWithOutputs<Name, TKey, TWorkflow["templates"][TKey]["outputs"]> }>,
             OutputParamsScope
         >
     > {
         return this.addStepGroup(groupBuilder => {
-            // addStep returns a constrained type, so we need to cast it for internal use
-            return groupBuilder.addStep(name, workflowBuilder, key, params) as any;
+            return groupBuilder.addStep(name, workflowBuilder, key, paramsFn) as any;
         }) as any;
+    }
+
+    addParameterOutput<T, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
+        StepsBuilder<ContextualScope, InputParamsScope, StepsScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+        return new StepsBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.stepGroups, {
+            ...this.outputsScope,
+            [name as string]: {
+                type: t,
+                fromWhere: "parameter" as const,
+                parameter: parameter,
+                description: descriptionValue
+            }
+        });
+    }
+
+    addExpressionOutput<T, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+        StepsBuilder<ContextualScope, InputParamsScope, StepsScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+        return new StepsBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.stepGroups, {
+            ...this.outputsScope,
+            [name as string]: {
+                type: t,
+                fromWhere: "expression" as const,
+                expression: expression,
+                description: descriptionValue
+            }
+        });
     }
 
     getBody(): { body: { steps: Record<string, any> } } {
@@ -589,25 +629,35 @@ class StepGroupBuilder<
 
     addStep<
         Name extends string,
-        StepDef,
         TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
         TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        params: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>
+        paramsFn: //UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
+        //>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-        StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, { [K in Name]: StepDef }>>>
+        StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, {
+            [K in Name]: StepWithOutputs<Name, TKey, TWorkflow["templates"][TKey]["outputs"]>
+        }>>>
     {
-        // Use type assertions since constraints prevent invalid calls at compile time
         const nameStr = name as string;
+        const workflow = workflowBuilder as TWorkflow;
+        const templateKey = key as TKey;
+
+        // Build the steps object with output expressions for intellisense
+        const stepsWithOutputs = this.buildStepsWithOutputs();
+
+        // Call the user's function to get the parameters
+        const params = paramsFn(stepsWithOutputs);
 
         // Call callTemplate to get the template reference and arguments
         const templateCall = callTemplate(
-            (workflowBuilder as TWorkflow).templates,
-            key as TKey,
-            params as z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
+            workflow.templates,
+            templateKey,
+            params
         );
 
         // Add to runtime structure
@@ -617,12 +667,37 @@ class StepGroupBuilder<
             arguments: templateCall.arguments
         });
 
-        // Return type-level representation - use 'as any' to bypass constraint checking in implementation
+        // Create the new step definition with output types
+        const stepDef: StepWithOutputs<Name, TKey, TWorkflow["templates"][TKey]["outputs"]> = {
+            name: nameStr as Name,
+            template: templateKey,
+            outputTypes: workflow.templates[templateKey].outputs || {} as any
+        };
+
+        // Return new builder with extended scope
         return new StepGroupBuilder(
             this.contextualScope,
-            { ...this.stepsScope, [nameStr]: { name: nameStr, template: templateCall.templateRef.key } } as ExtendScope<StepsScope, { [K in Name]: StepDef }>,
+            { ...this.stepsScope, [nameStr]: stepDef } as ExtendScope<StepsScope, {
+                [K in Name]: StepWithOutputs<Name, TKey, TWorkflow["templates"][TKey]["outputs"]>
+            }>,
             this.stepTasks
         ) as any;
+    }
+
+    // Add this private helper method to build the steps object with outputs
+    private buildStepsWithOutputs(): StepsScopeToStepsWithOutputs<StepsScope> {
+        const result: any = {};
+
+        Object.entries(this.stepsScope).forEach(([stepName, stepDef]: [string, any]) => {
+            if (stepDef.outputTypes) {
+                result[stepName] = {};
+                Object.entries(stepDef.outputTypes).forEach(([outputName, outputParamDef]: [string, any]) => {
+                    result[stepName][outputName] = stepOutput(stepName, outputName, outputParamDef);
+                });
+            }
+        });
+
+        return result as StepsScopeToStepsWithOutputs<StepsScope>;
     }
 
     getStepTasks() {
@@ -646,6 +721,34 @@ class DagBuilder<
     }
 
     addTask() {}
+
+    addParameterOutput<T, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
+        DagBuilder<ContextualScope, InputParamsScope, DagScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+        return new DagBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
+            ...this.outputsScope,
+            [name as string]: {
+                type: t,
+                fromWhere: "parameter" as const,
+                parameter: parameter,
+                description: descriptionValue
+            }
+        });
+    }
+
+    addExpressionOutput<T, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+        DagBuilder<ContextualScope, InputParamsScope, DagScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+        return new DagBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
+            ...this.outputsScope,
+            [name as string]: {
+                type: t,
+                fromWhere: "expression" as const,
+                expression: expression,
+                description: descriptionValue
+            }
+        });
+    }
 }
 
 const TemplateDefSchema = z.object({

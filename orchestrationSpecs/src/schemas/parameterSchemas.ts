@@ -28,11 +28,33 @@ export function defineRequiredParam<T>(opts: {
     };
 }
 
+// Supporting types for Argo output parameters
+export type ConfigMapKeySelector = {
+    name: string;
+    key: string;
+    optional?: boolean;
+};
+
+export type SuppliedValueFrom = {
+    // This would be defined based on Argo's SuppliedValueFrom spec
+    // For now, keeping it simple
+    [key: string]: any;
+};
+
 export type OutputParamDef<T> = {
     type: ZodType<T>;
-    fromWhere: "path" | "expression";
-    description?: string | null;
-};
+    description?: string;
+} & (
+    | { fromWhere: "path"; path: string }
+    | { fromWhere: "expression"; expression: string }
+    | { fromWhere: "parameter"; parameter: string }
+    | { fromWhere: "jsonPath"; jsonPath: string }
+    | { fromWhere: "jqFilter"; jqFilter: string }
+    | { fromWhere: "event"; event: string }
+    | { fromWhere: "configMapKeyRef"; configMapKeyRef: ConfigMapKeySelector }
+    | { fromWhere: "supplied"; supplied: SuppliedValueFrom }
+    | { fromWhere: "default"; default: string }
+);
 
 export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
 export type OutputParametersRecord = Record<string, OutputParamDef<any>>;

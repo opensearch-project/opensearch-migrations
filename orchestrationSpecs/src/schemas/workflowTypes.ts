@@ -1,7 +1,8 @@
 // Internal types for workflow schema implementation
 import {ZodTypeAny} from "zod";
-import {InputParamDef} from "@/schemas/parameterSchemas";
+import {InputParamDef, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
+import {Expression, stepOutput} from "@/schemas/expression";
 
 declare global {
     // true: worse LSP, but squigglies under the name declaration
@@ -34,3 +35,27 @@ export type FieldGroupConstraint<T extends FieldSpecs, S extends Scope, TypeWhen
             ? TypeWhenValid
             : TypescriptError<`Field group contains conflicting names: '${keyof T & keyof S & string}' already exists`>
         : TypeWhenValid;
+
+export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
+
+export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = {
+    [K in keyof Outputs]: ReturnType<typeof stepOutput<ExtractOutputParamType<Outputs[K]>>>
+};
+
+export type StepWithOutputs<
+    StepName extends string,
+    TemplateKey extends string,
+    Outputs extends OutputParametersRecord | undefined
+> = {
+    name: StepName;
+    template: TemplateKey;
+    outputTypes: Outputs;
+};
+
+export type StepsScopeToStepsWithOutputs<StepsScope extends Scope> = {
+    [StepName in keyof StepsScope]: StepsScope[StepName] extends StepWithOutputs<
+        infer Name,
+        infer Template,
+        infer Outputs
+    > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
+};

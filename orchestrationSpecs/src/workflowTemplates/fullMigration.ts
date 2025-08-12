@@ -21,9 +21,9 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
             .addImageInfo(b.getInputParam("etcdUtilsImage"), b.getInputParam("etcdUtilsImagePullPolicy"))
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
+            .addPathOutput("prefix", "/tmp/prefix", z.string())
+            .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", z.number())
         )
-        .addOutputs(b=>b.addPathOutput("prefix", "/tmp/prefix", z.string()), true)
-        .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", z.number())
     )
     .addTemplate("decrementLatch", t => t
         .addInputs(addCommonTargetLatchInputs)
@@ -55,7 +55,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
                 ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
-            .addStep("init", TargetLatchHelpers, "init", {
+            .addStep("init", TargetLatchHelpers, "init", steps => ({
                 prefix: "foo",
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
@@ -64,12 +64,12 @@ export const FullMigration = WFBuilder.create("FullMigration")
                     indices: [],
                     migrations: []
                 }
-            })
-            .addStep("cleanup", TargetLatchHelpers, "cleanup", {
-                prefix: "",
+            }))
+            .addStep("cleanup", TargetLatchHelpers, "cleanup", steps => ({
+                prefix: ""+steps.init.prefix,
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
-            })
+            }))
         )
     )
     .addTemplate("cleanup", t => t

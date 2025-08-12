@@ -1,5 +1,5 @@
 import {ZodTypeAny} from "zod";
-import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
 import {StepGroup} from "@/schemas/workflowSchemas";
 import {Expression} from "@/schemas/expression";
@@ -49,18 +49,6 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
     }
 }
 
-function formatOutputParameters<IPR extends OutputParametersRecord>(outputs : OutputParametersRecord)  {
-    return outputs == undefined ? [] : {
-        parameters:
-            Object.entries(outputs).map(([fieldName, definition]) => {
-                return {
-                    name: fieldName,
-                    d: definition // TODO - do a better job
-                }
-            })
-    }
-}
-
 function formatBody(body: Scope) {
     if (body) {
         if (body.steps == undefined) {
@@ -71,6 +59,43 @@ function formatBody(body: Scope) {
     } else {
         return {};
     }
+}
+
+function formatOutputSource(def: OutputParamDef<any>) {
+    switch (def.fromWhere) {
+        case "path":
+            return { path: def.path };
+        case "expression":
+            return { expression: def.expression };
+        case "parameter":
+            return { parameter: def.parameter };
+        case "jsonPath":
+            return { jsonPath: def.jsonPath };
+        case "jqFilter":
+            return { jqFilter: def.jqFilter };
+        case "event":
+            return { event: def.event };
+        case "configMapKeyRef":
+            return { configMapKeyRef: def.configMapKeyRef };
+        case "supplied":
+            return { supplied: def.supplied };
+        case "default":
+            return { default: def.default };
+        default:
+            throw new Error(`Unsupported output parameter type: ${(def as any).fromWhere}`);
+    }
+}
+
+function formatOutputParameters<OPR extends OutputParametersRecord>(outputs : OPR)  {
+    if (!outputs) return undefined;
+    
+    return {
+        parameters: Object.entries(outputs).map(([fieldName, definition]) => ({
+            name: fieldName,
+            ...(definition.description && { description: definition.description }),
+            ...formatOutputSource(definition)
+        }))
+    };
 }
 
 function formatTemplate(template: Scope) {
