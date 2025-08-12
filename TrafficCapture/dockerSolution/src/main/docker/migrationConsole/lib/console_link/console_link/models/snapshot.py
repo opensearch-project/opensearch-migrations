@@ -283,9 +283,9 @@ class SnapshotStatus(BaseModel):
     shard_total: int | None
     shard_complete: int | None
     shard_failed: int | None
-
-    class Config:
-        from_attributes = True
+    model_config = {
+        'from_attributes': True,
+    }
 
     @field_serializer("started", "finished")
     def serialize_completed(self, dt: datetime | None) -> str | None:
@@ -374,7 +374,10 @@ def convert_snapshot_state_to_step_state(snapshot_state: str) -> str:
         "SUCCESS": "COMPLETED",
     }
 
-    return state_mapping.get(snapshot_state, "FAILED")
+    if (mapped := state_mapping.get(snapshot_state)) is None:
+        logging.warning("Unknown snapshot_state %r; defaulting to 'FAILED'", snapshot_state)
+        return "FAILED"
+    return mapped
 
 
 def get_latest_snapshot_status_raw(cluster: Cluster,

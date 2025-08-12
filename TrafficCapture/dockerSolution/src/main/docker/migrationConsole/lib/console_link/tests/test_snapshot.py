@@ -124,7 +124,7 @@ def test_snapshot_status_full(request, snapshot_fixture):
 
     # Basic result validations
     assert isinstance(result, CommandResult)
-    # assert result.success
+    assert result.success
     
     # Content validations
     assert "SUCCESS" in result.value
