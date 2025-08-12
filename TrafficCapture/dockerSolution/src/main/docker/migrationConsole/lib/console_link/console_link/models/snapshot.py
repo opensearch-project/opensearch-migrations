@@ -397,7 +397,7 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     snapshot_info = snapshots[0]
     state = snapshot_info.get("state")
     if not deep_check:
-        SnapshotStateAndDetails(state, None)
+        return SnapshotStateAndDetails(state, None)
 
     try:
         path = f"/_snapshot/{repository}/{snapshot}/_status"
