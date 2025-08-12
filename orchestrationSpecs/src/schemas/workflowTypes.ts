@@ -36,7 +36,26 @@ export type FieldGroupConstraint<T extends FieldSpecs, S extends Scope, TypeWhen
             : TypescriptError<`Field group contains conflicting names: '${keyof T & keyof S & string}' already exists`>
         : TypeWhenValid;
 
+// Helper types for extracting output types and creating step references
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
+
+// Helper type to allow both literal values and expressions
+export type AllowLiteralOrExpression<T> = T extends string
+    ? string | Expression<string>
+    : T extends number
+        ? number | Expression<number>
+        : T extends boolean
+            ? boolean | Expression<boolean>
+            : T extends Array<infer U>
+                ? Array<AllowLiteralOrExpression<U>> | Expression<T>
+                : T extends object
+                    ? { [K in keyof T]: AllowLiteralOrExpression<T[K]> } | Expression<T>
+                    : T | Expression<T>;
+
+// Apply the literal-or-expression transformation to parameter schemas
+export type ParamsWithLiteralsOrExpressions<T> = {
+    [K in keyof T]: AllowLiteralOrExpression<T[K]>
+};
 
 export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = {
     [K in keyof Outputs]: ReturnType<typeof stepOutput<ExtractOutputParamType<Outputs[K]>>>

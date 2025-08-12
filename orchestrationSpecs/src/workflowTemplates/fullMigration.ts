@@ -40,6 +40,8 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
 export const FullMigration = WFBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
+        .addRequiredInput("test",
+            z.string())
         .addRequiredInput("sourceMigrationConfigs",
             SNAPSHOT_MIGRATION_CONFIG,
             "List of server configurations to direct migrated traffic toward")
@@ -56,7 +58,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
             .addStep("init", TargetLatchHelpers, "init", steps => ({
-                prefix: "foo",
+                prefix: b.getInputParam("test"),
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                 targets: [],
@@ -66,7 +68,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
                 }
             }))
             .addStep("cleanup", TargetLatchHelpers, "cleanup", steps => ({
-                prefix: ""+steps.init.prefix,
+                prefix: steps.init.prefix,
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
             }))

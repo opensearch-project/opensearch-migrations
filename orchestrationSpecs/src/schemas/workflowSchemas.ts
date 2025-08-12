@@ -12,7 +12,10 @@ import {
     TemplateSigEntry,
     FieldSpecs,
     FieldGroupConstraint,
-    FieldSpecsToInputParams, StepsScopeToStepsWithOutputs, StepWithOutputs
+    FieldSpecsToInputParams,
+    StepsScopeToStepsWithOutputs,
+    StepWithOutputs,
+    ParamsWithLiteralsOrExpressions, AllowLiteralOrExpression
 } from "@/schemas/workflowTypes";
 import {z, ZodType, ZodTypeAny} from "zod";
 import {TypescriptError} from "@/utils";
@@ -405,6 +408,8 @@ abstract class TemplateBodyBuilder<
         return inputParam(key as string, this.inputsScope[key]);
     }
 
+    // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow
+    // others to reach into the body anyway.  They should interface through the inputs and outputs exclusively
     getBody(): { body: { [K in BodyKey]: Record<string, any> } } {
         const impl = { [this.bodyKey]: this.bodyScope } as Record<BodyKey, BodyScope>;
         return { body: {...impl} };
@@ -439,12 +444,15 @@ class ContainerBuilder<
         super("container", contextualScope, inputsScope, bodyScope, outputsScope)
     }
 
-    addImageInfo(image: Expression<string>,
-                 pullPolicy: Expression<z.infer<typeof IMAGE_PULL_POLICY>>):
+    addImageInfo(image: AllowLiteralOrExpression<string>,
+                 pullPolicy: AllowLiteralOrExpression<z.infer<typeof IMAGE_PULL_POLICY>>):
         ContainerBuilder<
             ContextualScope,
             InputParamsScope,
-            ExtendScope<ContainerScope, {image: Expression<string>, pullPolicy: Expression<string> }>,
+            ExtendScope<ContainerScope, {
+                image: AllowLiteralOrExpression<string>,
+                pullPolicy: AllowLiteralOrExpression<string>
+            }>,
             OutputParamsScope>
     {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
@@ -537,7 +545,7 @@ class StepsBuilder<
     }
 
     addStepGroup<NewStepScope extends Scope,
-        GB extends StepGroupBuilder<any, any>,
+        GB extends StepGroupBuilder<ContextualScope, any>,
         StepsGroup extends ReturnType<GB["getStepTasks"]>>
     (
         builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => GB
@@ -564,7 +572,7 @@ class StepsBuilder<
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
@@ -635,9 +643,8 @@ class StepGroupBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        paramsFn: //UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
-        //>
+        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, {
             [K in Name]: StepWithOutputs<Name, TKey, TWorkflow["templates"][TKey]["outputs"]>
@@ -651,7 +658,7 @@ class StepGroupBuilder<
         const stepsWithOutputs = this.buildStepsWithOutputs();
 
         // Call the user's function to get the parameters
-        const params = paramsFn(stepsWithOutputs);
+        const params = (paramsFn as any)(stepsWithOutputs);
 
         // Call callTemplate to get the template reference and arguments
         const templateCall = callTemplate(

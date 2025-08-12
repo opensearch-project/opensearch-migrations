@@ -5,8 +5,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup",
-    "dev": "nodemon --watch src --ext ts,sh --exec \"node dev.cjs\"",
+    "build": "npm run type-check && tsup",
+    "dev": "node dev.cjs",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit"
   },
