@@ -232,7 +232,7 @@ def test_from_snapshot_info_with_partial_snapshot(partial_snapshot_info):
     assert status.finished == expected_finished
     
     # Verify ETA
-    assert status.eta_ms == None
+    assert status.eta_ms is None
 
 
 def test_from_snapshot_info_with_zero_total_units():
