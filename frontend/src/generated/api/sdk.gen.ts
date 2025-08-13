@@ -20,6 +20,9 @@ import type {
   SessionUpdateData,
   SessionUpdateResponses,
   SessionUpdateErrors,
+  SnapshotStatusData,
+  SnapshotStatusResponses,
+  SnapshotStatusErrors,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
 
@@ -157,5 +160,21 @@ export const sessionUpdate = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+};
+
+/**
+ * Get Snapshot Status
+ */
+export const snapshotStatus = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotStatusData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotStatusResponses,
+    SnapshotStatusErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/status",
+    ...options,
   });
 };
