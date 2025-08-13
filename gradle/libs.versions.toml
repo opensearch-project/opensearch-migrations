@@ -1,5 +1,5 @@
 [versions]
-aws-crt = "0.38.7"
+aws-crt = "0.38.8"
 aws-msk-iam-auth = "2.3.2"
 aws-sdk = "2.32.22"
 bouncycastle = "1.81"
@@ -7,7 +7,7 @@ commons-collections = "4.5.0"
 commons-compress = "1.26.2"
 disruptor = "4.0.0"
 dockerapi = "3.5.3"
-errorprone = "2.40.0"
+errorprone = "2.41.0"
 graalvm = "24.2.2"
 groovy = "3.0.25"
 guava = "33.4.8-jre"
@@ -177,13 +177,13 @@ boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version
 # Transitive dependencies to force based on CVEs
 transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",    version = "4.5.14"   }
 transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.18.0"   }
-transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.11.1"   }
+transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.12.0"   }
 transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.3"    }
-transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.10"   }
+transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.11"   }
 transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "2.9.0"    }
-transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.5.2"    }
+transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
 transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.1"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
-transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.1"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.2"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
 transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",        version = "1.4.21"   }
