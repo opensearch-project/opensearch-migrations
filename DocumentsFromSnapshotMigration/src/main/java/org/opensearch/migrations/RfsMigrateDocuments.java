@@ -692,7 +692,7 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        Function<String, BiFunction<String, Integer, ShardMetadata>> shardMetadataSupplierFactory = (snapshot) -> (indexName, shardId) -> {
+        Function<String, BiFunction<String, Integer, ShardMetadata>> shardMetadataSupplierFactory = snapshot -> (indexName, shardId) -> {
             var shardMetadata = shardMetadataFactory.fromRepo(snapshot, indexName, shardId);
             log.atInfo()
                 .setMessage("Shard size: {} for snapshotName={} indexName={} shardId={}")

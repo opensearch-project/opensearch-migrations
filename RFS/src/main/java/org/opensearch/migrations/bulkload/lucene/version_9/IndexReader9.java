@@ -26,7 +26,7 @@ public class IndexReader9 implements LuceneIndexReader {
             var relevantCommit = commits.stream()
                 .filter(commit -> segmentsFileName.equals(commit.getSegmentsFileName()))
                 .findAny()
-                .orElseThrow(() -> new IOException("No such commit with segments file: " + segmentsFileName));;
+                .orElseThrow(() -> new IOException("No such commit with segments file: " + segmentsFileName));
             var reader = DirectoryReader.open(relevantCommit, 0, null);
             if (softDeletesPossible) {
                 reader = new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
