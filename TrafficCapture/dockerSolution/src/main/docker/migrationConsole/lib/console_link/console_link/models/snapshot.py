@@ -1,6 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
+from enum import Enum
 from requests.exceptions import HTTPError
 from typing import Any, Dict, Optional
 
@@ -270,9 +271,14 @@ class SnapshotNotStarted(Exception):
 class SnapshotStatusUnavailable(Exception):
     pass
 
+class StepState(str, Enum):
+    PENDING = "Pending"
+    RUNNING = "Running"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
 
 class SnapshotStatus(BaseModel):
-    status: str
+    status: StepState
     percentage_completed: float
     eta_ms: float | None
     started: datetime | None = None
@@ -366,17 +372,17 @@ class SnapshotStatus(BaseModel):
         )
 
 
-def convert_snapshot_state_to_step_state(snapshot_state: str) -> str:
+def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
     state_mapping = {
-        "FAILED": "FAILED",
-        "IN_PROGRESS": "RUNNING",
-        "PARTIAL": "FAILED",
-        "SUCCESS": "COMPLETED",
+        "FAILED": StepState.FAILED,
+        "IN_PROGRESS": StepState.RUNNING,
+        "PARTIAL": StepState.FAILED,
+        "SUCCESS": StepState.COMPLETED,
     }
 
     if (mapped := state_mapping.get(snapshot_state)) is None:
         logging.warning("Unknown snapshot_state %r; defaulting to 'FAILED'", snapshot_state)
-        return "FAILED"
+        return StepState.FAILED
     return mapped
 
 
