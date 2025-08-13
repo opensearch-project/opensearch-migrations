@@ -12,6 +12,7 @@ function addCommonTargetLatchInputs<C extends Scope>(tb: TemplateBuilder<C, {}, 
         .addRequiredInput("etcdUtilsImage", z.string())
         .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY);
 }
+
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     .addTemplate("init", t=> t
         .addInputs(addCommonTargetLatchInputs)

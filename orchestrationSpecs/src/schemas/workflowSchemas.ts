@@ -39,19 +39,11 @@ export type ScopeIsEmptyConstraint<S, T> =
         ? T
         : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
 
-class ScopeBuilder<SigScope extends Scope = Scope> {
-    constructor(protected readonly sigScope: SigScope) {}
-
-    extendScope<AddSig extends Scope>(fn: ScopeFn<SigScope, AddSig>): ExtendScope<SigScope, AddSig> {
-        return {
-            ...this.sigScope,
-            ...fn(this.sigScope)
-        } as ExtendScope<SigScope, AddSig>;
-    }
-
-    getScope(): SigScope {
-        return this.sigScope;
-    }
+function extendScope<OS extends Scope, NS extends Scope>(orig: OS, fn: ScopeFn<OS, NS>): ExtendScope<OS, NS> {
+    return {
+        ...orig,
+        ...fn(orig)
+    } as ExtendScope<OS, NS>;
 }
 
 export class WFBuilder<
@@ -60,21 +52,11 @@ export class WFBuilder<
     TemplateSigScope extends Scope = Scope,
     TemplateFullScope extends Scope = Scope
 > {
-    metadataScope: MetadataScope;
-    inputsScope: WorkflowInputsScope;
-    templateSigScope: TemplateSigScope;
-    templateFullScope: TemplateFullScope;
-
     constructor(
-        metadataScope: MetadataScope,
-        inputsScope: WorkflowInputsScope,
-        templateSigScope: TemplateSigScope,
-        templateFullScope: TemplateFullScope
-    ) {
-        this.metadataScope = metadataScope;
-        this.inputsScope = inputsScope;
-        this.templateSigScope = templateSigScope;
-        this.templateFullScope = templateFullScope;
+        protected readonly metadataScope: MetadataScope,
+        protected readonly inputsScope: WorkflowInputsScope,
+        protected readonly templateSigScope: TemplateSigScope,
+        protected readonly templateFullScope: TemplateFullScope) {
     }
 
     static create(k8sResourceName: string) {
@@ -170,19 +152,10 @@ export class TemplateBuilder<
     InputParamsScope extends Scope = Scope,
     OutputParamsScope extends Scope = Scope
 > {
-    private readonly contextualScope: ContextualScope;
-    private readonly bodyScope: BodyScope;
-    private readonly inputScopeBuilder: ScopeBuilder<InputParamsScope>;
-    private readonly outputScopeBuilder: ScopeBuilder<OutputParamsScope>;
-
-    constructor(contextualScope: ContextualScope,
-                bodyScope: BodyScope,
-                inputScope: InputParamsScope,
-                outputScope: OutputParamsScope) {
-        this.contextualScope = contextualScope;
-        this.bodyScope = bodyScope;
-        this.inputScopeBuilder = new ScopeBuilder(inputScope);
-        this.outputScopeBuilder = new ScopeBuilder(outputScope);
+    constructor(protected readonly contextualScope: ContextualScope,
+                protected readonly bodyScope: BodyScope,
+                protected readonly inputScope: InputParamsScope,
+                protected readonly outputScope: OutputParamsScope) {
     }
 
     private extendWithParam<
@@ -198,11 +171,11 @@ export class TemplateBuilder<
         ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, R> }>,
         OutputParamsScope
     > {
-        const newScope = this.inputScopeBuilder.extendScope(s =>
+        const newScope = extendScope(this.inputScope, s =>
             ({[name]: param})
         );
 
-        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScopeBuilder.getScope());
+        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope);
     }
 
     addOptionalInput<T, Name extends string>(
@@ -305,7 +278,7 @@ export class TemplateBuilder<
         const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new StepsBuilder(c, i, {}, [], {})))
-        (this.contextualScope, this.inputScopeBuilder.getScope()));
+        (this.contextualScope, this.inputScope));
     }
 
     addDag<
@@ -319,7 +292,7 @@ export class TemplateBuilder<
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new DagBuilder(c, i, {}, {})))
-        (this.contextualScope, this.inputScopeBuilder.getScope()));
+        (this.contextualScope, this.inputScope));
     }
 
     addContainer<
@@ -333,11 +306,11 @@ export class TemplateBuilder<
         const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new ContainerBuilder(c, i, {}, {})))
-        (this.contextualScope, this.inputScopeBuilder.getScope()));
+        (this.contextualScope, this.inputScope));
     }
 
     getTemplateSignatureScope(): InputParamsScope {
-        return this.inputScopeBuilder.getScope();
+        return this.inputScope;
     }
 }
 
@@ -358,11 +331,11 @@ abstract class TemplateBodyBuilder<
     >
 > {
     constructor(
-        readonly bodyKey: BodyKey,
-        readonly contextualScope: ContextualScope,
-        readonly inputsScope: InputParamsScope,
-        readonly bodyScope: BodyScope,
-        readonly outputsScope: OutputParamsScope
+        protected readonly bodyKey: BodyKey,
+        protected readonly contextualScope: ContextualScope,
+        protected readonly inputsScope: InputParamsScope,
+        protected readonly bodyScope: BodyScope,
+        protected readonly outputsScope: OutputParamsScope
     ) {
     }
 
@@ -446,10 +419,10 @@ class ContainerBuilder<
 > extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope,
     ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, any>>
 {
-    constructor(readonly contextualScope: ContextualScope,
-                readonly inputsScope: InputParamsScope,
-                readonly bodyScope: ContainerScope,
-                readonly outputsScope: OutputParamsScope) {
+    constructor(contextualScope: ContextualScope,
+                inputsScope: InputParamsScope,
+                bodyScope: ContainerScope,
+                outputsScope: OutputParamsScope) {
         super("container", contextualScope, inputsScope, bodyScope, outputsScope)
     }
 
@@ -542,15 +515,12 @@ class StepsBuilder<
 > extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope,
     StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>>
 {
-    private readonly stepGroups: StepGroup[] = []; // Runtime ordering
-
-    constructor(readonly contextualScope: ContextualScope,
-                readonly inputsScope: InputParamsScope,
-                readonly bodyScope: StepsScope,
-                stepGroups: StepGroup[],
-                readonly outputsScope: OutputParamsScope) {
+    constructor(contextualScope: ContextualScope,
+                inputsScope: InputParamsScope,
+                bodyScope: StepsScope,
+                protected readonly stepGroups: StepGroup[],
+                outputsScope: OutputParamsScope) {
         super("steps", contextualScope, inputsScope, bodyScope, outputsScope)
-        this.stepGroups = stepGroups;
     }
 
     addStepGroup<NewStepScope extends Scope,
@@ -634,14 +604,9 @@ class StepGroupBuilder<
     ContextualScope extends Scope,
     StepsScope extends Scope
 > {
-    readonly contextualScope: ContextualScope;
-    readonly stepsScope: StepsScope;
-    private readonly stepTasks: StepTask[] = [];
-
-    constructor(contextualScope: ContextualScope, stepsScope: StepsScope, stepTasks: StepTask[]) {
-        this.contextualScope = contextualScope;
-        this.stepsScope = stepsScope;
-        this.stepTasks = stepTasks;
+    constructor(protected readonly contextualScope: ContextualScope,
+                protected readonly stepsScope: StepsScope,
+                protected readonly stepTasks: StepTask[]) {
     }
 
     addStep<
