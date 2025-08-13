@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from console_link.models.factories import get_snapshot
 from console_link.models.snapshot import (
     SnapshotNotStarted, SnapshotStatusUnavailable, get_latest_snapshot_status_raw,
-    SnapshotStatus
+    SnapshotStatus, StepState
 )
 from console_link.api.sessions import existence_check, find_session
 import logging
@@ -38,7 +38,7 @@ def get_snapshot_status(session_name: str):
                                                        True)
         return SnapshotStatus.from_snapshot_info(latest_status.details)
     except SnapshotNotStarted:
-        return SnapshotStatus(status="PENDING", percentage_completed=0, eta_ms=None)
+        return SnapshotStatus(status=StepState.PENDING, percentage_completed=0, eta_ms=None)
     except SnapshotStatusUnavailable:
         raise HTTPException(status_code=500, detail="Snapshot status not available")
     except Exception as e:

@@ -245,4 +245,4 @@ class Metadata:
             return command_runner.run(print_on_error=True)
         except CommandRunnerError as e:
             logger.debug(f"Metadata migration failed: {e}")
-            return CommandResult(success=False, value=f"Metadata migration failed: {e}")
+            return CommandResult(success=False, value=f"{e.output}")

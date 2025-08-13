@@ -198,6 +198,10 @@ export type MetadataResponse = {
    * Errorcode
    */
   errorCode?: number | null;
+  /**
+   * Errormessage
+   */
+  errorMessage?: string | null;
 };
 
 /**
@@ -268,27 +272,27 @@ export type SnapshotStatus = {
   /**
    * Data Total Bytes
    */
-  data_total_bytes: number | null;
+  data_total_bytes?: number | null;
   /**
    * Data Processed Bytes
    */
-  data_processed_bytes: number | null;
+  data_processed_bytes?: number | null;
   /**
    * Data Throughput Bytes Avg Sec
    */
-  data_throughput_bytes_avg_sec: number | null;
+  data_throughput_bytes_avg_sec?: number | null;
   /**
    * Shard Total
    */
-  shard_total: number | null;
+  shard_total?: number | null;
   /**
    * Shard Complete
    */
-  shard_complete: number | null;
+  shard_complete?: number | null;
   /**
    * Shard Failed
    */
-  shard_failed: number | null;
+  shard_failed?: number | null;
 };
 
 /**

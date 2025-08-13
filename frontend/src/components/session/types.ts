@@ -22,4 +22,5 @@ export type MetadataData = {
   errors?: Array<string>;
   errorCount?: number;
   errorCode?: number;
+  errorMessage?: string;
 };

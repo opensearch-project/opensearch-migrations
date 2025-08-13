@@ -285,12 +285,12 @@ class SnapshotStatus(BaseModel):
     eta_ms: float | None
     started: datetime | None = None
     finished: datetime | None = None
-    data_total_bytes: int | None
-    data_processed_bytes: int | None
-    data_throughput_bytes_avg_sec: float | None
-    shard_total: int | None
-    shard_complete: int | None
-    shard_failed: int | None
+    data_total_bytes: int | None = None
+    data_processed_bytes: int | None = None
+    data_throughput_bytes_avg_sec: float | None = None
+    shard_total: int | None = None
+    shard_complete: int | None = None
+    shard_failed: int | None = None
     model_config = {
         'from_attributes': True,
     }

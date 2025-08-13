@@ -90,10 +90,12 @@ class MetadataResponse(BaseModel):
     errors: Optional[List[str]] = None
     errorCount: Optional[int] = None
     errorCode: Optional[int] = None
+    errorMessage: Optional[str] = None
 
 
 def parse_metadata_result(result: CommandResult) -> Dict[str, Any]:
     """Parse the metadata operation result into a structured format."""
+    logger.info(f"Result response: {result}")
     if result.output and result.output.stdout:
         result_str = result.output.stdout
     elif result.value:
@@ -118,12 +120,14 @@ def parse_metadata_result(result: CommandResult) -> Dict[str, Any]:
             parsed_json = json.loads(result_str)
             if isinstance(parsed_json, dict):
                 parsed_json["success"] = result.success
+                logger.info("Able to parse json and return it directlry")
                 return parsed_json
             
     except (json.JSONDecodeError, AttributeError):
         logger.info("Could not parse result as JSON, using fallback structure")
     
     # Fallback: return basic structure with success status
+    logger.warn("Unable to parse response")
     return {
         "success": result.success,
         "result": result_str if result_str else None
@@ -196,6 +200,8 @@ def build_metadata_response(session_name: str, result: Dict[str, Any], success: 
     # Get status and timing information
     status = StepState.COMPLETED if success else StepState.FAILED
     
+    logger.info(f"Building response for {session_name} with {result}")
+
     response = MetadataResponse(
         success=success,
         session_name=session_name,
@@ -206,7 +212,9 @@ def build_metadata_response(session_name: str, result: Dict[str, Any], success: 
         if "transformations" in result else None,
         errors=result.get("errors", []),
         errorCount=result.get("errorCount", 0),
-        errorCode=result.get("errorCode", 0)
+        errorCode=result.get("errorCode", 0),
+        errorMessage=result.get("errorMessage", None)
+
     )
     
     return response
@@ -224,53 +232,12 @@ def build_status_response_from_result(latest_result: Dict[str, Any]) -> Metadata
     # Extract the basic fields
     session_name = latest_result.get("session_name", "unknown")
     success = latest_result.get("success", False)
-    status_str = latest_result.get("status", "Pending")
     
-    # Convert string status to enum
-    status = StepState.PENDING
-    if status_str == "Completed":
-        status = StepState.COMPLETED
-    elif status_str == "Failed":
-        status = StepState.FAILED
-    elif status_str == "Running":
-        status = StepState.RUNNING
-    
-    # Parse timestamps if present
-    started = datetime.fromisoformat(latest_result["started"]) if "started" in latest_result else None
-    finished = datetime.fromisoformat(latest_result["finished"]) if "finished" in latest_result else None
-    
-    # Get the stored result data
-    result_data = latest_result.get("result", {})
-    
-    # Build the response
-    response = MetadataResponse(
-        success=success,
+    return build_metadata_response(
         session_name=session_name,
-        status=status,
-        started=started,
-        finished=finished
+        success=success,
+        result=latest_result.get("result", {}),
     )
-    
-    # Add all available fields from the result
-    if "clusters" in result_data:
-        response.clusters = ClustersInfo(**result_data["clusters"])
-    
-    if "items" in result_data:
-        response.items = ItemsInfo(**result_data["items"])
-    
-    if "transformations" in result_data:
-        response.transformations = TransformationInfo(**result_data["transformations"])
-    
-    if "errors" in result_data:
-        response.errors = result_data["errors"]
-    
-    if "errorCount" in result_data:
-        response.errorCount = result_data["errorCount"]
-    
-    if "errorCode" in result_data:
-        response.errorCode = result_data["errorCode"]
-    
-    return response
 
 
 @metadata_router.post("/migrate",

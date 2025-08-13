@@ -87,6 +87,10 @@ export default function MetadataStatusView({
               <li key={idx}>{error}</li>
             ))}
           </ul>
+        ) : metadataData?.errorMessage ? (
+          <ul style={{ margin: 0, paddingLeft: "1rem" }}>
+              <li key="err-msg">{metadataData.errorMessage}</li>
+          </ul>
         ) : (
           <TextDisplay text="-" />
         ),
