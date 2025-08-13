@@ -213,6 +213,10 @@ class OpenSearchClientFactoryTest {
                 CLUSTER_SETTINGS_COMPRESSION_ENABLED);
         openSearchClientFactory.determineVersionAndCreate();
         assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -222,6 +226,10 @@ class OpenSearchClientFactoryTest {
                 CLUSTER_SETTINGS_COMPRESSION_DISABLED);
         openSearchClientFactory.determineVersionAndCreate();
         assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -231,6 +239,10 @@ class OpenSearchClientFactoryTest {
                 CLUSTER_SETTINGS_COMPRESSION_MISSING);
         openSearchClientFactory.determineVersionAndCreate();
         assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -240,6 +252,10 @@ class OpenSearchClientFactoryTest {
                 CLUSTER_SETTINGS_COMPRESSION_ENABLED_TRANSIENT);
         openSearchClientFactory.determineVersionAndCreate();
         assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -248,5 +264,8 @@ class OpenSearchClientFactoryTest {
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         openSearchClientFactory.determineVersionAndCreate();
         assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
     }
 }
