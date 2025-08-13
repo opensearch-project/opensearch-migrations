@@ -300,7 +300,7 @@ public class SourceTestBase {
             var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
             when(readerFactory.getReader(any())).thenAnswer(inv -> {
                 var reader = (LuceneIndexReader)spy(inv.callRealMethod());
-                when(reader.readDocuments()).thenAnswer(inv2 -> {
+                when(reader.readDocuments(any())).thenAnswer(inv2 -> {
                     var flux = (Flux<RfsLuceneDocument>)inv2.callRealMethod();
                     return flux.map(terminatingDocumentFilter);
                 });

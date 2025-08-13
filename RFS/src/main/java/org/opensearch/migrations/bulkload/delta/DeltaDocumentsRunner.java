@@ -138,7 +138,7 @@ public class DeltaDocumentsRunner {
         log.info("Setting up doc migration for index={}, shard={}",
              workItem.getIndexName(), workItem.getShardNumber());
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName(), workItem.getStartingDocId());
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
             .doOnSubscribe(s -> log.info("Subscribed to docMigrationCursors for index={}, shard={}",
