@@ -10,7 +10,6 @@ import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 
-
 function addCommonTargetLatchInputs<C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) {
     return tb
         .addRequiredInput("prefix", z.string())
@@ -76,47 +75,5 @@ export const TargetLatchHelpers = WorkflowBuilder.create("TargetLatchHelpers")
             .addArgs([cleanupTlhScript])
 
         )
-    )
-    .getFullScope();
-
-export const FullMigration = WorkflowBuilder.create("FullMigration")
-    .addParams(CommonWorkflowParameters)
-    .addTemplate("main", t=> t
-        .addRequiredInput("test",
-            z.string())
-        .addRequiredInput("sourceMigrationConfigs",
-            SNAPSHOT_MIGRATION_CONFIG,
-            "List of server configurations to direct migrated traffic toward")
-        .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
-            "List of server configurations to direct migrated traffic toward")
-        .addOptionalInput("imageParams",
-            scope =>
-                Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
-                        .flatMap((k) => [
-                            [`${k}Image`, ""],
-                            [`${k}ImagePullPolicy`, "IF_NOT_PRESENT"]
-                        ])
-                ),
-            "OCI image locations and pull policies for required images")
-        .addSteps(b => b
-            .addStep("init", TargetLatchHelpers, "init", steps => ({
-                prefix: b.inputs.test,
-                etcdUtilsImage: "",
-                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
-                targets: [],
-                configuration: {
-                    indices: [],
-                    migrations: []
-                }
-            }))
-            .addStep("cleanup", TargetLatchHelpers, "cleanup", steps => ({
-                prefix: steps.init.prefix,
-                etcdUtilsImage: "",
-                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
-            }))
-        )
-    )
-    .addTemplate("cleanup", t => t
-        .addSteps(b=>b)
     )
     .getFullScope();
