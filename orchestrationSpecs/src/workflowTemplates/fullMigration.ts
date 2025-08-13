@@ -2,7 +2,6 @@ import {z} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
-import {defineParam} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 

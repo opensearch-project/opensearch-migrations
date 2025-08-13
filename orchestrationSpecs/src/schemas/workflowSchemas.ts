@@ -17,9 +17,9 @@ import {
     StepWithOutputs,
     ParamsWithLiteralsOrExpressions, AllowLiteralOrExpression, InputParamsToExpressions, WorkflowInputsToExpressions
 } from "@/schemas/workflowTypes";
-import {z, ZodType, ZodTypeAny} from "zod";
+import {z, ZodType} from "zod";
 import {TypescriptError} from "@/utils";
-import {Expression, inputParam, inputParams, stepOutput} from "@/schemas/expression";
+import {inputParam, stepOutput} from "@/schemas/expression";
 import {IMAGE_PULL_POLICY} from "@/schemas/userSchemas";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;

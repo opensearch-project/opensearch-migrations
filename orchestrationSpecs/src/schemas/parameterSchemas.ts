@@ -1,4 +1,4 @@
-import {z, ZodEnum, ZodType, ZodTypeAny} from 'zod';
+import {z, ZodType, ZodTypeAny} from 'zod';
 
 export type InputParamDef<T, REQ extends boolean> = {
     type: ZodType<T>;
@@ -18,6 +18,7 @@ export function defineParam<T>(opts: {
     };
 }
 
+// Could be used to define Workflow Parameters
 export function defineRequiredParam<T>(opts: {
     type: ZodType<T>;
     description?: string;
