@@ -92,12 +92,11 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
-        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
-                    repoAccessor,
-                    tempDirectory,
-                    shardMetadata,
-                    Integer.MAX_VALUE
-                );
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
+            repoAccessor,
+            tempDirectory,
+            Integer.MAX_VALUE
+        ).create(shardMetadata);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
@@ -156,12 +155,11 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
-        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
-                    repoAccessor,
-                    tempDirectory,
-                    shardMetadata,
-                    Integer.MAX_VALUE
-                );
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
+            repoAccessor,
+            tempDirectory,
+            Integer.MAX_VALUE
+        ).create(shardMetadata);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
@@ -310,12 +308,11 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
-        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
-                repoAccessor,
-                tempDirectory,
-                shardMetadata,
-                Integer.MAX_VALUE
-        );
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
+            repoAccessor,
+            tempDirectory,
+            Integer.MAX_VALUE
+        ).create(shardMetadata);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
@@ -348,12 +345,11 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
-        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
-                repoAccessor,
-                tempDirectory,
-                shardMetadata,
-                Integer.MAX_VALUE
-        );
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
+            repoAccessor,
+            tempDirectory,
+            Integer.MAX_VALUE
+        ).create(shardMetadata);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents

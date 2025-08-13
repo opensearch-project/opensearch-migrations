@@ -128,9 +128,10 @@ public class DeltaDocumentsRunner {
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
-        ShardMetadata shardMetadata = shardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
+        var baseShardMetadata = baseShardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
+        var shardMetadata = shardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
 
-        var unpacker = unpackerFactory.create(shardMetadata);
+        var unpacker = unpackerFactory.create(baseShardMetadata, shardMetadata);
         var reader = readerFactory.getReader(unpacker.unpack());
         timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
         

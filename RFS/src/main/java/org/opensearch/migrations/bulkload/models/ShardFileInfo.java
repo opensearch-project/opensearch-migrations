@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.models;
 
+import lombok.Value;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
 /**
@@ -27,4 +28,23 @@ public interface ShardFileInfo {
 
     public String partName(long part);
 
+    public default ShardFileKey key() {
+        return new ShardFileKey(getName(), getPhysicalName(), getChecksum());
+    }
+
+    @Value
+    class ShardFileKey implements Comparable<ShardFileKey> {
+        String name;
+        String physicalName;
+        String checksum;
+
+        @Override
+        public int compareTo(ShardFileKey other) {
+            int cmp = name.compareTo(other.name);
+            if (cmp != 0) return cmp;
+            cmp = physicalName.compareTo(other.physicalName);
+            if (cmp != 0) return cmp;
+            return checksum.compareTo(other.checksum);
+        }
+    }
 }
