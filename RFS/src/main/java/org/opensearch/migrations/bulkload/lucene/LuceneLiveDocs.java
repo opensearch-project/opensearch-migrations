@@ -2,6 +2,15 @@ package org.opensearch.migrations.bulkload.lucene;
 
 public interface LuceneLiveDocs {
 
-    public boolean get(int docIdx);
+    boolean get(int docIdx);
 
+    long length();
+
+    LuceneLiveDocs xor(LuceneLiveDocs other);
+
+    LuceneLiveDocs and(LuceneLiveDocs other);
+
+    LuceneLiveDocs or(LuceneLiveDocs other);
+
+    LuceneLiveDocs andNot(LuceneLiveDocs other);
 }
