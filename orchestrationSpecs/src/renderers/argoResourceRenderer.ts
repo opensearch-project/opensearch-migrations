@@ -1,9 +1,9 @@
 import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {Scope} from "@/schemas/workflowTypes";
-import {StepGroup} from "@/schemas/workflowSchemas";
 import {Expression} from "@/schemas/expression";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
+import {StepGroup} from "@/schemas/stepsBuilder";
 
 
 export function renderWorkflowTemplate(wf: Scope) {

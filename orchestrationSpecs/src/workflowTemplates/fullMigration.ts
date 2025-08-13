@@ -1,12 +1,14 @@
 import {z} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {ContainerBuilder, TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 import {Scope} from "@/schemas/workflowTypes";
 import {asString} from "@/schemas/expression";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
+import {TemplateBuilder} from "@/schemas/templateBuilder";
+import {ContainerBuilder} from "@/schemas/containerBuilder";
+import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 
 
 function addCommonTargetLatchInputs<C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) {
@@ -30,7 +32,7 @@ function commonTargetLatchHelperEnvVarsFromWorkflowParameters<
         .addEnvVar("ETCD_USER", b.workflowInputs.etcdUser);
 }
 
-export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
+export const TargetLatchHelpers = WorkflowBuilder.create("TargetLatchHelpers")
     .addParams(CommonWorkflowParameters)
     .addTemplate("init", t=> t
         .addInputs(addCommonTargetLatchInputs)
@@ -77,7 +79,7 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
     )
     .getFullScope();
 
-export const FullMigration = WFBuilder.create("FullMigration")
+export const FullMigration = WorkflowBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
         .addRequiredInput("test",
