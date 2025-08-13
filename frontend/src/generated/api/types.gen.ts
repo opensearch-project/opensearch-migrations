@@ -93,6 +93,30 @@ export type SnapshotStatus = {
    * Finished
    */
   finished?: string | null;
+  /**
+   * Data Total Bytes
+   */
+  data_total_bytes: number | null;
+  /**
+   * Data Processed Bytes
+   */
+  data_processed_bytes: number | null;
+  /**
+   * Data Throughput Bytes Avg Sec
+   */
+  data_throughput_bytes_avg_sec: number | null;
+  /**
+   * Shard Total
+   */
+  shard_total: number | null;
+  /**
+   * Shard Complete
+   */
+  shard_complete: number | null;
+  /**
+   * Shard Failed
+   */
+  shard_failed: number | null;
 };
 
 /**
