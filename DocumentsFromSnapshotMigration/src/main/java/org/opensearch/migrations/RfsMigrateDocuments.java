@@ -209,6 +209,25 @@ public class RfsMigrateDocuments {
 
         @ParametersDelegate
         private VersionStrictness versionStrictness = new VersionStrictness();
+
+        @ParametersDelegate
+        private ExperimentalArgs experimental = new ExperimentalArgs();
+    }
+
+    public static class ExperimentalArgs {
+        @Parameter(required = false,
+            names = { "--base-snapshot-name", "--baseSnapshotName" },
+            description = "Optional. The name of the base snapshot for delta migration (experimental feature)",
+            hidden = true
+        )
+        public String baseSnapshotName = null;
+
+        @Parameter(required = false,
+            names = { "--experimental-delta-mode" },
+            description = "Enable experimental delta snapshot migration mode. Requires --base-snapshot-name",
+            hidden = true
+        )
+        public boolean experimentalDeltaMode = false;
     }
 
 
@@ -308,6 +327,20 @@ public class RfsMigrateDocuments {
             throw new ParameterException(
                 "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region."
             );
+        }
+        
+        // Validate delta mode parameters
+        if (args.experimental.experimentalDeltaMode) {
+            if (args.experimental.baseSnapshotName == null) {
+                throw new ParameterException(
+                    "When --experimental-delta-mode is enabled, --base-snapshot-name must be provided."
+                );
+            }
+            log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration is enabled. " +
+                    "This feature is experimental and should not be used in production.");
+        } else if (args.experimental.baseSnapshotName != null) {
+            log.warn("--base-snapshot-name was provided but --experimental-delta-mode is not enabled. " +
+                    "The base snapshot will be ignored.");
         }
 
     }
