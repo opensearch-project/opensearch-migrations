@@ -73,6 +73,19 @@ tasks.register('lintFrontend', NpmTask) {
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
 }
 
+tasks.register('checkGeneratedFilesTracked', Exec) {
+    dependsOn 'buildFrontend'
+    group = 'check'
+    description = 'Verifies there are no untracked files in src/generated directory'
+    workingDir = project.projectDir
+    
+    // Using System.out and System.err is compatible with configuration cache
+    standardOutput = System.out
+    errorOutput = System.err
+    
+    commandLine 'bash', '-c', 'untrackedFiles=$(git ls-files --others --exclude-standard src/generated); if [ -n "$untrackedFiles" ]; then echo "Error: Untracked files found in src/generated:"; echo "$untrackedFiles"; exit 1; else echo "All generated files are tracked by git"; fi'
+}
+
 tasks.register('cleanFrontend', Delete) {
     delete buildOutputs
 }
@@ -104,4 +117,5 @@ The following is a list of npm commands to execute:
 
 assemble.dependsOn 'buildFrontend'
 check.dependsOn 'lintFrontend'
+check.dependsOn 'checkGeneratedFilesTracked'
 clean.dependsOn 'cleanFrontend'
