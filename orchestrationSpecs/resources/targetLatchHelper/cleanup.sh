@@ -1,7 +1,7 @@
 export ETCDCTL_API=3
-etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD"
 
-PREFIX="{{inputs.parameters.prefix}}"
+PREFIX="$WORKFLOW_PREFIX"
 echo "===== CLEANING UP ETCD KEYS FOR PREFIX $PREFIX ====="
 
 # Record workflow completion time

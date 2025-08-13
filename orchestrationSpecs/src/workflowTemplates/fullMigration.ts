@@ -13,6 +13,7 @@ function addCommonTargetLatchInputs<C extends Scope>(tb: TemplateBuilder<C, {}, 
 }
 
 export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
+    .addParams(CommonWorkflowParameters)
     .addTemplate("init", t=> t
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
@@ -21,6 +22,12 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
+            .addEnvVars(b=> b
+                .addEnvVar("PREFIX", b.inputs.prefix)
+                .addEnvVar("ETCD_ENDPOINTS", b.workflowInputs.etcdEndpoints)
+                .addEnvVar("ETCD_PASSWORD", b.workflowInputs.etcdPassword)
+                .addEnvVar("ETCD_USER", b.workflowInputs.etcdUser)
+            )
             .addPathOutput("prefix", "/tmp/prefix", z.string())
             .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", z.number())
         )

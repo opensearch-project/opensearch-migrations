@@ -1,8 +1,8 @@
 set -x -e
-PROCESSOR_ID="{{inputs.parameters.processor}}"
-TARGET_ENDPOINT="{{inputs.parameters.target}}"
-ETCD_ENDPOINT={{workflow.parameters.etcd-endpoints}}
-PREFIX="{{inputs.parameters.prefix}}"
+PROCESSOR_ID="$PROCESSOR_ID"
+TARGET_ENDPOINT="$TARGET_ENDPOINT"
+ETCD_ENDPOINT=$ETCD_ENDPOINTS
+PREFIX="$WORKFLOW_PREFIX"
 
 normalize_endpoint() {
   echo "$1" | base64
@@ -10,8 +10,8 @@ normalize_endpoint() {
 
 NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_ENDPOINT")
 
-USERNAME={{workflow.parameters.etcd-user}}
-PASSWORD={{workflow.parameters.etcd-password}}
+USERNAME=$ETCD_USER
+PASSWORD=$ETCD_PASSWORD
 LATCH_KEY_NAME=/$PREFIX/workflow/targets/$NORMALIZED_TARGET/latch
 
 FRIENDLY_NAME="${NORMALIZED_TARGET}-${PROCESSOR_ID}"

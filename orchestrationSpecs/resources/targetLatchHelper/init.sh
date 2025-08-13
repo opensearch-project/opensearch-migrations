@@ -1,5 +1,5 @@
-SOURCE_CONFIG=$(echo '{{inputs.parameters.configurations}}')
-TARGETS_CONFIG=$(echo '{{inputs.parameters.targets}}')
+SOURCE_CONFIG=$(echo "$CONFIGURATIONS")
+TARGETS_CONFIG=$(echo "$TARGETS")
 echo "source config = $SOURCE_CONFIG"
 echo "targets config = $TARGETS_CONFIG"
 
@@ -60,15 +60,15 @@ done
 PROCESSOR_COUNT=$(echo "$SOURCE_CONFIG" | jq -r '[.[] | .["snapshot-and-migration-configs"][] | .migrations | length] | add')
 echo "Total processor count: $PROCESSOR_COUNT"
 
-echo "{{inputs.parameters.prefix}}" > /tmp/prefix
+echo "$PREFIX" > /tmp/prefix
 export ETCDCTL_API=3
 
 # Run etcdctl with configured endpoints and authentication
-etcdctl_cmd="etcdctl --endpoints={{workflow.parameters.etcd-endpoints}} --user {{workflow.parameters.etcd-user}}:{{workflow.parameters.etcd-password}}"
+etcdctl_cmd="etcdctl --endpoints=$ETCD_ENDPOINTS --user $ETCD_USER:$ETCD_PASSWORD"
 
 # Store the workflow prefix in etcd for future reference
-$etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/info/prefix "{{inputs.parameters.prefix}}"
-$etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/info/started "$(date +%s)"
+$etcdctl_cmd put /$PREFIX/workflow/info/prefix "$PREFIX"
+$etcdctl_cmd put /$PREFIX/workflow/info/started "$(date +%s)"
 
 # Initialize target latches
 echo "$TARGETS_CONFIG" | jq -c '.[]' | while read -r target_json; do
@@ -76,8 +76,8 @@ echo "$TARGETS_CONFIG" | jq -c '.[]' | while read -r target_json; do
   NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_ENDPOINT")
 
   # Initialize the latch with processor count
-  $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$NORMALIZED_TARGET/endpoint "$TARGET_ENDPOINT"
-  $etcdctl_cmd put /{{inputs.parameters.prefix}}/workflow/targets/$NORMALIZED_TARGET/latch "$PROCESSOR_COUNT"
+  $etcdctl_cmd put /$PREFIX/workflow/targets/$NORMALIZED_TARGET/endpoint "$TARGET_ENDPOINT"
+  $etcdctl_cmd put /$PREFIX/workflow/targets/$NORMALIZED_TARGET/latch "$PROCESSOR_COUNT"
 
   echo "Target $TARGET_ENDPOINT ($NORMALIZED_TARGET) latch initialized with count $PROCESSOR_COUNT"
 done
@@ -85,4 +85,4 @@ done
 # Output the processor count per target for workflow output
 echo "{\"processor_count\": $PROCESSOR_COUNT}" > /tmp/processors-per-target
 
-echo "Etcd keys initialized with prefix: {{inputs.parameters.prefix}}"
+echo "Etcd keys initialized with prefix: $PREFIX"
