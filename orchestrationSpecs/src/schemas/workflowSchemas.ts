@@ -15,7 +15,7 @@ import {
     FieldSpecsToInputParams,
     StepsScopeToStepsWithOutputs,
     StepWithOutputs,
-    ParamsWithLiteralsOrExpressions, AllowLiteralOrExpression
+    ParamsWithLiteralsOrExpressions, AllowLiteralOrExpression, InputParamsToExpressions, WorkflowInputsToExpressions
 } from "@/schemas/workflowTypes";
 import {z, ZodType, ZodTypeAny} from "zod";
 import {TypescriptError} from "@/utils";
@@ -400,12 +400,21 @@ abstract class TemplateBodyBuilder<
             >;
     }
 
-    getInputParam<K extends keyof InputParamsScope>(
-        key: K
-    ): ReturnType<typeof inputParam<
-        InputParamsScope[K] extends { type: ZodType<infer T> } ? T : never
-    >> {
-        return inputParam(key as string, this.inputsScope[key]);
+    get inputs(): InputParamsToExpressions<InputParamsScope> {
+        const result: any = {};
+        Object.keys(this.inputsScope).forEach(key => {
+            result[key] = inputParam(key, this.inputsScope[key]);
+        });
+        return result as InputParamsToExpressions<InputParamsScope>;
+    }
+
+    get workflowInputs(): WorkflowInputsToExpressions<ContextualScope> {
+        const result: any = {};
+        const workflowParams = (this.contextualScope as any).workflowParameters || {};
+        Object.keys(workflowParams).forEach(key => {
+            result[key] = inputParam(key, workflowParams[key]);
+        });
+        return result as WorkflowInputsToExpressions<ContextualScope>;
     }
 
     // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow

@@ -1,8 +1,8 @@
 // Internal types for workflow schema implementation
-import {ZodTypeAny} from "zod";
+import {ZodType, ZodTypeAny} from "zod";
 import {InputParamDef, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
-import {Expression, stepOutput} from "@/schemas/expression";
+import {Expression, inputParam, stepOutput} from "@/schemas/expression";
 
 declare global {
     // true: worse LSP, but squigglies under the name declaration
@@ -60,6 +60,20 @@ export type ParamsWithLiteralsOrExpressions<T> = {
 export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = {
     [K in keyof Outputs]: ReturnType<typeof stepOutput<ExtractOutputParamType<Outputs[K]>>>
 };
+
+export type InputParamsToExpressions<InputParamsScope extends Scope> = {
+    [K in keyof InputParamsScope]: ReturnType<typeof inputParam<
+        InputParamsScope[K] extends { type: ZodType<infer T> } ? T : never
+    >>
+};
+
+// Helper type to extract workflow inputs from contextual scope
+export type WorkflowInputsToExpressions<ContextualScope extends Scope> =
+    ContextualScope extends { workflowParameters: infer WP }
+        ? WP extends Scope
+            ? InputParamsToExpressions<WP>
+            : {}
+        : {};
 
 export type StepWithOutputs<
     StepName extends string,

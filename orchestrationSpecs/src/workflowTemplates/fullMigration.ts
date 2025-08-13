@@ -18,7 +18,7 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG))
         .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
         .addContainer(b=>b
-            .addImageInfo(b.getInputParam("etcdUtilsImage"), b.getInputParam("etcdUtilsImagePullPolicy"))
+            .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
             .addPathOutput("prefix", "/tmp/prefix", z.string())
@@ -58,7 +58,7 @@ export const FullMigration = WFBuilder.create("FullMigration")
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
             .addStep("init", TargetLatchHelpers, "init", steps => ({
-                prefix: b.getInputParam("test"),
+                prefix: b.inputs.test,
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                 targets: [],
