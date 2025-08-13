@@ -355,7 +355,7 @@ class SnapshotStatus(BaseModel):
         state = convert_snapshot_state_to_step_state(raw_state)
 
         # 6) If it's already done, clamp to 100%
-        if state == "COMPLETED":
+        if state == StepState.COMPLETED:
             percentage = 100.0
             eta_ms = 0.0
 

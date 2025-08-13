@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 
-from console_link.models.snapshot import SnapshotStatus
+from console_link.models.snapshot import SnapshotStatus, StepState
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def test_from_snapshot_info_with_opensearch_format(opensearch_snapshot_info):
     status = SnapshotStatus.from_snapshot_info(opensearch_snapshot_info)
     
     # Verify status
-    assert status.status == "RUNNING"
+    assert status.status == StepState.RUNNING
     assert status.percentage_completed == pytest.approx(50.0)
     
     # Verify timestamps
@@ -155,7 +155,7 @@ def test_from_snapshot_info_with_es_7_8_format(es_7_8_snapshot_info):
     status = SnapshotStatus.from_snapshot_info(es_7_8_snapshot_info)
     
     # Verify status
-    assert status.status == "RUNNING"
+    assert status.status == StepState.RUNNING
     assert status.percentage_completed == pytest.approx(50.0)
     
     # Verify timestamps
@@ -172,7 +172,7 @@ def test_from_snapshot_info_with_es_pre_7_8_format(es_pre_7_8_snapshot_info):
     status = SnapshotStatus.from_snapshot_info(es_pre_7_8_snapshot_info)
     
     # Verify status
-    assert status.status == "RUNNING"
+    assert status.status == StepState.RUNNING
     assert status.percentage_completed == pytest.approx(25.0)
     
     # Verify timestamps
@@ -189,7 +189,7 @@ def test_from_snapshot_info_with_completed_snapshot(completed_snapshot_info):
     status = SnapshotStatus.from_snapshot_info(completed_snapshot_info)
     
     # Verify status
-    assert status.status == "COMPLETED"
+    assert status.status == StepState.COMPLETED
     assert status.percentage_completed == pytest.approx(100.0)
     
     # Verify timestamps
@@ -206,7 +206,7 @@ def test_from_snapshot_info_with_failed_snapshot(failed_snapshot_info):
     status = SnapshotStatus.from_snapshot_info(failed_snapshot_info)
     
     # Verify status
-    assert status.status == "FAILED"
+    assert status.status == StepState.FAILED
     assert status.percentage_completed == pytest.approx(50.0)
     
     # Verify timestamps
@@ -223,7 +223,7 @@ def test_from_snapshot_info_with_partial_snapshot(partial_snapshot_info):
     status = SnapshotStatus.from_snapshot_info(partial_snapshot_info)
     
     # Verify status
-    assert status.status == "FAILED"  # PARTIAL maps to FAILED
+    assert status.status == StepState.FAILED  # PARTIAL maps to FAILED
     assert status.percentage_completed == pytest.approx(100.0)
     
     # Verify timestamps
@@ -272,7 +272,7 @@ def test_from_snapshot_info_with_missing_fields():
     status = SnapshotStatus.from_snapshot_info(snapshot_info)
     
     # Should handle missing fields gracefully
-    assert status.status == "RUNNING"
+    assert status.status == StepState.RUNNING
     assert status.percentage_completed == pytest.approx(0.0)
     assert status.started is None
     assert status.finished is None
