@@ -40,7 +40,7 @@ public class S3Repo implements SourceRepo {
     //      maxConcurrency = 100
     //
     //  To reduce heap memory usage to under 1GB we will set concurrentFileDownloads to 10 (otherwise it defaults to 100)
-    private static int TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS = 10;
+    private static final int TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS = 10;
 
 
     public static final String INDICES_PREFIX_STR = "indices/";
