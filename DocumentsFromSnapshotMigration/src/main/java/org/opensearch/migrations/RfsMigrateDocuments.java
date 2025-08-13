@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -27,6 +28,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.delta.DeltaDocumentsRunner;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -37,6 +39,7 @@ import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -465,6 +468,7 @@ public class RfsMigrateDocuments {
                 processManager,
                 sourceResourceProvider.getIndexMetadata(),
                 arguments.snapshotName,
+                arguments.experimental.baseSnapshotName,
                 arguments.indexAllowlist,
                 sourceResourceProvider.getShardMetadata(),
                 unpackerFactory,
@@ -657,21 +661,23 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(LuceneIndexReader.Factory readerFactory,
-                                                       DocumentReindexer reindexer,
-                                                       AtomicReference<WorkItemCursor> progressCursor,
-                                                       IWorkCoordinator workCoordinator,
-                                                       Duration maxInitialLeaseDuration,
-                                                       LeaseExpireTrigger leaseExpireTrigger,
-                                                       IndexMetadata.Factory indexMetadataFactory,
-                                                       String snapshotName,
-                                                       List<String> indexAllowlist,
-                                                       ShardMetadata.Factory shardMetadataFactory,
-                                                       SnapshotShardUnpacker.Factory unpackerFactory,
-                                                       long maxShardSizeBytes,
-                                                       RootDocumentMigrationContext rootDocumentContext,
-                                                       AtomicReference<Runnable> cancellationRunnable,
-                                                       WorkItemTimeProvider timeProvider)
+
+    public static CompletionStatus run(LuceneIndexReader.Factory readerFactory,
+                                       DocumentReindexer reindexer,
+                                       AtomicReference<WorkItemCursor> progressCursor,
+                                       IWorkCoordinator workCoordinator,
+                                       Duration maxInitialLeaseDuration,
+                                       LeaseExpireTrigger leaseExpireTrigger,
+                                       IndexMetadata.Factory indexMetadataFactory,
+                                       String snapshotName,
+                                       String baseSnapshotName,
+                                       List<String> indexAllowlist,
+                                       ShardMetadata.Factory shardMetadataFactory,
+                                       SnapshotShardUnpacker.Factory unpackerFactory,
+                                       long maxShardSizeBytes,
+                                       RootDocumentMigrationContext rootDocumentContext,
+                                       AtomicReference<Runnable> cancellationRunnable,
+                                       WorkItemTimeProvider timeProvider)
         throws IOException, InterruptedException, NoWorkLeftException
     {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
@@ -686,25 +692,47 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+        Function<String, BiFunction<String, Integer, ShardMetadata>> shardMetadataSupplierFactory = (snapshot) -> (indexName, shardId) -> {
+            var shardMetadata = shardMetadataFactory.fromRepo(snapshot, indexName, shardId);
+            log.atInfo()
+                .setMessage("Shard size: {} for snapshotName={} indexName={} shardId={}")
+                .addArgument(shardMetadata.getTotalSizeBytes())
+                .addArgument(snapshot)
+                .addArgument(indexName)
+                .addArgument(shardId)
+                .log();
             if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
                 throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
             }
             return shardMetadata;
         };
 
-        var runner = new DocumentsRunner(scopedWorkCoordinator,
-            maxInitialLeaseDuration,
-            reindexer,
-            unpackerFactory,
-            shardMetadataSupplier,
-            readerFactory,
-            progressCursor::set,
-            cancellationRunnable::set,
-            timeProvider);
-        return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+        var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
+        if (baseSnapshotName == null) {
+            var runner = new DocumentsRunner(scopedWorkCoordinator,
+                maxInitialLeaseDuration,
+                reindexer,
+                unpackerFactory,
+                shardMetadataSupplier,
+                readerFactory,
+                progressCursor::set,
+                cancellationRunnable::set,
+                timeProvider);
+            return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+        } else {
+            var baseShardMetadataSupplier = shardMetadataSupplierFactory.apply(baseSnapshotName);
+            var runner = new DeltaDocumentsRunner(scopedWorkCoordinator,
+                maxInitialLeaseDuration,
+                reindexer,
+                unpackerFactory,
+                baseShardMetadataSupplier,
+                shardMetadataSupplier,
+                readerFactory,
+                progressCursor::set,
+                cancellationRunnable::set,
+                timeProvider);
+            return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+        }
     }
 
     private static void confirmShardPrepIsComplete(

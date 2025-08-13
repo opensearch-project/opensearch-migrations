@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.worker;
+package org.opensearch.migrations.bulkload.delta;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -9,7 +9,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
@@ -17,6 +16,8 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import lombok.AllArgsConstructor;
@@ -27,11 +28,12 @@ import reactor.core.scheduler.Schedulers;
 
 @Slf4j
 @AllArgsConstructor
-public class DocumentsRunner {
+public class DeltaDocumentsRunner {
     private final ScopedWorkCoordinator workCoordinator;
     private final Duration maxInitialLeaseDuration;
     private final DocumentReindexer reindexer;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
+    private final BiFunction<String, Integer, ShardMetadata> baseShardMetadataFactory;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final LuceneIndexReader.Factory readerFactory;
     private final Consumer<WorkItemCursor> cursorConsumer;
@@ -118,18 +120,6 @@ public class DocumentsRunner {
                     return CompletionStatus.NOTHING_DONE;
                 }
             }, context::createCloseContet);
-        }
-    }
-
-    public static class ShardTooLargeException extends RfsException {
-        public ShardTooLargeException(long shardSizeBytes, long maxShardSize) {
-            super(
-                "The shard size of "
-                    + shardSizeBytes
-                    + " bytes exceeds the maximum shard size of "
-                    + maxShardSize
-                    + " bytes"
-            );
         }
     }
 

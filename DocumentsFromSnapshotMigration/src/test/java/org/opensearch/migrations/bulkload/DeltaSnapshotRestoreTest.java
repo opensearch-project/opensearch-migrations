@@ -141,17 +141,14 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
-            // === ACTION: Migrate documents from snapshot2 ===
-            // TODO: In the future, this will accept both snapshot1Name and snapshot2Name
-            // and calculate the delta between them
+            // === ACTION: Migrate state change between snapshot1 and snapshot2
             var runCounter = new AtomicInteger();
             var clockJitter = new Random(1);
 
-            // Currently just migrating from snapshot2
-            // Future: Will calculate delta between snapshot1 and snapshot2
             var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
-                    snapshot2Name,  // Currently using snapshot2; future will use both snapshots
+                    snapshot1Name,
+                    snapshot2Name,
                     List.of(),
                     targetCluster,
                     runCounter,
