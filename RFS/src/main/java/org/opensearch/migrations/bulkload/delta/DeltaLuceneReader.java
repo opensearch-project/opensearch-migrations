@@ -1,6 +1,17 @@
 package org.opensearch.migrations.bulkload.delta;
 
-import lombok.extern.slf4j.Slf4j;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
@@ -8,20 +19,13 @@ import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.ReaderAndBase;
 import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
+
+import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
-
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class DeltaLuceneReader {
@@ -32,23 +36,79 @@ public class DeltaLuceneReader {
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
      */
-    public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader ignoredBaseReader, LuceneDirectoryReader reader, int startDocId) {
-        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
-        log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
-            .addArgument(reader::maxDoc)
-            .addArgument(() -> reader.leaves().size())
-            .log();
+    public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader baseReader, LuceneDirectoryReader currentReader, int startDocId) {
+       // Start with brute force solution
+        var baseSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+        baseReader.leaves().forEach(
+            leaf ->
+                baseSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+        );
 
-        // Create shared scheduler for i/o bound document reading
+        var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+        currentReader.leaves().forEach(
+            leaf ->
+                currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+        );
+
+        // --- compute key sets
+        var baseKeys    = new TreeSet<>(baseSegmentToLeafReader.keySet());
+        var currentKeys = new TreeSet<>(currentSegmentToLeafReader.keySet());
+
+        var onlyInBaseKeys    = new TreeSet<>(baseKeys);
+        onlyInBaseKeys.removeAll(currentKeys);
+
+        var onlyInCurrentKeys = new TreeSet<>(currentKeys);
+        onlyInCurrentKeys.removeAll(baseKeys);
+
+        var inBothKeys        = new TreeSet<>(baseKeys);
+        inBothKeys.retainAll(currentKeys);
+
+        // --- materialize maps
+        var onlyInBase = onlyInBaseKeys.stream()
+            .collect(Collectors.toMap(
+                k -> k,
+                baseSegmentToLeafReader::get,
+                (a,b) -> a,
+                TreeMap::new
+            ));
+
+        var onlyInCurrent = onlyInCurrentKeys.stream()
+            .collect(Collectors.toMap(
+                k -> k,
+                currentSegmentToLeafReader::get,
+                (a,b) -> a,
+                TreeMap::new
+            ));
+
+        var inBoth = inBothKeys.stream()
+            .collect(Collectors.toMap(
+                k -> k,
+                k -> new AbstractMap.SimpleEntry<>(baseSegmentToLeafReader.get(k), currentSegmentToLeafReader.get(k)),
+                (a,b) -> a,
+                TreeMap::new
+            ));
+
+        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-        return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
-            .concatMapDelayError(c -> readDocsFromSegment(c,
+
+
+        // Start with just new segments
+        List<ReaderAndBase> readerAndBases = new ArrayList<>(onlyInCurrent.size());
+        // TODO: For delta backfill we need to move to using `long` everywhere since we may have more than 2^31 docs to work through
+        // when adding both docs to remove and docs to add
+        int offset = 0;
+        for (var reader : onlyInCurrent.values()) {
+            readerAndBases.add(new ReaderAndBase(reader, offset));
+            offset += reader.maxDoc();
+        }
+        return Flux.fromIterable(readerAndBases)
+            .flatMapSequential( c ->
+                readDocsFromSegment(c,
                     startDocId,
                     sharedSegmentReaderScheduler,
                     maxDocumentsToReadAtOnce,
-                    reader.getIndexDirectoryPath())
-            )
-            .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
+                    Path.of(c.getReader().getSegmentName()))
+            ).subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
             .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
             .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }

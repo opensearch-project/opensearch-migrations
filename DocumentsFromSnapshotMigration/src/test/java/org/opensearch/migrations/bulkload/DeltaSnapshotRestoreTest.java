@@ -176,9 +176,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
 
             // Check if snap1Doc exists
             var snap1DocResponse = targetClusterOperations.get("/" + indexName + "/_source/snap1Doc");
-            // TODO: When delta feature is implemented, this should fail (snap1Doc should have never been on target)
-            // Assertions.assertEquals(404, snap1DocResponse.statusCode, "snap1Doc should not be found on target");
-            Assertions.assertEquals(200, snap1DocResponse.getKey(), "snapDoc1 should exist on target");
+            Assertions.assertEquals(404, snap1DocResponse.getKey(), "snap1Doc should not be found on target");
         } finally {
             deleteTree(localDirectory.toPath());
         }
