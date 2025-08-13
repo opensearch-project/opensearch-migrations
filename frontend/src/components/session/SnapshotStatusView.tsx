@@ -44,7 +44,7 @@ export default function SnapshotStatusView({ sessionName }: Readonly<SessionStat
     setDebugData(null);
   };
 
-  const fields: StatusFieldDefinition<SnapshotData>[] = [
+  const fields: StatusFieldDefinition[] = [
     {
       label: 'Status',
       value: <StatusDisplay status={snapshotData?.status} />

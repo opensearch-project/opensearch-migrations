@@ -23,6 +23,12 @@ import type {
   SnapshotStatusData,
   SnapshotStatusResponses,
   SnapshotStatusErrors,
+  MetadataMigrateData,
+  MetadataMigrateResponses,
+  MetadataMigrateErrors,
+  MetadataStatusData,
+  MetadataStatusResponses,
+  MetadataStatusErrors,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
 
@@ -175,6 +181,45 @@ export const snapshotStatus = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/sessions/{session_name}/snapshot/status",
+    ...options,
+  });
+};
+
+/**
+ * Migrate Metadata
+ * Migrate metadata for the given session.
+ * If dry_run=True, only evaluates the migration without making changes.
+ */
+export const metadataMigrate = <ThrowOnError extends boolean = false>(
+  options: Options<MetadataMigrateData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    MetadataMigrateResponses,
+    MetadataMigrateErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/metadata/migrate",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+};
+
+/**
+ * Get Metadata Status
+ * Get the status of the most recent metadata operation for the session.
+ */
+export const metadataStatus = <ThrowOnError extends boolean = false>(
+  options: Options<MetadataStatusData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    MetadataStatusResponses,
+    MetadataStatusErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/metadata/status",
     ...options,
   });
 };
