@@ -77,13 +77,23 @@ tasks.register('checkGeneratedFilesTracked', Exec) {
     dependsOn 'buildFrontend'
     group = 'check'
     description = 'Verifies there are no untracked files in src/generated directory'
-    workingDir = project.projectDir
-    
-    // Using System.out and System.err is compatible with configuration cache
+    workingDir = rootProject.rootDir
+   
     standardOutput = System.out
     errorOutput = System.err
     
-    commandLine 'bash', '-c', 'untrackedFiles=$(git ls-files --others --exclude-standard src/generated); if [ -n "$untrackedFiles" ]; then echo "Error: Untracked files found in src/generated:"; echo "$untrackedFiles"; exit 1; else echo "All generated files are tracked by git"; fi'
+    commandLine 'bash', '-c', '''
+        changed=$(git diff --name-only -- frontend/src/generated/)
+        untracked=$(git ls-files --others --exclude-standard -- frontend/src/generated/)
+        if [ -n "$changed$untracked" ]; then
+            echo "Error: Unstaged or untracked files under frontend/src/generated/:"
+            [ -n "$changed" ] && echo "$changed"
+            [ -n "$untracked" ] && echo "$untracked"
+            exit 1
+        else
+            echo "OK: No unstaged or untracked files under frontend/src/generated/"
+        fi
+        '''
 }
 
 tasks.register('cleanFrontend', Delete) {
