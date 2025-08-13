@@ -420,7 +420,7 @@ export function inputsToEnvVarNames<T extends Record<string, any>>(inputs: T): R
     return result;
 }
 
-class ContainerBuilder<
+export class ContainerBuilder<
     ContextualScope extends Scope,
     InputParamsScope  extends Scope,
     ContainerScope extends Scope,
