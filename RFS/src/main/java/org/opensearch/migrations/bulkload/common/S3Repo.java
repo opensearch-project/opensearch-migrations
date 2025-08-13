@@ -40,7 +40,7 @@ public class S3Repo implements SourceRepo {
     //      maxConcurrency = 100
     //
     //  To reduce heap memory usage to under 1GB we will set concurrentFileDownloads to 10 (otherwise it defaults to 100)
-    private static int DIRECTORY_TRANSFER_MAX_CONCURRENT_FILE_DOWNLOADS = 10;
+    private static int TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS = 10;
 
 
     public static final String INDICES_PREFIX_STR = "indices/";
@@ -166,7 +166,7 @@ public class S3Repo implements SourceRepo {
     public void prepBlobFiles(ShardMetadata shardMetadata) {
         try (S3TransferManager transferManager = S3TransferManager.builder()
         .s3Client(s3Client)
-        .directoryTransferMaxConcurrency(DIRECTORY_TRANSFER_MAX_CONCURRENT_FILE_DOWNLOADS)
+        .transferDirectoryMaxConcurrency(TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS)
         .build()) {
 
             Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
