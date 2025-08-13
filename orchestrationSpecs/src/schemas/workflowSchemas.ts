@@ -19,7 +19,7 @@ import {
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
 import {toEnvVarName, TypescriptError} from "@/utils";
-import {inputParam, stepOutput} from "@/schemas/expression";
+import {inputParam, stepOutput, workflowParam} from "@/schemas/expression";
 import {IMAGE_PULL_POLICY} from "@/schemas/userSchemas";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
@@ -385,7 +385,7 @@ abstract class TemplateBodyBuilder<
         const result: any = {};
         const workflowParams = (this.contextualScope as any).workflowParameters || {};
         Object.keys(workflowParams).forEach(key => {
-            result[key] = inputParam(key, workflowParams[key]);
+            result[key] = workflowParam(key, workflowParams[key]);
         });
         return result as WorkflowInputsToExpressions<ContextualScope>;
     }

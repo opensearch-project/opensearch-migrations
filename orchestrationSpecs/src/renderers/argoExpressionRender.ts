@@ -2,7 +2,7 @@
 import {
     ArithmeticExpression,
     ArrayIndexExpression,
-    ArrayLengthExpression,
+    ArrayLengthExpression, AsStringExpression,
     ComparisonExpression,
     ConcatExpression,
     Expression,
@@ -15,6 +15,10 @@ import {
 
 export function toArgoExpression<T>(expr: Expression<T>): string {
     // Use type guards instead of switch statements with type assertions
+
+    if (isAsStringExpression(expr)) {
+        return toArgoExpression(expr.source);
+    }
 
     if (isLiteralExpression(expr)) {
         return typeof expr.value === 'string'
@@ -76,6 +80,10 @@ export function toArgoExpression<T>(expr: Expression<T>): string {
     }
 
     throw new Error(`Unsupported expression kind: ${(expr as any).kind}`);
+}
+
+export function isAsStringExpression(expr: Expression<any>): expr is AsStringExpression<any> {
+    return expr.kind === 'as_string';
 }
 
 export function isLiteralExpression<T>(expr: Expression<T>): expr is LiteralExpression<T> {

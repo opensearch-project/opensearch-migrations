@@ -7,6 +7,12 @@ export abstract class Expression<T> {
     constructor(public readonly kind: string) {}
 }
 
+export class AsStringExpression<T> extends Expression<string> {
+    constructor(public readonly source: Expression<T>) {
+        super('as_string');
+    }
+}
+
 export class LiteralExpression<T> extends Expression<T> {
     constructor(public readonly value: T) {
         super('literal');
@@ -115,6 +121,10 @@ export class ArrayIndexExpression<T> extends Expression<T> {
 // =============================================================================
 // BUILDER FUNCTIONS
 // =============================================================================
+
+// conversion
+export const asString = <T>(expr: Expression<T>): Expression<string> =>
+    new AsStringExpression(expr);
 
 // Literals
 export const literal = <T>(value: T) => new LiteralExpression(value);

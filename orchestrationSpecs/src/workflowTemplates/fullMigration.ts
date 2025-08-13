@@ -4,6 +4,7 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {TemplateBuilder, WFBuilder} from "@/schemas/workflowSchemas";
 import {Scope} from "@/schemas/workflowTypes";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
+import {asString} from "@/schemas/expression";
 
 function addCommonTargetLatchInputs<C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) {
     return tb
@@ -24,6 +25,7 @@ export const TargetLatchHelpers = WFBuilder.create("TargetLatchHelpers")
             .addArgs([initTlhScript])
             .addEnvVars(b=> b
                 .addEnvVar("PREFIX", b.inputs.prefix)
+                .addEnvVar("CONFIGURATIONS", asString(b.inputs.configuration))
                 .addEnvVar("ETCD_ENDPOINTS", b.workflowInputs.etcdEndpoints)
                 .addEnvVar("ETCD_PASSWORD", b.workflowInputs.etcdPassword)
                 .addEnvVar("ETCD_USER", b.workflowInputs.etcdUser)
