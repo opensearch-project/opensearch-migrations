@@ -271,11 +271,13 @@ class SnapshotNotStarted(Exception):
 class SnapshotStatusUnavailable(Exception):
     pass
 
+
 class StepState(str, Enum):
     PENDING = "Pending"
     RUNNING = "Running"
     COMPLETED = "Completed"
     FAILED = "Failed"
+
 
 class SnapshotStatus(BaseModel):
     status: StepState
