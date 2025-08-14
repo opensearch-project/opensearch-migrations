@@ -193,7 +193,11 @@ def build_extra_args(request: MetadataRequest) -> List[str]:
     return extra_args
 
 
-def build_metadata_response(session_name: str, result: Dict[str, Any], success: bool) -> MetadataResponse:
+def build_metadata_response(session_name: str,
+                            result: Dict[str, Any],
+                            success: bool,
+                            started: Optional[datetime],
+                            finished: Optional[datetime]) -> MetadataResponse:
     """Build a structured metadata response from the command result."""
     # Parse the result to get structured data
     
@@ -206,6 +210,8 @@ def build_metadata_response(session_name: str, result: Dict[str, Any], success: 
         success=success,
         session_name=session_name,
         status=status,
+        started=started,
+        finished=finished,
         clusters=ClustersInfo(**result.get("clusters", {})) if "clusters" in result else None,
         items=ItemsInfo(**result.get("items", {})) if "items" in result else None,
         transformations=TransformationInfo(**result.get("transformations", {}))
@@ -213,8 +219,7 @@ def build_metadata_response(session_name: str, result: Dict[str, Any], success: 
         errors=result.get("errors", []),
         errorCount=result.get("errorCount", 0),
         errorCode=result.get("errorCode", 0),
-        errorMessage=result.get("errorMessage", None)
-
+        errorMessage=result.get("errorMessage", None),
     )
     
     return response
@@ -237,6 +242,8 @@ def build_status_response_from_result(latest_result: Dict[str, Any]) -> Metadata
         session_name=session_name,
         success=success,
         result=latest_result.get("result", {}),
+        started=(lambda s: datetime.fromisoformat(s) if s else None)(latest_result.get("started")),
+        finished=(lambda s: datetime.fromisoformat(s) if s else None)(latest_result.get("finished")),
     )
 
 
@@ -277,7 +284,7 @@ def migrate_metadata(session_name: str, request: MetadataRequest = Body(...)):
 
         store_metadata_result(session_name, parsed_data, start_time, end_time, dry_run=request.dry_run)
         # Build structured response
-        return build_metadata_response(session_name, parsed_data, result.success)
+        return build_metadata_response(session_name, parsed_data, result.success, start_time, end_time)
             
     except HTTPException:
         # Re-raise HTTPExceptions (like 404, 500)

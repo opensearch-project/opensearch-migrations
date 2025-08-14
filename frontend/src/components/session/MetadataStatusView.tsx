@@ -13,9 +13,6 @@ import {
 } from "./statusComponents";
 import { METADATA_SCENARIOS } from "./mockData/metadataScenarios";
 import { MetadataDebugControls } from "./debug/MetadataDebugControls";
-import {
-  ClusterVersions,
-} from "./statusComponents/MetadataProgress";
 
 export default function MetadataStatusView({
   sessionName,
@@ -73,10 +70,6 @@ export default function MetadataStatusView({
           finished={metadataData?.finished}
         />
       ),
-    },
-    {
-      label: "Clusters",
-      value: <ClusterVersions metadata={metadataData} />,
     },
     {
       label: "Errors",
