@@ -5,7 +5,6 @@ import random
 import string
 import json
 import time
-import yaml
 from typing import Dict, List, Optional
 from unittest import TestCase
 from console_link.middleware.clusters import run_test_benchmarks
@@ -23,13 +22,6 @@ class DefaultOperationsLibrary:
     work with older clusters, such as Elasticsearch 5.x clusters, where pattern differences such as multi-type indices
     exist.
     """
-    
-    # Global configuration file path
-    DEFAULT_CONFIG_FILE_PATH = "/config/migration_services.yaml"
-    
-    def __init__(self):
-        """Initialize with default config file path"""
-        self.config_file_path = self.DEFAULT_CONFIG_FILE_PATH
 
     def create_index(self, index_name: str, cluster: Cluster, **kwargs):
         headers = {'Content-Type': 'application/json'}
@@ -212,40 +204,3 @@ class DefaultOperationsLibrary:
     
     def run_test_benchmarks(self, cluster: Cluster):
         run_test_benchmarks(cluster=cluster)
-
-    def extract_account_id_from_config(self, config_file_path: str = None) -> str:
-        """
-        Extract AWS account ID from the migration services configuration file.
-        Returns: str: The AWS account ID
-        """
-        # Use instance variable if no path provided
-        if config_file_path is None:
-            config_file_path = self.config_file_path
-            
-        try:
-            with open(config_file_path, 'r') as f:
-                config = yaml.safe_load(f)
-            
-            # Extract role ARN from snapshot.s3.role
-            role_arn = config.get('snapshot', {}).get('s3', {}).get('role', '')
-            
-            if not role_arn:
-                raise ValueError("No role ARN found in snapshot.s3.role")
-            
-            # Parse account ID from ARN format: arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME
-            if ':' in role_arn:
-                arn_parts = role_arn.split(':')
-                if len(arn_parts) >= 5:
-                    account_id = arn_parts[4]
-                    if account_id and account_id.isdigit():
-                        logger.debug(f"Extracted account ID from role ARN: {role_arn}")
-                        return account_id
-            
-            raise ValueError(f"Could not extract account ID from role ARN: {role_arn}")
-            
-        except FileNotFoundError:
-            raise ValueError(f"Config file not found: {config_file_path}")
-        except yaml.YAMLError as e:
-            raise ValueError(f"Error parsing YAML config file: {e}")
-        except Exception as e:
-            raise ValueError(f"Error extracting account ID from config: {e}")
