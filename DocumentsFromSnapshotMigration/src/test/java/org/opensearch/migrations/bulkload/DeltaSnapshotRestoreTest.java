@@ -84,15 +84,13 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             sourceClusterOperations.createIndex(indexName, indexSettings);
             targetClusterOperations.createIndex(indexName, indexSettings);
 
-            // === ACTION: Create first document on source ===
             String doc = "{\"content\": \"document\"}";
-            sourceClusterOperations.createDocument(indexName, "doc1", doc);
-            
-            // Also create the same document on target to ensure it is removed to maintain consistent state
-            targetClusterOperations.createDocument(indexName, "doc1", doc);
 
-            // === ACTION: Create document that will exist on snap1 and snap2 and should not be migrated ===
-            sourceClusterOperations.createDocument(indexName, "snap1Doc", doc);
+            var docIdDeletedOnSecond = "docDeletedOnSecond";
+            sourceClusterOperations.createDocument(indexName, docIdDeletedOnSecond, doc);
+
+            var docIdOnBoth = "docOnBoth";
+            sourceClusterOperations.createDocument(indexName, docIdOnBoth, doc);
 
             // Refresh to ensure documents are searchable
             sourceClusterOperations.post("/_refresh", null);
@@ -119,8 +117,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator1);
 
             // === ACTION: Delete first document and create second document ===
-            sourceClusterOperations.deleteDocument(indexName, "doc1", null, null);
-            sourceClusterOperations.createDocument(indexName, "doc2", doc);
+            sourceClusterOperations.deleteDocument(indexName, docIdDeletedOnSecond, null, null);
+            var docIdOnlyOnSecond = "docOnlyOnSecond";
+            sourceClusterOperations.createDocument(indexName, docIdOnlyOnSecond, doc);
             sourceClusterOperations.post("/_refresh", null);
 
             // === ACTION: Take second snapshot ===
@@ -142,10 +141,13 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             // === ACTION: Migrate state change between snapshot1 and snapshot2
-            var runCounter = new AtomicInteger();
-            var clockJitter = new Random(1);
+            // Create docIdDeletedOnSecond to verify it's deleted when going from snapshot1 -> snapshot2
+            targetClusterOperations.createDocument(indexName, docIdDeletedOnSecond, doc);
+            {
+                var runCounter = new AtomicInteger();
+                var clockJitter = new Random(1);
 
-            var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
                     sourceRepo,
                     snapshot1Name,
                     snapshot2Name,
@@ -157,26 +159,72 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     sourceCluster.getContainerVersion().getVersion(),
                     targetCluster.getContainerVersion().getVersion(),
                     null
-            ));
+                ));
 
-            Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
+                Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 
-            // === VERIFICATION: Check the results ===
-            targetClusterOperations.post("/_refresh", null);
+                // === VERIFICATION: Check the results ===
+                targetClusterOperations.post("/_refresh", null);
+                {
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecond);
+                    // docIdDeletedOnSecond should be deleted once deletions are supported
+                    // Assertions.assertEquals(404, doc2Response.getKey(), "doc2 should be deleted on target");
+                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecond + " should not be found on target");
+                }
+                {
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnlyOnSecond);
+                    Assertions.assertEquals(200, response.getKey(), docIdOnlyOnSecond + " should be created");
+                }
+                {
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
+                    Assertions.assertEquals(404, response.getKey(), docIdOnlyOnSecond + " should not be created");
+                }
+            }
 
-            // Check that doc2 exists
-            var doc2Response = targetClusterOperations.get("/" + indexName + "/_source/doc2");
-            Assertions.assertEquals(200, doc2Response.getKey(), "doc2 should exist on target");
+            // Run second time reversing base and current snapshot
+            targetClusterOperations.delete("/.migrations_working_state");
+            // Simulate delete that should have occurred in prior RFS but is currently not supported
+            {
+                var response = targetClusterOperations.delete("/" + indexName + "/_doc/" + docIdDeletedOnSecond);
+                Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecond + " should be manually deleted");
+            }
+            {
+                var runCounter = new AtomicInteger();
+                var clockJitter = new Random(1);
 
-            // Check that doc2 exists
-            var doc1Response = targetClusterOperations.get("/" + indexName + "/_source/doc1");
-            // TODO: When delta feature is implemented, this should fail (doc1 should be deleted)
-            // Assertions.assertEquals(404, doc1Response.statusCode, "doc1 should be deleted on target");
-            Assertions.assertEquals(200, doc1Response.getKey(), "doc1 should exist on target");
+                var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                    sourceRepo,
+                    snapshot2Name,
+                    snapshot1Name,
+                    List.of(),
+                    targetCluster,
+                    runCounter,
+                    clockJitter,
+                    testDocMigrationContext,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion(),
+                    null
+                ));
 
-            // Check if snap1Doc exists
-            var snap1DocResponse = targetClusterOperations.get("/" + indexName + "/_source/snap1Doc");
-            Assertions.assertEquals(404, snap1DocResponse.getKey(), "snap1Doc should not be found on target");
+                Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
+
+                // === VERIFICATION: Check the results ===
+                targetClusterOperations.post("/_refresh", null);
+                {
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecond);
+                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecond + " should created when restoring first snapshot");
+                }
+                {
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnlyOnSecond);
+                    // docIdDeletedOnSecond should be deleted once deletions are supported
+                    // Assertions.assertEquals(404, doc2Response.getKey(), "doc2 should not exist");
+                    Assertions.assertEquals(200, response.getKey(), docIdOnlyOnSecond + " is created because deletes are not supported");
+                }
+                {
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
+                    Assertions.assertEquals(404, response.getKey(), docIdOnlyOnSecond + " should not be created");
+                }
+            }
         } finally {
             deleteTree(localDirectory.toPath());
         }
