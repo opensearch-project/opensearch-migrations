@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient

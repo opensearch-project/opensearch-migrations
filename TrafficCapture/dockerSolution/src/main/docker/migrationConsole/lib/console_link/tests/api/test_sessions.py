@@ -1,10 +1,10 @@
 import pytest
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, UTC
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from console_link.api.main import app
-from console_link.db.session_db import SessionAlreadyExists, SessionNameLengthInvalid, SessionNotFound
+from console_link.db.session_db import SessionAlreadyExists, SessionNotFound
 from console_link.models.session import Session
 
 client = TestClient(app)

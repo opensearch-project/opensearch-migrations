@@ -16,6 +16,7 @@ snapshot_router = APIRouter(
     tags=["snapshot"],
 )
 
+
 # Snapshot status endpoint
 @snapshot_router.get("/status", response_model=SnapshotStatus, operation_id="snapshotStatus")
 def get_snapshot_status(session_name: str):
