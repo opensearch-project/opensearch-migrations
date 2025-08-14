@@ -123,6 +123,10 @@ spec:
                   value: "{{steps.generate-migration-configs.outputs.parameters.source-migration-configs}}"
                 - name: targets
                   value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
+        
+        # Pause for integration test migration verification
+        - - name: pause-for-migration-verification
+            template: suspend-step
 
     # Template to generate unique cluster names based on template types
     - name: generate-cluster-names

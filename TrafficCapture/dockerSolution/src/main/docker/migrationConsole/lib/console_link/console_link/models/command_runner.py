@@ -27,9 +27,13 @@ class CommandRunner:
         self.run_as_detached = run_as_detatched
         self.log_file = log_file
 
-    def run(self, print_to_console=True, print_on_error=False) -> CommandResult:
+    def run(self, print_to_console=True, print_on_error=False, stream_output=False) -> CommandResult:
         if self.run_as_detached:
+            if self.log_file is None:
+                raise ValueError("log_file must be provided for detached mode")
             return self._run_as_detached_process(self.log_file)
+        if stream_output:
+            return self._run_as_streaming_process(print_to_console=print_to_console)
         return self._run_as_synchronous_process(print_to_console=print_to_console, print_on_error=print_on_error)
 
     def sanitized_command(self) -> List[str]:
@@ -74,6 +78,39 @@ class CommandRunner:
         except subprocess.CalledProcessError as e:
             self.print_output_if_enabled(holder=e, should_print=print_on_error, is_error=True)
             raise CommandRunnerError(e.returncode, self.sanitized_command(), e.stdout, e.stderr)
+
+    def _run_as_streaming_process(self, print_to_console: bool = True) -> CommandResult:
+        try:
+            # Start process with pipes for real-time output
+            process = subprocess.Popen(
+                self.command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # Line buffered
+                universal_newlines=True
+            )
+
+            # Read output line by line as it comes
+            if process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        if print_to_console:
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
+                        logger.debug(f"STDOUT: {line.rstrip()}")
+            
+            # Wait for process to complete
+            return_code = process.wait()
+            
+            if return_code == 0:
+                return CommandResult(success=True, value="Command executed successfully")
+            else:
+                raise CommandRunnerError(return_code, self.sanitized_command())
+                
+        except Exception as e:
+            logger.error(f"Streaming command failed: {e}")
+            raise CommandRunnerError(-1, self.sanitized_command(), None, str(e))
 
     def _run_as_detached_process(self, log_file: str) -> CommandResult:
         try:
