@@ -29,7 +29,7 @@ import {
     SecurityGroup,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
-import {CfnDocument} from "aws-cdk-lib/aws-ssm";
+import { CfnDocument, StringParameter } from "aws-cdk-lib/aws-ssm";
 import { InstanceProfile, ManagedPolicy, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import {
     addParameterLabel,
@@ -203,45 +203,9 @@ export class SolutionsInfrastructureStack extends Stack {
             }),
         ]
 
-        // Generated with ../create-ami-map.sh
-        const amiMap: Record<string, string> = {
-            'us-east-2': 'ami-0fc82f4dabc05670b',
-            'us-east-1': 'ami-05b10e08d247fb927',
-            'il-central-1': 'ami-0632d5335bb97c65e',
-            'us-west-1': 'ami-094b981da55429bfc',
-            'af-south-1': 'ami-071ec74a9abd8fec2',
-            'us-west-2': 'ami-027951e78de46a00e',
-            'me-central-1': 'ami-0c4117cd3d8aa9f9a',
-            'mx-central-1': 'ami-0692398a0c98b312e',
-            'ca-central-1': 'ami-05073582a4b03d785',
-            'ap-south-1': 'ami-0d682f26195e9ec0f',
-            'ap-south-2': 'ami-09e23b3de35f110f6',
-            'ap-east-1': 'ami-0123e5d7542358c86',
-            'me-south-1': 'ami-0a95ef992b0368b4c',
-            'sa-east-1': 'ami-02cfee28b56653f5c',
-            'eu-north-1': 'ami-016038ae9cc8d9f51',
-            'ca-west-1': 'ami-05586d5f95c77b005',
-            'ap-northeast-1': 'ami-072298436ce5cb0c4',
-            'ap-northeast-2': 'ami-075e056c0f3d02523',
-            'ap-northeast-3': 'ami-0439cd8bc5628c9e8',
-            'eu-south-1': 'ami-02c8b07ea6001f11a',
-            'eu-south-2': 'ami-047456c943d393211',
-            'eu-central-1': 'ami-06ee6255945a96aba',
-            'eu-central-2': 'ami-0a0c3a3296ccc2a29',
-            'eu-west-2': 'ami-00710ab5544b60cf7',
-            'eu-west-3': 'ami-0446057e5961dfab6',
-            'eu-west-1': 'ami-0a89fa9a6d8c7ad98',
-            'ap-southeast-7': 'ami-043f00bcf35b3eab2',
-            'ap-southeast-4': 'ami-0a9b2961cf0036d29',
-            'ap-southeast-5': 'ami-0e5b1229fc8235ff7',
-            'ap-southeast-2': 'ami-064b71eca68aadfb8',
-            'ap-southeast-3': 'ami-02a732f5ab0d7b2a4',
-            'ap-southeast-1': 'ami-0b03299ddb99998e9',
-          };
-
-        // Manually looked up with https://us-gov-east-1.console.amazonaws-us-gov.com/ec2/home?region=us-gov-east-1#AMICatalog:
-        amiMap['us-gov-west-1'] = 'ami-06cf22f69c918a2c1';
-        amiMap['us-gov-east-1'] = 'ami-066774057f581130f';
+        const amiId = StringParameter.valueForStringParameter(this,
+            '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+        );
 
         const securityGroup = new SecurityGroup(this, 'BootstrapSecurityGroup', {
             vpc: vpc,
@@ -255,7 +219,9 @@ export class SolutionsInfrastructureStack extends Stack {
             },
             instanceName: `bootstrap-instance-${stackMarker}`,
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
-            machineImage: new GenericLinuxImage(amiMap),
+            machineImage: new GenericLinuxImage({
+                [this.region]: amiId
+            }),
             role: bootstrapRole,
             blockDevices: [
                 {
