@@ -16,13 +16,14 @@ spec:
             description: "Target host config object"
           - name: snapshot-config
             description: "Details of the snapshot to use (required)"
+          - name: rfs-config
+            description: "Reindex-from-snapshot config object"
           - name: session-name
             description: "Name of the unique session to disambiguate coordinating indices"
-          - name: optional-configs
-            description: "JSON Key-Value form of all of the optional parameters to run-bulk-load"
-            value: ""
           - name: image-config
             description: "Map of MA images and settings (e.g. pull policy)"
+          - name: localstack-enabled
+            description: "Is Localstack being used for AWS endpoints"
       steps:
         - - name: run-bulk-load
             template: run-bulk-load
@@ -44,10 +45,14 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['snapshot-config'])['s3']['aws_region'] ?? ''}}"
                 - name: s3-endpoint
                   value: "{{=fromJSON(inputs.parameters['snapshot-config'])['s3']['endpoint'] ?? ''}}"
+                - name: doc-transformer-base64
+                  value: "{{=fromJSON(inputs.parameters['rfs-config'])['transformer_config_base64'] ?? ''}}"
                 - name: session-name
                   value: "{{inputs.parameters.session-name}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: use-localstack-aws-creds
+                  value: "{{inputs.parameters.localstack-enabled}}"
                   # TODO - parse the other stuff out and into the args.
 
     - name: run-bulk-load
@@ -71,7 +76,9 @@ spec:
             
           - name: image-config
             description: "Map of MA images and settings (e.g. pull policy)"
-            
+          - name: use-localstack-aws-creds
+            description: "Is Localstack being used for AWS endpoints"
+
           # Parameters with defaults - split into input and default pairs
           - name: replicas
             value: ""
@@ -149,6 +156,8 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
                 - name: migration-console-pull-policy
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
+                - name: use-localstack-aws-creds
+                  value: "{{inputs.parameters.use-localstack-aws-creds}}"
 
         - - name: setup-wait-for-completion
             templateRef:
@@ -192,6 +201,10 @@ spec:
         parameters:
           - name: logging-configuration-contents
             value: '{"configuration":{"status":"ERROR","appenders":{"Console":{"name":"ConsoleAppender","PatternLayout":{"pattern":"%d{yyyy-MM-dd HH:mm:ss} %-5p %c{1}:%L - %m%n"}}},"loggers":{"logger":{"name":"org.opensearch.migrations","level":"trace","additivity":"false","AppenderRef":{"ref":"ConsoleAppender"}},"root":{"level":"warn","AppenderRef":{"ref":"ConsoleAppender"}}}}}'
+          - name: otel-collector-endpoint
+            value: "http://otel-collector:4317"
+          - name: use-localstack-aws-creds
+            value: "false"
           - name: target-host
           - name: snapshot-name
           - name: session-name
@@ -206,8 +219,6 @@ spec:
           - name: target-password
           - name: doc-transformer-base64
           - name: index-allowlist
-          - name: otel-collector-endpoint
-            value: "http://otel-collector:4317"
           - name: reindex-from-snapshot-image
           - name: reindex-from-snapshot-pull-policy
           - name: migration-console-image
@@ -233,51 +244,6 @@ spec:
                   app: bulk-loader
                   workflows.argoproj.io/workflow: "{{workflow.name}}"
               spec:
-                volumes:
-                - name: shared-data
-                  emptyDir: {}
-                initContainers:
-                - name: resolver
-                  image: "{{inputs.parameters.migration-console-image}}"
-                  imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
-                  command:
-                  - sh
-                  - -c
-                  - |
-                    # Check if s3-endpoint is provided
-                    if [ -z "{{inputs.parameters.s3-endpoint}}" ]; then
-                      echo "No S3 endpoint provided, skipping resolution"
-                      exit 0
-                    fi
-
-                    echo "Resolving S3 endpoint IP address for {{inputs.parameters.s3-endpoint}}"
-                    # Extract hostname from URL if needed
-                    S3_HOST=$(echo "{{inputs.parameters.s3-endpoint}}" | sed -E 's|^https?://||' | sed -E 's|:[0-9]+$||' | sed -E 's|/.*$||')
-                    echo "Extracted hostname: $S3_HOST"
-
-                    # Resolve IP address
-                    S3_IP=$(/usr/bin/getent hosts $S3_HOST | awk '{ print $1 }')
-                    if [ -z "$S3_IP" ]; then
-                      echo "Failed to resolve $S3_HOST, using original endpoint"
-                      S3_IP="{{inputs.parameters.s3-endpoint}}"
-                    else
-                      echo "Resolved $S3_HOST to IP: $S3_IP"
-                      # Preserve protocol and port if present
-                      if echo "{{inputs.parameters.s3-endpoint}}" | grep -q "^https"; then
-                        PROTOCOL="https://"
-                      else
-                        PROTOCOL="http://"
-                      fi
-                      PORT=$(echo "{{inputs.parameters.s3-endpoint}}" | grep -Eo ':[0-9]+' || echo "")
-                      PATH_SUFFIX=$(echo "{{inputs.parameters.s3-endpoint}}" | grep -Eo '/.*$' || echo "")
-                      S3_IP="${PROTOCOL}${S3_IP}${PORT}"
-                    fi
-
-                    echo "Final S3 endpoint IP address: $S3_IP"
-                    echo "$S3_IP" > /shared-data/s3-endpoint-ip
-                  volumeMounts:
-                  - name: shared-data
-                    mountPath: /shared-data
                 containers:
                 - name: bulk-loader
                   image: "{{inputs.parameters.reindex-from-snapshot-image}}"
@@ -293,6 +259,8 @@ spec:
                       value: "{{inputs.parameters.s3-repo-uri}}"
                     - name: S3_REGION
                       value: "{{inputs.parameters.s3-region}}"
+                    - name: S3_ENDPOINT
+                      value: "{{inputs.parameters.s3-endpoint}}"
                     - name: DOCUMENTS_PER_BULK_REQUEST
                       value: "{{inputs.parameters.documents-per-bulk-request}}"
                     - name: LEASE_DURATION
@@ -311,16 +279,6 @@ spec:
                       value: "{{inputs.parameters.doc-transformer-base64}}"
                     - name: INDEX_ALLOW_LIST
                       value: "{{inputs.parameters.index-allowlist}}"
-                    - name: AWS_ACCESS_KEY_ID
-                      value: "test"
-                    - name: AWS_SECRET_ACCESS_KEY
-                      value: "test"
-                    - name: AWS_SESSION_TOKEN
-                      value: "test"
-                    - name: AWS_REGION
-                      value: "us-east-1"
-                    - name: AWS_DEFAULT_REGION
-                      value: "us-east-1"
                     - name: OTEL_COLLECTOR_ENDPOINT
                       value: "{{inputs.parameters.otel-collector-endpoint}}"
                   command:
@@ -328,11 +286,12 @@ spec:
                     - "-c"
                     - |
                       set -e
-
-                      # If s3-endpoint is provided and the file with resolved IP exists, use it
-                      if [ -n "{{inputs.parameters.s3-endpoint}}" ] && [ -f /shared-data/s3-endpoint-ip ]; then
-                        export S3_ENDPOINT=$(cat /shared-data/s3-endpoint-ip)
-                        echo "Using resolved S3 endpoint: $S3_ENDPOINT"
+          
+                      if [ "{{inputs.parameters.use-localstack-aws-creds}}" = "true" ]; then
+                        export AWS_ACCESS_KEY_ID=test
+                        export AWS_SECRET_ACCESS_KEY=test
+                        export AWS_SESSION_TOKEN=test
+                        export AWS_REGION=us-east-2
                       fi
 
                       ARGS=""
@@ -368,9 +327,6 @@ spec:
 
                       export RFS_COMMAND="/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments $ARGS"
                       exec /rfs-app/entrypoint.sh
-                  volumeMounts:
-                  - name: shared-data
-                    mountPath: /shared-data
 
 
     - name: wait-for-completion
