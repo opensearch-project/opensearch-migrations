@@ -3,9 +3,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
-from console_link.api.sessions import session_router
 from console_link.api.main import app
-from console_link.api.metadata import metadata_router
 from console_link.models.session import Session
 from console_link.models.step_state import StepState
 from console_link.environment import Environment

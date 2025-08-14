@@ -29,7 +29,7 @@ def create_session(session: Session):
     if unexpected_length(session.name):
         raise SessionNameLengthInvalid()
 
-    if is_url_safe(session.name):
+    if not is_url_safe(session.name):
         raise SessionNameContainsInvalidCharacters()
 
     if (find_session(session.name)):

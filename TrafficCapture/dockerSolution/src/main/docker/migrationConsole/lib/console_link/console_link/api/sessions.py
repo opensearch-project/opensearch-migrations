@@ -67,18 +67,20 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
     existing = http_safe_find_session(session_name)
 
     try:
-        updated_session = Session.model_validate(existing)
-        session_dict = updated_session.model_dump()
+        session_dict = existing.model_dump()
         
         for key, value in data.items():
             # Don't allow overriding creation date
             if key == 'created':
                 continue
+
+            # Don't allow updating the name
+            if key == 'name':
+                continue
                 
             # Allow updating any other field
-            if hasattr(updated_session, key):
+            if hasattr(session_dict, key):
                 session_dict[key] = value
-        
         updated_session = Session.model_validate(session_dict)
         session_db.update_session(updated_session)
     except ValidationError as e:

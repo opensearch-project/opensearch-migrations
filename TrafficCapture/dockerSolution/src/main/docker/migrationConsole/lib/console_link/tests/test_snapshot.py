@@ -85,9 +85,9 @@ def test_snapshot_status(request, snapshot_fixture):
     result = snapshot.status()
 
     assert isinstance(result, CommandResult)
-    assert "SUCCESS" in result.value
+    assert "SUCCESS" == result.value
     source_cluster.call_api.assert_called_with(
-        f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}/_status",
+        f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
         HttpMethod.GET
     )
 
@@ -112,7 +112,7 @@ def test_snapshot_status_full(request, snapshot_fixture):
     
     source_cluster.call_api.side_effect = mock_call_api
 
-    result = snapshot_.status(snapshot=snapshot, expert_mode=True)
+    result = snapshot_.status(snapshot=snapshot, deep_check=True)
 
     # Basic result validations
     assert isinstance(result, CommandResult)
