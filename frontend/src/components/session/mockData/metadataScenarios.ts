@@ -1,6 +1,5 @@
 "use client";
 
-import { StepState } from "@/generated/api/types.gen";
 import { MetadataData } from "../types";
 
 export const METADATA_SCENARIOS: Record<string, MetadataData> = {

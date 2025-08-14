@@ -9,7 +9,6 @@ import {
   StatusDisplay,
   DateDisplay,
   DurationDisplay,
-  TextDisplay,
 } from "./statusComponents";
 import { METADATA_SCENARIOS } from "./mockData/metadataScenarios";
 import { MetadataDebugControls } from "./debug/MetadataDebugControls";

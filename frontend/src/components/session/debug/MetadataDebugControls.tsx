@@ -6,8 +6,8 @@ import DebugCommands from "@/components/playground/debug/DebugCommands";
 import { METADATA_SCENARIOS } from "@/components/session/mockData/metadataScenarios";
 
 interface MetadataDebugControlsProps {
-  onScenarioSelect: (scenario: keyof typeof METADATA_SCENARIOS) => void;
-  onReset: () => void;
+  readonly onScenarioSelect: (scenario: keyof typeof METADATA_SCENARIOS) => void;
+  readonly onReset: () => void;
 }
 
 export function MetadataDebugControls({
