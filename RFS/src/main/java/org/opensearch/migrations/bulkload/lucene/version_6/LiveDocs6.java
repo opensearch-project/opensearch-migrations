@@ -1,5 +1,8 @@
 package org.opensearch.migrations.bulkload.lucene.version_6;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.opensearch.migrations.bulkload.lucene.LuceneLiveDocs;
 
 import lombok.RequiredArgsConstructor;
@@ -22,19 +25,23 @@ public class LiveDocs6 implements LuceneLiveDocs {
     }
 
     public LuceneLiveDocs xor(LuceneLiveDocs other) {
-        return applyOp(other, "xor", FixedBitSet::xor);
+        return applyMutatingOp(other, "xor", FixedBitSet::xor);
     }
 
     public LuceneLiveDocs and(LuceneLiveDocs other) {
-        return applyOp(other, "and", FixedBitSet::and);
+        return applyMutatingOp(other, "and", FixedBitSet::and);
     }
 
     public LuceneLiveDocs or(LuceneLiveDocs other) {
-        return applyOp(other, "or", FixedBitSet::or);
+        return applyMutatingOp(other, "or", FixedBitSet::or);
+    }
+
+    public long andNotCount(LuceneLiveDocs other) {
+        return applyNonMutatingOp(other, "andNotCount", FixedBitSet::andNotCount);
     }
 
     public LuceneLiveDocs andNot(LuceneLiveDocs other) {
-        return applyOp(other, "andNot", FixedBitSet::andNot);
+        return applyMutatingOp(other, "andNot", FixedBitSet::andNot);
     }
 
     public LuceneLiveDocs not() {
@@ -43,15 +50,37 @@ public class LiveDocs6 implements LuceneLiveDocs {
         return new LiveDocs6(clone);
     }
 
-    private LuceneLiveDocs applyOp(LuceneLiveDocs other,
-                              String opName,
-                              java.util.function.BiConsumer<FixedBitSet, FixedBitSet> op) {
+    public long cardinality() {
+        return fixedBitSet().cardinality();
+    }
+
+    public List<Integer> getAllEnabledDocIdxs() {
+        var fixedBits = fixedBitSet();
+        List<Integer> enabledIdxs = new ArrayList<>();
+        for (int idx = fixedBits.nextSetBit(0); idx != -1; idx = fixedBits.nextSetBit(idx + 1)) {
+            enabledIdxs.add(idx);
+        }
+        return enabledIdxs;
+    }
+
+    private LuceneLiveDocs applyMutatingOp(LuceneLiveDocs other,
+                                           String opName,
+                                           java.util.function.BiConsumer<FixedBitSet, FixedBitSet> op) {
         if (!(other instanceof LiveDocs6 o)) {
             throw new UnsupportedOperationException(opName + " only supported when other is a LiveDocs6");
         }
         FixedBitSet clone = fixedBitSet().clone();
         op.accept(clone, o.fixedBitSet());
         return new LiveDocs6(clone);
+    }
+
+    private <T> T applyNonMutatingOp(LuceneLiveDocs other,
+                               String opName,
+                               java.util.function.BiFunction<FixedBitSet, FixedBitSet, T> op) {
+        if (!(other instanceof LiveDocs6 o)) {
+            throw new UnsupportedOperationException(opName + " only supported when other is a LiveDocs6");
+        }
+        return op.apply(fixedBitSet(), o.fixedBitSet());
     }
 
     private FixedBitSet fixedBitSet() {

@@ -115,6 +115,9 @@ public class SnapshotShardUnpacker {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
 
+            // Use prepBlobFiles on new shard
+            repoAccessor.prepBlobFiles(shardMetadata);
+
             // Create the directory for the shard's lucene files
             Path luceneIndexDir = Paths.get(
                 luceneFilesBasePath + "/" + shardMetadata.getIndexName() + "/" + shardMetadata.getShardId()

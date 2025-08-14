@@ -3,22 +3,18 @@ package org.opensearch.migrations.bulkload.delta;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
-import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.LuceneLiveDocs;
-import org.opensearch.migrations.bulkload.lucene.ReaderAndBase;
-import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
@@ -37,7 +33,11 @@ public class DeltaLuceneReader {
        If the startDocId is 0, it will start from the first document in the segment.
      */
     public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader baseReader, LuceneDirectoryReader currentReader, int startDocId) {
-       // Start with brute force solution
+        log.atInfo()
+            .setMessage("Starting delta backfill from position {}")
+            .addArgument(startDocId)
+            .log();
+        // Start with brute force solution
         var baseSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
         baseReader.leaves().forEach(
             leaf ->
@@ -49,6 +49,12 @@ public class DeltaLuceneReader {
             leaf ->
                 currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
         );
+
+        log.atInfo()
+            .setMessage("Found {} segments in base and {} segments in current")
+            .addArgument(baseSegmentToLeafReader.size())
+            .addArgument(currentSegmentToLeafReader.size())
+            .log();
 
         // --- compute key sets
         var baseKeys    = new TreeSet<>(baseSegmentToLeafReader.keySet());
@@ -66,6 +72,9 @@ public class DeltaLuceneReader {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
+        log.atInfo()
+            .setMessage("Generating readerAndBases")
+            .log();
 
         // Start with just new docs, will add remove later
         List<SegmentReaderAndLiveDoc> readerAndBases = new ArrayList<>();
@@ -77,6 +86,10 @@ public class DeltaLuceneReader {
             readerAndBases.add(new SegmentReaderAndLiveDoc(reader, reader.getLiveDocs(), offset));
             offset += reader.maxDoc();
         }
+
+        log.atInfo()
+            .setMessage("Starting comparing both new and old")
+            .log();
 
         for (var readerKey : inBothKeys) {
             var baseSegmentReader = baseSegmentToLeafReader.get(readerKey);
@@ -92,16 +105,29 @@ public class DeltaLuceneReader {
                             .andNot(baseLiveDocs)
                     : baseLiveDocs.not();
 
-                var segmentReaderToCreate = new SegmentReaderAndLiveDoc(
-                    currentSegmentReader,
-                    liveDocs,
-                    offset
-                );
-                offset += currentSegmentReader.maxDoc();
-                readerAndBases.add(segmentReaderToCreate);
+                if (liveDocs.cardinality() == 0) {
+                    log.atDebug().setMessage("Skipping segment {} since no difference between segments found in snapshot.")
+                        .addArgument(readerKey)
+                        .log();
+                    continue;
+                }
 
+                // Only add segment if there are documents to process
+                if (liveDocs.cardinality() > 0) {
+                    var segmentReaderToCreate = new SegmentReaderAndLiveDoc(
+                        currentSegmentReader,
+                        liveDocs,
+                        offset
+                    );
+                    offset += currentSegmentReader.maxDoc();
+                    readerAndBases.add(segmentReaderToCreate);
+                }
             }
         }
+
+        log.atInfo()
+            .setMessage("Finished comparing for segments that contain in both")
+            .log();
 
         return Flux.fromIterable(readerAndBases)
             .flatMapSequential( c ->
@@ -120,54 +146,6 @@ public class DeltaLuceneReader {
         LuceneLiveDocs liveDocOverride,
         int baseDocIdx
     ){};
-
-    /**
-     * Retrieves, sorts, and processes document segments, returning a {@link Flux} of segments
-     * starting from the first segment where the cumulative document base is less than or equal
-     * to the specified start document ID.
-     *
-     * @param originalLeaves A list of {@link LuceneLeafReaderContext} representing the document segments.
-     * @param startDocId The document ID from which to begin processing.
-     * @return A {@link Flux} emitting the sorted segments starting from the identified segment,
-     *         wrapped in {@link ReaderAndBase}.
-     */
-    static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
-        if (originalLeaves.isEmpty()) {
-            return Flux.empty();
-        }
-
-        // Step 1: Sort the segments by name
-        var sortedLeaves = originalLeaves.stream()
-            .map(LuceneLeafReaderContext::reader)
-            .sorted(SegmentNameSorter.INSTANCE)
-            .collect(Collectors.toList());
-
-        // Step 2: Build the list of ReaderAndBase objects with cumulative doc base
-        var sortedReaderAndBase = new ArrayList<ReaderAndBase>();
-        int cumulativeDocBase = 0;
-        for (var segment : sortedLeaves) {
-            sortedReaderAndBase.add(new ReaderAndBase(segment, cumulativeDocBase));
-            cumulativeDocBase += segment.maxDoc();
-        }
-
-        // Step 3: Use binary search to find the insertion point of startDocId in list of docBaseInParent
-        var segmentStartingDocIds = sortedReaderAndBase.stream().map(ReaderAndBase::getDocBaseInParent).toArray();
-        int index = Arrays.binarySearch(segmentStartingDocIds, startDocId);
-
-        // Step 4: If an exact match is found (binarySearch returns non-negative value)
-        //         then use this index to start on.
-        //         If an exact match is not found, binarySearch returns `-(insertionPoint) - 1`
-        //         where `insertion_point` is the first position where docBaseInParent > startDocId.
-        if (index < 0) {
-            var insertionPoint = -(index + 1);
-            // index = Last segment index with docBaseInParent < startDocId
-            index = insertionPoint - 1;
-            assert index >= 0;
-        }
-
-        // Step 5: Return the sublist starting from the first valid segment
-        return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
-    }
 
     static Flux<RfsLuceneDocument> readDocsFromSegment(SegmentReaderAndLiveDoc readerAndBase, int docStartingId, Scheduler scheduler,
                                                 int concurrency, Path indexDirectoryPath) {
@@ -194,16 +172,21 @@ public class DeltaLuceneReader {
                 .addArgument(numDocsToProcessInSegment)
                 .log();
 
+        Predicate<Integer> isLive;
+        if (liveDocs != null) {
+            var allLiveDocIdx = liveDocs.getAllEnabledDocIdxs();
+            isLive = allLiveDocIdx::contains;
+        } else {
+            isLive = ignored -> true;
+        }
+
         return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)
+            .filter(isLive)
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
-                        if (liveDocs == null || liveDocs.get(docIdx)) {
-                            // Get document, returns null to skip malformed docs
-                            RfsLuceneDocument document = DeltaLuceneReader.getDocument(segmentReader, docIdx.intValue(), true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath);
-                            return Mono.justOrEmpty(document); // Emit only non-null documents
-                        } else {
-                            return Mono.empty(); // Skip non-live documents
-                        }
+                        // Get document, returns null to skip malformed docs
+                        RfsLuceneDocument document = DeltaLuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath);
+                        return Mono.justOrEmpty(document); // Emit only non-null documents
                     } catch (Exception e) {
                         // Handle individual document read failures gracefully
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
