@@ -119,7 +119,7 @@ def test_create_session_already_exists(mock_db, mock_env):
         json={"name": "existing-session"}
     )
     
-    # assert response.status_code == 409
+    assert response.status_code == 409
     assert response.json()["detail"] == "Session already exists."
     mock_env.assert_called_once_with(config_file="/config/migration_services.yaml")
 
