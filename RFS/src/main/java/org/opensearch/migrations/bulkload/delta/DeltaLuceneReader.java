@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.delta;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -17,6 +16,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
+import org.opensearch.migrations.bulkload.lucene.LuceneLiveDocs;
 import org.opensearch.migrations.bulkload.lucene.ReaderAndBase;
 import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
 
@@ -63,55 +63,63 @@ public class DeltaLuceneReader {
         var inBothKeys        = new TreeSet<>(baseKeys);
         inBothKeys.retainAll(currentKeys);
 
-        // --- materialize maps
-        var onlyInBase = onlyInBaseKeys.stream()
-            .collect(Collectors.toMap(
-                k -> k,
-                baseSegmentToLeafReader::get,
-                (a,b) -> a,
-                TreeMap::new
-            ));
-
-        var onlyInCurrent = onlyInCurrentKeys.stream()
-            .collect(Collectors.toMap(
-                k -> k,
-                currentSegmentToLeafReader::get,
-                (a,b) -> a,
-                TreeMap::new
-            ));
-
-        var inBoth = inBothKeys.stream()
-            .collect(Collectors.toMap(
-                k -> k,
-                k -> new AbstractMap.SimpleEntry<>(baseSegmentToLeafReader.get(k), currentSegmentToLeafReader.get(k)),
-                (a,b) -> a,
-                TreeMap::new
-            ));
-
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
 
-        // Start with just new segments
-        List<ReaderAndBase> readerAndBases = new ArrayList<>(onlyInCurrent.size());
+        // Start with just new docs, will add remove later
+        List<SegmentReaderAndLiveDoc> readerAndBases = new ArrayList<>();
         // TODO: For delta backfill we need to move to using `long` everywhere since we may have more than 2^31 docs to work through
         // when adding both docs to remove and docs to add
         int offset = 0;
-        for (var reader : onlyInCurrent.values()) {
-            readerAndBases.add(new ReaderAndBase(reader, offset));
+        for (var key : onlyInCurrentKeys) {
+            var reader = currentSegmentToLeafReader.get(key);
+            readerAndBases.add(new SegmentReaderAndLiveDoc(reader, reader.getLiveDocs(), offset));
             offset += reader.maxDoc();
         }
+
+        for (var readerKey : inBothKeys) {
+            var baseSegmentReader = baseSegmentToLeafReader.get(readerKey);
+            var currentSegmentReader = currentSegmentToLeafReader.get(readerKey);
+
+            var baseLiveDocs = baseSegmentReader.getLiveDocs();
+            var currentLiveDocs = currentSegmentReader.getLiveDocs();
+
+            // Only add segment if baseSnapshot was missing a doc that the current one has
+            // If baseLiveDocs == null, then base has a superset of docs than current
+            if (baseLiveDocs != null) {
+                LuceneLiveDocs liveDocs = (currentLiveDocs != null) ? currentLiveDocs
+                            .andNot(baseLiveDocs)
+                    : baseLiveDocs.not();
+
+                var segmentReaderToCreate = new SegmentReaderAndLiveDoc(
+                    currentSegmentReader,
+                    liveDocs,
+                    offset
+                );
+                offset += currentSegmentReader.maxDoc();
+                readerAndBases.add(segmentReaderToCreate);
+
+            }
+        }
+
         return Flux.fromIterable(readerAndBases)
             .flatMapSequential( c ->
                 readDocsFromSegment(c,
                     startDocId,
                     sharedSegmentReaderScheduler,
                     maxDocumentsToReadAtOnce,
-                    Path.of(c.getReader().getSegmentName()))
+                    Path.of(c.reader.getSegmentName()))
             ).subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
             .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
             .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }
+
+    record SegmentReaderAndLiveDoc(
+        LuceneLeafReader reader,
+        LuceneLiveDocs liveDocOverride,
+        int baseDocIdx
+    ){};
 
     /**
      * Retrieves, sorts, and processes document segments, returning a {@link Flux} of segments
@@ -161,12 +169,12 @@ public class DeltaLuceneReader {
         return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
-    static Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
+    static Flux<RfsLuceneDocument> readDocsFromSegment(SegmentReaderAndLiveDoc readerAndBase, int docStartingId, Scheduler scheduler,
                                                 int concurrency, Path indexDirectoryPath) {
-        var segmentReader = readerAndBase.getReader();
-        var liveDocs = segmentReader.getLiveDocs();
+        var segmentReader = readerAndBase.reader;
+        var liveDocs = readerAndBase.liveDocOverride;
 
-        int segmentDocBase = readerAndBase.getDocBaseInParent();
+        int segmentDocBase = readerAndBase.baseDocIdx;
 
         // Start at
         int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
@@ -181,7 +189,7 @@ public class DeltaLuceneReader {
         );
 
         log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
-                .addArgument(readerAndBase.getReader())
+                .addArgument(readerAndBase.reader)
                 .addArgument(startDocIdInSegment)
                 .addArgument(numDocsToProcessInSegment)
                 .log();

@@ -13,4 +13,6 @@ public interface LuceneLiveDocs {
     LuceneLiveDocs or(LuceneLiveDocs other);
 
     LuceneLiveDocs andNot(LuceneLiveDocs other);
+
+    LuceneLiveDocs not();
 }

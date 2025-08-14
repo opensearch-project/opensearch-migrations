@@ -37,6 +37,12 @@ public class LiveDocs6 implements LuceneLiveDocs {
         return applyOp(other, "andNot", FixedBitSet::andNot);
     }
 
+    public LuceneLiveDocs not() {
+        var clone = fixedBitSet().clone();
+        clone.flip(0, wrapped.length());
+        return new LiveDocs6(clone);
+    }
+
     private LuceneLiveDocs applyOp(LuceneLiveDocs other,
                               String opName,
                               java.util.function.BiConsumer<FixedBitSet, FixedBitSet> op) {
