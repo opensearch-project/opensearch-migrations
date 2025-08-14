@@ -1,8 +1,15 @@
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
+
+from console_link.api.sessions import session_router
 from console_link.api.main import app
-from console_link.models.command_result import CommandResult
+from console_link.api.metadata import metadata_router
+from console_link.models.session import Session
+from console_link.models.step_state import StepState
+from console_link.environment import Environment
+from console_link.db.metadata_db import MetadataEntry, MetadataNotAvailable
 
 client = TestClient(app)
 
@@ -12,165 +19,192 @@ class TestMetadataAPI:
 
     def setup_method(self):
         """Set up test fixtures."""
-        self.session_id = "test-session"
+        self.session_name = "test-session"
         self.sample_request = {
             "index_allowlist": ["index1", "index2"],
             "index_template_allowlist": ["template1"],
-            "component_template_allowlist": ["component1"]
+            "component_template_allowlist": ["component1"],
+            "dry_run": True
+        }
+        self.mock_result = {
+            "clusters": {
+                "source": {"type": "snapshot", "version": "2.0.0"},
+                "target": {"type": "live", "version": "2.0.0"}
+            },
+            "items": {
+                "dryRun": True,
+                "indexTemplates": [{"name": "template1", "successful": True}],
+                "componentTemplates": [{"name": "component1", "successful": True}],
+                "indexes": [{"name": "index1", "successful": True}],
+                "aliases": []
+            },
+            "transformations": {
+                "transformers": []
+            }
         }
 
-    @patch('console_link.api.metadata.get_environment')
-    @patch('console_link.api.metadata.find_session')
-    def test_evaluate_metadata_success(self, mock_find_session, mock_get_environment):
-        """Test successful metadata evaluation."""
-        # Mock session exists
-        mock_find_session.return_value = {"name": self.session_id}
+    def create_mock_session(self, has_metadata=True):
+        """Helper to create a mock session with environment."""
+        env = Environment(config={
+            "source_cluster": {
+                "endpoint": "http://source:9200",
+                "no_auth": None
+            },
+            "target_cluster": {
+                "endpoint": "http://target:9200",
+                "no_auth": None
+            }
+        })
         
-        # Mock environment and metadata
-        mock_env = Mock()
-        mock_metadata = Mock()
-        mock_metadata.evaluate.return_value = CommandResult(success=True, value="Evaluation successful")
-        mock_env.metadata = mock_metadata
-        mock_get_environment.return_value = mock_env
-        
-        # Make request
-        response = client.post(
-            f"/sessions/{self.session_id}/metadata/evaluate",
-            json=self.sample_request
+        if has_metadata:
+            mock_metadata = Mock()
+            mock_metadata.migrate_or_evaluate.return_value.output.stdout = str(self.mock_result)
+            env.metadata = mock_metadata
+        else:
+            env.metadata = None
+            
+        return Session(
+            name=self.session_name,
+            created=datetime.now(timezone.utc),
+            updated=datetime.now(timezone.utc),
+            env=env
         )
-        
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["session_id"] == self.session_id
-        assert "result" in data
-        
-        # Verify metadata.evaluate was called with correct args
-        expected_args = [
-            "--index-allowlist", "index1,index2",
-            "--index-template-allowlist", "template1",
-            "--component-template-allowlist", "component1",
-            "--output-format", "json"
-        ]
-        mock_metadata.evaluate.assert_called_once_with(extra_args=expected_args)
 
-    @patch('console_link.api.metadata.get_environment')
-    @patch('console_link.api.metadata.find_session')
-    def test_migrate_metadata_success(self, mock_find_session, mock_get_environment):
+    @patch('console_link.api.metadata.http_safe_find_session')
+    @patch('console_link.api.metadata.metadata.parse_metadata_result')
+    def test_migrate_metadata_success(self, mock_parse_result, mock_find_session):
         """Test successful metadata migration."""
-        # Mock session exists
-        mock_find_session.return_value = {"name": self.session_id}
+        mock_find_session.return_value = self.create_mock_session()
+        mock_parse_result.return_value = self.mock_result
         
-        # Mock environment and metadata
-        mock_env = Mock()
-        mock_metadata = Mock()
-        mock_metadata.migrate.return_value = CommandResult(success=True, value="Migration successful")
-        mock_env.metadata = mock_metadata
-        mock_get_environment.return_value = mock_env
-        
-        # Make request
         response = client.post(
-            f"/sessions/{self.session_id}/metadata/migrate",
+            f"/sessions/{self.session_name}/metadata/migrate",
             json=self.sample_request
         )
         
-        # Verify response
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] is True
-        assert data["session_id"] == self.session_id
-        assert "result" in data
-        
-        # Verify metadata.migrate was called with correct args
-        expected_args = [
-            "--index-allowlist", "index1,index2",
-            "--index-template-allowlist", "template1",
-            "--component-template-allowlist", "component1",
-            "--output-format", "json"
-        ]
-        mock_metadata.migrate.assert_called_once_with(extra_args=expected_args)
+        assert data["session_name"] == self.session_name
+        assert data["status"] == StepState.COMPLETED
+        assert "started" in data
+        assert "finished" in data
+        assert data["clusters"]["source"]["type"] == "snapshot"
+        assert len(data["items"]["indexTemplates"]) == 1
+        assert data["items"]["indexTemplates"][0]["name"] == "template1"
 
-    @patch('console_link.api.metadata.find_session')
+    @patch('console_link.api.metadata.http_safe_find_session')
+    def test_migrate_metadata_not_configured(self, mock_find_session):
+        """Test error when metadata is not configured in environment."""
+        mock_find_session.return_value = self.create_mock_session(has_metadata=False)
+        
+        response = client.post(
+            f"/sessions/{self.session_name}/metadata/migrate",
+            json=self.sample_request
+        )
+        
+        assert response.status_code == 400
+        assert "not configured" in response.json()["detail"]
+
+    @patch('console_link.api.metadata.http_safe_find_session')
+    @patch('console_link.api.metadata.metadata.parse_metadata_result')
+    def test_migrate_metadata_failure(self, mock_parse_result, mock_find_session):
+        """Test metadata migration failure handling."""
+        mock_find_session.return_value = self.create_mock_session()
+        mock_parse_result.return_value = {
+            "errorMessage": "Migration failed",
+            "errorCount": 1,
+            "errors": ["Error occurred"]
+        }
+        
+        response = client.post(
+            f"/sessions/{self.session_name}/metadata/migrate",
+            json=self.sample_request
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == StepState.FAILED
+        assert data["errorMessage"] == "Migration failed"
+        assert data["errorCount"] == 1
+        assert data["errors"] == ["Error occurred"]
+
+    @patch('console_link.api.metadata.http_safe_find_session')
+    @patch('console_link.db.metadata_db.get_latest')
+    def test_get_metadata_status_success(self, mock_get_latest, mock_find_session):
+        """Test successful metadata status retrieval."""
+        mock_find_session.return_value = self.create_mock_session()
+        
+        mock_entry = MetadataEntry(
+            session_name=self.session_name,
+            timestamp=datetime.now(timezone.utc),
+            started=datetime.now(timezone.utc),
+            finished=datetime.now(timezone.utc),
+            dry_run=True,
+            detailed_results=self.mock_result
+        )
+        mock_get_latest.return_value = mock_entry
+        
+        response = client.get(f"/sessions/{self.session_name}/metadata/status")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_name"] == self.session_name
+        assert data["status"] == StepState.COMPLETED
+        assert "started" in data
+        assert "finished" in data
+        assert data["items"]["dryRun"] is True
+
+    @patch('console_link.api.metadata.http_safe_find_session')
+    @patch('console_link.db.metadata_db.get_latest')
+    def test_get_metadata_status_no_results(self, mock_get_latest, mock_find_session):
+        """Test metadata status when no operations have been performed."""
+        mock_find_session.return_value = self.create_mock_session()
+        mock_get_latest.side_effect = MetadataNotAvailable()
+        
+        response = client.get(f"/sessions/{self.session_name}/metadata/status")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_name"] == self.session_name
+        assert data["status"] == StepState.PENDING
+
+    @patch('console_link.api.metadata.http_safe_find_session')
+    @patch('console_link.db.metadata_db.get_latest')
+    def test_get_metadata_status_error(self, mock_get_latest, mock_find_session):
+        """Test metadata status retrieval error handling."""
+        mock_find_session.return_value = self.create_mock_session()
+        mock_get_latest.side_effect = Exception("Unexpected error")
+        
+        response = client.get(f"/sessions/{self.session_name}/metadata/status")
+        
+        assert response.status_code == 500
+        assert "Failed to get metadata status" in response.json()["detail"]
+
+    @patch('console_link.api.metadata.http_safe_find_session')
     def test_session_not_found(self, mock_find_session):
         """Test error when session doesn't exist."""
         from fastapi import HTTPException
-        mock_find_session.side_effect = HTTPException(status_code=404, detail="Session not found.")
+        mock_find_session.side_effect = HTTPException(status_code=404, detail="Session not found")
         
         response = client.post(
-            f"/sessions/nonexistent/metadata/evaluate",
-            json={}
+            "/sessions/nonexistent/metadata/migrate",
+            json=self.sample_request
         )
         
         assert response.status_code == 404
+        assert "Session not found" in response.json()["detail"]
 
-    @patch('console_link.api.metadata.get_environment')
-    @patch('console_link.api.metadata.find_session')
-    def test_metadata_not_configured(self, mock_find_session, mock_get_environment):
-        """Test error when metadata is not configured in environment."""
-        # Mock session exists
-        mock_find_session.return_value = {"name": self.session_id}
-        
-        # Mock environment without metadata
-        mock_env = Mock()
-        mock_env.metadata = None
-        mock_get_environment.return_value = mock_env
+    @patch('console_link.api.metadata.http_safe_find_session')
+    @patch('console_link.api.metadata.metadata.parse_metadata_result')
+    def test_migrate_metadata_unexpected_error(self, mock_parse_result, mock_find_session):
+        """Test handling of unexpected errors during migration."""
+        mock_find_session.return_value = self.create_mock_session()
+        mock_parse_result.side_effect = Exception("Unexpected error")
         
         response = client.post(
-            f"/sessions/{self.session_id}/metadata/evaluate",
-            json={}
+            f"/sessions/{self.session_name}/metadata/migrate",
+            json=self.sample_request
         )
         
         assert response.status_code == 500
-        assert "not configured" in response.json()["detail"]
-
-    @patch('console_link.api.metadata.get_environment')
-    @patch('console_link.api.metadata.find_session')
-    def test_metadata_operation_failure(self, mock_find_session, mock_get_environment):
-        """Test metadata operation failure."""
-        # Mock session exists
-        mock_find_session.return_value = {"name": self.session_id}
-        
-        # Mock environment and metadata that fails
-        mock_env = Mock()
-        mock_metadata = Mock()
-        mock_metadata.evaluate.return_value = CommandResult(success=False, value="Operation failed")
-        mock_env.metadata = mock_metadata
-        mock_get_environment.return_value = mock_env
-        
-        response = client.post(
-            f"/sessions/{self.session_id}/metadata/evaluate",
-            json={}
-        )
-        
-        # Should return 200 but with success=False
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "error" in data
-
-    def test_empty_request_body(self):
-        """Test that empty request body is handled correctly."""
-        with patch('console_link.api.metadata.find_session') as mock_find_session, \
-             patch('console_link.api.metadata.get_environment') as mock_get_environment:
-            
-            # Mock session exists
-            mock_find_session.return_value = {"name": self.session_id}
-            
-            # Mock environment and metadata
-            mock_env = Mock()
-            mock_metadata = Mock()
-            mock_metadata.evaluate.return_value = CommandResult(success=True, value="Success")
-            mock_env.metadata = mock_metadata
-            mock_get_environment.return_value = mock_env
-            
-            # Make request with empty body
-            response = client.post(
-                f"/sessions/{self.session_id}/metadata/evaluate",
-                json={}
-            )
-            
-            assert response.status_code == 200
-            # Verify metadata.evaluate was called with empty extra_args  
-            expected_args = ["--output-format", "json"]
-            mock_metadata.evaluate.assert_called_once_with(extra_args=expected_args)
+        assert "Unexpected error during metadata" in response.json()["detail"]

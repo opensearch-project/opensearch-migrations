@@ -1,16 +1,16 @@
 import logging
 from abc import ABC, abstractmethod
+from cerberus import Validator
 from datetime import datetime
-from enum import Enum
+from pydantic import BaseModel, field_serializer
 from requests.exceptions import HTTPError
 from typing import Any, Dict, Optional
 
-from cerberus import Validator
-from pydantic import BaseModel, field_serializer
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.step_state import StepState
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
 logger = logging.getLogger(__name__)
@@ -270,13 +270,6 @@ class SnapshotNotStarted(Exception):
 
 class SnapshotStatusUnavailable(Exception):
     pass
-
-
-class StepState(str, Enum):
-    PENDING = "Pending"
-    RUNNING = "Running"
-    COMPLETED = "Completed"
-    FAILED = "Failed"
 
 
 class SnapshotStatus(BaseModel):

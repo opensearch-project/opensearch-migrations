@@ -1,15 +1,18 @@
-from typing import Optional
 import tempfile
 import logging
-
+import json
 from cerberus import Validator
+from datetime import datetime, timezone
+from pydantic import BaseModel, field_validator, field_serializer
+from typing import Optional, Any, Dict, List
 
+from console_link.db import metadata_db
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
-from console_link.models.schema_tools import list_schema
 from console_link.models.cluster import AuthMethod, Cluster, NoTargetClusterDefinedError
+from console_link.models.schema_tools import list_schema
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
-from typing import Any, Dict, List
+from console_link.models.step_state import StepState
 
 logger = logging.getLogger(__name__)
 
@@ -246,3 +249,172 @@ class Metadata:
         except CommandRunnerError as e:
             logger.debug(f"Metadata migration failed: {e}")
             return CommandResult(success=False, value=f"{e.output}")
+
+
+class MetadataMigrateRequest(BaseModel):
+    index_allowlist: Optional[List[str]] = None
+    index_template_allowlist: Optional[List[str]] = None
+    component_template_allowlist: Optional[List[str]] = None
+    dry_run: bool = True
+
+
+class ClusterInfo(BaseModel):
+    type: Optional[str] = None
+    version: Optional[str] = None
+    uri: Optional[str] = None
+    protocol: Optional[str] = None
+    insecure: Optional[bool] = None
+    awsSpecificAuthentication: Optional[bool] = None
+    disableCompression: Optional[bool] = None
+    localRepository: Optional[str] = None
+
+
+class ClustersInfo(BaseModel):
+    source: ClusterInfo
+    target: ClusterInfo
+
+
+class FailureInfo(BaseModel):
+    type: Optional[str] = None
+    message: Optional[str] = None
+    fatal: Optional[bool] = None
+
+
+class ItemResult(BaseModel):
+    name: str
+    successful: bool
+    failure: Optional[FailureInfo] = None
+
+
+class ItemsInfo(BaseModel):
+    dryRun: bool
+    indexTemplates: List[ItemResult]
+    componentTemplates: List[ItemResult]
+    indexes: List[ItemResult]
+    aliases: List[ItemResult]
+
+
+class TransformationInfo(BaseModel):
+    transformers: List[Dict[str, Any]]
+
+
+class MetadataStatus(BaseModel):
+    session_name: str
+    status: Optional[StepState] = StepState.PENDING
+    started: Optional[datetime] = None
+    finished: Optional[datetime] = None
+    clusters: Optional[ClustersInfo] = None
+    items: Optional[ItemsInfo] = None
+    transformations: Optional[TransformationInfo] = None
+    errors: Optional[List[str]] = None
+    errorCount: Optional[int] = None
+    errorCode: Optional[int] = None
+    errorMessage: Optional[str] = None
+
+    @field_serializer('started', 'finished')
+    def serialize_datetime(self, dt: Optional[datetime]) -> str | None:
+        if dt:
+            return dt.isoformat()
+        return None
+
+    @field_validator('started', 'finished', mode='before')
+    @classmethod
+    def parse_datetime(cls, v):
+        if isinstance(v, str):
+            return datetime.fromisoformat(v)
+        return v
+
+
+class MetadataResponseUnparseable(Exception):
+    pass
+
+
+def parse_metadata_result(result: CommandResult) -> Any:
+    """Parse the metadata operation result into a structured format."""
+    logger.info(f"Result response: {result}")
+    if result.output and result.output.stdout:
+        result_str = result.output.stdout
+    else:
+        logger.error("Unable to read standard out from the migration command")
+        raise MetadataResponseUnparseable
+
+    try:
+        if result_str.strip().startswith('{'):
+            parsed_json = json.loads(result_str)
+            if isinstance(parsed_json, dict):
+                return parsed_json
+    except Exception:
+        raise MetadataResponseUnparseable
+
+    # Fail out if we could not parse the response
+    raise MetadataResponseUnparseable
+
+
+def store_metadata_result(
+    session_name: str,
+    result: Any,
+    start_time: datetime,
+    end_time: datetime,
+    dry_run: bool
+) -> metadata_db.MetadataEntry:
+    """Store metadata operation result for later retrieval."""
+    metadata_result = metadata_db.MetadataEntry(
+        session_name=session_name,
+        timestamp=datetime.now(timezone.utc),
+        started=start_time,
+        finished=end_time,
+        dry_run=dry_run,
+        detailed_results=result
+    )
+    metadata_db.create_entry(metadata_result)
+    return metadata_result
+
+
+def extra_args_from_request(request: MetadataMigrateRequest) -> List[str]:
+    """Build extra args list from the request parameters."""
+    extra_args = []
+    
+    if request.index_allowlist:
+        extra_args.extend(["--index-allowlist", ",".join(request.index_allowlist)])
+    
+    if request.index_template_allowlist:
+        extra_args.extend(["--index-template-allowlist", ",".join(request.index_template_allowlist)])
+    
+    if request.component_template_allowlist:
+        extra_args.extend(["--component-template-allowlist", ",".join(request.component_template_allowlist)])
+    
+    extra_args.extend(["--output", "json"])
+    extra_args.extend(["--multi-type-behavior", "union"])
+
+    return extra_args
+
+
+def build_status_from_entry(entry: metadata_db.MetadataEntry) -> MetadataStatus:
+    """Build a structured metadata response from the command result."""
+    error_message = entry.detailed_results.get("errorMessage", None)
+    error_count = entry.detailed_results.get("errorCount", 0)
+    errors = entry.detailed_results.get("errors", [])
+
+    if error_message or error_count or errors:
+        status = StepState.FAILED
+    else:
+        status = StepState.COMPLETED
+
+    response = MetadataStatus(
+        session_name=entry.session_name,
+        status=status,
+        started=entry.started,
+        finished=entry.finished,
+        clusters=ClustersInfo(**entry.detailed_results.get("clusters", {}))
+        if "clusters" in entry.detailed_results else None,
+        items=ItemsInfo(**entry.detailed_results.get("items", {}))
+        if "items" in entry.detailed_results else None,
+        transformations=TransformationInfo(**entry.detailed_results.get("transformations", {}))
+        if "transformations" in entry.detailed_results else None,
+        errors=errors,
+        errorCount=error_count,
+        errorCode=entry.detailed_results.get("errorCode", 0),
+        errorMessage=error_message,
+    )
+    
+    return response
