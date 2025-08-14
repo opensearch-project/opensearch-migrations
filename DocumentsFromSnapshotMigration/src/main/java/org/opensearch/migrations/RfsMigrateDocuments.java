@@ -344,6 +344,7 @@ public class RfsMigrateDocuments {
         } else if (args.experimental.baseSnapshotName != null) {
             log.warn("--base-snapshot-name was provided but --experimental-delta-mode is not enabled. " +
                     "The base snapshot will be ignored.");
+            args.experimental.baseSnapshotName = null;
         }
 
     }
