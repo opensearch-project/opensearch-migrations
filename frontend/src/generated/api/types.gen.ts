@@ -2,7 +2,6 @@
 
 /**
  * ClusterInfo
- * Cluster information model.
  */
 export type ClusterInfo = {
   /**
@@ -41,7 +40,6 @@ export type ClusterInfo = {
 
 /**
  * ClustersInfo
- * Clusters information model.
  */
 export type ClustersInfo = {
   source: ClusterInfo;
@@ -50,7 +48,6 @@ export type ClustersInfo = {
 
 /**
  * FailureInfo
- * Failure information model.
  */
 export type FailureInfo = {
   /**
@@ -97,7 +94,6 @@ export type HealthStatus = "ok" | "error";
 
 /**
  * ItemResult
- * Individual item result model.
  */
 export type ItemResult = {
   /**
@@ -113,7 +109,6 @@ export type ItemResult = {
 
 /**
  * ItemsInfo
- * Items migration information model.
  */
 export type ItemsInfo = {
   /**
@@ -139,10 +134,9 @@ export type ItemsInfo = {
 };
 
 /**
- * MetadataRequest
- * Request model for metadata migration operations.
+ * MetadataMigrateRequest
  */
-export type MetadataRequest = {
+export type MetadataMigrateRequest = {
   /**
    * Index Allowlist
    */
@@ -162,14 +156,9 @@ export type MetadataRequest = {
 };
 
 /**
- * MetadataResponse
- * Response model for metadata migration operations.
+ * MetadataStatus
  */
-export type MetadataResponse = {
-  /**
-   * Success
-   */
-  success: boolean;
+export type MetadataStatus = {
   /**
    * Session Name
    */
@@ -302,7 +291,6 @@ export type StepState = "Pending" | "Running" | "Completed" | "Failed";
 
 /**
  * TransformationInfo
- * Transformation information model.
  */
 export type TransformationInfo = {
   /**
@@ -549,7 +537,7 @@ export type SnapshotStatusResponse =
   SnapshotStatusResponses[keyof SnapshotStatusResponses];
 
 export type MetadataMigrateData = {
-  body: MetadataRequest;
+  body: MetadataMigrateRequest;
   path: {
     /**
      * Session Name
@@ -574,7 +562,7 @@ export type MetadataMigrateResponses = {
   /**
    * Successful Response
    */
-  200: MetadataResponse;
+  200: MetadataStatus;
 };
 
 export type MetadataMigrateResponse =
@@ -606,7 +594,7 @@ export type MetadataStatusResponses = {
   /**
    * Successful Response
    */
-  200: MetadataResponse;
+  200: MetadataStatus;
 };
 
 export type MetadataStatusResponse =
