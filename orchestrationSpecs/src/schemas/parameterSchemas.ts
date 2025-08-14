@@ -1,4 +1,6 @@
 import {z, ZodType, ZodTypeAny} from 'zod';
+import {Scope, WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
+import {inputParam, workflowParam} from "@/schemas/expression";
 
 export type InputParamDef<T, REQ extends boolean> = {
     type: ZodType<T>;
@@ -69,4 +71,22 @@ export function paramsToCallerSchema<T extends InputParametersRecord>(
     }
 
     return z.object(shape) as any;
+}
+
+export function templateInputParametersAsExpressions<WP extends Record<string, any>>(params: WP) {
+    const result: any = {};
+    const workflowParams = params || {};
+    Object.keys(params).forEach(key => {
+        result[key] = inputParam(key, workflowParams[key]);
+    });
+    return result;
+}
+
+export function workflowParametersAsExpressions<WP extends Record<string, any>>(params: WP) {
+    const result: any = {};
+    const workflowParams = params || {};
+    Object.keys(params).forEach(key => {
+        result[key] = workflowParam(key, workflowParams[key]);
+    });
+    return result;
 }

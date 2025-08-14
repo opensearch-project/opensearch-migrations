@@ -1,4 +1,4 @@
-SOURCE_CONFIG=$(echo "$CONFIGURATIONS")
+SOURCE_CONFIG=$(echo "$CONFIGURATION")
 TARGETS_CONFIG=$(echo "$TARGETS")
 echo "source config = $SOURCE_CONFIG"
 echo "targets config = $TARGETS_CONFIG"

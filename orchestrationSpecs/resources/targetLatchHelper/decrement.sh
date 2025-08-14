@@ -1,6 +1,6 @@
 set -x -e
 PROCESSOR_ID="$PROCESSOR_ID"
-TARGET_ENDPOINT="$TARGET_ENDPOINT"
+TARGET_NAME="$TARGET_NAME"
 ETCD_ENDPOINT=$ETCD_ENDPOINTS
 PREFIX="$WORKFLOW_PREFIX"
 
@@ -8,7 +8,7 @@ normalize_endpoint() {
   echo "$1" | base64
 }
 
-NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_ENDPOINT")
+NORMALIZED_TARGET=$(normalize_endpoint "$TARGET_NAME")
 
 USERNAME=$ETCD_USER
 PASSWORD=$ETCD_PASSWORD
@@ -61,10 +61,10 @@ SHOULD_FINALIZE="false"
 
 # Check if latch has reached zero
 if [ "$NEW_COUNT" -eq 0 ]; then
-  echo "All processors for target $TARGET_ENDPOINT have completed" >&2
+  echo "All processors for target $TARGET_NAME have completed" >&2
   SHOULD_FINALIZE="true"
 else
-  echo "Target $TARGET_ENDPOINT still has $NEW_COUNT processors pending" >&2
+  echo "Target $TARGET_NAME still has $NEW_COUNT processors pending" >&2
 fi
 
 # Output just the boolean value to stdout for the result

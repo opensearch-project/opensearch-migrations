@@ -16,7 +16,7 @@ export function renderWorkflowTemplate(wf: Scope) {
         },
         spec: {
             serviceAccountName: wf.serviceAccountName,
-            entrypoint: "main",
+            entrypoint:  "FILL_THIS_IN_PROPERLY",
             parallelism: 100,
             ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
             templates: (() => {
@@ -33,7 +33,7 @@ export function renderWorkflowTemplate(wf: Scope) {
 function formatParameterDefinition<P extends InputParamDef<ZodTypeAny, boolean>>(inputs : P) {
     return {
         ...(inputs.description != null && { description: inputs.description }),
-        ...(inputs.defaultValue != null && { value: inputs.defaultValue })
+        ...(inputs.defaultValue != null && { value: transformExpressionsDeep(inputs.defaultValue) })
     };
 }
 

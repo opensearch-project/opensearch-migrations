@@ -1,10 +1,15 @@
-import {defineParam, InputParamDef} from "@/schemas/parameterSchemas";
+import {
+    defineParam,
+    InputParamDef,
+    templateInputParametersAsExpressions,
+    workflowParametersAsExpressions
+} from "@/schemas/parameterSchemas";
 import {
     Scope,
     ExtendScope,
     FieldSpecs,
     FieldGroupConstraint,
-    FieldSpecsToInputParams,
+    FieldSpecsToInputParams, WorkflowInputsToExpressions, InputParamsToExpressions, AllowLiteralOrExpression,
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
 import {TypescriptError} from "@/utils";
@@ -17,6 +22,7 @@ import {
 import {StepsBuilder} from "@/schemas/stepsBuilder";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
+import {Expression} from "@/schemas/expression";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -59,7 +65,11 @@ export class TemplateBuilder<
     addOptionalInput<T, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
-            (s: { context: ContextualScope; currentScope: InputParamsScope }) => T>,
+            (s: {
+                workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+                inputParameters: InputParamsToExpressions<InputParamsScope>,
+                rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+            }) => AllowLiteralOrExpression<T>>,
         description?: string
     ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
@@ -67,13 +77,20 @@ export class TemplateBuilder<
             BodyScope,
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
             OutputParamsScope
-        >>> {
-        const fn = defaultValueFromScopeFn as (s: { context: ContextualScope; currentScope: InputParamsScope }) => T;
+        >>>
+    {
+        const fn = defaultValueFromScopeFn as (s: {
+            workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
+            inputParameters: InputParamsToExpressions<InputParamsScope>,
+            rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
+        }) => T;
         const param = defineParam({
             defaultValue: fn({
-                context: this.contextualScope,
-                currentScope: this.getTemplateSignatureScope()
-            }),
+                workflowParameters: workflowParametersAsExpressions(this.contextualScope.workflowParameters),
+                inputParameters: templateInputParametersAsExpressions(this.inputScope),
+                rawParameters: { workflow: this.contextualScope,
+                currentTemplate: this.getTemplateSignatureScope()
+            }}),
             description
         });
 

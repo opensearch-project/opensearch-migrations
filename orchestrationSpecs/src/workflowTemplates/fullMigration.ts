@@ -3,29 +3,29 @@ import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_C
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
+import {literal} from "@/schemas/expression";
 
 export const FullMigration = WorkflowBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
-        .addRequiredInput("test",
-            z.string())
         .addRequiredInput("sourceMigrationConfigs",
             SNAPSHOT_MIGRATION_CONFIG,
             "List of server configurations to direct migrated traffic toward")
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
             "List of server configurations to direct migrated traffic toward")
         .addOptionalInput("imageParams",
-            scope =>
+            scope => literal(
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
                         .flatMap((k) => [
                             [`${k}Image`, ""],
                             [`${k}ImagePullPolicy`, "IF_NOT_PRESENT"]
                         ])
-                ),
+                )
+            ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
             .addStep("init", TargetLatchHelpers, "init", steps => ({
-                prefix: b.inputs.test,
+                prefix: "prefix",
                 etcdUtilsImage: "",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                 targets: [],

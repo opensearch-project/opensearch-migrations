@@ -10,20 +10,28 @@ import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 
-function addCommonTargetLatchInputs<C extends Scope>(tb: TemplateBuilder<C, {}, {}, {}>) {
+function addCommonTargetLatchInputs<
+    C extends { workflowParameters: typeof CommonWorkflowParameters }
+>(tb: TemplateBuilder<C, {}, {}, {}>) {
     return tb
         .addRequiredInput("prefix", z.string())
-        .addRequiredInput("etcdUtilsImage", z.string())
-        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY);
+        .addRequiredInput("etcdUtilsImagePullPolicy", IMAGE_PULL_POLICY)
+        // this makes it much easier to standardize handling in the rest of the template below, rather than pulling
+        // now all values can come from input parameters!
+        .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
+        .addOptionalInput("etcdPassword",  s => s.workflowParameters.etcdPassword)
+        .addOptionalInput("etcdUser",  s => s.workflowParameters.etcdUser)
+        .addOptionalInput("etcdUtilsImage", s => s.workflowParameters.etcdImage)
+        .addOptionalInput("test", s=>"")
+    ;
 }
 
 function commonTargetLatchHelperEnvVarsFromWorkflowParameters<
     ContextualScope extends { workflowParameters: typeof CommonWorkflowParameters },
     InputParamsScope extends Scope,
-    ContainerScope extends Scope,
-    OutputParamsScope extends Scope
+    ContainerScope extends Scope
 >(
-    b: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, OutputParamsScope>
+    b: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, {}>
 ) {
     return b
         .addEnvVar("ETCD_ENDPOINTS", b.workflowInputs.etcdEndpoints)
@@ -39,12 +47,9 @@ export const TargetLatchHelpers = WorkflowBuilder.create("TargetLatchHelpers")
         .addRequiredInput("configuration", SNAPSHOT_MIGRATION_CONFIG)
         .addContainer(b=>b
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
-            .addEnvVars( commonTargetLatchHelperEnvVarsFromWorkflowParameters)
+            .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
-
-            .addEnvVar("PREFIX", b.inputs.prefix)
-            .addEnvVar("CONFIGURATIONS", asString(b.inputs.configuration))
 
             .addPathOutput("prefix", "/tmp/prefix", z.string())
             .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", z.number())
@@ -52,16 +57,13 @@ export const TargetLatchHelpers = WorkflowBuilder.create("TargetLatchHelpers")
     )
     .addTemplate("decrementLatch", t => t
         .addInputs(addCommonTargetLatchInputs)
-        .addRequiredInput("target", CLUSTER_CONFIG)
-        .addRequiredInput("processor", z.string())
+        .addRequiredInput("targetName", CLUSTER_CONFIG)
+        .addRequiredInput("processorId", z.string())
         .addContainer(b=>b
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
-            .addEnvVars(commonTargetLatchHelperEnvVarsFromWorkflowParameters)
+            .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
-
-            .addEnvVar("PROCESSOR_ID", "")
-            .addEnvVar("TARGET_ENDPOINT", "")
 
             .addPathOutput("shouldFinalize", "/tmp/should-finalize", z.boolean())
         )
@@ -70,10 +72,10 @@ export const TargetLatchHelpers = WorkflowBuilder.create("TargetLatchHelpers")
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b=>b
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
-            .addEnvVars(commonTargetLatchHelperEnvVarsFromWorkflowParameters)
+            .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])
-
+            .addPathOutput("DUMMY_NEED_TO_RESOLVE_THIS_BUILDER BUG!", "/tmp/should-finalize", z.boolean())
         )
     )
     .getFullScope();

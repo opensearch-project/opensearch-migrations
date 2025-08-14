@@ -1,6 +1,7 @@
 import {Scope,InputParamsToExpressions, WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
 import {inputParam, workflowParam} from "@/schemas/expression";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterSchemas";
 
 export abstract class TemplateBodyBuilder<
     ContextualScope extends Scope,
@@ -62,20 +63,13 @@ export abstract class TemplateBodyBuilder<
     }
 
     get inputs(): InputParamsToExpressions<InputParamsScope> {
-        const result: any = {};
-        Object.keys(this.inputsScope).forEach(key => {
-            result[key] = inputParam(key, this.inputsScope[key]);
-        });
-        return result as InputParamsToExpressions<InputParamsScope>;
+        const rval = templateInputParametersAsExpressions(this.inputsScope);
+        return rval as InputParamsToExpressions<InputParamsScope>;
     }
 
     get workflowInputs(): WorkflowInputsToExpressions<ContextualScope> {
-        const result: any = {};
-        const workflowParams = (this.contextualScope as any).workflowParameters || {};
-        Object.keys(workflowParams).forEach(key => {
-            result[key] = workflowParam(key, workflowParams[key]);
-        });
-        return result as WorkflowInputsToExpressions<ContextualScope>;
+        const rval = workflowParametersAsExpressions(this.contextualScope.workflowParameters)
+        return rval as WorkflowInputsToExpressions<ContextualScope>;
     }
 
     // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow

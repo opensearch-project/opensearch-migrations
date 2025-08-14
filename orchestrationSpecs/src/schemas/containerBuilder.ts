@@ -135,33 +135,11 @@ export class ContainerBuilder<
             this.contextualScope,
             this.inputsScope,
             this.bodyScope,
-            {} as {},
+            {},
             this.outputsScope
         );
 
         return builderFn(emptyEnvBuilder) as any;
-    }
-
-    // Keep the old addEnvVars as addEnvVarsObject for direct object usage
-    addEnvVarsObject<NewEnvVars extends Record<string, AllowLiteralOrExpression<string>>>(
-        envVars: keyof EnvScope & keyof NewEnvVars extends never
-            ? NewEnvVars
-            : TypescriptError<`Environment variable '${keyof EnvScope & keyof NewEnvVars & string}' already exists`>
-    ): ContainerBuilder<
-        ContextualScope,
-        InputParamsScope,
-        ContainerScope,
-        ExtendScope<EnvScope, NewEnvVars>,
-        OutputParamsScope
-    >
-    {
-        const currentEnv = (this.bodyScope as any).env || {};
-        const newEnvScope = { ...this.envScope, ...envVars } as ExtendScope<EnvScope, NewEnvVars>;
-
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.bodyScope,
-            env: { ...currentEnv, ...envVars }
-        }, newEnvScope, this.outputsScope);
     }
 
     // Internal method without constraint checking for use by other methods
