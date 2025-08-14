@@ -144,7 +144,7 @@ class ConnectionContextTest {
         assertNull(targetArgs.getAwsRegion());
         assertNull(targetArgs.getAwsServiceSigningName());
         assertFalse(targetArgs.isInsecure());
-        assertFalse(targetArgs.isCompressionEnabled());
+        assertFalse(targetArgs.isDisableCompression());
     }
 
     @Test
@@ -156,6 +156,6 @@ class ConnectionContextTest {
         assertNull(sourceArgs.getAwsRegion());
         assertNull(sourceArgs.getAwsServiceSigningName());
         assertFalse(sourceArgs.isInsecure());
-        assertFalse(sourceArgs.isCompressionEnabled());
+        assertTrue(sourceArgs.isDisableCompression());
     }
 }

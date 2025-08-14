@@ -72,7 +72,7 @@ def generate_tmp_dir(name: str) -> str:
 
 
 class Metadata:
-    def __init__(self, config, target_cluster: Cluster, source_cluster: Optional[Cluster] = None,
+    def __init__(self, config, target_cluster: Optional[Cluster], source_cluster: Optional[Cluster] = None,
                  snapshot: Optional[Snapshot] = None):
         logger.debug(f"Initializing Metadata with config: {config}")
         v = Validator(SCHEMA)
@@ -188,6 +188,9 @@ class Metadata:
         return self.migrate_or_evaluate("migrate", extra_args)
 
     def migrate_or_evaluate(self, command: str, extra_args=None) -> CommandResult:
+        if not self._target_cluster:
+            raise NoTargetClusterDefinedError()
+
         command_base = "/root/metadataMigration/bin/MetadataMigration"
         command_args = {}
 

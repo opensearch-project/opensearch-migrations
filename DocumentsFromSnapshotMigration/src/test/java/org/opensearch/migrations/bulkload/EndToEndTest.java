@@ -60,6 +60,7 @@ public class EndToEndTest extends SourceTestBase {
     private static Stream<Arguments> extendedScenarios() {
         return SupportedClusters.extendedSources().stream().map(s -> Arguments.of(s));
     }
+
     @ParameterizedTest(name = "Source {0} to Target OS 2.19")
     @MethodSource(value = "extendedScenarios")
     public void extendedMigrationDocuments(

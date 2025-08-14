@@ -6,6 +6,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
@@ -25,6 +26,7 @@ import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -57,6 +59,15 @@ class OpenSearchClientFactoryTest {
                 "}";
     private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"true\"}}}";
     private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}";
+    private static final String CLUSTER_SETTINGS_COMPRESSION_ENABLED =
+            "{\"persistent\":{\"http_compression\":{\"enabled\":true}}}";
+    private static final String CLUSTER_SETTINGS_COMPRESSION_ENABLED_TRANSIENT =
+            "{\"transient\":{\"http_compression\":{\"enabled\":true}}}";
+    private static final String CLUSTER_SETTINGS_COMPRESSION_DISABLED =
+            "{\"persistent\":{\"http_compression\":{\"enabled\":false}}}";
+    private static final String CLUSTER_SETTINGS_COMPRESSION_MISSING =
+            "{\"persistent\":{}}";
+
     private static final String ROOT_RESPONSE_OS_1_0_0 = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"1.0.0\"}}";
     private static final String ROOT_RESPONSE_OS_3_0_0_alpha = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"3.0.0-alpha1\"}}";
     private static final String ROOT_RESPONSE_ES_7_10_2 = "{\"version\": {\"number\": \"7.10.2\"}}";
@@ -92,8 +103,8 @@ class OpenSearchClientFactoryTest {
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
-        verify(restClient).getAsync("", null);
-        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
         verifyNoMoreInteractions(restClient);
     }
 
@@ -107,9 +118,11 @@ class OpenSearchClientFactoryTest {
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("AOS 2.13.0")));
-        verify(restClient).getAsync("", null);
-        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
-        verify(restClient).getAsync("_nodes/_all/nodes,version?format=json", null);
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
+        verify(restClient, times(1)).getAsync("_nodes/_all/nodes,version?format=json", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -120,8 +133,8 @@ class OpenSearchClientFactoryTest {
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("OS 1.0.0")));
-        verify(restClient).getConnectionContext();
-        verify(restClient).getAsync("", null);
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
     }
 
@@ -133,8 +146,8 @@ class OpenSearchClientFactoryTest {
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("OS 3.0.0")));
-        verify(restClient).getConnectionContext();
-        verify(restClient).getAsync("", null);
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
     }
 
@@ -148,8 +161,8 @@ class OpenSearchClientFactoryTest {
         var version = openSearchClientFactory.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
-        verify(restClient).getAsync("", null);
-        verify(restClient).getAsync("_cluster/settings?include_defaults=true", null);
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
         verifyNoMoreInteractions(restClient);
     }
 
@@ -193,5 +206,68 @@ class OpenSearchClientFactoryTest {
         assertThat(transientTrue.block(), equalTo(true));
         var neitherTrue = openSearchClientFactory.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, false));
         assertThat(neitherTrue.block(), equalTo(false));
+    }
+
+    @Test
+    void determineVersion_setsCompressionTrue() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
+                CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+        openSearchClientFactory.determineVersionAndCreate();
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void determineVersion_setsCompressionFalse() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
+                CLUSTER_SETTINGS_COMPRESSION_DISABLED);
+        openSearchClientFactory.determineVersionAndCreate();
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void determineVersion_setsCompressionFalseWhenSettingMissing() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
+                CLUSTER_SETTINGS_COMPRESSION_MISSING);
+        openSearchClientFactory.determineVersionAndCreate();
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void determineVersion_setsCompressionWhenTransient() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, "_cluster/settings?include_defaults=true",
+                CLUSTER_SETTINGS_COMPRESSION_ENABLED_TRANSIENT);
+        openSearchClientFactory.determineVersionAndCreate();
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings?include_defaults=true", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void determineVersion_setsCompressionFalseWhenForcedOff() {
+        when(connectionContext.isDisableCompression()).thenReturn(true);
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        openSearchClientFactory.determineVersionAndCreate();
+        assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+        verify(restClient, times(1)).getConnectionContext();
+        verify(restClient, times(1)).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
     }
 }

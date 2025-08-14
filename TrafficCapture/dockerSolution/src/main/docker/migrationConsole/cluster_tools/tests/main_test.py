@@ -1,7 +1,7 @@
 from src.cluster_tools.base.main import main
 import argparse
-from tests.utils import get_target_index_info
-import cluster_tools.tools.create_index as create_index
+from .utils import get_target_index_info
+import src.cluster_tools.tools.create_index as create_index
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,11 +24,19 @@ def test_list_tools(caplog):
     assert "create_index" in available_tools, "Expected 'create_index' tool to be listed"
 
 
-def test_main_with_tool(caplog, env):
+def test_main_with_tool(caplog, env, monkeypatch):
     """Test the main function with a specific tool to ensure it executes correctly."""
     caplog.set_level(logging.INFO)
+    
+    # Create a mock Environment constructor that returns our fixture env
+    def mock_environment_init(*args, **kwargs):
+        return env
+    
+    # Patch the Environment class to return our fixture env
+    monkeypatch.setattr("src.cluster_tools.base.main.Environment", mock_environment_init)
+    
     args = argparse.Namespace(tool="create_index", index_name="test-index",
-                              primary_shards=10, config_file=env.config_file)
+                              primary_shards=10)
     args.func = create_index.main
     main(args)
 

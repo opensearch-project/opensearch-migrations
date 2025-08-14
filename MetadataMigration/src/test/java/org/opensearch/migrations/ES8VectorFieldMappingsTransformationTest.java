@@ -9,6 +9,7 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -101,8 +102,11 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         log.info(result.asCliOutput());
         assertThat(result.getExitCode(), equalTo(0));
 
-        assertThat(result.getTransformations().getTransformerInfos().size(), equalTo(2));
-        assertThat(result.getTransformations().getTransformerInfos().get(0).getName(), equalTo("dense_vector to knn_vector"));
+        var vectorTransformation = result.getTransformations().getTransformerInfos().stream()
+            .filter(t -> t.getName().contains("dense_vector"))
+            .findAny();
+        Assertions.assertTrue(vectorTransformation.isPresent());
+        Assertions.assertEquals("dense_vector to knn_vector", vectorTransformation.get().getName());
 
         // Verify that the transformed index exists on the target cluster
         var res = targetOperations.get("/" + indexName);

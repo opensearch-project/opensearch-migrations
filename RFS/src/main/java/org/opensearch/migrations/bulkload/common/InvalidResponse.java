@@ -57,7 +57,7 @@ public class InvalidResponse extends RfsException {
 
             var onlyExpectedErrors = interimResults.stream()
                 .map(Entry::getKey)
-                .allMatch("illegal_argument_exception"::equals);
+                .allMatch(errorType -> "illegal_argument_exception".equals(errorType) || "settings_exception".equals(errorType));
             if (!onlyExpectedErrors) {
                 log.warn("Expecting only invalid argument errors, found additional error types " + interimResults);
                 return Set.of();
