@@ -70,24 +70,7 @@ export default function MetadataStatusView({
           finished={metadataData?.finished}
         />
       ),
-    },
-    {
-      label: "Errors",
-      value:
-        metadataData?.errors && metadataData.errors.length > 0 ? (
-          <ul style={{ margin: 0, paddingLeft: "1rem" }}>
-            {metadataData.errors.map((error, idx) => (
-              <li key={idx}>{error}</li>
-            ))}
-          </ul>
-        ) : metadataData?.errorMessage ? (
-          <ul style={{ margin: 0, paddingLeft: "1rem" }}>
-              <li key="err-msg">{metadataData.errorMessage}</li>
-          </ul>
-        ) : (
-          <TextDisplay text="-" />
-        ),
-    },
+    }
   ];
 
   return (
