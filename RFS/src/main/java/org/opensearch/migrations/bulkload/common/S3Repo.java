@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -48,6 +49,7 @@ public class S3Repo implements SourceRepo {
     private final S3AsyncClient s3Client;
     private final SnapshotFileFinder fileFinder;
     private final String s3Region;
+    private final Supplier<S3TransferManager> transferManagerSupplier;
 
     @Getter
     private final S3Uri s3RepoUri;
@@ -109,11 +111,20 @@ public class S3Repo implements SourceRepo {
     }
 
     protected S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
+        this(s3LocalDir, s3Uri, s3Region, s3Client, fileFinder, null);
+    }
+
+    protected S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder, Supplier<S3TransferManager> transferManagerSupplier) {
         this.s3LocalDir = s3LocalDir;
         this.s3RepoUri = s3Uri;
         this.s3Region = s3Region;
         this.s3Client = s3Client;
         this.fileFinder = fileFinder;
+        this.transferManagerSupplier = transferManagerSupplier != null ? transferManagerSupplier :
+         () -> S3TransferManager.builder()
+                .transferDirectoryMaxConcurrency(TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS)
+                .s3Client(s3Client)
+                .build();
     }
 
     @Override
@@ -164,15 +175,12 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public void prepBlobFiles(ShardMetadata shardMetadata) {
-        try (S3TransferManager transferManager = S3TransferManager.builder()
-        .s3Client(s3Client)
-        .transferDirectoryMaxConcurrency(TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS)
-        .build()) {
+        try (S3TransferManager transferManager = transferManagerSupplier.get()) {
 
             Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
             ensureS3LocalDirectoryExists(shardDirPath);
 
-            String blobFilesS3Prefix = s3RepoUri.key
+            String blobFilesS3Prefix = (s3RepoUri.key.isBlank() ? "" : s3RepoUri.key + "/")
                 + INDICES_PREFIX_STR
                 + shardMetadata.getIndexId()
                 + "/"
