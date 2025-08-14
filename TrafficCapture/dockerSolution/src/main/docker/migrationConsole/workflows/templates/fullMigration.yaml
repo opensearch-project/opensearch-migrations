@@ -44,26 +44,6 @@ spec:
                {"endpoint":"https://opensearch-cluster-master-headless:9200","allow_insecure":true,"basic_auth":{"username":"admin","password":"admin"}}
               ]
       steps:
-        - - name: get-configs-from-maps
-            template: get-configs-from-args
-            arguments:
-              parameters:
-                - name: aws-region
-                  valueFrom:
-                    configMapKeyRef:
-                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                      key: AWS_REGION
-                - name: s3-endpoint
-                  valueFrom:
-                    configMapKeyRef:
-                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                      key: ENDPOINT
-                - name: bucket-name
-                  valueFrom:
-                    configMapKeyRef:
-                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
-                      key: BUCKET_NAME
-
         - - name: get-image-map
             template: get-image-map-from-args
             arguments:
@@ -119,6 +99,36 @@ spec:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
 
+        - - name: get-configs-from-maps
+            template: get-configs-from-args
+            arguments:
+              parameters:
+                - name: aws-region
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: AWS_REGION
+                - name: s3-endpoint
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: ENDPOINT
+                - name: bucket-name
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                      key: BUCKET_NAME
+                - name: migration-console-image
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: migration-console-pull-policy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+
         - - name: main-direct
             template: main-direct
             arguments:
@@ -131,26 +141,45 @@ spec:
                   value: "{{steps.get-configs-from-maps.outputs.parameters.s3-config}}"
                 - name: image-config
                   value: "{{steps.get-image-map.outputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{steps.get-configs-from-maps.outputs.parameters.is-localstack-endpoint}}"
 
 
     - name: get-configs-from-args
-      steps: [[]]
       inputs:
         parameters:
           - name: aws-region
           - name: s3-endpoint
           - name: bucket-name
+          - name: migration-console-image
+          - name: migration-console-pull-policy
+      steps:
+        - - name: resolve-s3-endpoint
+            templateRef:
+              name: localstack-helper
+              template: resolve-s3-endpoint
+            arguments:
+              parameters:
+                - name: s3-endpoint
+                  value: "{{inputs.parameters.s3-endpoint}}"
+                - name: migration-console-image
+                  value: "{{inputs.parameters.migration-console-image}}"
+                - name: migration-console-pull-policy
+                  value: "{{inputs.parameters.migration-console-pull-policy}}"
       outputs:
         parameters:
           - name: s3-config
             valueFrom:
-              # add this too... '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' +
               expression: >- 
                 '{' + 
                   '"aws_region": "' + inputs.parameters['aws-region'] + '", ' + 
-                  '"endpoint": "' + inputs.parameters['s3-endpoint'] + '", ' + 
+                  '"endpoint": "' + steps['resolve-s3-endpoint'].outputs.parameters['resolved-s3-endpoint'] + '", ' + 
                   '"repo_uri": "s3://' + inputs.parameters['bucket-name'] + '"' +
                 '}'
+          - name: is-localstack-endpoint
+            valueFrom:
+              expression: >-
+                steps['resolve-s3-endpoint'].outputs.parameters['is-localstack-endpoint']
 
     - name: get-image-map-from-args
       inputs:
@@ -205,6 +234,7 @@ spec:
             value: "[{\"endpoint\":\"https://t1.example.com\"}, {\"endpoint\":\"https://t2.example.com\"}]"
           - name: s3-config
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: init
             templateRef:
@@ -238,6 +268,8 @@ spec:
                   value: "{{steps.init.outputs.parameters.prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
         - - name: cleanup
             templateRef:
@@ -262,6 +294,7 @@ spec:
           - name: s3-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: pipeline-snapshot
             template: pipeline-snapshot
@@ -282,6 +315,8 @@ spec:
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
     - name: pipeline-snapshot
       inputs:
@@ -293,6 +328,7 @@ spec:
           - name: s3-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: create-or-get-snapshot
             templateRef:
@@ -327,6 +363,8 @@ spec:
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
     - name: pipeline-snapshot-to-target
       inputs:
@@ -337,6 +375,7 @@ spec:
           - name: target-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: pipeline-migrate-from-snapshot
             template: pipeline-migrate-from-snapshot
@@ -355,6 +394,8 @@ spec:
                   value: "{{inputs.parameters.latch-coordination-prefix}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
 
     - name: pipeline-migrate-from-snapshot
       inputs:
@@ -365,22 +406,31 @@ spec:
           - name: target-config
           - name: latch-coordination-prefix
           - name: image-config
+          - name: localstack-enabled
       steps:
         - - name: id-generator
             template: do-nothing
         - - name: migrate-metadata
-            template: migrate-metadata
-#            when: "{{=fromJSON(inputs.parameters['migration-config'])['metadata'] != nil}}"
+            templateRef:
+              name: metadata-migration
+              template: migrate-metadata-from-config
+            #when: "{{fromJSON(inputs.parameters['migration-config']).metadata != null}}"
             arguments:
               parameters:
-                - name: source-config
-                  value: "{{inputs.parameters.source-config}}"
                 - name: snapshot-config
                   value: "{{inputs.parameters.snapshot-config}}"
-                - name: migration-config
-                  value: "{{fromJSON(inputs.parameters['migration-config'])['metadata']}}"
+                - name: source-config
+                  value: "{{inputs.parameters.source-config}}"
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
+                - name: metadata-migration-config
+                  value: "{{=fromJSON(inputs.parameters['migration-config'])['metadata']}}"
+                - name: migration-console-image
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['image']}}"
+                - name: migration-console-pull-policy
+                  value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
         - - name: bulk-load-documents
             templateRef:
               name: bulk-load
@@ -398,6 +448,8 @@ spec:
                   value: "{{steps.id-generator.id}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
+                - name: localstack-enabled
+                  value: "{{inputs.parameters.localstack-enabled}}"
         # Check target readiness after processing and bump it to the next phase if ready
         - - name: target-backfill-complete-check
             templateRef:
@@ -424,16 +476,6 @@ spec:
                   value: "{{inputs.parameters.target-config}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
-
-
-    - name: migrate-metadata
-      inputs:
-        parameters:
-          - name: source-config
-          - name: snapshot-config
-          - name: migration-config
-          - name: target-config
-      steps: [[]]
 
     # This is where we'd start running live-replay
     - name: run-replayer-for-target
