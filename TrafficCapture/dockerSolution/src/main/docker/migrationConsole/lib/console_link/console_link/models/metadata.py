@@ -7,7 +7,7 @@ from cerberus import Validator
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import list_schema
-from console_link.models.cluster import AuthMethod, Cluster
+from console_link.models.cluster import AuthMethod, Cluster, NoTargetClusterDefinedError
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
 from typing import Any, Dict, List
 
