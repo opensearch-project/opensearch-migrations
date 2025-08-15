@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.delta;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.BitSet;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -11,6 +10,7 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.lucene.LiveDocsConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
@@ -99,15 +99,15 @@ public class DeltaLuceneReader {
             if (baseLiveDocs == null) {
                 continue;
             }
-            BitSet liveDocs;
+            LiveDocsConverter.LengthDisabledBitSet liveDocs;
             if (currentLiveDocs != null) {
                 // Compute currentLiveDocs AND NOT baseLiveDocs
-                liveDocs = (BitSet) currentLiveDocs.clone();
+                liveDocs = (LiveDocsConverter.LengthDisabledBitSet) currentLiveDocs.clone();
                 liveDocs.andNot(baseLiveDocs);
             } else {
                 // Compute NOT baseLiveDocs (all docs except those in base)
-                liveDocs = (BitSet) baseLiveDocs.clone();
-                liveDocs.flip(0, liveDocs.length());
+                liveDocs = (LiveDocsConverter.LengthDisabledBitSet) baseLiveDocs.clone();
+                liveDocs.flip(0, currentSegmentReader.maxDoc());
             }
 
             if (liveDocs.cardinality() == 0) {
@@ -122,7 +122,7 @@ public class DeltaLuceneReader {
                 liveDocs,
                 offset
             );
-            offset += liveDocs.length();
+            offset += currentSegmentReader.maxDoc();
             readerAndBases.add(segmentReaderToCreate);
         }
 
@@ -145,7 +145,7 @@ public class DeltaLuceneReader {
     // Lower case to appease sonar until sonar is updated to java 17
     record segmentReaderAndLiveDoc(
         LuceneLeafReader reader,
-        BitSet liveDocOverride,
+        LiveDocsConverter.LengthDisabledBitSet liveDocOverride,
         int baseDocIdx
     ){
         // Base Record Implementation

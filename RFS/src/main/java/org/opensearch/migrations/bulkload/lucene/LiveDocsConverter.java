@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene;
 
+import lombok.experimental.Delegate;
+
 import java.util.BitSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -106,7 +108,7 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
      * @param nextSetBitFactory Function to create a nextSetBit function for SparseFixedBitSet
      * @return A Java BitSet containing the live docs, or null if input is null
      */
-    public static <B, F extends B, S extends B> BitSet convert(
+    public static <B, F extends B, S extends B> LengthDisabledBitSet convert(
             B liveDocs,
             Class<F> fixedBitSetClass,
             Class<S> sparseFixedBitSetClass,
@@ -123,7 +125,21 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
             getBitAt,
             nextSetBitFactory
         );
-        
-        return converter.convert(liveDocs);
+        var convertedBitSet = converter.convert(liveDocs);
+        return convertedBitSet != null ? new LengthDisabledBitSet(convertedBitSet) : null;
+    }
+
+    public static class LengthDisabledBitSet extends BitSet {
+        @Delegate
+        private final BitSet delegate;
+
+        public LengthDisabledBitSet(BitSet delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public int length() {
+            throw new UnsupportedOperationException("Ensure no calls to length");
+        }
     }
 }

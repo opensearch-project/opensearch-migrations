@@ -52,7 +52,7 @@ public class LiveDocsConverterTest {
         
         // Verify the result
         assertNotNull(result);
-        assertEquals(10, result.length());
+        assertThrows(UnsupportedOperationException.class, result::length);
         assertTrue(result.get(0));
         assertFalse(result.get(1));
         assertFalse(result.get(2));
@@ -99,7 +99,7 @@ public class LiveDocsConverterTest {
         
         // Verify the result
         assertNotNull(result);
-        assertEquals(100, result.length());
+        assertThrows(UnsupportedOperationException.class, result::length);
         assertFalse(result.get(0));
         assertTrue(result.get(5));
         assertTrue(result.get(25));
@@ -150,7 +150,7 @@ public class LiveDocsConverterTest {
                 assertFalse(result.get(i), "Bit at index " + i + " should not be set");
             }
         }
-        assertEquals(20, result.length());
+        assertThrows(UnsupportedOperationException.class, result::length);
         
         // Verify that length() and get() were called (fallback path)
         verify(spyBits, times(1)).length();
@@ -189,7 +189,7 @@ public class LiveDocsConverterTest {
         );
         
         assertNotNull(result);
-        assertEquals(10, result.length());
+        assertThrows(UnsupportedOperationException.class, result::length);
         assertEquals(0, result.cardinality(), "Empty sparse bits should result in empty BitSet");
     }
 
@@ -212,7 +212,7 @@ public class LiveDocsConverterTest {
         );
         
         assertNotNull(result);
-        assertEquals(8, result.length());
+        assertThrows(UnsupportedOperationException.class, result::length);
         assertEquals(8, result.cardinality(), "All bits should be set");
         for (int i = 0; i < 8; i++) {
             assertTrue(result.get(i), "Bit " + i + " should be set");
@@ -246,7 +246,7 @@ public class LiveDocsConverterTest {
         
         // Should fall back to manual iteration
         assertNotNull(result);
-        assertEquals(5, result.length());
+        assertThrows(UnsupportedOperationException.class, result::length);
         assertFalse(result.get(0));
         assertTrue(result.get(1));
         assertFalse(result.get(2));
