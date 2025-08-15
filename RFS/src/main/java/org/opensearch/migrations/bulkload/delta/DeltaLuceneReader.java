@@ -58,9 +58,6 @@ public class DeltaLuceneReader {
         var baseKeys    = new TreeSet<>(baseSegmentToLeafReader.keySet());
         var currentKeys = new TreeSet<>(currentSegmentToLeafReader.keySet());
 
-        var onlyInBaseKeys    = new TreeSet<>(baseKeys);
-        onlyInBaseKeys.removeAll(currentKeys);
-
         var onlyInCurrentKeys = new TreeSet<>(currentKeys);
         onlyInCurrentKeys.removeAll(baseKeys);
 
