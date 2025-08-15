@@ -46,13 +46,6 @@ public class SnapshotShardUnpacker {
     }
 
     public Path unpack() {
-        if (baseShardMetadata == null) {
-            return standardUnpack();
-        }
-        return deltaUnpack();
-    }
-
-    public Path standardUnpack() {
         try {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
@@ -65,77 +58,33 @@ public class SnapshotShardUnpacker {
                 luceneFilesBasePath + "/" + shardMetadata.getIndexName() + "/" + shardMetadata.getShardId()
             );
             Files.createDirectories(luceneIndexDir);
-            try (FSDirectory primaryDirectory = FSDirectory.open(luceneIndexDir, lockFactory)) {
-                for (ShardFileInfo fileMetadata : shardMetadata.getFiles()) {
-                    log.atInfo().setMessage("Unpacking - Blob Name: {}, Lucene Name: {}")
-                        .addArgument(fileMetadata::getName)
-                        .addArgument(fileMetadata::getPhysicalName)
-                        .log();
-                    try (
-                        IndexOutput indexOutput = primaryDirectory.createOutput(
-                            fileMetadata.getPhysicalName(),
-                            IOContext.DEFAULT
-                        );
-                    ) {
-                        if (fileMetadata.getName().startsWith("v__")) {
-                            final BytesRef hash = fileMetadata.getMetaHash();
-                            indexOutput.writeBytes(hash.bytes, hash.offset, hash.length);
-                        } else {
-                            try (
-                                InputStream stream = new PartSliceStream(
-                                    repoAccessor,
-                                    fileMetadata,
-                                    shardMetadata.getIndexId(),
-                                    shardMetadata.getShardId()
-                                )
-                            ) {
-                                final byte[] buffer = new byte[Math.toIntExact(
-                                    Math.min(bufferSize, fileMetadata.getLength())
-                                )];
-                                int length;
-                                while ((length = stream.read(buffer)) > 0) {
-                                    indexOutput.writeBytes(buffer, 0, length);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            return luceneIndexDir;
-        } catch (Exception e) {
-            throw new CouldNotUnpackShard(
-                "Could not unpack shard: Index " + shardMetadata.getIndexId() + ", Shard " + shardMetadata.getShardId(),
-                e
-            );
-        }
-    }
 
-    public Path deltaUnpack() {
-        try {
-            // Some constants
-            NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
-
-            // Use prepBlobFiles on new shard
-            repoAccessor.prepBlobFiles(shardMetadata);
-
-            // Create the directory for the shard's lucene files
-            Path luceneIndexDir = Paths.get(
-                luceneFilesBasePath + "/" + shardMetadata.getIndexName() + "/" + shardMetadata.getShardId()
-            );
-            Files.createDirectories(luceneIndexDir);
-
-            Set<ShardFileInfo> combinedFiles =
-                Stream.concat(shardMetadata.getFiles().stream(),
+            // Determine which files to unpack
+            Set<ShardFileInfo> filesToUnpack;
+            boolean isDelta = baseShardMetadata != null;
+            
+            if (isDelta) {
+                // For delta unpacking, combine files from both current and base shard metadata
+                filesToUnpack = Stream.concat(
+                        shardMetadata.getFiles().stream(),
                         baseShardMetadata.getFiles().stream())
                     .collect(Collectors.toCollection(
                         () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
+            } else {
+                // For standard unpacking, use only current shard metadata files
+                filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+                filesToUnpack.addAll(shardMetadata.getFiles());
+            }
 
             try (FSDirectory primaryDirectory = FSDirectory.open(luceneIndexDir, lockFactory)) {
-                for (ShardFileInfo fileMetadata : combinedFiles) {
-                    log.atInfo().setMessage("Delta Unpacking - Blob Name: {}, Lucene Name: {}")
+                for (ShardFileInfo fileMetadata : filesToUnpack) {
+                    String logPrefix = isDelta ? "Delta Unpacking" : "Unpacking";
+                    log.atInfo().setMessage("{} - Blob Name: {}, Lucene Name: {}")
+                        .addArgument(logPrefix)
                         .addArgument(fileMetadata::getName)
                         .addArgument(fileMetadata::getPhysicalName)
                         .log();
+                    
                     try (
                         IndexOutput indexOutput = primaryDirectory.createOutput(
                             fileMetadata.getPhysicalName(),
@@ -168,14 +117,19 @@ public class SnapshotShardUnpacker {
             }
             return luceneIndexDir;
         } catch (Exception e) {
-            throw new CouldNotUnpackShard(
-                "Could not delta unpack shard: Index " + shardMetadata.getIndexId() + ", Shard " + shardMetadata.getShardId()
-                + " BaseSnapshot " + baseShardMetadata.getSnapshotName() + " CurrentSnapshot " + shardMetadata.getSnapshotName(),
-                e
-            );
+            String errorMessage;
+            if (baseShardMetadata != null) {
+                errorMessage = "Could not delta unpack shard: Index " + shardMetadata.getIndexId() 
+                    + ", Shard " + shardMetadata.getShardId()
+                    + " BaseSnapshot " + baseShardMetadata.getSnapshotName() 
+                    + " CurrentSnapshot " + shardMetadata.getSnapshotName();
+            } else {
+                errorMessage = "Could not unpack shard: Index " + shardMetadata.getIndexId() 
+                    + ", Shard " + shardMetadata.getShardId();
+            }
+            throw new CouldNotUnpackShard(errorMessage, e);
         }
     }
-
 
     public static class CouldNotUnpackShard extends RfsException {
         public CouldNotUnpackShard(String message, Exception e) {
