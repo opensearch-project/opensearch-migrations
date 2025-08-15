@@ -83,7 +83,12 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 "    \"number_of_replicas\": 0," +
                 "    \"refresh_interval\": -1," +
                     // TODO: Define behavior on ES 6 when soft_deletes is disabled
-                    ((VersionMatchers.isES_6_X.test(sourceCluster.getContainerVersion().getVersion())) ?
+                    // Appears to prevent this test from disabling segment merges
+                    // Disabled by default on ES 6.5+ and optionally disabled on ES 7.x
+                    (( (VersionMatchers.isES_6_X.and(
+                        version -> version.getMinor() >= 5
+                        ))
+                        .test(sourceCluster.getContainerVersion().getVersion())) ?
                     "    \"index.soft_deletes.enabled\": true," : "") +
                     // Disable segment merges to ensure consistent test execution
                 "    \"merge.policy.floor_segment\": \"1gb\"," +
@@ -93,7 +98,6 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 numberOfShards
             );
             sourceClusterOperations.createIndex(indexName, indexSettings);
-            targetClusterOperations.createIndex(indexName, indexSettings);
 
             String doc = "{\"content\": \"document\"}";
 
