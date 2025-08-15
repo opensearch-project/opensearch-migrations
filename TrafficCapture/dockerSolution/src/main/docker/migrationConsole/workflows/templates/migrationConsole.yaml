@@ -14,21 +14,25 @@ spec:
           - name: source-cluster
             value: ""
             description: "Source cluster configuration (JSON)"
-          - name: snapshot-info
-            value: ""
-            description: "Snapshot configuration information (JSON)"
           - name: target-cluster
             value: ""
             description: "Target cluster configuration (JSON)"
+          - name: snapshot-info
+            value: ""
+            description: "Snapshot configuration information (JSON)"
+          - name: metadata-info
+            value: ""
+            description: "Metadata migration configuration information (JSON)"
       outputs:
         parameters:
           - name: config-contents
             valueFrom:
               expression: >-
-                (inputs.parameters['kafka-info']     != "" ? "kafka: " +          inputs.parameters['kafka-info'] + "\n" : "") + 
-                (inputs.parameters['source-cluster'] != "" ? "source_cluster: " + inputs.parameters['source-cluster'] + "\n" : "") + 
-                (inputs.parameters['snapshot-info']  != "" ? "snapshot: " +       inputs.parameters['snapshot-info'] + "\n" : "") +
-                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " + inputs.parameters['target-cluster'] + "\n" : "")
+                (inputs.parameters['kafka-info']     != "" ? "kafka: " +              inputs.parameters['kafka-info'] + "\n" : "") + 
+                (inputs.parameters['source-cluster'] != "" ? "source_cluster: " +     inputs.parameters['source-cluster'] + "\n" : "") + 
+                (inputs.parameters['snapshot-info']  != "" ? "snapshot: " +           inputs.parameters['snapshot-info'] + "\n" : "") +
+                (inputs.parameters['metadata-info']  != "" ? "metadata_migration: " + inputs.parameters['metadata-info'] + "\n" : "") +
+                (inputs.parameters['target-cluster'] != "" ? "target_cluster: " +     inputs.parameters['target-cluster'] + "\n" : "")
       steps: [[]]
 
     - name: run-console-with-config
@@ -38,6 +42,8 @@ spec:
           - name: config-contents
           - name: migration-console-image
           - name: migration-console-pull-policy
+          - name: use-localstack-aws-creds
+            value: "false"
       container:
         image: "{{inputs.parameters.migration-console-image}}"
         imagePullPolicy: "{{inputs.parameters.migration-console-pull-policy}}"
@@ -46,6 +52,13 @@ spec:
           - |
             set -e
             
+            if [ "{{inputs.parameters.use-localstack-aws-creds}}" = "true" ]; then
+              export AWS_ACCESS_KEY_ID=test
+              export AWS_SECRET_ACCESS_KEY=test
+              export AWS_SESSION_TOKEN=test
+              export AWS_REGION=us-east-2
+            fi
+    
             # Save pod name to output path
             echo $HOSTNAME > /tmp/podname
             

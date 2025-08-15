@@ -47,7 +47,7 @@ class Environment:
     def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None):
         """
         Initialize the environment either from a configuration file or a direct configuration object.
-        
+
         :param config: Direct configuration object (overrides config_file).
         :param config_file: Path to the YAML config file.
         """
@@ -118,6 +118,7 @@ class Environment:
         if 'metadata_migration' in self.config:
             self.metadata = Metadata(self.config["metadata_migration"],
                                      target_cluster=self.target_cluster,
+                                     source_cluster=self.source_cluster,
                                      snapshot=self.snapshot)
         if 'kafka' in self.config:
             self.kafka = get_kafka(self.config["kafka"])
