@@ -1,12 +1,11 @@
 package org.opensearch.migrations.bulkload.lucene.version_5;
 
 import java.io.IOException;
-import java.util.BitSet;
 
-import lombok.Getter;
 import org.opensearch.migrations.bulkload.lucene.LiveDocsConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
+import lombok.Getter;
 import shadow.lucene5.org.apache.lucene.index.LeafReader;
 import shadow.lucene5.org.apache.lucene.index.SegmentReader;
 import shadow.lucene5.org.apache.lucene.util.Bits;

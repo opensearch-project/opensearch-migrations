@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
-import java.util.BitSet;
 
 public interface LuceneLeafReader {
 

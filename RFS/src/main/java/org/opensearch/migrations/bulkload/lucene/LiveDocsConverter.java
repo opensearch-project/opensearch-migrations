@@ -1,11 +1,11 @@
 package org.opensearch.migrations.bulkload.lucene;
 
-import lombok.experimental.Delegate;
-
 import java.util.BitSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
+
+import lombok.experimental.Delegate;
 
 /**
  * Generic converter for converting Lucene Bits implementations to Java BitSet.

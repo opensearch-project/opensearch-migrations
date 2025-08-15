@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
-import java.util.BitSet;
 
 import org.opensearch.migrations.bulkload.lucene.LiveDocsConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
