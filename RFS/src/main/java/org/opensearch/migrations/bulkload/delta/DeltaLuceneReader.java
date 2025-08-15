@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.delta;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -12,7 +11,6 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 

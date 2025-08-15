@@ -28,9 +28,6 @@ import org.testcontainers.lifecycle.Startables;
  * Test class for delta snapshot restore functionality.
  * This test sets up a scenario where we have two snapshots and want to
  * restore only the changes between them.
- * 
- * Initial implementation: Just restores from the second snapshot.
- * Future implementation: Will calculate and apply the delta between snapshots.
  */
 @Slf4j
 @Tag("isolatedTest")

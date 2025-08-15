@@ -23,14 +23,14 @@ public class LeafReader5 implements LuceneLeafReader {
     }
 
     private static BitSet convertLiveDocs(Bits bits) {
-        return LiveDocsConverter.convertLiveDocs(
+        return LiveDocsConverter.convert(
             bits,
             FixedBitSet.class,
             SparseFixedBitSet.class,
-            obj -> ((FixedBitSet) obj).getBits(),
-            obj -> ((Bits) obj).length(),
+            FixedBitSet::getBits,
+            Bits::length,
             idx -> bits != null && bits.get(idx),
-            idx -> ((SparseFixedBitSet) bits).nextSetBit(idx)
+            sparseBits -> sparseBits::nextSetBit
         );
     }
 
