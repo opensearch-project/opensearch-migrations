@@ -8,6 +8,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
@@ -166,11 +167,13 @@ public class DeltaLuceneReader {
         );
 
         log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
-                .addArgument(readerAndBase.reader)
+                .addArgument(segmentReader)
                 .addArgument(startDocIdInSegment)
-                .addArgument(liveDocs::length)
+                .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
                 .log();
-        return Flux.fromStream(liveDocs.stream().filter(idx -> idx >= startDocIdInSegment).boxed())
+        var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
+            IntStream.range(startDocIdInSegment, readerAndBase.reader.maxDoc());
+        return Flux.fromStream(idxStream.boxed())
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         // Get document, returns null to skip malformed docs

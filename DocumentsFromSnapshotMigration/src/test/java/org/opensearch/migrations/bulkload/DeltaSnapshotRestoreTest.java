@@ -6,6 +6,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -80,8 +81,13 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 "  \"settings\": {" +
                 "    \"number_of_shards\": %d," +
                 "    \"number_of_replicas\": 0," +
-                "    \"index.soft_deletes.enabled\": true," +
-                "    \"refresh_interval\": -1" +
+                "    \"refresh_interval\": -1," +
+                    // TODO: Define behavior on ES 6 when soft_deletes is disabled
+                    ((VersionMatchers.isES_6_X.test(sourceCluster.getContainerVersion().getVersion())) ?
+                    "    \"index.soft_deletes.enabled\": true," : "") +
+                    // Disable segment merges to ensure consistent test execution
+                "    \"merge.policy.floor_segment\": \"1gb\"," +
+                "    \"merge.policy.max_merged_segment\": \"1gb\"" +
                 "  }" +
                 "}",
                 numberOfShards
@@ -182,7 +188,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 }
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
-                    Assertions.assertEquals(404, response.getKey(), docIdOnlyOnSecond + " should not be created");
+                    Assertions.assertEquals(404, response.getKey(), docIdOnBoth + " should not be created");
                 }
             }
 
