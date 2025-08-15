@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.models;
 
+import java.util.Objects;
+
 import lombok.Value;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
 
@@ -40,11 +42,18 @@ public interface ShardFileInfo {
 
         @Override
         public int compareTo(ShardFileKey other) {
-            int cmp = name.compareTo(other.name);
+            if (other == null) return 1;
+            int cmp = compareNullable(name, other.name);
             if (cmp != 0) return cmp;
-            cmp = physicalName.compareTo(other.physicalName);
+            cmp = compareNullable(physicalName, other.physicalName);
             if (cmp != 0) return cmp;
-            return checksum.compareTo(other.checksum);
+            return compareNullable(checksum, other.checksum);
         }
-    }
+
+        private static int compareNullable(String a, String b) {
+            if (Objects.equals(a, b)) return 0;
+            if (a == null) return -1;
+            if (b == null) return 1;
+            return a.compareTo(b);
+        }    }
 }
