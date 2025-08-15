@@ -3,15 +3,9 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Comparator;
 import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,9 +19,10 @@ import shadow.lucene9.org.apache.lucene.util.BytesRef;
 @Slf4j
 public class SnapshotShardUnpacker {
     private final SourceRepoAccessor repoAccessor;
-    private final Path luceneFilesBasePath;
-    private final ShardMetadata baseShardMetadata;
-    private final ShardMetadata shardMetadata;
+    private final Set<ShardFileInfo> filesToUnpack;
+    private final Path targetDirectory;
+    private final String indexId;
+    private final int shardId;
     private final int bufferSize;
 
     @RequiredArgsConstructor
@@ -36,12 +31,25 @@ public class SnapshotShardUnpacker {
         private final Path luceneFilesBasePath;
         private final int bufferSize;
 
-        public SnapshotShardUnpacker create(ShardMetadata shardMetadata) {
-            return new SnapshotShardUnpacker(repoAccessor, luceneFilesBasePath, null, shardMetadata, bufferSize);
+        public SourceRepoAccessor getRepoAccessor() {
+            return repoAccessor;
         }
 
-        public SnapshotShardUnpacker create(ShardMetadata baseShardMetadata, ShardMetadata shardMetadata) {
-            return new SnapshotShardUnpacker(repoAccessor, luceneFilesBasePath, baseShardMetadata, shardMetadata, bufferSize);
+        public SnapshotShardUnpacker create(
+            Set<ShardFileInfo> filesToUnpack,
+            String indexName,
+            String indexId,
+            int shardId
+        ) {
+            Path targetDirectory = luceneFilesBasePath.resolve(indexName).resolve(String.valueOf(shardId));
+            return new SnapshotShardUnpacker(
+                repoAccessor,
+                filesToUnpack,
+                targetDirectory,
+                indexId,
+                shardId,
+                bufferSize
+            );
         }
     }
 
@@ -50,37 +58,12 @@ public class SnapshotShardUnpacker {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
 
-            // Ensure the blob files are prepped, if they need to be
-            repoAccessor.prepBlobFiles(shardMetadata);
-
             // Create the directory for the shard's lucene files
-            Path luceneIndexDir = Paths.get(
-                luceneFilesBasePath + "/" + shardMetadata.getIndexName() + "/" + shardMetadata.getShardId()
-            );
-            Files.createDirectories(luceneIndexDir);
+            Files.createDirectories(targetDirectory);
 
-            // Determine which files to unpack
-            Set<ShardFileInfo> filesToUnpack;
-            boolean isDelta = baseShardMetadata != null;
-            
-            if (isDelta) {
-                // For delta unpacking, combine files from both current and base shard metadata
-                filesToUnpack = Stream.concat(
-                        shardMetadata.getFiles().stream(),
-                        baseShardMetadata.getFiles().stream())
-                    .collect(Collectors.toCollection(
-                        () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
-            } else {
-                // For standard unpacking, use only current shard metadata files
-                filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
-                filesToUnpack.addAll(shardMetadata.getFiles());
-            }
-
-            try (FSDirectory primaryDirectory = FSDirectory.open(luceneIndexDir, lockFactory)) {
+            try (FSDirectory primaryDirectory = FSDirectory.open(targetDirectory, lockFactory)) {
                 for (ShardFileInfo fileMetadata : filesToUnpack) {
-                    String logPrefix = isDelta ? "Delta Unpacking" : "Unpacking";
-                    log.atInfo().setMessage("{} - Blob Name: {}, Lucene Name: {}")
-                        .addArgument(logPrefix)
+                    log.atInfo().setMessage("Unpacking - Blob Name: {}, Lucene Name: {}")
                         .addArgument(fileMetadata::getName)
                         .addArgument(fileMetadata::getPhysicalName)
                         .log();
@@ -99,8 +82,8 @@ public class SnapshotShardUnpacker {
                                 InputStream stream = new PartSliceStream(
                                     repoAccessor,
                                     fileMetadata,
-                                    shardMetadata.getIndexId(),
-                                    shardMetadata.getShardId()
+                                    indexId,
+                                    shardId
                                 )
                             ) {
                                 final byte[] buffer = new byte[Math.toIntExact(
@@ -115,18 +98,9 @@ public class SnapshotShardUnpacker {
                     }
                 }
             }
-            return luceneIndexDir;
+            return targetDirectory;
         } catch (Exception e) {
-            String errorMessage;
-            if (baseShardMetadata != null) {
-                errorMessage = "Could not delta unpack shard: Index " + shardMetadata.getIndexId() 
-                    + ", Shard " + shardMetadata.getShardId()
-                    + " BaseSnapshot " + baseShardMetadata.getSnapshotName() 
-                    + " CurrentSnapshot " + shardMetadata.getSnapshotName();
-            } else {
-                errorMessage = "Could not unpack shard: Index " + shardMetadata.getIndexId() 
-                    + ", Shard " + shardMetadata.getShardId();
-            }
+            String errorMessage = "Could not unpack shard: Index " + indexId + ", Shard " + shardId;
             throw new CouldNotUnpackShard(errorMessage, e);
         }
     }
@@ -136,5 +110,4 @@ public class SnapshotShardUnpacker {
             super(message, e);
         }
     }
-
 }

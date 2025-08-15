@@ -1,11 +1,15 @@
 package org.opensearch.migrations.bulkload.worker;
 
+import java.util.Comparator;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.BiFunction;
 
 import org.opensearch.migrations.bulkload.common.DocumentReadingStrategy;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.AllArgsConstructor;
@@ -22,7 +26,20 @@ public class RegularDocumentReadingStrategy implements DocumentReadingStrategy {
         int shardNumber
     ) {
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
-        return unpackerFactory.create(shardMetadata);
+        
+        // Extract files from metadata
+        Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+        filesToUnpack.addAll(shardMetadata.getFiles());
+        
+        // TODO: Refactor this away from here for shard downloading
+        unpackerFactory.getRepoAccessor().prepBlobFiles(shardMetadata);
+
+        return unpackerFactory.create(
+            filesToUnpack,
+            indexName,
+            shardMetadata.getIndexId(),
+            shardNumber
+        );
     }
 
     @Override

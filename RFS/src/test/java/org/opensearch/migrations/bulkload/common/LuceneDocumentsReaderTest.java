@@ -8,6 +8,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +26,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
+import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
@@ -92,11 +95,18 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
+        // Extract files from metadata
+        Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+        filesToUnpack.addAll(shardMetadata.getFiles());
+        
+        // Ensure the blob files are prepped
+        repoAccessor.prepBlobFiles(shardMetadata);
+
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
             tempDirectory,
             Integer.MAX_VALUE
-        ).create(shardMetadata);
+        ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
@@ -155,11 +165,18 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
+        // Extract files from metadata
+        Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+        filesToUnpack.addAll(shardMetadata.getFiles());
+        
+        // Ensure the blob files are prepped
+        repoAccessor.prepBlobFiles(shardMetadata);
+
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
             tempDirectory,
             Integer.MAX_VALUE
-        ).create(shardMetadata);
+        ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
@@ -308,11 +325,18 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
+        // Extract files from metadata
+        Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+        filesToUnpack.addAll(shardMetadata.getFiles());
+        
+        // Ensure the blob files are prepped
+        repoAccessor.prepBlobFiles(shardMetadata);
+
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
             tempDirectory,
             Integer.MAX_VALUE
-        ).create(shardMetadata);
+        ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
@@ -345,11 +369,18 @@ public class LuceneDocumentsReaderTest {
 
         final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
+        // Extract files from metadata
+        Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+        filesToUnpack.addAll(shardMetadata.getFiles());
+        
+        // Ensure the blob files are prepped
+        repoAccessor.prepBlobFiles(shardMetadata);
+
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker.Factory(
             repoAccessor,
             tempDirectory,
             Integer.MAX_VALUE
-        ).create(shardMetadata);
+        ).create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0);
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents

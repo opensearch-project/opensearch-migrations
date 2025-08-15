@@ -1,12 +1,18 @@
 package org.opensearch.migrations.bulkload.delta;
 
+import java.util.Comparator;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReadingStrategy;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.AllArgsConstructor;
@@ -26,7 +32,23 @@ public class DeltaDocumentReadingStrategy implements DocumentReadingStrategy {
     ) {
         ShardMetadata baseShardMetadata = baseShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
-        return unpackerFactory.create(baseShardMetadata, shardMetadata);
+        
+        // For delta unpacking, combine files from both current and base shard metadata
+        Set<ShardFileInfo> filesToUnpack = Stream.concat(
+                shardMetadata.getFiles().stream(),
+                baseShardMetadata.getFiles().stream())
+            .collect(Collectors.toCollection(
+                () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
+        
+        // Ensure the blob files are prepped, if they need to be
+        unpackerFactory.getRepoAccessor().prepBlobFiles(shardMetadata);
+        
+        return unpackerFactory.create(
+            filesToUnpack,
+            indexName,
+            shardMetadata.getIndexId(),
+            shardNumber
+        );
     }
 
     @Override
