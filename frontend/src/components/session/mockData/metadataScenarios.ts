@@ -1,8 +1,8 @@
 "use client";
 
-import { MetadataData } from "../types";
+import { MetadataStatus } from "@/generated/api";
 
-export const METADATA_SCENARIOS: Record<string, MetadataData> = {
+export const METADATA_SCENARIOS: Record<string, MetadataStatus> = {
   notStarted: {
     status: "Pending",
     started: undefined,
@@ -16,7 +16,7 @@ export const METADATA_SCENARIOS: Record<string, MetadataData> = {
   },
   inProgress: {
     status: "Running",
-    started: new Date(Date.now() - 300000).toISOString(),
+    started: new Date(Date.now() - 300000),
     finished: undefined,
     clusters: undefined,
     items: undefined,
@@ -27,8 +27,8 @@ export const METADATA_SCENARIOS: Record<string, MetadataData> = {
   },
   completedEmpty: {
     status: "Completed",
-    started: new Date(Date.now() - 600000).toISOString(),
-    finished: new Date().toISOString(),
+    started: new Date(Date.now() - 600000),
+    finished: new Date(),
     clusters: {
       source: {
         type: "Snapshot",
@@ -40,6 +40,7 @@ export const METADATA_SCENARIOS: Record<string, MetadataData> = {
       },
     },
     items: {
+      dryRun: false,
       indexTemplates: [],
       componentTemplates: [],
       indexes: [],
@@ -52,8 +53,8 @@ export const METADATA_SCENARIOS: Record<string, MetadataData> = {
   },
   completedWithData: {
     status: "Completed",
-    started: new Date(Date.now() - 1200000).toISOString(),
-    finished: new Date().toISOString(),
+    started: new Date(Date.now() - 1200000),
+    finished: new Date(),
     clusters: {
       source: {
         type: "Snapshot",
@@ -65,6 +66,7 @@ export const METADATA_SCENARIOS: Record<string, MetadataData> = {
       },
     },
     items: {
+      dryRun: false,
       indexTemplates: [
         { name: "template1", successful: true },
         { name: "template2", successful: false },
@@ -84,8 +86,8 @@ export const METADATA_SCENARIOS: Record<string, MetadataData> = {
   },
   failed: {
     status: "Failed",
-    started: new Date(Date.now() - 600000).toISOString(),
-    finished: new Date(Date.now() - 300000).toISOString(),
+    started: new Date(Date.now() - 600000),
+    finished: new Date(Date.now() - 300000),
     clusters: {
       source: {
         type: "Snapshot",

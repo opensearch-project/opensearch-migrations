@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { MetadataData, SessionStatusProps } from "./types";
+import { SessionStatusProps } from "./types";
 import { StatusFieldDefinition } from "./statusUtils";
 import { useMetadataStatus } from "./apiHooks";
 import StatusContainer from "./StatusContainer";
@@ -12,6 +12,7 @@ import {
 } from "./statusComponents";
 import { METADATA_SCENARIOS } from "./mockData/metadataScenarios";
 import { MetadataDebugControls } from "./debug/MetadataDebugControls";
+import { MetadataStatus } from "@/generated/api";
 
 export default function MetadataStatusView({
   sessionName,
@@ -22,15 +23,15 @@ export default function MetadataStatusView({
     error,
   } = useMetadataStatus(sessionName);
 
-  const [debugData, setDebugData] = useState<MetadataData | null>(null);
+  const [debugData, setDebugData] = useState<MetadataStatus | null>(null);
   const [isLoading, setIsLoading] = useState(apiLoading);
-  const [metadataData, setMetadataData] = useState<MetadataData | null>(null);
+  const [metadataData, setMetadataData] = useState<MetadataStatus | null>(null);
 
   useEffect(() => {
     if (!debugData) {
       // Only update if there's actual API data
       if (apiMetadataData) {
-        setMetadataData(apiMetadataData as MetadataData);
+        setMetadataData(apiMetadataData);
       } else {
         setMetadataData(null);
       }

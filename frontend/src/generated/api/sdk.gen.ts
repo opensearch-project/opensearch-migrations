@@ -31,6 +31,15 @@ import type {
   MetadataStatusErrors,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
+import {
+  sessionsListResponseTransformer,
+  sessionCreateResponseTransformer,
+  sessionGetResponseTransformer,
+  sessionUpdateResponseTransformer,
+  snapshotStatusResponseTransformer,
+  metadataMigrateResponseTransformer,
+  metadataStatusResponseTransformer,
+} from "./transformers.gen";
 
 export type Options<
   TData extends TDataShape = TDataShape,
@@ -92,6 +101,7 @@ export const sessionsList = <ThrowOnError extends boolean = false>(
     unknown,
     ThrowOnError
   >({
+    responseTransformer: sessionsListResponseTransformer,
     url: "/sessions/",
     ...options,
   });
@@ -108,6 +118,7 @@ export const sessionCreate = <ThrowOnError extends boolean = false>(
     SessionCreateErrors,
     ThrowOnError
   >({
+    responseTransformer: sessionCreateResponseTransformer,
     url: "/sessions/",
     ...options,
     headers: {
@@ -144,6 +155,7 @@ export const sessionGet = <ThrowOnError extends boolean = false>(
     SessionGetErrors,
     ThrowOnError
   >({
+    responseTransformer: sessionGetResponseTransformer,
     url: "/sessions/{session_name}",
     ...options,
   });
@@ -160,6 +172,7 @@ export const sessionUpdate = <ThrowOnError extends boolean = false>(
     SessionUpdateErrors,
     ThrowOnError
   >({
+    responseTransformer: sessionUpdateResponseTransformer,
     url: "/sessions/{session_name}",
     ...options,
     headers: {
@@ -180,6 +193,7 @@ export const snapshotStatus = <ThrowOnError extends boolean = false>(
     SnapshotStatusErrors,
     ThrowOnError
   >({
+    responseTransformer: snapshotStatusResponseTransformer,
     url: "/sessions/{session_name}/snapshot/status",
     ...options,
   });
@@ -198,6 +212,7 @@ export const metadataMigrate = <ThrowOnError extends boolean = false>(
     MetadataMigrateErrors,
     ThrowOnError
   >({
+    responseTransformer: metadataMigrateResponseTransformer,
     url: "/sessions/{session_name}/metadata/migrate",
     ...options,
     headers: {
@@ -219,6 +234,7 @@ export const metadataStatus = <ThrowOnError extends boolean = false>(
     MetadataStatusErrors,
     ThrowOnError
   >({
+    responseTransformer: metadataStatusResponseTransformer,
     url: "/sessions/{session_name}/metadata/status",
     ...options,
   });

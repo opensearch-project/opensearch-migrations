@@ -38,11 +38,11 @@ def migrate_metadata(session_name: str, request: metadata.MetadataMigrateRequest
         extra_args = metadata.extra_args_from_request(request)
         
         # Execute metadata migration or evaluation based on dry_run
-        operation_type = "evaluation" if request.dry_run else "migration"
+        operation_type = "evaluation" if request.dryRun else "migration"
         logger.info(f"Starting metadata {operation_type} for session {session_name}")
         
         start_time = datetime.now(timezone.utc)
-        result = env.metadata.migrate_or_evaluate("migrate" if not request.dry_run else "evaluate", extra_args)
+        result = env.metadata.migrate_or_evaluate("migrate" if not request.dryRun else "evaluate", extra_args)
         end_time = datetime.now(timezone.utc)
 
         parsed_data = metadata.parse_metadata_result(result)
@@ -50,7 +50,7 @@ def migrate_metadata(session_name: str, request: metadata.MetadataMigrateRequest
                                                 parsed_data,
                                                 start_time,
                                                 end_time,
-                                                dry_run=request.dry_run)
+                                                dry_run=request.dryRun)
         
         return metadata.build_status_from_entry(result)
             

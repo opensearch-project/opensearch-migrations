@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from cerberus import Validator
 from datetime import datetime
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 from requests.exceptions import HTTPError
 from typing import Any, Dict, Optional
 
@@ -276,15 +276,23 @@ class SnapshotStatusUnavailable(Exception):
 class SnapshotStatus(BaseModel):
     status: StepState
     percentage_completed: float
-    eta_ms: float | None
-    started: datetime | None = None
-    finished: datetime | None = None
-    data_total_bytes: int | None = None
-    data_processed_bytes: int | None = None
-    data_throughput_bytes_avg_sec: float | None = None
-    shard_total: int | None = None
-    shard_complete: int | None = None
-    shard_failed: int | None = None
+    eta_ms: Optional[float] = None
+    started: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    finished: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    data_total_bytes: Optional[int] = None
+    data_processed_bytes: Optional[int] = None
+    data_throughput_bytes_avg_sec: Optional[float] = None
+    shard_total: Optional[int] = None
+    shard_complete: Optional[int] = None
+    shard_failed: Optional[int] = None
     model_config = {
         'from_attributes': True,
     }

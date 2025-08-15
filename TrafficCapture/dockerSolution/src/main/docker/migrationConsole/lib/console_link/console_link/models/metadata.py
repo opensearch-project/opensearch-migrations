@@ -4,7 +4,7 @@ import logging
 import json
 from cerberus import Validator
 from datetime import datetime, timezone
-from pydantic import BaseModel, field_validator, field_serializer
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import Optional, Any, Dict, List
 
 from console_link.db import metadata_db
@@ -289,10 +289,10 @@ class Metadata:
 
 
 class MetadataMigrateRequest(BaseModel):
-    index_allowlist: Optional[List[str]] = None
-    index_template_allowlist: Optional[List[str]] = None
-    component_template_allowlist: Optional[List[str]] = None
-    dry_run: bool = True
+    indexAllowlist: Optional[List[str]] = None
+    indexTemplateAllowlist: Optional[List[str]] = None
+    componentTemplateAllowlist: Optional[List[str]] = None
+    dryRun: bool = True
 
 
 class ClusterInfo(BaseModel):
@@ -336,10 +336,18 @@ class TransformationInfo(BaseModel):
 
 
 class MetadataStatus(BaseModel):
-    session_name: str
     status: Optional[StepState] = StepState.PENDING
-    started: Optional[datetime] = None
-    finished: Optional[datetime] = None
+    started: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    finished: Optional[datetime] = Field(
+        default=None,
+        description="Finish time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    dryRun: Optional[bool] = None
     clusters: Optional[ClustersInfo] = None
     items: Optional[ItemsInfo] = None
     transformations: Optional[TransformationInfo] = None
@@ -411,14 +419,14 @@ def extra_args_from_request(request: MetadataMigrateRequest) -> List[str]:
     """Build extra args list from the request parameters."""
     extra_args = []
     
-    if request.index_allowlist:
-        extra_args.extend(["--index-allowlist", ",".join(request.index_allowlist)])
+    if request.indexAllowlist:
+        extra_args.extend(["--index-allowlist", ",".join(request.indexAllowlist)])
     
-    if request.index_template_allowlist:
-        extra_args.extend(["--index-template-allowlist", ",".join(request.index_template_allowlist)])
+    if request.indexTemplateAllowlist:
+        extra_args.extend(["--index-template-allowlist", ",".join(request.indexTemplateAllowlist)])
     
-    if request.component_template_allowlist:
-        extra_args.extend(["--component-template-allowlist", ",".join(request.component_template_allowlist)])
+    if request.componentTemplateAllowlist:
+        extra_args.extend(["--component-template-allowlist", ",".join(request.componentTemplateAllowlist)])
     
     extra_args.extend(["--output", "json"])
 
@@ -437,10 +445,10 @@ def build_status_from_entry(entry: metadata_db.MetadataEntry) -> MetadataStatus:
         status = StepState.COMPLETED
 
     response = MetadataStatus(
-        session_name=entry.session_name,
         status=status,
         started=entry.started,
         finished=entry.finished,
+        dryRun=entry.dry_run,
         clusters=ClustersInfo(**entry.detailed_results.get("clusters", {}))
         if "clusters" in entry.detailed_results else None,
         items=ItemsInfo(**entry.detailed_results.get("items", {}))

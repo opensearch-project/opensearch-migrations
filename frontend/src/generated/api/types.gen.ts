@@ -138,40 +138,42 @@ export type ItemsInfo = {
  */
 export type MetadataMigrateRequest = {
   /**
-   * Index Allowlist
+   * Indexallowlist
    */
-  index_allowlist?: Array<string> | null;
+  indexAllowlist?: Array<string> | null;
   /**
-   * Index Template Allowlist
+   * Indextemplateallowlist
    */
-  index_template_allowlist?: Array<string> | null;
+  indexTemplateAllowlist?: Array<string> | null;
   /**
-   * Component Template Allowlist
+   * Componenttemplateallowlist
    */
-  component_template_allowlist?: Array<string> | null;
+  componentTemplateAllowlist?: Array<string> | null;
   /**
-   * Dry Run
+   * Dryrun
    */
-  dry_run?: boolean;
+  dryRun?: boolean;
 };
 
 /**
  * MetadataStatus
  */
 export type MetadataStatus = {
-  /**
-   * Session Name
-   */
-  session_name: string;
   status?: StepState | null;
   /**
    * Started
+   * Start time in ISO 8601 format
    */
-  started?: string | null;
+  started?: Date | null;
   /**
    * Finished
+   * Finish time in ISO 8601 format
    */
-  finished?: string | null;
+  finished?: Date | null;
+  /**
+   * Dryrun
+   */
+  dryRun?: boolean | null;
   clusters?: ClustersInfo | null;
   items?: ItemsInfo | null;
   transformations?: TransformationInfo | null;
@@ -203,12 +205,14 @@ export type Session = {
   name: string;
   /**
    * Created
+   * Start time in ISO 8601 format
    */
-  created: string;
+  created: Date;
   /**
    * Updated
+   * Start time in ISO 8601 format
    */
-  updated: string;
+  updated: Date;
   /**
    * Env
    */
@@ -249,15 +253,17 @@ export type SnapshotStatus = {
   /**
    * Eta Ms
    */
-  eta_ms: number | null;
+  eta_ms?: number | null;
   /**
    * Started
+   * Start time in ISO 8601 format
    */
-  started?: string | null;
+  started?: Date | null;
   /**
    * Finished
+   * Start time in ISO 8601 format
    */
-  finished?: string | null;
+  finished?: Date | null;
   /**
    * Data Total Bytes
    */

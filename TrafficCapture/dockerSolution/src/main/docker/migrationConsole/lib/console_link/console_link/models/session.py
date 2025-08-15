@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, field_validator, field_serializer
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import Dict
 
 from console_link.environment import Environment
@@ -13,8 +13,14 @@ class SessionBase(BaseModel):
 
 
 class Session(SessionBase):
-    created: datetime
-    updated: datetime
+    created: datetime = Field(
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    updated: datetime = Field(
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
     env: Environment | None
 
     @field_serializer('created', 'updated')

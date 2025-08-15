@@ -35,10 +35,10 @@ export function mapStatus(state: StepState): StatusIndicatorProps.Type {
   }
 }
 
-export function durationFromTimes(start: string | undefined | null, end: string | undefined | null) {
+export function durationFromTimes(start: Date | undefined | null, end: Date | undefined | null) {
   return start != null
     && end != null
-    && formatDuration(((new Date(end).getTime() - new Date(start).getTime()))/1000);
+    && formatDuration(((end.getTime() - start.getTime()))/1000);
 }
 
 /**
