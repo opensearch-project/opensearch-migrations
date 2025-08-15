@@ -1,3 +1,4 @@
+from enum import Enum
 import tempfile
 import logging
 import json
@@ -420,7 +421,6 @@ def extra_args_from_request(request: MetadataMigrateRequest) -> List[str]:
         extra_args.extend(["--component-template-allowlist", ",".join(request.component_template_allowlist)])
     
     extra_args.extend(["--output", "json"])
-    extra_args.extend(["--multi-type-behavior", "union"])
 
     return extra_args
 
