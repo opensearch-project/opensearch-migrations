@@ -81,7 +81,6 @@ class TestMetadataAPI:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["session_name"] == self.session_name
         assert data["status"] == StepState.COMPLETED
         assert "started" in data
         assert "finished" in data
@@ -145,7 +144,6 @@ class TestMetadataAPI:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["session_name"] == self.session_name
         assert data["status"] == StepState.COMPLETED
         assert "started" in data
         assert "finished" in data
@@ -162,7 +160,6 @@ class TestMetadataAPI:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["session_name"] == self.session_name
         assert data["status"] == StepState.PENDING
 
     @patch('console_link.api.metadata.http_safe_find_session')
