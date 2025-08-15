@@ -146,7 +146,9 @@ public class DeltaLuceneReader {
         LuceneLeafReader reader,
         BitSet liveDocOverride,
         int baseDocIdx
-    ){};
+    ){
+        // Base Record Implementation
+    }
 
     static Flux<RfsLuceneDocument> readDocsFromSegment(SegmentReaderAndLiveDoc readerAndBase, int docStartingId, Scheduler scheduler,
                                                 int concurrency, Path indexDirectoryPath) {
