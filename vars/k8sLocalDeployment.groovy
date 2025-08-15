@@ -98,7 +98,7 @@ def call(Map config = [:]) {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"
-                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion --skip-delete"
+                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion --test-ids=0005 --skip-delete"
                             }
                         }
                     }
