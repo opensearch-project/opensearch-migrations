@@ -73,13 +73,13 @@ public class DeltaLuceneReader {
             .log();
 
         // Start with just new docs, will add remove later
-        List<SegmentReaderAndLiveDoc> readerAndBases = new ArrayList<>();
+        List<segmentReaderAndLiveDoc> readerAndBases = new ArrayList<>();
         // TODO: For delta backfill we need to move to using `long` everywhere since we may have more than 2^31 docs to work through
         // when adding both docs to remove and docs to add
         int offset = 0;
         for (var key : onlyInCurrentKeys) {
             var reader = currentSegmentToLeafReader.get(key);
-            readerAndBases.add(new SegmentReaderAndLiveDoc(reader, reader.getLiveDocs(), offset));
+            readerAndBases.add(new segmentReaderAndLiveDoc(reader, reader.getLiveDocs(), offset));
             offset += reader.maxDoc();
         }
 
@@ -117,7 +117,7 @@ public class DeltaLuceneReader {
                 continue;
             }
 
-            var segmentReaderToCreate = new SegmentReaderAndLiveDoc(
+            var segmentReaderToCreate = new segmentReaderAndLiveDoc(
                 currentSegmentReader,
                 liveDocs,
                 offset
@@ -142,7 +142,8 @@ public class DeltaLuceneReader {
             .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }
 
-    record SegmentReaderAndLiveDoc(
+    // Lower case to appease sonar until sonar is updated to java 17
+    record segmentReaderAndLiveDoc(
         LuceneLeafReader reader,
         BitSet liveDocOverride,
         int baseDocIdx
@@ -150,7 +151,7 @@ public class DeltaLuceneReader {
         // Base Record Implementation
     }
 
-    static Flux<RfsLuceneDocument> readDocsFromSegment(SegmentReaderAndLiveDoc readerAndBase, int docStartingId, Scheduler scheduler,
+    static Flux<RfsLuceneDocument> readDocsFromSegment(segmentReaderAndLiveDoc readerAndBase, int docStartingId, Scheduler scheduler,
                                                 int concurrency, Path indexDirectoryPath) {
         var segmentReader = readerAndBase.reader;
         var liveDocs = readerAndBase.liveDocOverride;
