@@ -1,19 +1,20 @@
 import { ZodType } from 'zod';
 import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
+import {PlainObject} from "@/schemas/plainObject";
 
 // Base Expression class
-export abstract class Expression<T> {
+export abstract class Expression<T extends PlainObject> {
     readonly _resultType!: T; // Phantom type for compile-time checking
     constructor(public readonly kind: string) {}
 }
 
-export class AsStringExpression<T> extends Expression<string> {
+export class AsStringExpression<T extends PlainObject> extends Expression<string> {
     constructor(public readonly source: Expression<T>) {
         super('as_string');
     }
 }
 
-export class LiteralExpression<T> extends Expression<T> {
+export class LiteralExpression<T extends PlainObject> extends Expression<T> {
     constructor(public readonly value: T) {
         super('literal');
     }
@@ -25,7 +26,7 @@ type ParameterSource =
     | { kind: 'step_output', stepName: string, parameterName: string }
     | { kind: 'task_output', taskName: string, parameterName: string };
 
-export class FromParameterExpression<T> extends Expression<T> {
+export class FromParameterExpression<T extends PlainObject> extends Expression<T> {
     constructor(
         public readonly source: ParameterSource,
         public readonly paramDef?: InputParamDef<T, any> | OutputParamDef<T>
@@ -34,7 +35,7 @@ export class FromParameterExpression<T> extends Expression<T> {
     }
 }
 
-export class FromConfigMapExpression<T> extends Expression<T> {
+export class FromConfigMapExpression<T extends PlainObject> extends Expression<T> {
     constructor(
         public readonly configMapName: string,
         public readonly key: string
@@ -55,7 +56,7 @@ type PathValue<T, P extends string> = P extends keyof T
                 : never
             : never;
 
-export class PathExpression<TSource, TResult> extends Expression<TResult> {
+export class PathExpression<TSource extends PlainObject, TResult extends PlainObject> extends Expression<TResult> {
     constructor(
         public readonly source: Expression<TSource>,
         public readonly path: string
@@ -73,7 +74,7 @@ export class ConcatExpression extends Expression<string> {
     }
 }
 
-export class TernaryExpression<T> extends Expression<T> {
+export class TernaryExpression<T extends PlainObject> extends Expression<T> {
     constructor(
         public readonly condition: Expression<boolean>,
         public readonly whenTrue: Expression<T>,
@@ -103,15 +104,15 @@ export class ComparisonExpression extends Expression<boolean> {
     }
 }
 
-export class ArrayLengthExpression<T> extends Expression<number> {
-    constructor(public readonly array: Expression<readonly T[]>) {
+export class ArrayLengthExpression<T extends PlainObject> extends Expression<number> {
+    constructor(public readonly array: Expression<T[]>) {
         super('array_length');
     }
 }
 
-export class ArrayIndexExpression<T> extends Expression<T> {
+export class ArrayIndexExpression<T extends PlainObject> extends Expression<T> {
     constructor(
-        public readonly array: Expression<readonly T[]>,
+        public readonly array: Expression<T[]>,
         public readonly index: Expression<number>
     ) {
         super('array_index');
@@ -123,17 +124,17 @@ export class ArrayIndexExpression<T> extends Expression<T> {
 // =============================================================================
 
 // conversion
-export const asString = <T>(expr: Expression<T>): Expression<string> =>
+export const asString = <T extends PlainObject>(expr: Expression<T>): Expression<string> =>
     new AsStringExpression(expr);
 
 // Literals
-export const literal = <T>(value: T) => new LiteralExpression(value);
+export const literal = <T extends PlainObject>(value: T) => new LiteralExpression(value);
 
 // =============================================================================
 // PARAMETER HELPERS (Type-safe parameter references)
 // =============================================================================
 
-export const workflowParam = <T>(
+export const workflowParam = <T extends PlainObject>(
     name: string,
     paramDef?: InputParamDef<T, any>
 ) => new FromParameterExpression<T>(
@@ -141,7 +142,7 @@ export const workflowParam = <T>(
     paramDef
 );
 
-export const inputParam = <T>(
+export const inputParam = <T extends PlainObject>(
     name: string,
     paramDef: InputParamDef<T, any>
 ) => new FromParameterExpression<T>(
@@ -149,7 +150,7 @@ export const inputParam = <T>(
     paramDef
 );
 
-export const stepOutput = <T>(
+export const stepOutput = <T extends PlainObject>(
     stepName: string,
     parameterName: string,
     paramDef?: OutputParamDef<T>
@@ -158,7 +159,7 @@ export const stepOutput = <T>(
     paramDef
 );
 
-export const taskOutput = <T>(
+export const taskOutput = <T extends PlainObject>(
     taskName: string,
     parameterName: string,
     paramDef?: OutputParamDef<T>
@@ -220,13 +221,13 @@ export const taskOutputs = <T extends Record<string, OutputParamDef<any>>>(
     return result;
 };
 
-export const configMap = <T>(name: string, key: string) => new FromConfigMapExpression<T>(name, key);
+export const configMap = <T extends PlainObject>(name: string, key: string) => new FromConfigMapExpression<T>(name, key);
 
 // Path access with type inference
-export const path = <TSource, TPath extends string>(
+export const path = <TSource extends PlainObject, TPath extends string>(
     source: Expression<TSource>,
     pathStr: TPath
-) => new PathExpression<TSource, PathValue<TSource, TPath>>(source, pathStr);
+) => new PathExpression<TSource, PathValue<TSource, TPath> & PlainObject>(source, pathStr);
 
 export const concat = (...expressions: Expression<string>[]) =>
     new ConcatExpression(expressions);
@@ -234,7 +235,7 @@ export const concat = (...expressions: Expression<string>[]) =>
 export const concatWith = (separator: string, ...expressions: Expression<string>[]) =>
     new ConcatExpression(expressions, separator);
 
-export const ternary = <T>(
+export const ternary = <T extends PlainObject>(
     condition: Expression<boolean>,
     whenTrue: Expression<T>,
     whenFalse: Expression<T>
@@ -263,10 +264,10 @@ export const lessThan = (left: Expression<number>, right: Expression<number>) =>
 export const greaterThan = (left: Expression<number>, right: Expression<number>) =>
     new ComparisonExpression('>', left, right);
 
-export const length = <T>(array: Expression<readonly T[]>) =>
+export const length = <T extends PlainObject>(array: Expression<T[]>) =>
     new ArrayLengthExpression(array);
 
-export const index = <T>(array: Expression<readonly T[]>, idx: Expression<number>) =>
+export const index = <T extends PlainObject>(array: Expression<T[]>, idx: Expression<number>) =>
     new ArrayIndexExpression(array, idx);
 
 // =============================================================================
@@ -274,7 +275,7 @@ export const index = <T>(array: Expression<readonly T[]>, idx: Expression<number
 // =============================================================================
 
 // Helper to validate parameter definitions match expression types
-export const validateParameterExpression = <T>(
+export const validateParameterExpression = <T extends PlainObject>(
     expr: FromParameterExpression<T>,
     expectedType: ZodType<T>
 ): boolean => {
@@ -286,7 +287,7 @@ export const validateParameterExpression = <T>(
 };
 
 // Helper to get parameter metadata for Argo workflow generation
-export const getParameterMetadata = <T>(expr: FromParameterExpression<T>) => ({
+export const getParameterMetadata = <T extends PlainObject>(expr: FromParameterExpression<T>) => ({
     source: expr.source,
     schema: expr.paramDef?.type,
     description: expr.paramDef?.description,

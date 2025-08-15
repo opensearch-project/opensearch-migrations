@@ -3,7 +3,7 @@ import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_C
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {literal} from "@/schemas/expression";
+import {asString, literal} from "@/schemas/expression";
 
 export const FullMigration = WorkflowBuilder.create("FullMigration")
     .addParams(CommonWorkflowParameters)
@@ -25,9 +25,8 @@ export const FullMigration = WorkflowBuilder.create("FullMigration")
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
             .addStep("init", TargetLatchHelpers, "init", steps => ({
-                prefix: "prefix",
-                etcdUtilsImage: "",
-                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
+                prefix: "w",
+                etcdUtilsImagePullPolicy: "aa",
                 targets: [],
                 configuration: {
                     indices: [],

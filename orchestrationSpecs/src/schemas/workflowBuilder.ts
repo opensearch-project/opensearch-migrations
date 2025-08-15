@@ -1,14 +1,20 @@
 import {InputParametersRecord} from "@/schemas/parameterSchemas";
-import {Scope, ExtendScope, TemplateSigEntry,} from "@/schemas/workflowTypes";
+import {
+    DataScope,
+    ExtendScope,
+    GenericScope,
+    TemplateSigEntry,
+    TemplateSignaturesScope,
+} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 
 export class WorkflowBuilder<
-    MetadataScope extends Scope = Scope,
-    WorkflowInputsScope extends Scope = Scope,
-    TemplateSigScope extends Scope = Scope,
-    TemplateFullScope extends Scope = Scope
+    MetadataScope extends GenericScope = GenericScope,
+    WorkflowInputsScope extends InputParametersRecord = InputParametersRecord,
+    TemplateSigScope extends TemplateSignaturesScope = TemplateSignaturesScope,
+    TemplateFullScope extends GenericScope = GenericScope
 > {
     constructor(
         protected readonly metadataScope: MetadataScope,

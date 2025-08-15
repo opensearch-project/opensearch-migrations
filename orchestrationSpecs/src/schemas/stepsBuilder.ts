@@ -1,28 +1,21 @@
 import {
-    defineParam,
-    InputParamDef,
     InputParametersRecord, OutputParamDef,
     OutputParametersRecord,
     paramsToCallerSchema
 } from "@/schemas/parameterSchemas";
 import {
-    Scope,
-    ScopeFn,
     ExtendScope,
-    TemplateSigEntry,
-    FieldSpecs,
-    FieldGroupConstraint,
-    FieldSpecsToInputParams,
     StepsScopeToStepsWithOutputs,
     StepWithOutputs,
-    ParamsWithLiteralsOrExpressions, AllowLiteralOrExpression, InputParamsToExpressions, WorkflowInputsToExpressions
+    ParamsWithLiteralsOrExpressions,
+    WorkflowAndTemplatesScope,
+    StepsOutputsScope
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
-import {toEnvVarName, TypescriptError} from "@/utils";
-import {inputParam, stepOutput, workflowParam} from "@/schemas/expression";
-import {IMAGE_PULL_POLICY} from "@/schemas/userSchemas";
+import {stepOutput} from "@/schemas/expression";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
+import {PlainObject} from "@/schemas/plainObject";
 
 export interface StepGroup {
     steps: StepTask[];
@@ -37,10 +30,10 @@ export interface StepTask {
 }
 
 export class StepsBuilder<
-    ContextualScope extends Scope,
-    InputParamsScope  extends Scope,
-    StepsScope extends Scope,
-    OutputParamsScope extends Scope
+    ContextualScope extends WorkflowAndTemplatesScope,
+    InputParamsScope  extends InputParametersRecord,
+    StepsScope extends StepsOutputsScope,
+    OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope,
     StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>>
 {
@@ -52,7 +45,7 @@ export class StepsBuilder<
         super("steps", contextualScope, inputsScope, bodyScope, outputsScope)
     }
 
-    addStepGroup<NewStepScope extends Scope,
+    addStepGroup<NewStepScope extends StepsOutputsScope,
         GB extends StepGroupBuilder<ContextualScope, any>,
         StepsGroup extends ReturnType<GB["getStepTasks"]>>
     (
@@ -94,7 +87,7 @@ export class StepsBuilder<
         }) as any;
     }
 
-    addParameterOutput<T, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
+    addParameterOutput<T extends PlainObject, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
         StepsBuilder<ContextualScope, InputParamsScope, StepsScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new StepsBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.stepGroups, {
@@ -108,7 +101,7 @@ export class StepsBuilder<
         });
     }
 
-    addExpressionOutput<T, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+    addExpressionOutput<T extends PlainObject, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
         StepsBuilder<ContextualScope, InputParamsScope, StepsScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new StepsBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.stepGroups, {
@@ -130,8 +123,8 @@ export class StepsBuilder<
 }
 
 export class StepGroupBuilder<
-    ContextualScope extends Scope,
-    StepsScope extends Scope
+    ContextualScope extends WorkflowAndTemplatesScope,
+    StepsScope extends StepsOutputsScope
 > {
     constructor(protected readonly contextualScope: ContextualScope,
                 protected readonly stepsScope: StepsScope,

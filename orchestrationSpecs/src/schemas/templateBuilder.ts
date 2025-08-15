@@ -1,15 +1,18 @@
 import {
     defineParam,
-    InputParamDef,
+    InputParamDef, InputParametersRecord, OutputParametersRecord,
     templateInputParametersAsExpressions,
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
 import {
-    Scope,
     ExtendScope,
     FieldSpecs,
     FieldGroupConstraint,
-    FieldSpecsToInputParams, WorkflowInputsToExpressions, InputParamsToExpressions, AllowLiteralOrExpression,
+    FieldSpecsToInputParams,
+    WorkflowInputsToExpressions,
+    InputParamsToExpressions,
+    AllowLiteralOrExpression,
+    GenericScope,
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
 import {TypescriptError} from "@/utils";
@@ -22,7 +25,7 @@ import {
 import {StepsBuilder} from "@/schemas/stepsBuilder";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
-import {Expression} from "@/schemas/expression";
+import {PlainObject} from "@/schemas/plainObject";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -31,10 +34,10 @@ import {Expression} from "@/schemas/expression";
  * receives the specification up to that point.
  */
 export class TemplateBuilder<
-    ContextualScope extends Scope,
-    BodyScope extends Scope = Scope,
-    InputParamsScope extends Scope = Scope,
-    OutputParamsScope extends Scope = Scope
+    ContextualScope extends { workflowParameters?: InputParametersRecord },
+    BodyScope extends GenericScope = GenericScope,
+    InputParamsScope extends InputParametersRecord = InputParametersRecord,
+    OutputParamsScope extends OutputParametersRecord = OutputParametersRecord
 > {
     constructor(protected readonly contextualScope: ContextualScope,
                 protected readonly bodyScope: BodyScope,
@@ -45,7 +48,7 @@ export class TemplateBuilder<
     private extendWithParam<
         Name extends string,
         R extends boolean,
-        T
+        T extends PlainObject
     >(
         name: Name,
         param: InputParamDef<T, R>
@@ -62,7 +65,7 @@ export class TemplateBuilder<
         return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope);
     }
 
-    addOptionalInput<T, Name extends string>(
+    addOptionalInput<T extends PlainObject, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         defaultValueFromScopeFn: UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
             (s: {
@@ -86,7 +89,7 @@ export class TemplateBuilder<
         }) => T;
         const param = defineParam({
             defaultValue: fn({
-                workflowParameters: workflowParametersAsExpressions(this.contextualScope.workflowParameters),
+                workflowParameters: workflowParametersAsExpressions(this.contextualScope.workflowParameters || {}),
                 inputParameters: templateInputParametersAsExpressions(this.inputScope),
                 rawParameters: { workflow: this.contextualScope,
                 currentTemplate: this.getTemplateSignatureScope()
@@ -97,7 +100,7 @@ export class TemplateBuilder<
         return this.extendWithParam(name as string, param) as any;
     }
 
-    addRequiredInput<Name extends string, T>(
+    addRequiredInput<Name extends string, T extends PlainObject>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
         t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, ZodType<T>>>,
         description?: string
@@ -147,7 +150,7 @@ export class TemplateBuilder<
      * Add multiple inputs using a function that operates on this TemplateBuilder
      * The function can only modify inputs - other scopes must remain unchanged
      */
-    addInputs<NewInputScope extends Scope>(
+    addInputs<NewInputScope extends InputParametersRecord>(
         builderFn:
         (tb: TemplateBuilder<ContextualScope, {}, InputParamsScope, {}>) =>
             TemplateBuilder<ContextualScope, {}, NewInputScope, {}>

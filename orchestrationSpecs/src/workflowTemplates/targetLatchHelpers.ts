@@ -1,14 +1,14 @@
 import {z} from 'zod';
 import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {Scope} from "@/schemas/workflowTypes";
-import {asString} from "@/schemas/expression";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {GenericScope} from "@/schemas/workflowTypes";
+import {InputParametersRecord} from "@/schemas/parameterSchemas";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }
@@ -28,8 +28,8 @@ function addCommonTargetLatchInputs<
 
 function commonTargetLatchHelperEnvVarsFromWorkflowParameters<
     ContextualScope extends { workflowParameters: typeof CommonWorkflowParameters },
-    InputParamsScope extends Scope,
-    ContainerScope extends Scope
+    InputParamsScope extends InputParametersRecord,
+    ContainerScope extends GenericScope
 >(
     b: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, {}>
 ) {

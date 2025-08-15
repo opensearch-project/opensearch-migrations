@@ -1,14 +1,23 @@
-import {Scope,InputParamsToExpressions, WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
+import {
+    GenericScope,
+    InputParamsToExpressions,
+    WorkflowAndTemplatesScope,
+    WorkflowInputsToExpressions
+} from "@/schemas/workflowTypes";
 import {inputParam, workflowParam} from "@/schemas/expression";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
-import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterSchemas";
+import {
+    InputParametersRecord, OutputParametersRecord,
+    templateInputParametersAsExpressions,
+    workflowParametersAsExpressions
+} from "@/schemas/parameterSchemas";
 
 export abstract class TemplateBodyBuilder<
-    ContextualScope extends Scope,
+    ContextualScope extends WorkflowAndTemplatesScope,
     BodyKey extends string,
-    InputParamsScope extends Scope,
-    BodyScope extends Scope,
-    OutputParamsScope extends Scope,
+    InputParamsScope extends InputParametersRecord,
+    BodyScope extends GenericScope,
+    OutputParamsScope extends OutputParametersRecord,
     // Key detail: Self is NOT fixed to a particular OutputParamsScope
     Self extends TemplateBodyBuilder<
         ContextualScope,
@@ -28,7 +37,7 @@ export abstract class TemplateBodyBuilder<
     ) {
     }
 
-    addOutputs<NewOutputScope extends Scope>(
+    addOutputs<NewOutputScope extends OutputParametersRecord>(
         builderFn: (
             tb: Self
         ) => TemplateBodyBuilder<
@@ -68,7 +77,7 @@ export abstract class TemplateBodyBuilder<
     }
 
     get workflowInputs(): WorkflowInputsToExpressions<ContextualScope> {
-        const rval = workflowParametersAsExpressions(this.contextualScope.workflowParameters)
+        const rval = workflowParametersAsExpressions(this.contextualScope.workflowParameters ?? {})
         return rval as WorkflowInputsToExpressions<ContextualScope>;
     }
 

@@ -1,12 +1,13 @@
 import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {Scope} from "@/schemas/workflowTypes";
 import {Expression} from "@/schemas/expression";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
 import {StepGroup} from "@/schemas/stepsBuilder";
+import {PlainObject} from "@/schemas/plainObject";
+import {GenericScope} from "@/schemas/workflowTypes";
 
 
-export function renderWorkflowTemplate(wf: Scope) {
+export function renderWorkflowTemplate(wf: GenericScope) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",
@@ -30,7 +31,7 @@ export function renderWorkflowTemplate(wf: Scope) {
     };
 }
 
-function formatParameterDefinition<P extends InputParamDef<ZodTypeAny, boolean>>(inputs : P) {
+function formatParameterDefinition<T extends PlainObject, P extends InputParamDef<T, boolean>>(inputs : P) {
     return {
         ...(inputs.description != null && { description: inputs.description }),
         ...(inputs.defaultValue != null && { value: transformExpressionsDeep(inputs.defaultValue) })
@@ -49,7 +50,7 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
     }
 }
 
-function formatBody(body: Scope) {
+function formatBody(body: GenericScope) {
     if (body) {
         if (body.steps == undefined) {
             return transformExpressionsDeep(body);
@@ -98,7 +99,7 @@ function formatOutputParameters<OPR extends OutputParametersRecord>(outputs : OP
     };
 }
 
-function formatTemplate(template: Scope) {
+function formatTemplate(template: GenericScope) {
     return {
         inputs: formatParameters(template.inputs),
         ...formatBody(template.body),

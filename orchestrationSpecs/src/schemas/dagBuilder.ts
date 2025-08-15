@@ -3,15 +3,16 @@ import {
     OutputParametersRecord,
     paramsToCallerSchema
 } from "@/schemas/parameterSchemas";
-import {Scope, ExtendScope,} from "@/schemas/workflowTypes";
+import {ExtendScope, StepsOutputsScope, StepWithOutputs, WorkflowAndTemplatesScope,} from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
+import {PlainObject} from "@/schemas/plainObject";
 
 export class DagBuilder<
-    ContextualScope extends Scope,
-    InputParamsScope  extends Scope,
-    DagScope extends Scope,
-    OutputParamsScope extends Scope
+    ContextualScope extends WorkflowAndTemplatesScope,
+    InputParamsScope  extends InputParametersRecord,
+    DagScope extends StepsOutputsScope, // TODO FIXME
+    OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<ContextualScope, "dag", InputParamsScope, DagScope, OutputParamsScope,
     DagBuilder<ContextualScope, InputParamsScope, DagScope, any>>
 {
@@ -24,7 +25,7 @@ export class DagBuilder<
 
     addTask() {}
 
-    addParameterOutput<T, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
+    addParameterOutput<T extends PlainObject, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
         DagBuilder<ContextualScope, InputParamsScope, DagScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new DagBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
@@ -38,7 +39,7 @@ export class DagBuilder<
         });
     }
 
-    addExpressionOutput<T, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+    addExpressionOutput<T extends PlainObject, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
         DagBuilder<ContextualScope, InputParamsScope, DagScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new DagBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {

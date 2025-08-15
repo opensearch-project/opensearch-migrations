@@ -1,0 +1,38 @@
+// PlainObject type system for constraining values to serializable plain objects
+export type Primitive = string | number | boolean | null;
+export type PlainObject = Primitive | PlainObject[] | { [key: string]: PlainObject };
+
+/**
+ * Runtime validation helper to check if a value is a PlainObject
+ * Only allows primitives, plain arrays, and plain objects (no custom prototypes, functions, etc.)
+ */
+export function isPlainObject(value: any): value is PlainObject {
+    if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return true;
+    }
+    
+    if (Array.isArray(value)) {
+        return value.every(isPlainObject);
+    }
+    
+    if (typeof value === 'object' && value !== null) {
+        // Only allow plain objects (created with {} or Object.create(null))
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            return false;
+        }
+        return Object.values(value).every(isPlainObject);
+    }
+    
+    return false;
+}
+
+/**
+ * Runtime assertion helper that throws if value is not a PlainObject
+ */
+export function assertPlainObject(value: any, context?: string): asserts value is PlainObject {
+    if (!isPlainObject(value)) {
+        const contextMsg = context ? ` in ${context}` : '';
+        throw new Error(`Value must be a PlainObject (primitives, plain arrays, or plain objects only)${contextMsg}`);
+    }
+}

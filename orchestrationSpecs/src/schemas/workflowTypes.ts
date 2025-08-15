@@ -1,8 +1,9 @@
 // Internal types for workflow schema implementation
 import {ZodType, ZodTypeAny} from "zod";
-import {InputParamDef, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
 import {Expression, inputParam, stepOutput} from "@/schemas/expression";
+import {PlainObject} from "@/schemas/plainObject";
 
 declare global {
     // true: worse LSP, but squigglies under the name declaration
@@ -10,11 +11,18 @@ declare global {
     const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: boolean;
 }
 
-export type Scope = Record<string, any>;
-export type ScopeFn<S extends Scope, ADDITIONS extends Scope> = (scope: Readonly<S>) => ADDITIONS;
+// Specific scope types for different purposes
+export type WorkflowAndTemplatesScope = { workflowParameters?: InputParametersRecord };
+export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
+export type GenericScope = Record<string, any>;
+//export type DagScope = Record<string, DagTask>;
+export type StepsOutputsScope = Record<string, StepWithOutputs<any, any, any>>;
+export type TemplateSignaturesScope = Record<string, TemplateSigEntry<any>>;
+
+export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
 
 // Internal type for scope extension - used internally by builder methods
-export type ExtendScope<S extends Scope, ADDITIONS extends Scope> = S & ADDITIONS;
+export type ExtendScope<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = S & ADDITIONS;
 
 export type TemplateSigEntry<T extends { inputs: any }> = {
     input: T["inputs"];
@@ -29,7 +37,7 @@ export type FieldSpecsToInputParams<T extends FieldSpecs> = {
 };
 
 // Constraint type for checking field group conflicts
-export type FieldGroupConstraint<T extends FieldSpecs, S extends Scope, TypeWhenValid> =
+export type FieldGroupConstraint<T extends FieldSpecs, S extends Record<string, any>, TypeWhenValid> =
     typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
         ? keyof T & keyof S extends never
             ? TypeWhenValid
@@ -40,37 +48,41 @@ export type FieldGroupConstraint<T extends FieldSpecs, S extends Scope, TypeWhen
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
 
 // Helper type to allow both literal values and expressions
-export type AllowLiteralOrExpression<T> = T extends string
+export type AllowLiteralOrExpression<T extends PlainObject> = T extends string
     ? string | Expression<string>
     : T extends number
         ? number | Expression<number>
         : T extends boolean
             ? boolean | Expression<boolean>
             : T extends Array<infer U>
-                ? Array<AllowLiteralOrExpression<U>> | Expression<T>
+                ? U extends PlainObject
+                    ? Array<AllowLiteralOrExpression<U>> | Expression<T>
+                    : never
                 : T extends object
-                    ? { [K in keyof T]: AllowLiteralOrExpression<T[K]> } | Expression<T>
+                    ? { [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : never } | Expression<T>
                     : T | Expression<T>;
 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {
-    [K in keyof T]: AllowLiteralOrExpression<T[K]>
+    [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : T[K]
 };
 
 export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = {
     [K in keyof Outputs]: ReturnType<typeof stepOutput<ExtractOutputParamType<Outputs[K]>>>
 };
 
-export type InputParamsToExpressions<InputParamsScope extends Scope> = {
-    [K in keyof InputParamsScope]: ReturnType<typeof inputParam<
-        InputParamsScope[K] extends { type: ZodType<infer T> } ? T : never
-    >>
+export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {
+    [K in keyof InputParamsScope]: InputParamsScope[K] extends { type: ZodType<infer T> }
+        ? T extends PlainObject
+            ? ReturnType<typeof inputParam<T>>
+            : never
+        : never
 };
 
 // Helper type to extract workflow inputs from contextual scope
-export type WorkflowInputsToExpressions<ContextualScope extends Scope> =
+export type WorkflowInputsToExpressions<ContextualScope extends { workflowParameters?: InputParametersRecord }> =
     ContextualScope extends { workflowParameters: infer WP }
-        ? WP extends Scope
+        ? WP extends InputParametersRecord
             ? InputParamsToExpressions<WP>
             : {}
         : {};
@@ -85,7 +97,7 @@ export type StepWithOutputs<
     outputTypes: Outputs;
 };
 
-export type StepsScopeToStepsWithOutputs<StepsScope extends Scope> = {
+export type StepsScopeToStepsWithOutputs<StepsScope extends Record<string, StepWithOutputs<any, any, any>>> = {
     [StepName in keyof StepsScope]: StepsScope[StepName] extends StepWithOutputs<
         infer Name,
         infer Template,

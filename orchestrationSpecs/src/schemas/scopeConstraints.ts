@@ -1,4 +1,4 @@
-import {Scope, ScopeFn, ExtendScope} from "@/schemas/workflowTypes";
+import {ScopeFn, ExtendScope, DataScope, GenericScope} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
@@ -18,7 +18,7 @@ export type ScopeIsEmptyConstraint<S, T> =
         ? T
         : TypescriptError<`Scope must be empty but contains: ${keyof S & string}`>
 
-export function extendScope<OS extends Scope, NS extends Scope>(orig: OS, fn: ScopeFn<OS, NS>): ExtendScope<OS, NS> {
+export function extendScope<OS extends GenericScope, NS extends GenericScope>(orig: OS, fn: ScopeFn<OS, NS>): ExtendScope<OS, NS> {
     return {
         ...orig,
         ...fn(orig)

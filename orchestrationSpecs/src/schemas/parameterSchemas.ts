@@ -1,14 +1,15 @@
 import {z, ZodType, ZodTypeAny} from 'zod';
-import {Scope, WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
+import {WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
 import {inputParam, workflowParam} from "@/schemas/expression";
+import {PlainObject} from "@/schemas/plainObject";
 
-export type InputParamDef<T, REQ extends boolean> = {
+export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
     type: ZodType<T>;
     defaultValue?: T;
     description?: string;
 } & (REQ extends false ? { _hasDefault: true } : {});
 
-export function defineParam<T>(opts: {
+export function defineParam<T extends PlainObject>(opts: {
     defaultValue: T;
     description?: string;
 }): InputParamDef<T, false> {
@@ -21,7 +22,7 @@ export function defineParam<T>(opts: {
 }
 
 // Could be used to define Workflow Parameters
-export function defineRequiredParam<T>(opts: {
+export function defineRequiredParam<T extends PlainObject>(opts: {
     type: ZodType<T>;
     description?: string;
 }): InputParamDef<T, true> {
@@ -44,7 +45,7 @@ export type SuppliedValueFrom = {
     [key: string]: any;
 };
 
-export type OutputParamDef<T> = {
+export type OutputParamDef<T extends PlainObject> = {
     type: ZodType<T>;
     description?: string;
 } & (
@@ -82,7 +83,7 @@ export function templateInputParametersAsExpressions<WP extends Record<string, a
     return result;
 }
 
-export function workflowParametersAsExpressions<WP extends Record<string, any>>(params: WP) {
+export function workflowParametersAsExpressions<WP extends InputParametersRecord>(params: WP) {
     const result: any = {};
     const workflowParams = params || {};
     Object.keys(params).forEach(key => {

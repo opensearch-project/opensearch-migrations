@@ -12,8 +12,9 @@ import {
     PathExpression,
     TernaryExpression
 } from "@/schemas/expression";
+import {PlainObject} from "@/schemas/plainObject";
 
-export function toArgoExpression<T>(expr: Expression<T>): string {
+export function toArgoExpression<T extends PlainObject>(expr: Expression<T>): string {
     // Use type guards instead of switch statements with type assertions
 
     if (isAsStringExpression(expr)) {
@@ -21,9 +22,16 @@ export function toArgoExpression<T>(expr: Expression<T>): string {
     }
 
     if (isLiteralExpression(expr)) {
-        return typeof expr.value === 'string'
-            ? `"${expr.value}"`
-            : String(expr.value);
+        if (typeof expr.value === 'string') {
+            return `"${expr.value}"`;
+        } else if (typeof expr.value === 'number' || typeof expr.value === 'boolean') {
+            return String(expr.value);
+        } else if (expr.value === null) {
+            return 'null';
+        } else {
+            // Objects and arrays - serialize as JSON
+            return JSON.stringify(expr.value);
+        }
     }
 
     if (isParameterExpression(expr)) {
@@ -86,19 +94,19 @@ export function isAsStringExpression(expr: Expression<any>): expr is AsStringExp
     return expr.kind === 'as_string';
 }
 
-export function isLiteralExpression<T>(expr: Expression<T>): expr is LiteralExpression<T> {
+export function isLiteralExpression<T extends PlainObject>(expr: Expression<T>): expr is LiteralExpression<T> {
     return expr.kind === 'literal';
 }
 
-export function isParameterExpression<T>(expr: Expression<T>): expr is FromParameterExpression<T> {
+export function isParameterExpression<T extends PlainObject>(expr: Expression<T>): expr is FromParameterExpression<T> {
     return expr.kind === 'parameter';
 }
 
-export function isConfigMapExpression<T>(expr: Expression<T>): expr is FromConfigMapExpression<T> {
+export function isConfigMapExpression<T extends PlainObject>(expr: Expression<T>): expr is FromConfigMapExpression<T> {
     return expr.kind === 'configmap';
 }
 
-export function isPathExpression<T>(expr: Expression<T>): expr is PathExpression<any, T> {
+export function isPathExpression<T extends PlainObject>(expr: Expression<T>): expr is PathExpression<any, T> {
     return expr.kind === 'path';
 }
 
@@ -106,7 +114,7 @@ export function isConcatExpression(expr: Expression<any>): expr is ConcatExpress
     return expr.kind === 'concat';
 }
 
-export function isTernaryExpression<T>(expr: Expression<T>): expr is TernaryExpression<T> {
+export function isTernaryExpression<T extends PlainObject>(expr: Expression<T>): expr is TernaryExpression<T> {
     return expr.kind === 'ternary';
 }
 
@@ -122,6 +130,6 @@ export function isArrayLengthExpression(expr: Expression<any>): expr is ArrayLen
     return expr.kind === 'array_length';
 }
 
-export function isArrayIndexExpression<T>(expr: Expression<T>): expr is ArrayIndexExpression<T> {
+export function isArrayIndexExpression<T extends PlainObject>(expr: Expression<T>): expr is ArrayIndexExpression<T> {
     return expr.kind === 'array_index';
 }
