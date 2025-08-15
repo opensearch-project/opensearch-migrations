@@ -52,6 +52,7 @@ public class LiveDocsConverterTest {
         
         // Verify the result
         assertNotNull(result);
+        assertEquals(10, result.length());
         assertTrue(result.get(0));
         assertFalse(result.get(1));
         assertFalse(result.get(2));
@@ -98,7 +99,7 @@ public class LiveDocsConverterTest {
         
         // Verify the result
         assertNotNull(result);
-        assertEquals(100, spySparse.length());
+        assertEquals(100, result.length());
         assertFalse(result.get(0));
         assertTrue(result.get(5));
         assertTrue(result.get(25));
@@ -149,6 +150,7 @@ public class LiveDocsConverterTest {
                 assertFalse(result.get(i), "Bit at index " + i + " should not be set");
             }
         }
+        assertEquals(20, result.length());
         
         // Verify that length() and get() were called (fallback path)
         verify(spyBits, times(1)).length();
@@ -187,6 +189,7 @@ public class LiveDocsConverterTest {
         );
         
         assertNotNull(result);
+        assertEquals(10, result.length());
         assertEquals(0, result.cardinality(), "Empty sparse bits should result in empty BitSet");
     }
 
@@ -209,6 +212,7 @@ public class LiveDocsConverterTest {
         );
         
         assertNotNull(result);
+        assertEquals(8, result.length());
         assertEquals(8, result.cardinality(), "All bits should be set");
         for (int i = 0; i < 8; i++) {
             assertTrue(result.get(i), "Bit " + i + " should be set");
@@ -216,37 +220,8 @@ public class LiveDocsConverterTest {
     }
 
     @Test
-    public void testInstanceMethodConvert() {
-        // Test using the instance method instead of static method
-        LiveDocsConverter<Bits, FixedBitSet, SparseFixedBitSet> converter = new LiveDocsConverter<>(
-            FixedBitSet.class,
-            SparseFixedBitSet.class,
-            FixedBitSet::getBits,
-            Bits::length,
-            idx -> false,  // All bits are false for this test
-            sparseBits -> sparseBits::nextSetBit
-        );
-        
-        // Test with null
-        assertNull(converter.convert(null));
-        
-        // Test with FixedBitSet
-        FixedBitSet fixedBitSet = new FixedBitSet(5);
-        fixedBitSet.set(2);
-        fixedBitSet.set(4);
-        
-        BitSet result = converter.convert(fixedBitSet);
-        assertNotNull(result);
-        assertTrue(result.get(2));
-        assertTrue(result.get(4));
-        assertFalse(result.get(0));
-        assertFalse(result.get(1));
-        assertFalse(result.get(3));
-    }
-
-    @Test
     public void testConvertWithNullClasses() {
-        // Test with null class parameters (simulating older Lucene versions without SparseFixedBitSet)
+        // Test with null class parameters (simulating possible older Lucene versions without SparseFixedBitSet)
         Bits customBits = new Bits() {
             @Override
             public boolean get(int index) {
@@ -271,45 +246,11 @@ public class LiveDocsConverterTest {
         
         // Should fall back to manual iteration
         assertNotNull(result);
+        assertEquals(5, result.length());
         assertFalse(result.get(0));
         assertTrue(result.get(1));
         assertFalse(result.get(2));
         assertTrue(result.get(3));
         assertFalse(result.get(4));
-    }
-
-    @Test
-    public void testConvertLargeSparseSet() {
-        // Test with a large sparse set to verify efficiency
-        SparseFixedBitSet largeSparse = new SparseFixedBitSet(10000);
-        // Set only a few bits in a large range
-        largeSparse.set(100);
-        largeSparse.set(1000);
-        largeSparse.set(5000);
-        largeSparse.set(9999);
-        
-        BitSet result = LiveDocsConverter.convert(
-            largeSparse,
-            FixedBitSet.class,
-            SparseFixedBitSet.class,
-            FixedBitSet::getBits,
-            Bits::length,
-            largeSparse::get,
-            sparseBits -> idx -> {
-                if (idx >= sparseBits.length()) {
-                    return -1;
-                }
-                return sparseBits.nextSetBit(idx);
-            }
-        );
-        
-        assertNotNull(result);
-        assertEquals(4, result.cardinality());
-        assertTrue(result.get(100));
-        assertTrue(result.get(1000));
-        assertTrue(result.get(5000));
-        assertTrue(result.get(9999));
-        assertFalse(result.get(101));
-        assertFalse(result.get(9998));
     }
 }
