@@ -1,12 +1,13 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.util.BitSet;
 
 public interface LuceneLeafReader {
 
     public LuceneDocument document(int luceneDocId) throws IOException;
 
-    public LuceneLiveDocs getLiveDocs();
+    public BitSet getLiveDocs();
 
     public int maxDoc();
 

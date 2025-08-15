@@ -28,7 +28,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.delta.DeltaDocumentsRunner;
+import org.opensearch.migrations.bulkload.delta.DeltaDocumentReadingStrategy;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -41,6 +41,7 @@ import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactor
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
+import org.opensearch.migrations.bulkload.worker.RegularDocumentReadingStrategy;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
@@ -709,31 +710,32 @@ public class RfsMigrateDocuments {
         };
 
         var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
+        DocumentsRunner runner;
         if (baseSnapshotName == null) {
-            var runner = new DocumentsRunner(scopedWorkCoordinator,
+            var regularStrategy = new RegularDocumentReadingStrategy(shardMetadataSupplier);
+            runner = new DocumentsRunner(scopedWorkCoordinator,
                 maxInitialLeaseDuration,
                 reindexer,
                 unpackerFactory,
-                shardMetadataSupplier,
                 readerFactory,
                 progressCursor::set,
                 cancellationRunnable::set,
-                timeProvider);
-            return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+                timeProvider,
+                regularStrategy);
         } else {
             var baseShardMetadataSupplier = shardMetadataSupplierFactory.apply(baseSnapshotName);
-            var runner = new DeltaDocumentsRunner(scopedWorkCoordinator,
+            var deltaStrategy = new DeltaDocumentReadingStrategy(baseShardMetadataSupplier, shardMetadataSupplier);
+            runner = new DocumentsRunner(scopedWorkCoordinator,
                 maxInitialLeaseDuration,
                 reindexer,
                 unpackerFactory,
-                baseShardMetadataSupplier,
-                shardMetadataSupplier,
                 readerFactory,
                 progressCursor::set,
                 cancellationRunnable::set,
-                timeProvider);
-            return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+                timeProvider,
+                deltaStrategy);
         }
+        return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 
     private static void confirmShardPrepIsComplete(

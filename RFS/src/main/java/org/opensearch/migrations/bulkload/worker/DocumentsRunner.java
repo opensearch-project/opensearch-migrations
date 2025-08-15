@@ -4,16 +4,15 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
-import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.bulkload.common.DocumentReadingStrategy;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
@@ -32,11 +31,11 @@ public class DocumentsRunner {
     private final Duration maxInitialLeaseDuration;
     private final DocumentReindexer reindexer;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
-    private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final LuceneIndexReader.Factory readerFactory;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
     private final WorkItemTimeProvider timeProvider;
+    private final DocumentReadingStrategy documentReadingStrategy;
 
     /**
      * @return true if it did work, false if there was no available work at this time.
@@ -138,16 +137,24 @@ public class DocumentsRunner {
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
-        ShardMetadata shardMetadata = shardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
 
-        var unpacker = unpackerFactory.create(shardMetadata);
+        var unpacker = documentReadingStrategy.createUnpacker(
+            unpackerFactory,
+            workItem.getIndexName(),
+            workItem.getShardNumber()
+        );
         var reader = readerFactory.getReader(unpacker.unpack());
         timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
         
         log.info("Setting up doc migration for index={}, shard={}",
              workItem.getIndexName(), workItem.getShardNumber());
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(shardMetadata.getSegmentFileName(), workItem.getStartingDocId());
+        Flux<RfsLuceneDocument> documents = documentReadingStrategy.readDocuments(
+            reader,
+            workItem.getIndexName(),
+            workItem.getShardNumber(),
+            workItem.getStartingDocId()
+        );
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
             .doOnSubscribe(s -> log.info("Subscribed to docMigrationCursors for index={}, shard={}",

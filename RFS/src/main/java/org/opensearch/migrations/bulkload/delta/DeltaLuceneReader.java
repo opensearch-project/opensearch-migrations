@@ -3,18 +3,17 @@ package org.opensearch.migrations.bulkload.delta;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
-import org.opensearch.migrations.bulkload.lucene.LuceneLiveDocs;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
@@ -99,30 +98,35 @@ public class DeltaLuceneReader {
             var currentLiveDocs = currentSegmentReader.getLiveDocs();
 
             // Only add segment if baseSnapshot was missing a doc that the current one has
-            // If baseLiveDocs == null, then base has a superset of docs than current
-            if (baseLiveDocs != null) {
-                LuceneLiveDocs liveDocs = (currentLiveDocs != null) ? currentLiveDocs
-                            .andNot(baseLiveDocs)
-                    : baseLiveDocs.not();
-
-                if (liveDocs.cardinality() == 0) {
-                    log.atDebug().setMessage("Skipping segment {} since no difference between segments found in snapshot.")
-                        .addArgument(readerKey)
-                        .log();
-                    continue;
-                }
-
-                // Only add segment if there are documents to process
-                if (liveDocs.cardinality() > 0) {
-                    var segmentReaderToCreate = new SegmentReaderAndLiveDoc(
-                        currentSegmentReader,
-                        liveDocs,
-                        offset
-                    );
-                    offset += currentSegmentReader.maxDoc();
-                    readerAndBases.add(segmentReaderToCreate);
-                }
+            // If baseLiveDocs == null, then base has a superset of docs than current and we can skip
+            if (baseLiveDocs == null) {
+                continue;
             }
+            BitSet liveDocs;
+            if (currentLiveDocs != null) {
+                // Compute currentLiveDocs AND NOT baseLiveDocs
+                liveDocs = (BitSet) currentLiveDocs.clone();
+                liveDocs.andNot(baseLiveDocs);
+            } else {
+                // Compute NOT baseLiveDocs (all docs except those in base)
+                liveDocs = (BitSet) baseLiveDocs.clone();
+                liveDocs.flip(0, liveDocs.length());
+            }
+
+            if (liveDocs.cardinality() == 0) {
+                log.atDebug().setMessage("Skipping segment {} since no difference between segments found in snapshot.")
+                    .addArgument(readerKey)
+                    .log();
+                continue;
+            }
+
+            var segmentReaderToCreate = new SegmentReaderAndLiveDoc(
+                currentSegmentReader,
+                liveDocs,
+                offset
+            );
+            offset += liveDocs.length();
+            readerAndBases.add(segmentReaderToCreate);
         }
 
         log.atInfo()
@@ -143,7 +147,7 @@ public class DeltaLuceneReader {
 
     record SegmentReaderAndLiveDoc(
         LuceneLeafReader reader,
-        LuceneLiveDocs liveDocOverride,
+        BitSet liveDocOverride,
         int baseDocIdx
     ){};
 
@@ -156,7 +160,6 @@ public class DeltaLuceneReader {
 
         // Start at
         int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
-        int numDocsToProcessInSegment = segmentReader.maxDoc() - startDocIdInSegment;
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
@@ -169,19 +172,9 @@ public class DeltaLuceneReader {
         log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(readerAndBase.reader)
                 .addArgument(startDocIdInSegment)
-                .addArgument(numDocsToProcessInSegment)
+                .addArgument(liveDocs::length)
                 .log();
-
-        Predicate<Integer> isLive;
-        if (liveDocs != null) {
-            var allLiveDocIdx = liveDocs.getAllEnabledDocIdxs();
-            isLive = allLiveDocIdx::contains;
-        } else {
-            isLive = ignored -> true;
-        }
-
-        return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)
-            .filter(isLive)
+        return Flux.fromStream(liveDocs.stream().filter(idx -> idx >= startDocIdInSegment).boxed())
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         // Get document, returns null to skip malformed docs
