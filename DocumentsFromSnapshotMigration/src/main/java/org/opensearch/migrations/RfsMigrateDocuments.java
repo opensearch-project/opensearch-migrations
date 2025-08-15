@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -93,6 +94,20 @@ public class RfsMigrateDocuments {
         @Override
         public Duration convert(String value) {
             return Duration.parse(value);
+        }
+    }
+
+    public static class DeltaModeConverter implements IStringConverter<DeltaMode> {
+        @Override
+        public DeltaMode convert(String value) {
+            try {
+                return DeltaMode.valueOf(value.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                throw new ParameterException("Invalid delta mode: " + value + ". Valid values are: " + 
+                    String.join(", ", java.util.Arrays.stream(DeltaMode.values())
+                        .map(Enum::name)
+                        .toArray(String[]::new)));
+            }
         }
     }
 
@@ -228,10 +243,11 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--experimental-delta-mode" },
-            description = "Enable experimental delta snapshot migration mode. Requires --base-snapshot-name",
+            converter = DeltaModeConverter.class,
+            description = "Experimental delta snapshot migration mode (UPDATES_ONLY). Requires --base-snapshot-name",
             hidden = true
         )
-        public boolean experimentalDeltaMode = false;
+        public DeltaMode experimentalDeltaMode = null;
     }
 
 
@@ -334,18 +350,20 @@ public class RfsMigrateDocuments {
         }
         
         // Validate delta mode parameters
-        if (args.experimental.experimentalDeltaMode) {
+        if (args.experimental.experimentalDeltaMode != null) {
             if (args.experimental.baseSnapshotName == null) {
                 throw new ParameterException(
-                    "When --experimental-delta-mode is enabled, --base-snapshot-name must be provided."
+                    "When --experimental-delta-mode is specified, --base-snapshot-name must be provided."
                 );
             }
-            log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration is enabled. " +
-                    "This feature is experimental and should not be used in production.");
+            log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
+                    "This feature is experimental and should not be used in production.", 
+                    args.experimental.experimentalDeltaMode);
         } else if (args.experimental.baseSnapshotName != null) {
-            log.warn("--base-snapshot-name was provided but --experimental-delta-mode is not enabled. " +
-                    "The base snapshot will be ignored.");
-            args.experimental.baseSnapshotName = null;
+            log.error("--base-snapshot-name was provided but --experimental-delta-mode is not specified.");
+            throw new ParameterException(
+                "When --base-snapshot-name is specified, --experimental-delta-mode must be provided."
+            );
         }
 
     }
@@ -471,6 +489,7 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getIndexMetadata(),
                 arguments.snapshotName,
                 arguments.experimental.baseSnapshotName,
+                arguments.experimental.experimentalDeltaMode,
                 arguments.indexAllowlist,
                 sourceResourceProvider.getShardMetadata(),
                 unpackerFactory,
@@ -673,6 +692,7 @@ public class RfsMigrateDocuments {
                                        IndexMetadata.Factory indexMetadataFactory,
                                        String snapshotName,
                                        String baseSnapshotName,
+                                       DeltaMode deltaMode,
                                        List<String> indexAllowlist,
                                        ShardMetadata.Factory shardMetadataFactory,
                                        SnapshotShardUnpacker.Factory unpackerFactory,
@@ -724,7 +744,7 @@ public class RfsMigrateDocuments {
                 regularStrategy);
         } else {
             var baseShardMetadataSupplier = shardMetadataSupplierFactory.apply(baseSnapshotName);
-            var deltaStrategy = new DeltaDocumentReadingStrategy(baseShardMetadataSupplier, shardMetadataSupplier);
+            var deltaStrategy = new DeltaDocumentReadingStrategy(baseShardMetadataSupplier, shardMetadataSupplier, deltaMode);
             runner = new DocumentsRunner(scopedWorkCoordinator,
                 maxInitialLeaseDuration,
                 reindexer,

@@ -339,6 +339,7 @@ public class SourceTestBase {
                     sourceResourceProvider.getIndexMetadata(),
                     snapshotName,
                     baseSnapshotName,
+                    baseSnapshotName != null ? org.opensearch.migrations.bulkload.common.DeltaMode.UPDATES_ONLY : null,
                     indexAllowlist,
                     sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,

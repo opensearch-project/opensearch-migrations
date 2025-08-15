@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -20,8 +21,10 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.lifecycle.Startables;
 
 /**
@@ -35,12 +38,17 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
-    @Test
-    public void testDeltaSnapshotRestore() {
-        // Using a recent version that supports all features we need
-        final var sourceVersion = SearchClusterContainer.ES_V7_10_2;
-        final var targetVersion = SearchClusterContainer.OS_V2_19_1;
-        
+    private static Stream<Arguments> scenarios() {
+        var target = SearchClusterContainer.OS_LATEST;
+        return SupportedClusters.supportedSources(true).stream()
+                .flatMap(source -> Stream.of(Arguments.of(source, target)));
+    }
+
+    @ParameterizedTest(name = "Source {0} to Target {1}")
+    @MethodSource("scenarios")
+    public void testDeltaSnapshotRestore(
+            final SearchClusterContainer.ContainerVersion sourceVersion,
+            final SearchClusterContainer.ContainerVersion targetVersion) {
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)

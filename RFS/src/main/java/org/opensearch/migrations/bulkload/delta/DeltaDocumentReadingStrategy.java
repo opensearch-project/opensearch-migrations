@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.delta;
 
 import java.util.function.BiFunction;
 
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReadingStrategy;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
@@ -15,6 +16,7 @@ import reactor.core.publisher.Flux;
 public class DeltaDocumentReadingStrategy implements DocumentReadingStrategy {
     private final BiFunction<String, Integer, ShardMetadata> baseShardMetadataFactory;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
+    private final DeltaMode deltaMode;
 
     @Override
     public SnapshotShardUnpacker createUnpacker(
@@ -36,6 +38,9 @@ public class DeltaDocumentReadingStrategy implements DocumentReadingStrategy {
     ) {
         ShardMetadata baseShardMetadata = baseShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
+        if (deltaMode != DeltaMode.UPDATES_ONLY) {
+            throw new UnsupportedOperationException("Unsupported delta mode given " + deltaMode);
+        }
         return reader.readDeltaDocuments(
             baseShardMetadata.getSegmentFileName(),
             shardMetadata.getSegmentFileName(),
