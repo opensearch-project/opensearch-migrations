@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
@@ -178,7 +179,7 @@ public class DeltaLuceneReader {
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         // Get document, returns null to skip malformed docs
-                        RfsLuceneDocument document = DeltaLuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath);
+                        RfsLuceneDocument document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath);
                         return Mono.justOrEmpty(document); // Emit only non-null documents
                     } catch (Exception e) {
                         // Handle individual document read failures gracefully
@@ -193,89 +194,5 @@ public class DeltaLuceneReader {
                 }).subscribeOn(scheduler),
                         concurrency, 1)
                 .subscribeOn(scheduler);
-    }
-
-    static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
-        LuceneDocument document;
-        try {
-            document = reader.document(luceneDocId);
-        } catch (IOException e) {
-            log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
-                .addArgument(luceneDocId).log();
-            return null;
-        }
-
-        String openSearchDocId = null;
-        String type = null;
-        String sourceBytes = null;
-        String routing = null;
-
-        try {
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                switch (fieldName) {
-                    case "_id": {
-                        // Lucene >= 7 (ES 6+ created segments)
-                        openSearchDocId = field.asUid();
-                        break;
-                    }
-                    case "_uid": {
-                        // Lucene <= 6 (ES <= 5 created segments)
-                        var combinedTypeId = field.stringValue().split("#", 2);
-                        type = combinedTypeId[0];
-                        openSearchDocId = combinedTypeId[1];
-                        break;
-                    }
-                    case "_source": {
-                        // All versions (?)
-                        sourceBytes = field.utf8ToStringValue();
-                        break;
-                    }
-                    case "_routing": {
-                        routing = field.stringValue();
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
-            if (openSearchDocId == null) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
-                    .addArgument(luceneDocId)
-                    .addArgument(getSegmentReaderDebugInfo)
-                    .addArgument(indexDirectoryPath)
-                    .log();
-                return null;  // Skip documents with missing id
-            }
-
-            if (sourceBytes == null || sourceBytes.isEmpty()) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
-                    .addArgument(luceneDocId)
-                    .addArgument(getSegmentReaderDebugInfo)
-                    .addArgument(indexDirectoryPath)
-                    .log();
-                return null;  // Skip these
-            }
-
-            log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
-        } catch (RuntimeException e) {
-            StringBuilder errorMessage = new StringBuilder();
-            errorMessage.append("Unable to parse Document id from Document with index ")
-                .append(luceneDocId)
-                .append(" from segment ")
-                .append(getSegmentReaderDebugInfo.get())
-                .append(".  The Document's Fields: ");
-            document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
-            log.atError().setCause(e).setMessage("{}").addArgument(errorMessage).log();
-            return null; // Skip documents with invalid id
-        }
-
-        if (!isLive) {
-            log.atDebug().setMessage("Document {} is not live").addArgument(openSearchDocId).log();
-            return null; // Skip these
-        }
-
-        log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new RfsLuceneDocument(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing);
     }
 }

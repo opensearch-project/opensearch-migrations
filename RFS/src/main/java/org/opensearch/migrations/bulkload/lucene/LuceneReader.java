@@ -146,7 +146,7 @@ public class LuceneReader {
                 .subscribeOn(scheduler);
     }
 
-    static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
+    public static RfsLuceneDocument getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
