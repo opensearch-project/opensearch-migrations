@@ -13,7 +13,7 @@ interface StatusContainerProps<T> {
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly data: T | null;
-  readonly fields: StatusFieldDefinition<T>[];
+  readonly fields: StatusFieldDefinition[];
   readonly columns?: number;
 }
 
@@ -43,7 +43,7 @@ export default function StatusContainer<T>({
   const renderDataState = () => {
     if (data) {
       return (
-        <KeyValuePairs columns={columns} items={generateDataItems(fields, data)} />
+        <KeyValuePairs columns={columns} items={generateDataItems(fields)} />
       );
     }
     

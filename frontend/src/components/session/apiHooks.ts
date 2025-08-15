@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
+import { metadataStatus, sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
 
 function useFetchData<T>(
   fetchFn: (sessionName: string) => Promise<{response: {status: number}, data: T}>,
@@ -57,4 +57,12 @@ export function useSnapshotStatus(sessionName: string) {
   };
 
   return useFetchData(fetchSnapshot, sessionName, 'snapshot status');
+}
+
+export function useMetadataStatus(sessionName: string) {
+  const fetchMetadata = async (name: string) => {
+    return await metadataStatus({ path: {session_name: name } });
+  };
+
+  return useFetchData(fetchMetadata, sessionName, 'metadata status');
 }

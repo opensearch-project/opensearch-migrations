@@ -1,9 +1,11 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from console_link.api.custom_openapi import OpenApiWithNullables
 from console_link.api.system import system_router
 from console_link.api.sessions import session_router
 from console_link.api.snapshot import snapshot_router
+from console_link.api.metadata import metadata_router
 
 app = FastAPI(
     title="Migration Assistant API",
@@ -28,7 +30,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+custom_openapi = OpenApiWithNullables(app)
+app.openapi = custom_openapi.openapi_with_nullables
+
 session_router.include_router(snapshot_router, prefix="/{session_name}", tags=["snapshot"])
+session_router.include_router(metadata_router, prefix="/{session_name}", tags=["metadata"])
 
 app.include_router(system_router)
 app.include_router(session_router)

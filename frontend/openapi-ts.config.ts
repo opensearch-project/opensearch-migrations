@@ -8,5 +8,15 @@ export default defineConfig({
     lint: 'eslint',
     tsConfigPath: './tsconfig.json'
   },
-  plugins: ['@hey-api/client-next']
+  plugins: [
+    {
+      name: '@hey-api/transformers',
+      dates: true,
+    },
+    {
+      name: '@hey-api/sdk',
+      transformer: true,
+    },
+    '@hey-api/client-next',
+  ]
 });
