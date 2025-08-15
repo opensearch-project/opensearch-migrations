@@ -136,6 +136,8 @@ class S3Snapshot(Snapshot):
             "--s3-repo-uri": self.s3_repo_uri,
             "--s3-region": self.s3_region,
         }
+        if self.s3_endpoint:
+            s3_command_args["--s3-endpoint"] = self.s3_endpoint
 
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)

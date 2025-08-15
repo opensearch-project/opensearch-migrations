@@ -11,6 +11,7 @@ class ClusterVersion:
                              f"OS_x.y, where y is a number or 'x' for any minor version.")
 
         self.cluster_type = match.group(1)
+        self.full_cluster_type = "elasticsearch" if self.cluster_type == "ES" else "opensearch"
         self.major_version = int(match.group(2))
 
         minor_version = match.group(3)

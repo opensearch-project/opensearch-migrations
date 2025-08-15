@@ -67,6 +67,12 @@ public class CreateSnapshot {
                 description = "The AWS Region the S3 bucket is in, like: us-east-2")
         public String s3Region;
 
+        @Parameter(
+                names = {"--s3-endpoint" },
+                required = false,
+                description = "The S3 endpoint setting to specify when creating a snapshot repository")
+        public String s3Endpoint;
+
         @ParametersDelegate
         public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 
@@ -186,6 +192,7 @@ public class CreateSnapshot {
                 client,
                 arguments.s3RepoUri,
                 arguments.s3Region,
+                arguments.s3Endpoint,
                 arguments.indexAllowlist,
                 arguments.maxSnapshotRateMBPerNode,
                 arguments.s3RoleArn,

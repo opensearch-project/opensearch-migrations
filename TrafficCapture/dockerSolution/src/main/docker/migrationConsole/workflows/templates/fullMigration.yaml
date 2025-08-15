@@ -446,6 +446,8 @@ spec:
                   value: "{{inputs.parameters.target-config}}"
                 - name: session-name
                   value: "{{steps.id-generator.id}}"
+                - name: source-version
+                  value: "{{=fromJSON(inputs.parameters['source-config'])['version']}}"
                 - name: image-config
                   value: "{{inputs.parameters.image-config}}"
                 - name: localstack-enabled

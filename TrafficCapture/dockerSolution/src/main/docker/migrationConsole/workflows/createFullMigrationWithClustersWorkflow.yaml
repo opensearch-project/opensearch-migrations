@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: full-migration-with-clusters-
+spec:
+  workflowTemplateRef:
+    name: full-migration-with-clusters
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: cluster-namespace
+        value: "ma"
+      - name: snapshot-and-migration-configs
+        value: |
+          [{
+            "indices": ["index_3", "index_4"],
+            "migrations": [{
+              "metadata": {
+                "from_snapshot": null,
+                "transformer_config_base64": ""
+              },
+              "documentBackfillConfigs": [{"indices": ["index_3", "index_4"]}]
+            }]
+          }]
+      - name: replayer-config
+        value: |
+          {"batchSize": 1000, "concurrency": 4}
