@@ -1,4 +1,3 @@
-from enum import Enum
 import tempfile
 import logging
 import json
