@@ -5,19 +5,18 @@ import {toArgoExpression} from "@/renderers/argoExpressionRender";
 import {StepGroup} from "@/schemas/stepsBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {GenericScope} from "@/schemas/workflowTypes";
+import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 
 
-export function renderWorkflowTemplate(wf: GenericScope) {
+export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["getFullScope"]>>(wf: WF) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",
 
-        metadata: {
-            name: wf.name,
-        },
+        metadata: wf.metadata.k8sMetadata,
         spec: {
-            serviceAccountName: wf.serviceAccountName,
-            entrypoint:  "FILL_THIS_IN_PROPERLY",
+            serviceAccountName: wf.metadata.serviceAccountName,
+            entrypoint:  wf.metadata.entrypoint,
             parallelism: 100,
             ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
             templates: (() => {

@@ -5,7 +5,11 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {asString, literal} from "@/schemas/expression";
 
-export const FullMigration = WorkflowBuilder.create("FullMigration")
+export const FullMigration = WorkflowBuilder.create({
+        k8sResourceName: "FullMigration",
+        parallelism: 100,
+        serviceAccountName: "argo-workflow-executor"
+    })
     .addParams(CommonWorkflowParameters)
     .addTemplate("main", t=> t
         .addRequiredInput("sourceMigrationConfigs",
@@ -43,4 +47,5 @@ export const FullMigration = WorkflowBuilder.create("FullMigration")
     .addTemplate("cleanup", t => t
         .addSteps(b=>b)
     )
+    .setEntrypoint("main")
     .getFullScope();

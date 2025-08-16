@@ -38,7 +38,12 @@ function commonTargetLatchHelperEnvVarsFromWorkflowParameters<
         .addEnvVar("ETCD_USER", b.workflowInputs.etcdUser);
 }
 
-export const TargetLatchHelpers = WorkflowBuilder.create("TargetLatchHelpers")
+export const TargetLatchHelpers = WorkflowBuilder.create({
+        k8sResourceName: "TargetLatchHelpers",
+        serviceAccountName: "argo-workflow-executor",
+        k8sMetadata: {},
+        parallelism: 1
+    })
     .addParams(CommonWorkflowParameters)
     .addTemplate("init", t=> t
         .addInputs(addCommonTargetLatchInputs)

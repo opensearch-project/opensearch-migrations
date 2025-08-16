@@ -1,5 +1,4 @@
 import {z, ZodType, ZodTypeAny} from 'zod';
-import {WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
 import {inputParam, workflowParam} from "@/schemas/expression";
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 

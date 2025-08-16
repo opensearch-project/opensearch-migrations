@@ -2,7 +2,6 @@
 export type Primitive = string | number | boolean | null;
 export type PlainObject = Primitive | PlainObject[] | { [key: string]: PlainObject };
 
-
 export type WidenPrimitive<T> =
     T extends string ? string :
         T extends number ? number :

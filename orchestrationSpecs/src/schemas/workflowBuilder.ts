@@ -7,8 +7,12 @@ import {
     TemplateSignaturesScope,
 } from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
+import {
+    UniqueNameConstraintAtDeclaration,
+    UniqueNameConstraintOutsideDeclaration
+} from "@/schemas/scopeConstraints";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
+import {PlainObject} from "@/schemas/plainObject";
 
 export class WorkflowBuilder<
     MetadataScope extends GenericScope = GenericScope,
@@ -17,14 +21,44 @@ export class WorkflowBuilder<
     TemplateFullScope extends GenericScope = GenericScope
 > {
     constructor(
-        protected readonly metadataScope: MetadataScope,
+        public readonly metadataScope: MetadataScope,
         protected readonly inputsScope: WorkflowInputsScope,
         protected readonly templateSigScope: TemplateSigScope,
         protected readonly templateFullScope: TemplateFullScope) {
     }
 
-    static create(k8sResourceName: string) {
-        return new WorkflowBuilder({ name: k8sResourceName }, {}, {}, {});
+    /**
+     * I'm a bit torn about putting K8s specific data into this API.
+     * Generally, it would be nice to be as Argo-independent as possible in this modeling layer.
+     * Striving for models that abstract away K8s isn't going to be possible though since
+     * many of the things being orchestrated are K8s resource (replicasets, services, etc).
+     * @param opts
+     */
+    static create(opts: {
+        k8sResourceName?: string,
+        k8sMetadata?: Record<string, PlainObject>,
+        serviceAccountName?: string,
+        parallelism?: number
+    }) {
+        return new WorkflowBuilder({
+            k8sMetadata: {
+                ...(opts.k8sMetadata ?? {}),
+                name: opts.k8sResourceName
+            },
+            serviceAccountName: opts.serviceAccountName,
+            parallelism: opts.parallelism
+        }, {}, {}, {});
+    }
+
+    setEntrypoint<Name extends Extract<keyof TemplateSigScope, string>>(
+        name: Name
+    ) {
+        return new WorkflowBuilder(
+            { ...this.metadataScope, entrypoint: name },
+            this.inputsScope,
+            this.templateSigScope,
+            this.templateFullScope
+        );
     }
 
     addParams<P extends InputParametersRecord>(
