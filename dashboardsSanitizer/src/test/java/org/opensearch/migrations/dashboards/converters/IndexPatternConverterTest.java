@@ -58,7 +58,7 @@ public class IndexPatternConverterTest extends SavedObjectsBase {
         // When calling convert
         final SavedObject converted = indexPattern.convert(new SavedObject(json));
 
-        assertEquals("7.6.0", converted.json().at("/migrationVersion/index-pattern").asText());;
+        assertEquals("7.6.0", converted.json().at("/migrationVersion/index-pattern").asText());
 
         // and no changes should be made to the json data
         assertEquals(originalStr, objectMapper.writeValueAsString(converted.json()));

@@ -10,9 +10,9 @@ import lombok.extern.slf4j.Slf4j;
  * To do this, we sort the segments by their ID or name.
  */
 @Slf4j
-class SegmentNameSorter implements Comparator<LuceneLeafReader> {
+public class SegmentNameSorter implements Comparator<LuceneLeafReader> {
 
-    static final SegmentNameSorter INSTANCE = new SegmentNameSorter();
+    public static final SegmentNameSorter INSTANCE = new SegmentNameSorter();
 
     @Override
     public int compare(LuceneLeafReader leafReader1, LuceneLeafReader leafReader2) {

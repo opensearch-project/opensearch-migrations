@@ -2,23 +2,41 @@ package org.opensearch.migrations.bulkload.lucene.version_6;
 
 import java.io.IOException;
 
+import org.opensearch.migrations.bulkload.lucene.LiveDocsConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
-import lombok.AllArgsConstructor;
+import lombok.Getter;
 import shadow.lucene6.org.apache.lucene.index.LeafReader;
 import shadow.lucene6.org.apache.lucene.index.SegmentReader;
+import shadow.lucene6.org.apache.lucene.util.Bits;
+import shadow.lucene6.org.apache.lucene.util.FixedBitSet;
+import shadow.lucene6.org.apache.lucene.util.SparseFixedBitSet;
 
-@AllArgsConstructor
 public class LeafReader6 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
+    @Getter
+    private final LiveDocsConverter.LengthDisabledBitSet liveDocs;
+
+    public LeafReader6(LeafReader wrapped) {
+        this.wrapped = wrapped;
+        this.liveDocs = convertLiveDocs(wrapped.getLiveDocs());
+    }
+
+    private static LiveDocsConverter.LengthDisabledBitSet convertLiveDocs(Bits bits) {
+        return LiveDocsConverter.convert(
+            bits,
+            FixedBitSet.class,
+            SparseFixedBitSet.class,
+            FixedBitSet::getBits,
+            Bits::length,
+            idx -> bits != null && bits.get(idx),
+            sparseBits -> sparseBits::nextSetBit
+        );
+    }
 
     public Document6 document(int luceneDocId) throws IOException {
         return new Document6(wrapped.document(luceneDocId));
-    }
-    
-    public LiveDocs6 getLiveDocs() {
-        return wrapped.getLiveDocs() != null ? new LiveDocs6(wrapped.getLiveDocs()) : null;
     }
 
     public int maxDoc() {

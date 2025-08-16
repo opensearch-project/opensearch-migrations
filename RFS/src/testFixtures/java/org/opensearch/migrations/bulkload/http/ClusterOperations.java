@@ -119,7 +119,9 @@ public class ClusterOperations {
     @SneakyThrows
     public void createIndex(final String index, final String body) {
         var response = put("/" + index, body);
-        assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
+        assertThat("Expected status code 200 or 201 for index creation of " + index + " but got: "
+                + response.getKey() + " " + response.getValue(),
+            response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
     @SneakyThrows

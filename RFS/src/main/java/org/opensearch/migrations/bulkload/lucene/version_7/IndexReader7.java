@@ -20,12 +20,15 @@ public class IndexReader7 implements LuceneIndexReader {
     protected final boolean softDeletesPossible;
     protected final String softDeletesField;
 
-    public LuceneDirectoryReader getReader() throws IOException {
+    public LuceneDirectoryReader getReader(String segmentsFileName) throws IOException {
         try (var directory = FSDirectory.open(indexDirectoryPath)) {
             var commits = DirectoryReader.listCommits(directory);
-            var latestCommit = commits.get(commits.size() - 1);
+            var relevantCommit = commits.stream()
+                .filter(commit -> segmentsFileName.equals(commit.getSegmentsFileName()))
+                .findAny()
+                .orElseThrow(() -> new IOException("No such commit with segments file: " + segmentsFileName));
 
-            var reader = DirectoryReader.open(latestCommit);
+            var reader = DirectoryReader.open(relevantCommit);
             if (softDeletesPossible) {
                 reader = new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
             }

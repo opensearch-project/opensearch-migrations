@@ -66,12 +66,13 @@ public class PerformanceVerificationTest {
 
         // Create a real DirectoryReader using the in-memory index
         DirectoryReader realReader = DirectoryReader.open(inMemoryDir);
+        var segmentsFileName = realReader.getIndexCommit().getSegmentsFileName();
 
         // Create a custom LuceneDocumentsReader for testing
         AtomicInteger ingestedDocuments = new AtomicInteger(0);
         var reader = new IndexReader9(Paths.get("dummy"), true, "dummy_field") {
             @Override
-            public LuceneDirectoryReader getReader() {
+            public LuceneDirectoryReader getReader(String ignored) {
                 return new DirectoryReader9(realReader, Path.of("in", "memory"));
             }
         };
@@ -104,7 +105,7 @@ public class PerformanceVerificationTest {
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);
         when(mockContext.createBulkRequest()).thenReturn(mock(IRfsContexts.IRequestContext.class));
 
-        Flux<RfsLuceneDocument> documentsStream = reader.readDocuments().map(d -> {
+        Flux<RfsLuceneDocument> documentsStream = reader.readDocuments(segmentsFileName).map(d -> {
             ingestedDocuments.incrementAndGet();
             return d;
         });
