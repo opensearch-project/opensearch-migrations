@@ -5,6 +5,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
+import lombok.EqualsAndHashCode;
 import lombok.experimental.Delegate;
 
 /**
@@ -129,6 +130,7 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
         return convertedBitSet != null ? new LengthDisabledBitSet(convertedBitSet) : null;
     }
 
+    @EqualsAndHashCode(callSuper = true)
     public static class LengthDisabledBitSet extends BitSet {
         @Delegate
         private final BitSet delegate;
@@ -140,11 +142,6 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
         @Override
         public int length() {
             throw new UnsupportedOperationException("Ensure no calls to length");
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            return super.equals(other);
         }
     }
 }
