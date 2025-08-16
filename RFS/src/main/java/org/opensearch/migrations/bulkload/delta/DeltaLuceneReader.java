@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
+import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
@@ -54,10 +55,54 @@ public class DeltaLuceneReader {
             .addArgument(baseSegmentToLeafReader.size())
             .addArgument(currentSegmentToLeafReader.size())
             .log();
+            
+        log.atInfo()
+            .setMessage("Calculating remove and add docs in snapshot")
+            .log();
 
-        // --- compute key sets
-        var baseKeys    = new TreeSet<>(baseSegmentToLeafReader.keySet());
-        var currentKeys = new TreeSet<>(currentSegmentToLeafReader.keySet());
+        // Docs to remove are additions between new and old
+        // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
+        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, baseSegmentToLeafReader, Integer.MIN_VALUE);
+        var additions = getAdditionsBetweenSnapshot(baseSegmentToLeafReader, currentSegmentToLeafReader, 0);
+
+        var totalDocsToRemove = removes.stream()
+            .mapToInt(s -> s.liveDocOverride.cardinality())
+            .sum();
+
+        log.atLevel(totalDocsToRemove > 0 ? Level.WARN : Level.INFO)
+            .setMessage("Delta Snapshot in UPDATES_ONLY mode will skip {} possible deleted docs (could be from segment merges)")
+            .addArgument(totalDocsToRemove)
+            .log();
+
+        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
+        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
+
+        return Flux.fromIterable(additions)
+            .flatMapSequential( c ->
+                readDocsFromSegment(c,
+                    startDocId,
+                    sharedSegmentReaderScheduler,
+                    maxDocumentsToReadAtOnce,
+                    Path.of(c.reader.getSegmentName()))
+            ).subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
+            .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
+            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+    }
+
+    // Lower case to appease sonar until sonar is updated to java 17
+    record segmentReaderAndLiveDoc(
+        LuceneLeafReader reader,
+        LiveDocsConverter.LengthDisabledBitSet liveDocOverride,
+        int baseDocIdx
+    ){
+        // Base Record Implementation
+    }
+
+
+    private static List<segmentReaderAndLiveDoc> getAdditionsBetweenSnapshot(TreeMap<String, LuceneLeafReader>
+      baseSegmentReaderMap, TreeMap<String, LuceneLeafReader> currentSegmentReaderMap, int startingOffset) {
+        var baseKeys    = new TreeSet<>(baseSegmentReaderMap.keySet());
+        var currentKeys = new TreeSet<>(currentSegmentReaderMap.keySet());
 
         var onlyInCurrentKeys = new TreeSet<>(currentKeys);
         onlyInCurrentKeys.removeAll(baseKeys);
@@ -65,31 +110,17 @@ public class DeltaLuceneReader {
         var inBothKeys        = new TreeSet<>(baseKeys);
         inBothKeys.retainAll(currentKeys);
 
-        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
-        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-
-        log.atInfo()
-            .setMessage("Generating readerAndBases")
-            .log();
-
-        // Start with just new docs, will add remove later
         List<segmentReaderAndLiveDoc> readerAndBases = new ArrayList<>();
-        // TODO: For delta backfill we need to move to using `long` everywhere since we may have more than 2^31 docs to work through
-        // when adding both docs to remove and docs to add
-        int offset = 0;
+        int offset = startingOffset;
         for (var key : onlyInCurrentKeys) {
-            var reader = currentSegmentToLeafReader.get(key);
+            var reader = currentSegmentReaderMap.get(key);
             readerAndBases.add(new segmentReaderAndLiveDoc(reader, reader.getLiveDocs(), offset));
             offset += reader.maxDoc();
         }
 
-        log.atInfo()
-            .setMessage("Starting comparing both new and old")
-            .log();
-
         for (var readerKey : inBothKeys) {
-            var baseSegmentReader = baseSegmentToLeafReader.get(readerKey);
-            var currentSegmentReader = currentSegmentToLeafReader.get(readerKey);
+            var baseSegmentReader = baseSegmentReaderMap.get(readerKey);
+            var currentSegmentReader = currentSegmentReaderMap.get(readerKey);
 
             var baseLiveDocs = baseSegmentReader.getLiveDocs();
             var currentLiveDocs = currentSegmentReader.getLiveDocs();
@@ -114,41 +145,17 @@ public class DeltaLuceneReader {
                 log.atDebug().setMessage("Skipping segment {} since no difference between segments found in snapshot.")
                     .addArgument(readerKey)
                     .log();
-                continue;
+            } else {
+                var segmentReaderToCreate = new segmentReaderAndLiveDoc(
+                    currentSegmentReader,
+                    liveDocs,
+                    offset
+                );
+                offset += currentSegmentReader.maxDoc();
+                readerAndBases.add(segmentReaderToCreate);
             }
-
-            var segmentReaderToCreate = new segmentReaderAndLiveDoc(
-                currentSegmentReader,
-                liveDocs,
-                offset
-            );
-            offset += currentSegmentReader.maxDoc();
-            readerAndBases.add(segmentReaderToCreate);
         }
-
-        log.atInfo()
-            .setMessage("Finished comparing for segments that contain in both")
-            .log();
-
-        return Flux.fromIterable(readerAndBases)
-            .flatMapSequential( c ->
-                readDocsFromSegment(c,
-                    startDocId,
-                    sharedSegmentReaderScheduler,
-                    maxDocumentsToReadAtOnce,
-                    Path.of(c.reader.getSegmentName()))
-            ).subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
-            .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
-            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
-    }
-
-    // Lower case to appease sonar until sonar is updated to java 17
-    record segmentReaderAndLiveDoc(
-        LuceneLeafReader reader,
-        LiveDocsConverter.LengthDisabledBitSet liveDocOverride,
-        int baseDocIdx
-    ){
-        // Base Record Implementation
+        return readerAndBases;
     }
 
     static Flux<RfsLuceneDocument> readDocsFromSegment(segmentReaderAndLiveDoc readerAndBase, int docStartingId, Scheduler scheduler,

@@ -141,5 +141,10 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
         public int length() {
             throw new UnsupportedOperationException("Ensure no calls to length");
         }
+
+        @Override
+        public boolean equals(Object other) {
+            return super.equals(other);
+        }
     }
 }
