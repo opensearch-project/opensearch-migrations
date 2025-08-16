@@ -2,6 +2,21 @@
 export type Primitive = string | number | boolean | null;
 export type PlainObject = Primitive | PlainObject[] | { [key: string]: PlainObject };
 
+
+export type WidenPrimitive<T> =
+    T extends string ? string :
+        T extends number ? number :
+            T extends boolean ? boolean :
+                T extends null ? null :
+                    never;
+
+export type DeepWiden<T> =
+    T extends readonly (infer U)[] ? Array<DeepWiden<U>> :
+        T extends (infer U)[] ? Array<DeepWiden<U>> :
+            // drop readonly and widen each property
+            T extends object ? { -readonly [K in keyof T]: DeepWiden<T[K]> } :
+                WidenPrimitive<T>;
+
 /**
  * Runtime validation helper to check if a value is a PlainObject
  * Only allows primitives, plain arrays, and plain objects (no custom prototypes, functions, etc.)

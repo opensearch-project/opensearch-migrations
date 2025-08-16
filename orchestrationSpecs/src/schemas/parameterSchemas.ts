@@ -1,7 +1,7 @@
 import {z, ZodType, ZodTypeAny} from 'zod';
 import {WorkflowInputsToExpressions} from "@/schemas/workflowTypes";
 import {inputParam, workflowParam} from "@/schemas/expression";
-import {PlainObject} from "@/schemas/plainObject";
+import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 
 export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
     type: ZodType<T>;
@@ -12,10 +12,10 @@ export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
 export function defineParam<T extends PlainObject>(opts: {
     defaultValue: T;
     description?: string;
-}): InputParamDef<T, false> {
+}): InputParamDef<DeepWiden<T>, false> {
     return {
-        type: z.custom<T>(),
-        defaultValue: opts.defaultValue,
+        type: z.custom<DeepWiden<T>>(),
+        defaultValue: opts.defaultValue as unknown as DeepWiden<T>,
         description: opts.description,
         _hasDefault: true
     };

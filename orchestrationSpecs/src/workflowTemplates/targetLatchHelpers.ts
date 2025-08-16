@@ -22,7 +22,6 @@ function addCommonTargetLatchInputs<
         .addOptionalInput("etcdPassword",  s => s.workflowParameters.etcdPassword)
         .addOptionalInput("etcdUser",  s => s.workflowParameters.etcdUser)
         .addOptionalInput("etcdUtilsImage", s => s.workflowParameters.etcdImage)
-        .addOptionalInput("test", s=>"")
     ;
 }
 
