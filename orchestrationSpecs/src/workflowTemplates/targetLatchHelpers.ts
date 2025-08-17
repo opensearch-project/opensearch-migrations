@@ -1,14 +1,11 @@
 import {z} from 'zod';
-import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, IMAGE_SPECIFIER, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
+import {CLUSTER_CONFIG, IMAGE_PULL_POLICY, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
-import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {GenericScope} from "@/schemas/workflowTypes";
-import {InputParametersRecord} from "@/schemas/parameterSchemas";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }
@@ -23,19 +20,6 @@ function addCommonTargetLatchInputs<
         .addOptionalInput("etcdUser",  s => s.workflowParameters.etcdUser)
         .addOptionalInput("etcdUtilsImage", s => s.workflowParameters.etcdImage)
     ;
-}
-
-function commonTargetLatchHelperEnvVarsFromWorkflowParameters<
-    ContextualScope extends { workflowParameters: typeof CommonWorkflowParameters },
-    InputParamsScope extends InputParametersRecord,
-    ContainerScope extends GenericScope
->(
-    b: ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, {}, {}>
-) {
-    return b
-        .addEnvVar("ETCD_ENDPOINTS", b.workflowInputs.etcdEndpoints)
-        .addEnvVar("ETCD_PASSWORD", b.workflowInputs.etcdPassword)
-        .addEnvVar("ETCD_USER", b.workflowInputs.etcdUser);
 }
 
 export const TargetLatchHelpers = WorkflowBuilder.create({

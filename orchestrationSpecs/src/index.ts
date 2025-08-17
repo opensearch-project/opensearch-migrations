@@ -11,6 +11,6 @@ console.log("OUTPUT: ");
 const finalConfigTlh = renderWorkflowTemplate(TargetLatchHelpers);
 console.log(JSON.stringify(finalConfigTlh, null, 2));
 
-//const finalConfigFm = renderWorkflowTemplate(FullMigration);
-//console.log(JSON.stringify(finalConfigFm, null, 2));
+const finalConfigFm = renderWorkflowTemplate(FullMigration);
+console.log(JSON.stringify(finalConfigFm, null, 2));
 
