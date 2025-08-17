@@ -7,9 +7,10 @@ import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 // console.log("FullMigration: " + JSON.stringify(FullMigration, null, 2));
 // console.log("\n\n\n");
 
-const finalConfigTlh = renderWorkflowTemplate(TargetLatchHelpers);
-const finalConfigFm = renderWorkflowTemplate(FullMigration);
 console.log("OUTPUT: ");
+const finalConfigTlh = renderWorkflowTemplate(TargetLatchHelpers);
 console.log(JSON.stringify(finalConfigTlh, null, 2));
-console.log(JSON.stringify(finalConfigFm, null, 2));
+
+//const finalConfigFm = renderWorkflowTemplate(FullMigration);
+//console.log(JSON.stringify(finalConfigFm, null, 2));
 

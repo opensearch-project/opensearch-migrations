@@ -13,8 +13,20 @@ import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
 
-export function inputsToEnvVarNames<T extends Record<string, any>>(inputs: T): Record<string, T[keyof T]> {
-    const result: Record<string, any> = {};
+export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpression<string>>>(
+    inputs: T
+): { [K in keyof T as Uppercase<string & K>]: T[K] } {
+    const result: Record<string, AllowLiteralOrExpression<string>> = {};
+    Object.entries(inputs).forEach(([key, value]) => {
+        result[toEnvVarName(key)] = value;
+    });
+    return result as any;
+}
+
+export function inputsToEnvVarNames<T extends Record<string, AllowLiteralOrExpression<string>>>(
+    inputs: T
+): Record<string, AllowLiteralOrExpression<string>> {
+    const result: Record<string, AllowLiteralOrExpression<string>> = {};
     Object.entries(inputs).forEach(([key, value]) => {
         result[toEnvVarName(key)] = value;
     });
@@ -111,7 +123,6 @@ export class ContainerBuilder<
         });
     }
 
-
     addEnvVar<Name extends string>(
         name: string extends keyof EnvScope  // If EnvScope is Record<string, X>, disable checking
             ? Name
@@ -171,28 +182,33 @@ export class ContainerBuilder<
     }
 
     // Convenience method to map input parameters to environment variables
-    addInputsAsEnvVars<ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> = never>(
-        modifierFn?: (inputs: InputParamsToExpressions<InputParamsScope>) => ModifiedInputs
+    addInputsAsEnvVars<
+        ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> =
+            { [K in keyof InputParamsScope as Uppercase<string & K>]: AllowLiteralOrExpression<string> }
+    >(
+        modifierFn: (inputs: InputParamsToExpressions<InputParamsScope>) => ModifiedInputs =
+        inputsToEnvVars as any
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<
             ContextualScope,
             InputParamsScope,
             ContainerScope,
-            ModifiedInputs extends never
-                ? Record<string, AllowLiteralOrExpression<string>>  // Default case - less specific
-                : ModifiedInputs,  // Modified case - preserve specific keys
+            ModifiedInputs,
             OutputParamsScope
         >>
     {
-        const baseInputs = this.inputs as Record<string, AllowLiteralOrExpression<string>>;
-        const envVars = modifierFn
-            ? modifierFn(this.inputs)
-            : inputsToEnvVarNames(baseInputs);
+        const envVars = modifierFn(this.inputs);
 
-        // Create new ContainerBuilder with envVars as the complete env scope
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.bodyScope,
-            env: envVars
-        }, envVars as any, this.outputsScope) as any;
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            {
+                ...this.bodyScope,
+                env: envVars
+            },
+            envVars,
+            this.outputsScope
+        ) as any;
     }
+
 }

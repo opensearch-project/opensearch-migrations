@@ -79,7 +79,6 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])
-            .addPathOutput("DUMMY_NEED_TO_RESOLVE_THIS_BUILDER BUG!", "/tmp/should-finalize", z.boolean())
         )
     )
     .getFullScope();
