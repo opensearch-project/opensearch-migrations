@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
-import org.opensearch.migrations.bulkload.common.DocumentReadingStrategy;
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
@@ -19,7 +19,7 @@ import lombok.AllArgsConstructor;
 import reactor.core.publisher.Flux;
 
 @AllArgsConstructor
-public class DeltaDocumentReadingStrategy implements DocumentReadingStrategy {
+public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
     private final BiFunction<String, Integer, ShardMetadata> baseShardMetadataFactory;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final DeltaMode deltaMode;

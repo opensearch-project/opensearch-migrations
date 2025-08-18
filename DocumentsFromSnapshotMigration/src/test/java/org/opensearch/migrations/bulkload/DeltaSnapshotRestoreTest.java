@@ -73,7 +73,6 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             var indexName = "test_index";
             var numberOfShards = 1; // Using single shard for simplicity
             var sourceClusterOperations = new ClusterOperations(sourceCluster);
-            var targetClusterOperations = new ClusterOperations(targetCluster);
 
             // Create index with single shard on both source and target
             String indexSettings = String.format(
@@ -91,8 +90,11 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                         .test(sourceCluster.getContainerVersion().getVersion())) ?
                     "    \"index.soft_deletes.enabled\": true," : "") +
                     // Disable segment merges to ensure consistent test execution
-                "    \"merge.policy.floor_segment\": \"1gb\"," +
-                "    \"merge.policy.max_merged_segment\": \"1gb\"" +
+                    // By setting floor_segment == max_merged_segment the cluster will
+                    // treat all segments regardless of size as equal to the max size
+                    // and will not merge them.
+                "    \"merge.policy.floor_segment\": \"1mb\"," +
+                "    \"merge.policy.max_merged_segment\": \"1mb\"" +
                 "  }" +
                 "}",
                 numberOfShards
@@ -101,15 +103,14 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
 
             String doc = "{\"content\": \"document\"}";
 
-            var docIdDeletedOnSecond = "docDeletedOnSecond";
-            sourceClusterOperations.createDocument(indexName, docIdDeletedOnSecond, doc);
+            var docIdDeletedOnSecondSnapshot = "docDeletedOnSecondSnapshot";
+            sourceClusterOperations.createDocument(indexName, docIdDeletedOnSecondSnapshot, doc);
 
             var docIdOnBoth = "docOnBoth";
             sourceClusterOperations.createDocument(indexName, docIdOnBoth, doc);
 
             // Refresh to ensure documents are searchable
             sourceClusterOperations.post("/_refresh", null);
-            targetClusterOperations.post("/_refresh", null);
 
             // === ACTION: Take first snapshot ===
             var snapshot1Name = "snapshot1";
@@ -132,7 +133,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator1);
 
             // === ACTION: Delete first document and create second document ===
-            sourceClusterOperations.deleteDocument(indexName, docIdDeletedOnSecond, null, null);
+            sourceClusterOperations.deleteDocument(indexName, docIdDeletedOnSecondSnapshot, null, null);
             var docIdOnlyOnSecond = "docOnlyOnSecond";
             sourceClusterOperations.createDocument(indexName, docIdOnlyOnSecond, doc);
             sourceClusterOperations.post("/_refresh", null);
@@ -156,8 +157,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             // === ACTION: Migrate state change between snapshot1 and snapshot2
-            // Create docIdDeletedOnSecond to verify it's deleted when going from snapshot1 -> snapshot2
-            targetClusterOperations.createDocument(indexName, docIdDeletedOnSecond, doc);
+            var targetClusterOperations = new ClusterOperations(targetCluster);
+            // Create docIdDeletedOnSecondSnapshot to verify it's deleted when going from snapshot1 -> snapshot2
+            targetClusterOperations.createDocument(indexName, docIdDeletedOnSecondSnapshot, doc);
             {
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
@@ -181,10 +183,10 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 // === VERIFICATION: Check the results ===
                 targetClusterOperations.post("/_refresh", null);
                 {
-                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecond);
-                    // docIdDeletedOnSecond should be deleted once deletions are supported
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
+                    // docIdDeletedOnSecondSnapshot should be deleted once deletions are supported
                     // Assertions.assertEquals(404, doc2Response.getKey(), "doc2 should be deleted on target");
-                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecond + " should not be found on target");
+                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should not be found on target");
                 }
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnlyOnSecond);
@@ -200,8 +202,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             targetClusterOperations.delete("/.migrations_working_state");
             // Simulate delete that should have occurred in prior RFS but is currently not supported
             {
-                var response = targetClusterOperations.delete("/" + indexName + "/_doc/" + docIdDeletedOnSecond);
-                Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecond + " should be manually deleted");
+                var response = targetClusterOperations.delete("/" + indexName + "/_doc/" + docIdDeletedOnSecondSnapshot);
+                Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should be manually deleted");
             }
             {
                 var runCounter = new AtomicInteger();
@@ -226,12 +228,12 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 // === VERIFICATION: Check the results ===
                 targetClusterOperations.post("/_refresh", null);
                 {
-                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecond);
-                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecond + " should created when restoring first snapshot");
+                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
+                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should created when restoring first snapshot");
                 }
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnlyOnSecond);
-                    // docIdDeletedOnSecond should be deleted once deletions are supported
+                    // docIdDeletedOnSecondSnapshot should be deleted once deletions are supported
                     // Assertions.assertEquals(404, doc2Response.getKey(), "doc2 should not exist");
                     Assertions.assertEquals(200, response.getKey(), docIdOnlyOnSecond + " is created because deletes are not supported");
                 }

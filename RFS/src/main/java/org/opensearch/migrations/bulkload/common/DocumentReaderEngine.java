@@ -4,7 +4,7 @@ import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 
 import reactor.core.publisher.Flux;
 
-public interface DocumentReadingStrategy {
+public interface DocumentReaderEngine {
     SnapshotShardUnpacker createUnpacker(
         SnapshotShardUnpacker.Factory unpackerFactory,
         String indexName,

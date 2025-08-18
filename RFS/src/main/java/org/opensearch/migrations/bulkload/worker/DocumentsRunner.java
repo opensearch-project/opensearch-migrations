@@ -7,7 +7,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.bulkload.common.DocumentReadingStrategy;
+import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
@@ -35,7 +35,7 @@ public class DocumentsRunner {
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final Consumer<Runnable> cancellationTriggerConsumer;
     private final WorkItemTimeProvider timeProvider;
-    private final DocumentReadingStrategy documentReadingStrategy;
+    private final DocumentReaderEngine documentReaderEngine;
 
     /**
      * @return true if it did work, false if there was no available work at this time.
@@ -138,7 +138,7 @@ public class DocumentsRunner {
     ) {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
 
-        var unpacker = documentReadingStrategy.createUnpacker(
+        var unpacker = documentReaderEngine.createUnpacker(
             unpackerFactory,
             workItem.getIndexName(),
             workItem.getShardNumber()
@@ -149,7 +149,7 @@ public class DocumentsRunner {
         log.info("Setting up doc migration for index={}, shard={}",
              workItem.getIndexName(), workItem.getShardNumber());
 
-        Flux<RfsLuceneDocument> documents = documentReadingStrategy.readDocuments(
+        Flux<RfsLuceneDocument> documents = documentReaderEngine.readDocuments(
             reader,
             workItem.getIndexName(),
             workItem.getShardNumber(),
