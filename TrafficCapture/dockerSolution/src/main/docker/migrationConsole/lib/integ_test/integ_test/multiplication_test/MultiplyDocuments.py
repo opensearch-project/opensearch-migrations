@@ -130,9 +130,12 @@ class MultiplyDocuments(unittest.TestCase):
             # Update progress and get metrics for logs
             metrics = progress_tracker.update(ACTUAL_COUNT)
             if metrics['current_count'] == 0:
-                logger.info(f"Migration Progress: {metrics['current_count']}/{metrics['expected_count']} "
-                            f"documents (0.0%) | Elapsed: {ProgressTracker.format_duration(metrics['elapsed_total'])} | "
-                            f"Waiting for migration to start...")
+                logger.info(
+                    f"Migration Progress: {metrics['current_count']}/{metrics['expected_count']} "
+                    f"documents (0.0%) | "
+                    f"Elapsed: {ProgressTracker.format_duration(metrics['elapsed_total'])} | "
+                    f"Waiting for migration to start..."
+                )
             elif metrics['avg_rate'] > 0:
                 eta_str = (ProgressTracker.format_duration(metrics['eta_seconds'])
                            if metrics['eta_seconds'] > 0 else "calculating...")

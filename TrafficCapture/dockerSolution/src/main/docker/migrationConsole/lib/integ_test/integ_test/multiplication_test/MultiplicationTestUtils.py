@@ -100,7 +100,7 @@ def cleanup_snapshots_and_repos(ACCOUNT_ID, TEST_STAGE, REGION):
     
     CLEANUP_COMMANDS = [
         ["console", "snapshot", "delete", "--acknowledge-risk"],  # Delete snapshot
-        ["console", "clusters", "curl", "source_cluster", "-XDELETE", 
+        ["console", "clusters", "curl", "source_cluster", "-XDELETE",
          f"/_snapshot/{SNAPSHOT_REPO_NAME}"],  # Delete repo
         ["aws", "s3", "rm", S3_BUCKET_URI, "--recursive"]  # Clear S3 contents
     ]
