@@ -42,7 +42,8 @@ import reactor.core.scheduler.Schedulers;
  *      For deletes, we can dedupe any deletes where the same document id appears in the additions stream.
  *      For additions, we can dedupe where the delete stream contains a doc with the same id and same source.
  *      Since we have an upper bound on shard doc changes of 2^31 deletions and 2^31 additions, this dedupe must be
- *      performed on Disk-backed data stores.
+ *      performed on Disk-backed data stores. This is different from the LiveDocs BitSet which uses 1 bit per doc
+ *      whereas a document's id can be up to 512 bytes.
  *
  * <h3>Complexity</h3>
  * Real-world performance assumes the number of segments is reasonably bounded (O(1)).
