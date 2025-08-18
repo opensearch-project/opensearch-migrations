@@ -14,14 +14,14 @@ export function StatusDisplay({ status }: Readonly<{ status?: StepState | null }
 /**
  * Displays a formatted date or a default if undefined
  */
-export function DateDisplay({ date }: Readonly<{ date?: string }>) {
-  return <>{date != undefined ? new Date(date).toLocaleString() : '-'}</>;
+export function DateDisplay({ date }: Readonly<{ date?: Date | null }>) {
+  return <>{date != null ? new Date(date).toLocaleString() : '-'}</>;
 }
 
 /**
  * Displays the duration between two timestamps or a default if not available
  */
-export function DurationDisplay({ started, finished }: Readonly<{ started?: string, finished?: string }>) {
+export function DurationDisplay({ started, finished }: Readonly<{ started?: Date | null, finished?: Date | null }>) {
   return <>{durationFromTimes(started, finished) || '-'}</>;
 }
 
@@ -29,7 +29,7 @@ export function DurationDisplay({ started, finished }: Readonly<{ started?: stri
  * Displays a percentage value
  */
 export function ProgressDisplay({ percentage }: Readonly<{ percentage?: number | null }>) {
-  return <>{percentage !== undefined && percentage !== null ? `${percentage}%` : '-'}</>;
+  return <>{percentage != null ? `${percentage}%` : '-'}</>;
 }
 
 /**
