@@ -74,7 +74,7 @@ public class LuceneReader {
         var sortedReaderAndBase = new ArrayList<ReaderAndBase>();
         int cumulativeDocBase = 0;
         for (var segment : sortedLeaves) {
-            sortedReaderAndBase.add(new ReaderAndBase(segment, cumulativeDocBase));
+            sortedReaderAndBase.add(new ReaderAndBase(segment, cumulativeDocBase, segment.getLiveDocs()));
             cumulativeDocBase += segment.maxDoc();
         }
 
@@ -97,10 +97,10 @@ public class LuceneReader {
         return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
-    static Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
+    public static Flux<RfsLuceneDocument> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
                                                 int concurrency, Path indexDirectoryPath) {
         var segmentReader = readerAndBase.getReader();
-        var liveDocs = segmentReader.getLiveDocs();
+        var liveDocs = readerAndBase.getLiveDocs();
 
         int segmentDocBase = readerAndBase.getDocBaseInParent();
 
