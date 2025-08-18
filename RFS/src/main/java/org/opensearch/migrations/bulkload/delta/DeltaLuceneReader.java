@@ -23,6 +23,57 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
+/**
+ * DeltaLuceneReader
+ * <p>
+ * Provides a delta-style backfill between a previous and current Lucene snapshot.
+ * Emits only new documents (skips deletion for now) as {@link RfsLuceneDocument} via Reactor streams.
+ *
+ * <h3>Functionality</h3>
+ * - Builds segment → reader maps from both snapshots.
+ * - Detects new segments or new docs in shared segments.
+ * - Streams additions for processing.
+ * - Calculates deletions for future expansion to support removing deleted docs
+ *
+ * <h3>Limitations</h3>
+ * - Deletions not emitted (logged only).
+ * - BitSet cloning can be memory-heavy (Upper bound in low hundreds of MBs based on 2^31 doc upper bound in segment)
+ * - Using Segment based diff for delta calculation. In the future, we should consider doc based diffs.
+ *      For deletes, we can dedupe any deletes where the same document id appears in the additions stream.
+ *      For additions, we can dedupe where the delete stream contains a doc with the same id and same source.
+ *      Since we have an upper bound on shard doc changes of 2^31 deletions and 2^31 additions, this dedupe must be
+ *      performed on Disk-backed data stores.
+ *
+ * <h3>Complexity</h3>
+ * Real-world performance assumes the number of segments is reasonably bounded (O(1)).
+ * Although documents may scale up to 2^31, the number of segments typically maxes out
+ * in the hundreds or thousands — beyond which cluster performance would degrade.
+ *
+ * <p>
+ * Complexity is determined at the <b>segment level</b>:
+ * <ul>
+ *   <li><b>Wholly created or deleted segments:</b> O(1) time and O(1) space</li>
+ *   <li><b>Partially modified segments (docs updated/deleted):</b>
+ *       O(n) time and O(n) space, where n = number of documents in the segment</li>
+ * </ul>
+ *
+ * <p>
+ * In mixed workloads (updates/deletes + inserts), different segments may fall into
+ * either category: some segments are replaced entirely (cheap), while others require
+ * per-document processing (less-cheap).
+ *
+ * <p>
+ * Lucene optimizes segments with no deletions by storing <code>liveDocs</code> as
+ * <code>null</code>. This allows diffs for those segments to be computed in O(1) time
+ * and space.
+ *
+ * <h4>Special Case: Append-Only Workloads</h4>
+ * When no updates/deletes occur and segments are only removed through merges:
+ * <ul>
+ *   <li>Deleted docs: O(1) time, O(1) space</li>
+ *   <li>Added docs: O(1) time, O(1) space</li>
+ * </ul>
+ */
 @Slf4j
 public class DeltaLuceneReader {
 
@@ -32,16 +83,16 @@ public class DeltaLuceneReader {
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
      */
-    public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader baseReader, LuceneDirectoryReader currentReader, int startDocId) {
+    public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader previousReader, LuceneDirectoryReader currentReader, int startDocId) {
         log.atInfo()
             .setMessage("Starting delta backfill from position {}")
             .addArgument(startDocId)
             .log();
         // Start with brute force solution
-        var baseSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
-        baseReader.leaves().forEach(
+        var previousSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+        previousReader.leaves().forEach(
             leaf ->
-                baseSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+                previousSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
         );
 
         var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
@@ -51,8 +102,8 @@ public class DeltaLuceneReader {
         );
 
         log.atInfo()
-            .setMessage("Found {} segments in base and {} segments in current")
-            .addArgument(baseSegmentToLeafReader.size())
+            .setMessage("Found {} segments in previous and {} segments in current")
+            .addArgument(previousSegmentToLeafReader.size())
             .addArgument(currentSegmentToLeafReader.size())
             .log();
             
@@ -62,8 +113,8 @@ public class DeltaLuceneReader {
 
         // Docs to remove are additions between new and old
         // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
-        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, baseSegmentToLeafReader, Integer.MIN_VALUE);
-        var additions = getAdditionsBetweenSnapshot(baseSegmentToLeafReader, currentSegmentToLeafReader, 0);
+        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, Integer.MIN_VALUE);
+        var additions = getAdditionsBetweenSnapshot(previousSegmentToLeafReader, currentSegmentToLeafReader, 0);
 
         var totalDocsToRemove = removes.stream()
             .mapToInt(s -> s.liveDocOverride == null ? s.reader.maxDoc() :
@@ -102,44 +153,44 @@ public class DeltaLuceneReader {
 
 
     private static List<segmentReaderAndLiveDoc> getAdditionsBetweenSnapshot(TreeMap<String, LuceneLeafReader>
-      baseSegmentReaderMap, TreeMap<String, LuceneLeafReader> currentSegmentReaderMap, int startingOffset) {
-        var baseKeys    = new TreeSet<>(baseSegmentReaderMap.keySet());
-        var currentKeys = new TreeSet<>(currentSegmentReaderMap.keySet());
+      previousSegmentReaderMap, TreeMap<String, LuceneLeafReader> currentSegmentReaderMap, int startingOffset) {
+        var prevousSnapshotSegmentReaderKeys    = new TreeSet<>(previousSegmentReaderMap.keySet());
+        var currentSnapshotSegmentReaderKeys = new TreeSet<>(currentSegmentReaderMap.keySet());
 
-        var onlyInCurrentKeys = new TreeSet<>(currentKeys);
-        onlyInCurrentKeys.removeAll(baseKeys);
+        var onlyIncurrentSnapshotSegmentReaderKeys = new TreeSet<>(currentSnapshotSegmentReaderKeys);
+        onlyIncurrentSnapshotSegmentReaderKeys.removeAll(prevousSnapshotSegmentReaderKeys);
 
-        var inBothKeys        = new TreeSet<>(baseKeys);
-        inBothKeys.retainAll(currentKeys);
+        var inBothKeys        = new TreeSet<>(prevousSnapshotSegmentReaderKeys);
+        inBothKeys.retainAll(currentSnapshotSegmentReaderKeys);
 
         List<segmentReaderAndLiveDoc> readerAndBases = new ArrayList<>();
         int offset = startingOffset;
-        for (var key : onlyInCurrentKeys) {
+        for (var key : onlyIncurrentSnapshotSegmentReaderKeys) {
             var reader = currentSegmentReaderMap.get(key);
             readerAndBases.add(new segmentReaderAndLiveDoc(reader, reader.getLiveDocs(), offset));
             offset += reader.maxDoc();
         }
 
         for (var readerKey : inBothKeys) {
-            var baseSegmentReader = baseSegmentReaderMap.get(readerKey);
+            var previousSegmentReader = previousSegmentReaderMap.get(readerKey);
             var currentSegmentReader = currentSegmentReaderMap.get(readerKey);
 
-            var baseLiveDocs = baseSegmentReader.getLiveDocs();
+            var previousLiveDocs = previousSegmentReader.getLiveDocs();
             var currentLiveDocs = currentSegmentReader.getLiveDocs();
 
-            // Only add segment if baseSnapshot was missing a doc that the current one has
-            // If baseLiveDocs == null, then base has a superset of docs than current and we can skip
-            if (baseLiveDocs == null) {
+            // Only add segment if previousSnapshot was missing a doc that the current one has
+            // If previousLiveDocs == null, then previous has a superset of docs than current and we can skip
+            if (previousLiveDocs == null) {
                 continue;
             }
             BitSetConverter.LengthDisabledBitSet liveDocs;
             if (currentLiveDocs != null) {
-                // Compute currentLiveDocs AND NOT baseLiveDocs
+                // Compute currentLiveDocs AND NOT previousLiveDocs
                 liveDocs = (BitSetConverter.LengthDisabledBitSet) currentLiveDocs.clone();
-                liveDocs.andNot(baseLiveDocs);
+                liveDocs.andNot(previousLiveDocs);
             } else {
-                // Compute NOT baseLiveDocs (all docs except those in base)
-                liveDocs = (BitSetConverter.LengthDisabledBitSet) baseLiveDocs.clone();
+                // Compute NOT previousLiveDocs (all docs except those in previous)
+                liveDocs = (BitSetConverter.LengthDisabledBitSet) previousLiveDocs.clone();
                 liveDocs.flip(0, currentSegmentReader.maxDoc());
             }
 
