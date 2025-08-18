@@ -66,7 +66,9 @@ public class DeltaLuceneReader {
         var additions = getAdditionsBetweenSnapshot(baseSegmentToLeafReader, currentSegmentToLeafReader, 0);
 
         var totalDocsToRemove = removes.stream()
-            .mapToInt(s -> s.liveDocOverride.cardinality())
+            .mapToInt(s -> s.liveDocOverride == null ? s.reader.maxDoc() :
+                    s.liveDocOverride.cardinality()
+                )
             .sum();
 
         log.atLevel(totalDocsToRemove > 0 ? Level.WARN : Level.INFO)
