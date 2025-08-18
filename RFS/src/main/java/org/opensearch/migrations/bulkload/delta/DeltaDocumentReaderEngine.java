@@ -20,7 +20,7 @@ import reactor.core.publisher.Flux;
 
 @AllArgsConstructor
 public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
-    private final BiFunction<String, Integer, ShardMetadata> baseShardMetadataFactory;
+    private final BiFunction<String, Integer, ShardMetadata> previousShardMetadataFactory;
     private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final DeltaMode deltaMode;
 
@@ -30,13 +30,13 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         String indexName,
         int shardNumber
     ) {
-        ShardMetadata baseShardMetadata = baseShardMetadataFactory.apply(indexName, shardNumber);
+        ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
         
         // For delta unpacking, combine files from both current and base shard metadata
         Set<ShardFileInfo> filesToUnpack = Stream.concat(
                 shardMetadata.getFiles().stream(),
-                baseShardMetadata.getFiles().stream())
+                previousShardMetadata.getFiles().stream())
             .collect(Collectors.toCollection(
                 () -> new TreeSet<>(Comparator.comparing(ShardFileInfo::key))));
         
@@ -59,13 +59,13 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         int shardNumber,
         int startingDocId
     ) {
-        ShardMetadata baseShardMetadata = baseShardMetadataFactory.apply(indexName, shardNumber);
+        ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
         if (deltaMode != DeltaMode.UPDATES_ONLY) {
             throw new UnsupportedOperationException("Unsupported delta mode given " + deltaMode);
         }
         return reader.readDeltaDocuments(
-            baseShardMetadata.getSegmentFileName(),
+            previousShardMetadata.getSegmentFileName(),
             shardMetadata.getSegmentFileName(),
             startingDocId
         );

@@ -84,7 +84,7 @@ public interface LuceneIndexReader {
     }
 
 
-    default Flux<RfsLuceneDocument> readDeltaDocuments(String baseSegmentsFileName, String segmentsFileName, int startDocIdx) {
+    default Flux<RfsLuceneDocument> readDeltaDocuments(String previousSegmentsFileName, String segmentsFileName, int startDocIdx) {
         Consumer<LuceneDirectoryReader> uncheckedReaderClose = reader -> {
             try {
                 reader.close();
@@ -94,10 +94,10 @@ public interface LuceneIndexReader {
         };
 
         return Flux.using(
-            () -> this.getReader(baseSegmentsFileName),
-            baseReader -> Flux.using(
+            () -> this.getReader(previousSegmentsFileName),
+            previousReader -> Flux.using(
                 () -> this.getReader(segmentsFileName),
-                currentReader -> DeltaLuceneReader.readDocsByLeavesFromStartingPosition(baseReader, currentReader, startDocIdx),
+                currentReader -> DeltaLuceneReader.readDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx),
                 uncheckedReaderClose),
             uncheckedReaderClose
         );
