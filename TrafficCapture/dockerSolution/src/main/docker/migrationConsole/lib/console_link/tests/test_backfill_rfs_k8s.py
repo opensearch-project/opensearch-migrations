@@ -1,4 +1,5 @@
 import json
+import logging
 from kubernetes import config
 import os
 import pathlib
@@ -9,7 +10,7 @@ import requests
 import requests_mock
 
 from console_link.models.cluster import Cluster, HttpMethod
-from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.backfill_base import Backfill, BackfillStatus, DeepStatusNotYetAvailable
 from console_link.models.backfill_rfs import (K8sRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist)
 from console_link.models.factories import get_backfill
 from console_link.models.kubectl_runner import KubectlRunner
@@ -180,12 +181,16 @@ def test_k8s_rfs_deep_status_check_failure(k8s_rfs_backfill, mocker, caplog):
     mock_k8s = mocker.patch.object(KubectlRunner, 'retrieve_deployment_status', autospec=True,
                                    return_value=mocked_instance_status)
     mock_api = mocker.patch.object(Cluster, 'call_api', side_effect=requests.exceptions.RequestException())
-    result = k8s_rfs_backfill.get_status(deep_check=True)
-    assert "Working state index does not yet exist" in caplog.text
-    mock_k8s.assert_called_once()
+
+    with caplog.at_level(logging.DEBUG):
+        k8s_rfs_backfill.get_status(deep_check=True)
+
+    # still make sure we logged the reason
+    assert "Failed to get detailed status:" in caplog.text
+
+    # deep check should fail early after the API probe
     mock_api.assert_called_once()
-    assert result.success
-    assert result.value[0] == BackfillStatus.RUNNING
+    mock_k8s.assert_not_called()
 
 
 def test_k8s_rfs_backfill_archive_as_expected(k8s_rfs_backfill, mocker, tmpdir):

@@ -8,6 +8,7 @@ import type {
   SnapshotStatusResponse,
   MetadataMigrateResponse,
   MetadataStatusResponse,
+  BackfillStatusResponse,
 } from "./types.gen";
 
 const sessionSchemaResponseTransformer = (data: any) => {
@@ -84,5 +85,22 @@ export const metadataStatusResponseTransformer = async (
   data: any,
 ): Promise<MetadataStatusResponse> => {
   data = metadataStatusSchemaResponseTransformer(data);
+  return data;
+};
+
+const backfillStatusSchemaResponseTransformer = (data: any) => {
+  if (data.started) {
+    data.started = new Date(data.started);
+  }
+  if (data.finished) {
+    data.finished = new Date(data.finished);
+  }
+  return data;
+};
+
+export const backfillStatusResponseTransformer = async (
+  data: any,
+): Promise<BackfillStatusResponse> => {
+  data = backfillStatusSchemaResponseTransformer(data);
   return data;
 };

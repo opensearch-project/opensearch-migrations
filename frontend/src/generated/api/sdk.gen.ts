@@ -29,6 +29,9 @@ import type {
   MetadataStatusData,
   MetadataStatusResponses,
   MetadataStatusErrors,
+  BackfillStatusData,
+  BackfillStatusResponses,
+  BackfillStatusErrors,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
 import {
@@ -39,6 +42,7 @@ import {
   snapshotStatusResponseTransformer,
   metadataMigrateResponseTransformer,
   metadataStatusResponseTransformer,
+  backfillStatusResponseTransformer,
 } from "./transformers.gen";
 
 export type Options<
@@ -236,6 +240,23 @@ export const metadataStatus = <ThrowOnError extends boolean = false>(
   >({
     responseTransformer: metadataStatusResponseTransformer,
     url: "/sessions/{session_name}/metadata/status",
+    ...options,
+  });
+};
+
+/**
+ * Get Metadata Status
+ */
+export const backfillStatus = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillStatusData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    BackfillStatusResponses,
+    BackfillStatusErrors,
+    ThrowOnError
+  >({
+    responseTransformer: backfillStatusResponseTransformer,
+    url: "/sessions/{session_name}/backfill/status",
     ...options,
   });
 };
