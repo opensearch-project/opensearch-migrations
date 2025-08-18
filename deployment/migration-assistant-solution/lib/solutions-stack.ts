@@ -267,6 +267,7 @@ export class SolutionsInfrastructureStack extends Stack {
             initOptions: {
                 printLog: true,
             },
+            requireImdsv2: true,
             securityGroup
         });
 
