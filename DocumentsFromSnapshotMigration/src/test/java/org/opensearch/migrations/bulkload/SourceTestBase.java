@@ -210,7 +210,7 @@ public class SourceTestBase {
 
     public static int migrateDocumentsSequentially(
         FileSystemRepo sourceRepo,
-        String baseSnapshotName,
+        String previousSnapshotName,
         String snapshotName,
         List<String> indexAllowlist,
         SearchClusterContainer target,
@@ -226,7 +226,7 @@ public class SourceTestBase {
                 var workResult = migrateDocumentsWithOneWorker(
                     sourceRepo,
                     snapshotName,
-                    baseSnapshotName,
+                    previousSnapshotName,
                     indexAllowlist,
                     target.getUrl(),
                     clockJitter,
@@ -261,7 +261,7 @@ public class SourceTestBase {
     public static CompletionStatus migrateDocumentsWithOneWorker(
         SourceRepo sourceRepo,
         String snapshotName,
-        String baseSnapshotName,
+        String previousSnapshotName,
         List<String> indexAllowlist,
         String targetAddress,
         Random clockJitter,
@@ -338,8 +338,8 @@ public class SourceTestBase {
                     processManager,
                     sourceResourceProvider.getIndexMetadata(),
                     snapshotName,
-                    baseSnapshotName,
-                    baseSnapshotName != null ? org.opensearch.migrations.bulkload.common.DeltaMode.UPDATES_ONLY : null,
+                    previousSnapshotName,
+                    previousSnapshotName != null ? org.opensearch.migrations.bulkload.common.DeltaMode.UPDATES_ONLY : null,
                     indexAllowlist,
                     sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,

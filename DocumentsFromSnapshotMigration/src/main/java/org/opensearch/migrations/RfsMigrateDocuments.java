@@ -235,11 +235,11 @@ public class RfsMigrateDocuments {
 
     public static class ExperimentalArgs {
         @Parameter(required = false,
-            names = { "--experimental-base-snapshot-name", "--experimentalBaseSnapshotName" },
-            description = "Optional. The name of the base snapshot for delta migration (experimental feature)",
+            names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
+            description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
             hidden = true
         )
-        public String baseSnapshotName = null;
+        public String previousSnapshotName = null;
 
         @Parameter(required = false,
             names = { "--experimental-delta-mode" },
@@ -351,18 +351,18 @@ public class RfsMigrateDocuments {
         
         // Validate delta mode parameters
         if (args.experimental.experimentalDeltaMode != null) {
-            if (args.experimental.baseSnapshotName == null) {
+            if (args.experimental.previousSnapshotName == null) {
                 throw new ParameterException(
-                    "When --experimental-delta-mode is specified, --base-snapshot-name must be provided."
+                    "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
                 );
             }
             log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
                     "This feature is experimental and should not be used in production.", 
                     args.experimental.experimentalDeltaMode);
-        } else if (args.experimental.baseSnapshotName != null) {
-            log.error("--base-snapshot-name was provided but --experimental-delta-mode is not specified.");
+        } else if (args.experimental.previousSnapshotName != null) {
+            log.error("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.");
             throw new ParameterException(
-                "When --base-snapshot-name is specified, --experimental-delta-mode must be provided."
+                "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
             );
         }
 
@@ -488,7 +488,7 @@ public class RfsMigrateDocuments {
                 processManager,
                 sourceResourceProvider.getIndexMetadata(),
                 arguments.snapshotName,
-                arguments.experimental.baseSnapshotName,
+                arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode,
                 arguments.indexAllowlist,
                 sourceResourceProvider.getShardMetadata(),
@@ -691,7 +691,7 @@ public class RfsMigrateDocuments {
                                        LeaseExpireTrigger leaseExpireTrigger,
                                        IndexMetadata.Factory indexMetadataFactory,
                                        String snapshotName,
-                                       String baseSnapshotName,
+                                       String previousSnapshotName,
                                        DeltaMode deltaMode,
                                        List<String> indexAllowlist,
                                        ShardMetadata.Factory shardMetadataFactory,
@@ -730,10 +730,10 @@ public class RfsMigrateDocuments {
         };
 
         var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
-        var strategy = (baseSnapshotName == null)
+        var strategy = (previousSnapshotName == null)
             ? new RegularDocumentReaderEngine(shardMetadataSupplier)
             : new DeltaDocumentReaderEngine(
-                shardMetadataSupplierFactory.apply(baseSnapshotName), shardMetadataSupplier, deltaMode);
+                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
 
         DocumentsRunner runner = new DocumentsRunner(scopedWorkCoordinator,
             maxInitialLeaseDuration,

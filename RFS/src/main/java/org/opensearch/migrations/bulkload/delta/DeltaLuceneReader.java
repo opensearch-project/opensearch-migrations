@@ -10,7 +10,7 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
-import org.opensearch.migrations.bulkload.lucene.LiveDocsConverter;
+import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
@@ -94,7 +94,7 @@ public class DeltaLuceneReader {
     // Lower case to appease sonar until sonar is updated to java 17
     record segmentReaderAndLiveDoc(
         LuceneLeafReader reader,
-        LiveDocsConverter.LengthDisabledBitSet liveDocOverride,
+        BitSetConverter.LengthDisabledBitSet liveDocOverride,
         int baseDocIdx
     ){
         // Base Record Implementation
@@ -132,14 +132,14 @@ public class DeltaLuceneReader {
             if (baseLiveDocs == null) {
                 continue;
             }
-            LiveDocsConverter.LengthDisabledBitSet liveDocs;
+            BitSetConverter.LengthDisabledBitSet liveDocs;
             if (currentLiveDocs != null) {
                 // Compute currentLiveDocs AND NOT baseLiveDocs
-                liveDocs = (LiveDocsConverter.LengthDisabledBitSet) currentLiveDocs.clone();
+                liveDocs = (BitSetConverter.LengthDisabledBitSet) currentLiveDocs.clone();
                 liveDocs.andNot(baseLiveDocs);
             } else {
                 // Compute NOT baseLiveDocs (all docs except those in base)
-                liveDocs = (LiveDocsConverter.LengthDisabledBitSet) baseLiveDocs.clone();
+                liveDocs = (BitSetConverter.LengthDisabledBitSet) baseLiveDocs.clone();
                 liveDocs.flip(0, currentSegmentReader.maxDoc());
             }
 

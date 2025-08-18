@@ -2,7 +2,7 @@ package org.opensearch.migrations.bulkload.lucene.version_7;
 
 import java.io.IOException;
 
-import org.opensearch.migrations.bulkload.lucene.LiveDocsConverter;
+import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
@@ -17,15 +17,15 @@ public class LeafReader7 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
     @Getter
-    private final LiveDocsConverter.LengthDisabledBitSet liveDocs;
+    private final BitSetConverter.LengthDisabledBitSet liveDocs;
 
     public LeafReader7(LeafReader wrapped) {
         this.wrapped = wrapped;
         this.liveDocs = convertLiveDocs(wrapped.getLiveDocs());
     }
 
-    private static LiveDocsConverter.LengthDisabledBitSet convertLiveDocs(Bits bits) {
-        return LiveDocsConverter.convert(
+    private static BitSetConverter.LengthDisabledBitSet convertLiveDocs(Bits bits) {
+        return BitSetConverter.convert(
             bits,
             FixedBitSet.class,
             SparseFixedBitSet.class,

@@ -16,7 +16,7 @@ import lombok.experimental.Delegate;
  * @param <F> The FixedBitSet type for the specific Lucene version
  * @param <S> The SparseFixedBitSet type for the specific Lucene version
  */
-public class LiveDocsConverter<B, F extends B, S extends B> {
+public class BitSetConverter<B, F extends B, S extends B> {
     
     private final Class<F> fixedBitSetClass;
     private final Class<S> sparseFixedBitSetClass;
@@ -35,7 +35,7 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
      * @param getBitAt Predicate to check if bit at index is set
      * @param nextSetBitFactory Function to create a nextSetBit function for SparseFixedBitSet
      */
-    public LiveDocsConverter(
+    public BitSetConverter(
             Class<F> fixedBitSetClass,
             Class<S> sparseFixedBitSetClass,
             Function<F, long[]> getBitsFromFixed,
@@ -118,7 +118,7 @@ public class LiveDocsConverter<B, F extends B, S extends B> {
             Predicate<Integer> getBitAt,
             Function<S, ToIntFunction<Integer>> nextSetBitFactory) {
         
-        LiveDocsConverter<B, F, S> converter = new LiveDocsConverter<>(
+        BitSetConverter<B, F, S> converter = new BitSetConverter<>(
             fixedBitSetClass,
             sparseFixedBitSetClass,
             getBitsFromFixed,

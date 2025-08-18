@@ -10,12 +10,12 @@ import shadow.lucene9.org.apache.lucene.util.SparseFixedBitSet;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-public class LiveDocsConverterTest {
+public class BitSetConverterTest {
 
     @Test
     public void testConvertNull() {
         // Test that null input returns null
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             null,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -40,7 +40,7 @@ public class LiveDocsConverterTest {
         // Spy on the FixedBitSet to verify method calls
         FixedBitSet spyFixed = spy(fixedBitSet);
         
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             spyFixed,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -82,7 +82,7 @@ public class LiveDocsConverterTest {
         // Spy on the SparseFixedBitSet
         SparseFixedBitSet spySparse = spy(sparseBitSet);
         
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             spySparse,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -131,7 +131,7 @@ public class LiveDocsConverterTest {
         // Spy on the custom Bits
         Bits spyBits = spy(customBits);
         
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             spyBits,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -162,7 +162,7 @@ public class LiveDocsConverterTest {
         // Test with an empty FixedBitSet
         FixedBitSet emptyFixed = new FixedBitSet(10);
         
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             emptyFixed,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -178,7 +178,7 @@ public class LiveDocsConverterTest {
         // Test with an empty SparseFixedBitSet
         SparseFixedBitSet emptySparse = new SparseFixedBitSet(50);
         
-        result = LiveDocsConverter.convert(
+        result = BitSetConverter.convert(
             emptySparse,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -201,7 +201,7 @@ public class LiveDocsConverterTest {
             allSetFixed.set(i);
         }
         
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             allSetFixed,
             FixedBitSet.class,
             SparseFixedBitSet.class,
@@ -234,7 +234,7 @@ public class LiveDocsConverterTest {
             }
         };
         
-        BitSet result = LiveDocsConverter.convert(
+        BitSet result = BitSetConverter.convert(
             customBits,
             null,  // No FixedBitSet class
             null,  // No SparseFixedBitSet class
