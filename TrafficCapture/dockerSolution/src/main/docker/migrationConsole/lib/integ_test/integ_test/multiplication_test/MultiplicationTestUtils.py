@@ -9,8 +9,8 @@ import os
 import shutil
 import subprocess
 import yaml
-from ..default_operations import DefaultOperationsLibrary
-from .JenkinsParamConstants import (
+from integ_test.default_operations import DefaultOperationsLibrary
+from integ_test.multiplication_test.JenkinsParamConstants import (
     COMMAND_TIMEOUT_SECONDS,
     S3_BUCKET_URI_PREFIX,
     S3_BUCKET_SUFFIX,
@@ -173,6 +173,11 @@ def ingest_test_data(INDEX_NAME, INGESTED_DOC_COUNT, INGEST_DOC):
     
     # Verify document count
     logger.info("Verifying document ingestion")
+    # Add explicit refresh before counting to ensure accurate results
+    run_console_command([
+        "console", "clusters", "curl", "source_cluster",
+        "-XPOST", "/_refresh"
+    ])
     RESULT = run_console_command([
         "console", "clusters", "curl", "source_cluster",
         "-XGET", f"/{INDEX_NAME}/_count"
@@ -247,6 +252,11 @@ def create_transformation_config():
 def get_target_document_count_for_index(INDEX_NAME):
     """Get document count from target cluster for specified index."""
     try:
+        # Add explicit refresh before counting to ensure accurate results
+        run_console_command([
+            "console", "clusters", "curl", "target_cluster",
+            "-XPOST", "/_refresh"
+        ])
         RESULT = run_console_command([
             "console", "clusters", "curl", "target_cluster",
             "-XGET", f"/{INDEX_NAME}/_count"
@@ -267,35 +277,14 @@ def get_target_document_count_for_index(INDEX_NAME):
 # =============================================================================
 
 def check_and_prepare_s3_bucket(JENKINS_BUCKET_NAME, DIRECTORY_PATH, REGION):
-    """Check and prepare S3 bucket and directory for large snapshot storage."""
-    logger.info("Checking and preparing S3 bucket and directory")
+    """Check and prepare S3 bucket directory for large snapshot storage (assumes bucket exists)."""
+    logger.info("Checking and preparing S3 bucket directory")
     
-    S3_BUCKET_URI = f"s3://{JENKINS_BUCKET_NAME}/"
     S3_DIRECTORY_URI = f"s3://{JENKINS_BUCKET_NAME}/{DIRECTORY_PATH}/"
     
     logger.info(f"Target bucket: {JENKINS_BUCKET_NAME}")
     logger.info(f"Target directory: {DIRECTORY_PATH}")
-    
-    # Check if bucket exists
-    BUCKET_EXISTS = False
-    try:
-        run_console_command(["aws", "s3", "ls", S3_BUCKET_URI, "--region", REGION])
-        BUCKET_EXISTS = True
-        logger.info(f"S3 bucket {JENKINS_BUCKET_NAME} exists")
-    except Exception:
-        logger.info(f"S3 bucket {JENKINS_BUCKET_NAME} does not exist")
-    
-    # Create bucket if needed
-    if not BUCKET_EXISTS:
-        logger.info("Creating S3 bucket")
-        try:
-            run_console_command(["aws", "s3", "mb", S3_BUCKET_URI, "--region", REGION])
-            logger.info(f"S3 bucket created: {JENKINS_BUCKET_NAME}")
-            logger.info("Directory will be created automatically when snapshot is uploaded")
-            return
-        except Exception as e:
-            logger.error(f"Failed to create S3 bucket: {e}")
-            raise
+    logger.info("Assuming S3 bucket already exists as per requirements")
     
     # Check if directory exists with content
     DIRECTORY_EXISTS = False
@@ -318,7 +307,7 @@ def check_and_prepare_s3_bucket(JENKINS_BUCKET_NAME, DIRECTORY_PATH, REGION):
         except Exception as e:
             logger.warning(f"Failed to clear S3 directory (may already be empty): {e}")
     
-    logger.info("S3 bucket and directory preparation completed")
+    logger.info("S3 bucket directory preparation completed")
 
 
 def modify_temp_config_file(ACTION, CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH, **KWARGS):
@@ -326,17 +315,22 @@ def modify_temp_config_file(ACTION, CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH, **K
     if ACTION == "create":
         logger.info("Creating temporary config file")
         
-        # Get account ID and build S3 URI
+        # Get account ID and build dynamic values
         ACCOUNT_ID = extract_account_id_from_config(CONFIG_FILE_PATH)
         JENKINS_BUCKET_NAME = f"{LARGE_SNAPSHOT_BUCKET_PREFIX}{ACCOUNT_ID}{LARGE_SNAPSHOT_BUCKET_SUFFIX}"
         LARGE_SNAPSHOT_URI = f"s3://{JENKINS_BUCKET_NAME}/{LARGE_S3_BASE_PATH}/"
+        LARGE_SNAPSHOT_ROLE_ARN = f"arn:aws:iam::{ACCOUNT_ID}:role/largesnapshotfinal"
         
         # Read and modify config
         with open(CONFIG_FILE_PATH, 'r') as f:
             CONFIG = yaml.safe_load(f)
         
+        # Update snapshot configuration with all required fields
         CONFIG['snapshot']['snapshot_name'] = 'large-snapshot'
+        CONFIG['snapshot']['snapshot_repo_name'] = 'migrations_jenkins_repo'
         CONFIG['snapshot']['s3']['repo_uri'] = LARGE_SNAPSHOT_URI
+        CONFIG['snapshot']['s3']['aws_region'] = 'us-west-2'
+        CONFIG['snapshot']['s3']['role'] = LARGE_SNAPSHOT_ROLE_ARN
         
         # Write temporary config
         with open(TEMP_CONFIG_FILE_PATH, 'w') as f:
@@ -344,6 +338,8 @@ def modify_temp_config_file(ACTION, CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH, **K
         
         logger.info(f"Created temporary config file: {TEMP_CONFIG_FILE_PATH}")
         logger.info(f"Large snapshot URI: {LARGE_SNAPSHOT_URI}")
+        logger.info("Large snapshot repository: migrations_jenkins_repo")
+        logger.info(f"Large snapshot role ARN: {LARGE_SNAPSHOT_ROLE_ARN}")
         
     elif ACTION == "delete":
         logger.info("Deleting temporary config file")

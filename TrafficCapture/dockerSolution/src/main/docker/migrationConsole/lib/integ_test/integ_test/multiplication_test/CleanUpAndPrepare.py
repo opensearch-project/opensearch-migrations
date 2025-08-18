@@ -1,14 +1,14 @@
 import logging
 import sys
 from console_link.cli import Context
-from .MultiplicationTestUtils import (
+from integ_test.multiplication_test.MultiplicationTestUtils import (
     run_console_command,
     clear_clusters,
     create_index_with_shards,
     ingest_test_data,
     create_transformation_config
 )
-from .JenkinsParamConstants import (
+from integ_test.multiplication_test.JenkinsParamConstants import (
     CONFIG_FILE_PATH,
     INDEX_NAME,
     INGESTED_DOC_COUNT,
@@ -41,21 +41,19 @@ class CleanUpAndPrepare:
     def run(self):
         """
         Main method that performs the preparation phase of the migration workflow.
-        
-        Assumption: Clusters and console are connected successfully.
-        Error handling only around data ingestion and snapshot commands.
+        Assumptions:
+            - Clusters and console are connected successfully.
+            - Source and target cluster config is exactly the same in `cdk.context.json`.
+            - User has performed a CDK deployment.
         """
         logger.info("=== Starting Large Snapshot Preparation Phase ===")
         
-        # Step 1: Clear clusters and cleanup
         logger.info("Phase 1, Step 1: Clearing source and target clusters")
         clear_clusters(TEST_STAGE, TEST_REGION)
         
-        # Step 2: Create index with specified shards
         logger.info(f"Phase 1, Step 2: Creating index '{INDEX_NAME}' with {INDEX_SHARD_COUNT} shards")
         create_index_with_shards(INDEX_NAME, INDEX_SHARD_COUNT)
         
-        # Step 3: Ingest test data and verify
         logger.info(f"Phase 1, Step 3: Ingesting {INGESTED_DOC_COUNT} test documents to source cluster")
         try:
             ingest_test_data(INDEX_NAME, INGESTED_DOC_COUNT, INGEST_DOC)
@@ -63,11 +61,9 @@ class CleanUpAndPrepare:
             logger.error(f"Data ingestion failed: {e}")
             return 1
         
-        # Step 4: Create transformation configuration
         logger.info("Phase 1, Step 4: Creating transformation configuration")
         create_transformation_config()
         
-        # Step 5: Create initial RFS snapshot
         logger.info("Phase 1, Step 5: Creating initial RFS snapshot")
         try:
             run_console_command(["console", "snapshot", "create"])
