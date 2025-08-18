@@ -79,9 +79,9 @@ public class DeltaLuceneReader {
 
     private DeltaLuceneReader() {}
 
-    /* Start reading docs from a specific segment and document id.
-       If the startSegmentIndex is 0, it will start from the first segment.
-       If the startDocId is 0, it will start from the first document in the segment.
+    /* Start reading docs from a specific document id.
+       If the startDocId is 0, it will start from the first document in the shard.
+       Note: The delta calculation is made on the entire shard regardless of where startDocId
      */
     public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader previousReader, LuceneDirectoryReader currentReader, int startDocId) {
         log.atInfo()
