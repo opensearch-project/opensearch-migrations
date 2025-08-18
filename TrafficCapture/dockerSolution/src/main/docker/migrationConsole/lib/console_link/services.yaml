@@ -2,6 +2,7 @@
 source_cluster:
   endpoint: "https://capture-proxy:9200"
   allow_insecure: true
+  version: "ES_7.10"
   basic_auth:
     username: "admin"
     password: "admin"
