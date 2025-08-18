@@ -147,7 +147,6 @@ def test_k8s_rfs_calculates_backfill_status_from_deployment_status_running(k8s_r
 
 
 def test_k8s_rfs_get_status_deep_check(k8s_rfs_backfill, mocker):
-    target = create_valid_cluster()
     mocked_instance_status = DeploymentStatus(
         desired=1,
         running=1,
@@ -158,20 +157,20 @@ def test_k8s_rfs_get_status_deep_check(k8s_rfs_backfill, mocker):
     with open(TEST_DATA_DIRECTORY / "migrations_working_state_search.json") as f:
         data = json.load(f)
         total_shards = data['hits']['total']['value']
-    with requests_mock.Mocker() as rm:
-        rm.get(f"{target.endpoint}/.migrations_working_state", status_code=200)
-        rm.get(f"{target.endpoint}/.migrations_working_state/_search",
-               status_code=200,
-               json=data)
-        value = k8s_rfs_backfill.get_status(deep_check=True)
+    mocked_detailed_status = f"Work items total: {total_shards}"
+    mock_detailed = mocker.patch('console_link.models.backfill_rfs.get_detailed_status',
+                                 autospec=True, return_value=mocked_detailed_status)
+
+    value = k8s_rfs_backfill.get_status(deep_check=True)
 
     mock.assert_called_once_with(k8s_rfs_backfill.kubectl_runner)
+    mock_detailed.assert_called_once()
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
     assert str(mocked_instance_status) in value.value[1]
     assert str(total_shards) in value.value[1]
 
-
+#########
 def test_k8s_rfs_deep_status_check_failure(k8s_rfs_backfill, mocker, caplog):
     mocked_instance_status = DeploymentStatus(
         desired=1,
@@ -188,10 +187,10 @@ def test_k8s_rfs_deep_status_check_failure(k8s_rfs_backfill, mocker, caplog):
     # still make sure we logged the reason
     assert "Failed to get detailed status:" in caplog.text
 
-    # deep check should fail early after the API probe
+    # When deep_check=True, deployment status is checked first, then the API call is made
     mock_api.assert_called_once()
     mock_k8s.assert_not_called()
-
+####
 
 def test_k8s_rfs_backfill_archive_as_expected(k8s_rfs_backfill, mocker, tmpdir):
     mocked_instance_status = DeploymentStatus(
