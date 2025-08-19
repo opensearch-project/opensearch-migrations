@@ -3,20 +3,6 @@ export type TypescriptError<Message extends string> = {
     readonly __never: never;
 };
 
-export function getKeyAndValue<T extends Record<string, any>, K extends keyof T>(
-    obj: T,
-    key: K
-): { key: K; value: T[K] } {
-    return { key, value: obj[key] };
-}
-
-export function getKeyAndValueClass<T extends Record<string, any>, K extends keyof T>(
-    classConstructor: T,
-    key: K
-): { key: K; value: T[K] } {
-    return { key, value: classConstructor[key] };
-}
-
 // Helper types to convert union to tuple and count length
 type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never
 

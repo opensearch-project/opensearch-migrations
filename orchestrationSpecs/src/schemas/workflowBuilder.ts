@@ -14,8 +14,15 @@ import {
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 
+type MetadataScopeBase = {
+    k8sMetadata: { name: string } & GenericScope,
+    entrypoint?: string,
+    serviceAccountName?: string,
+    parallelism?: number
+};
+
 export class WorkflowBuilder<
-    MetadataScope extends GenericScope = GenericScope,
+    MetadataScope extends MetadataScopeBase = MetadataScopeBase,
     WorkflowInputsScope extends InputParametersRecord = InputParametersRecord,
     TemplateSigScope extends TemplateSignaturesScope = TemplateSignaturesScope,
     TemplateFullScope extends GenericScope = GenericScope
@@ -35,7 +42,7 @@ export class WorkflowBuilder<
      * @param opts
      */
     static create(opts: {
-        k8sResourceName?: string,
+        k8sResourceName: string,
         k8sMetadata?: Record<string, PlainObject>,
         serviceAccountName?: string,
         parallelism?: number
@@ -129,11 +136,22 @@ export class WorkflowBuilder<
         ) as any;
     }
 
-    getFullScope() {
+    getFullScope() : Workflow<MetadataScope, WorkflowInputsScope, TemplateFullScope> {
         return {
-            metadata: this.metadataScope,
-            workflowParameters: this.inputsScope,
-            templates: this.templateFullScope
+            metadata: {name: "", ...this.metadataScope},//this.metadataScope.metadata,
+            templates: this.templateFullScope,
+            workflowParameters: this.inputsScope
         };
     }
+}
+
+export type Workflow<
+    MetadataScope extends MetadataScopeBase,
+    WorkflowInputsScope extends InputParametersRecord,
+    TemplateScope extends TemplateSignaturesScope
+> = {
+    metadata: MetadataScopeBase,
+    entrypoint?: string,
+    workflowParameters: WorkflowInputsScope,
+    templates: TemplateScope
 }

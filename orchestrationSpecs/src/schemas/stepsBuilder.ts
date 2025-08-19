@@ -16,18 +16,49 @@ import {stepOutput} from "@/schemas/expression";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
+import {Workflow, WorkflowBuilder} from "@/schemas/workflowBuilder";
+
+const TemplateDefSchema = z.object({
+    inputs: z.any(),
+    outputs: z.any(),
+});
+
+export type TemplateDef<
+    IN extends InputParametersRecord,
+    OUT extends OutputParametersRecord
+> = z.infer<typeof TemplateDefSchema> & {
+    inputs: IN;
+    outputs: OUT;
+};
+
+export type WorkflowTask<
+    IN extends InputParametersRecord,
+    OUT extends OutputParametersRecord
+> = {
+    arguments?: { parameters?: Record<string, any>; } & ({
+        type: 'external';
+        templateRef: { key: string, value: TemplateDef<IN, OUT> };
+    } | {
+        type: 'local';
+        template: string;
+    })
+}
+
+export type NamedTask<
+    IN extends InputParametersRecord = InputParametersRecord,
+    OUT extends OutputParametersRecord = OutputParametersRecord,
+    Extra extends Record<string, any> = {}
+> = { name: string } & WorkflowTask<IN, OUT> & Extra;
+
 
 export interface StepGroup {
     steps: StepTask[];
 }
 
-export interface StepTask {
-    name: string;
-    template: string;
-    arguments?: {
-        parameters?: Record<string, any>;
-    };
-}
+export type StepTask<
+    IN extends InputParametersRecord = InputParametersRecord,
+    OUT extends OutputParametersRecord = OutputParametersRecord
+> = NamedTask<IN, OUT>;
 
 export class StepsBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -37,7 +68,7 @@ export class StepsBuilder<
 > extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope,
     StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>>
 {
-    constructor(contextualScope: ContextualScope,
+    constructor(public contextualScope: ContextualScope,
                 inputsScope: InputParamsScope,
                 bodyScope: StepsScope,
                 protected readonly stepGroups: StepGroup[],
@@ -66,11 +97,11 @@ export class StepsBuilder<
     // Convenience method for single step
     addStep<
         Name extends string,
-        TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
+        TWorkflow extends Workflow<any, any, any>,
         TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
+        workflow: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
             (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>>
@@ -83,7 +114,7 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder => {
-            return groupBuilder.addStep(name, workflowBuilder, key, paramsFn) as any;
+            return groupBuilder.addStep(name, workflow, key, paramsFn) as any;
         }) as any;
     }
 
@@ -133,11 +164,11 @@ export class StepGroupBuilder<
 
     addStep<
         Name extends string,
-        TWorkflow extends { templates: Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }> },
+        TWorkflow extends Workflow<any, any, any>,
         TKey extends Extract<keyof TWorkflow["templates"], string>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        workflowBuilder: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
+        workflowIn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
             (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>>
@@ -147,7 +178,7 @@ export class StepGroupBuilder<
         }>>>
     {
         const nameStr = name as string;
-        const workflow = workflowBuilder as TWorkflow;
+        const workflow = workflowIn as TWorkflow;
         const templateKey = key as TKey;
 
         // Build the steps object with output expressions for intellisense
@@ -158,7 +189,7 @@ export class StepGroupBuilder<
 
         // Call callTemplate to get the template reference and arguments
         const templateCall = callTemplate(
-            workflow.templates,
+            workflow,
             templateKey,
             params
         );
@@ -166,8 +197,7 @@ export class StepGroupBuilder<
         // Add to runtime structure
         this.stepTasks.push({
             name: nameStr,
-            template: templateCall.templateRef.key,
-            arguments: templateCall.arguments
+            ...templateCall
         });
 
         // Create the new step definition with output types
@@ -208,38 +238,23 @@ export class StepGroupBuilder<
     }
 }
 
-const TemplateDefSchema = z.object({
-    inputs: z.any(),
-    outputs: z.any(),
-});
-
-export type TemplateDef<
-    IN extends InputParametersRecord,
-    OUT extends OutputParametersRecord
-> = z.infer<typeof TemplateDefSchema> & {
-    inputs: IN;
-    outputs: OUT;
-};
-
-export type WorkflowTask<
-    IN extends InputParametersRecord,
-    OUT extends OutputParametersRecord
-> = {
-    templateRef: { key: string, value: TemplateDef<IN,OUT> }
-    arguments?: { parameters: any }
-}
-
 export function callTemplate<
-    TClass extends Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }>,
-    TKey extends Extract<keyof TClass, string>
+    WF extends Workflow<any, any, any>,
+    TKey extends Extract<keyof WF["templates"], string>
 >(
-    classConstructor: TClass,
-    key: TKey,
-    params: z.infer<ReturnType<typeof paramsToCallerSchema<TClass[TKey]["inputs"]>>>
-): WorkflowTask<TClass[TKey]["inputs"], TClass[TKey]["outputs"] extends OutputParametersRecord ? TClass[TKey]["outputs"] : {}> {
-    const value = classConstructor[key];
+    wf: WF,
+    templateKey: TKey,
+    params: z.infer<ReturnType<typeof paramsToCallerSchema<WF["templates"][TKey]["inputs"]>>>
+): WorkflowTask<
+    WF["templates"][TKey]["inputs"],
+    WF["templates"][TKey]["outputs"] extends OutputParametersRecord ? WF["templates"][TKey]["outputs"] : {}
+> {
     return {
-        templateRef: { key, value },
+        type: "external",
+        templateRef: {
+            name: templateKey,
+            template: wf.metadata.k8sMetadata.name
+        },
         arguments: { parameters: params }
     } as any;
 }
