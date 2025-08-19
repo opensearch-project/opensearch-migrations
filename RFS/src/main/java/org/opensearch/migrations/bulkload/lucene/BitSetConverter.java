@@ -126,7 +126,7 @@ public class BitSetConverter<B, F extends B, S extends B> {
      * @param nextSetBitFactory      Function to create a nextSetBit function for SparseFixedBitSet
      * @return A Java BitSet containing the live docs, or null if input is null
      */
-    public static <B, F extends B, S extends B> LengthDisabledBitSet convert(
+    public static <B, F extends B, S extends B> FixedLengthBitSet convert(
         B liveDocs,
         Class<F> fixedBitSetClass,
         Class<S> sparseFixedBitSetClass,
@@ -144,26 +144,26 @@ public class BitSetConverter<B, F extends B, S extends B> {
             nextSetBitFactory
         );
         var convertedBitSet = converter.convert(liveDocs);
-        return convertedBitSet != null ? new LengthDisabledBitSet(convertedBitSet) : null;
+        return convertedBitSet != null ? new FixedLengthBitSet(convertedBitSet) : null;
     }
 
     // Java BitSet contains length operation that returns one greater than the position
     // of the highest set bit. This is at odds with lucene use of Bits which returns the total number
     // of Bits. To reduce friction and potential bugs, creating this LengthDisabledBitSet to specifically
     // not expose length. Length should be delegated to the reader's maxDoc method.
-    public static class LengthDisabledBitSet {
+    public static class FixedLengthBitSet {
         @Delegate(excludes = ExcludedMethods.class)
         private final BitSet delegate;
 
-        public LengthDisabledBitSet(BitSet delegate) {
+        public FixedLengthBitSet(BitSet delegate) {
             this.delegate = delegate;
         }
 
-        public LengthDisabledBitSet(LengthDisabledBitSet toCopy) {
+        public FixedLengthBitSet(FixedLengthBitSet toCopy) {
             this((BitSet) toCopy.delegate.clone());
         }
 
-        public void andNot(LengthDisabledBitSet other) {
+        public void andNot(FixedLengthBitSet other) {
             delegate.andNot(other.delegate);
         }
 

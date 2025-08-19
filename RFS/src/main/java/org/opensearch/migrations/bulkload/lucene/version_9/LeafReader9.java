@@ -17,14 +17,14 @@ public class LeafReader9 implements LuceneLeafReader {
 
     private final LeafReader wrapped;
     @Getter
-    private final BitSetConverter.LengthDisabledBitSet liveDocs;
+    private final BitSetConverter.FixedLengthBitSet liveDocs;
 
     public LeafReader9(LeafReader wrapped) {
         this.wrapped = wrapped;
         this.liveDocs = convertLiveDocs(wrapped.getLiveDocs());
     }
 
-    private static BitSetConverter.LengthDisabledBitSet convertLiveDocs(Bits bits) {
+    private static BitSetConverter.FixedLengthBitSet convertLiveDocs(Bits bits) {
         return BitSetConverter.convert(
             bits,
             FixedBitSet.class,

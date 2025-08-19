@@ -6,7 +6,7 @@ public interface LuceneLeafReader {
 
     public LuceneDocument document(int luceneDocId) throws IOException;
 
-    public BitSetConverter.LengthDisabledBitSet getLiveDocs();
+    public BitSetConverter.FixedLengthBitSet getLiveDocs();
 
     public int maxDoc();
 

@@ -114,7 +114,7 @@ public class DeltaLuceneReader {
                 .log();
 
             // Record total segments seen
-            long totalSegmentsSeen = previousSegmentToLeafReader.size() + currentSegmentToLeafReader.size();
+            long totalSegmentsSeen = (long) previousSegmentToLeafReader.size() + currentSegmentToLeafReader.size();
             deltaContext.recordSegmentsSeen(totalSegmentsSeen);
 
             log.atInfo()
@@ -195,14 +195,14 @@ public class DeltaLuceneReader {
             if (previousLiveDocs == null) {
                 continue;
             }
-            BitSetConverter.LengthDisabledBitSet liveDocs;
+            BitSetConverter.FixedLengthBitSet liveDocs;
             if (currentLiveDocs != null) {
                 // Compute currentLiveDocs AND NOT previousLiveDocs
-                liveDocs = new BitSetConverter.LengthDisabledBitSet(currentLiveDocs);
+                liveDocs = new BitSetConverter.FixedLengthBitSet(currentLiveDocs);
                 liveDocs.andNot(previousLiveDocs);
             } else {
                 // Compute NOT previousLiveDocs (all docs except those in previous)
-                liveDocs = new BitSetConverter.LengthDisabledBitSet(previousLiveDocs);
+                liveDocs = new BitSetConverter.FixedLengthBitSet(previousLiveDocs);
                 liveDocs.flip(0, currentSegmentReader.maxDoc());
             }
 

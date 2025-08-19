@@ -136,7 +136,7 @@ public class BitSetConverterTest {
          */
         @SuppressWarnings({"unchecked", "rawtypes"})
         @SneakyThrows
-        BitSetConverter.LengthDisabledBitSet convertBits(Object bits) {
+        BitSetConverter.FixedLengthBitSet convertBits(Object bits) {
             return BitSetConverter.convert(
                 bits,
                 (Class) fixedBitSetClass,
@@ -152,7 +152,7 @@ public class BitSetConverterTest {
          * Converts with null classes to test fallback behavior
          */
         @SuppressWarnings({"unchecked", "rawtypes"})
-        BitSetConverter.LengthDisabledBitSet convertBitsWithNullClasses(Object bits) {
+        BitSetConverter.FixedLengthBitSet convertBitsWithNullClasses(Object bits) {
             return BitSetConverter.convert(
                 bits,
                 null,  // No FixedBitSet class
@@ -185,7 +185,7 @@ public class BitSetConverterTest {
     void testConvertNull(String version) throws Exception {
         LuceneVersionTestCase testCase = new LuceneVersionTestCase(version);
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(null);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(null);
         
         assertNull(result, "Converting null should return null for Lucene " + version);
     }
@@ -205,7 +205,7 @@ public class BitSetConverterTest {
         testCase.setBit(fixedBitSet, 7);
         testCase.setBit(fixedBitSet, 9);
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(fixedBitSet);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(fixedBitSet);
         
         // Verify the result
         assertNotNull(result);
@@ -239,7 +239,7 @@ public class BitSetConverterTest {
         testCase.setBit(sparseBitSet, 50);
         testCase.setBit(sparseBitSet, 99);
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(sparseBitSet);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(sparseBitSet);
         
         // Verify the result
         assertNotNull(result);
@@ -268,7 +268,7 @@ public class BitSetConverterTest {
         // Set bits at even indices
         Object customBits = testCase.createCustomBits(idx -> idx % 2 == 0, 20);
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(customBits);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(customBits);
         
         // Verify the result
         assertNotNull(result);
@@ -294,7 +294,7 @@ public class BitSetConverterTest {
         
         // Test with an empty FixedBitSet
         Object emptyFixed = testCase.createFixedBitSet(10);
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(emptyFixed);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(emptyFixed);
         
         assertNotNull(result);
         assertEquals(0, result.cardinality(), "Empty FixedBitSet should result in empty BitSet");
@@ -321,7 +321,7 @@ public class BitSetConverterTest {
             testCase.setBit(allSetFixed, i);
         }
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(allSetFixed);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(allSetFixed);
         
         assertNotNull(result);
         assertEquals(8, result.cardinality(), "All bits should be set");
@@ -341,7 +341,7 @@ public class BitSetConverterTest {
         // Create a custom Bits with specific bits set
         Object customBits = testCase.createCustomBits(idx -> idx == 1 || idx == 3, 5);
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBitsWithNullClasses(customBits);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBitsWithNullClasses(customBits);
         
         // Should fall back to manual iteration
         assertNotNull(result);
@@ -378,7 +378,7 @@ public class BitSetConverterTest {
         }
         
         // Convert using BitSetConverter
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(fixedBitSet);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(fixedBitSet);
         
         // Verify the result
         assertNotNull(result, "Conversion result should not be null for Lucene " + version);
@@ -402,9 +402,6 @@ public class BitSetConverterTest {
         // Verify the total count matches
         assertEquals(expectedSetBits.size(), actualSetBits,
             String.format("Total number of set bits should match for Lucene %s", version));
-        
-        System.out.printf("Lucene %s: Successfully converted %d bits (%.1f%% density)%n",
-            version, actualSetBits, (actualSetBits * 100.0 / LARGE_BIT_SET_SIZE));
     }
 
     /**
@@ -430,7 +427,7 @@ public class BitSetConverterTest {
         }
         
         // Convert using BitSetConverter
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(sparseBitSet);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(sparseBitSet);
         
         // Verify the result
         assertNotNull(result, "Conversion result should not be null for Lucene " + version);
@@ -447,9 +444,6 @@ public class BitSetConverterTest {
         
         assertEquals(expectedSetBits.size(), actualSetBits,
             String.format("Sparse conversion should preserve all bits for Lucene %s", version));
-        
-        System.out.printf("Lucene %s: Successfully converted sparse bitset with %d bits%n",
-            version, actualSetBits);
     }
 
     /**
@@ -462,7 +456,7 @@ public class BitSetConverterTest {
         
         // Test 1: Empty FixedBitSet
         Object emptyFixed = testCase.createFixedBitSet(1000);
-        BitSetConverter.LengthDisabledBitSet emptyResult = testCase.convertBits(emptyFixed);
+        BitSetConverter.FixedLengthBitSet emptyResult = testCase.convertBits(emptyFixed);
         
         assertNotNull(emptyResult);
         assertEquals(0, emptyResult.cardinality(), 
@@ -474,7 +468,7 @@ public class BitSetConverterTest {
             testCase.setBit(allSetFixed, i);
         }
         
-        BitSetConverter.LengthDisabledBitSet allSetResult = testCase.convertBits(allSetFixed);
+        BitSetConverter.FixedLengthBitSet allSetResult = testCase.convertBits(allSetFixed);
         
         assertNotNull(allSetResult);
         assertEquals(100, allSetResult.cardinality(),
@@ -484,7 +478,7 @@ public class BitSetConverterTest {
         Object singleBitFixed = testCase.createFixedBitSet(1000);
         testCase.setBit(singleBitFixed, 500);
         
-        BitSetConverter.LengthDisabledBitSet singleBitResult = testCase.convertBits(singleBitFixed);
+        BitSetConverter.FixedLengthBitSet singleBitResult = testCase.convertBits(singleBitFixed);
         
         assertNotNull(singleBitResult);
         assertEquals(1, singleBitResult.cardinality(),
@@ -507,7 +501,7 @@ public class BitSetConverterTest {
             testCase.setBit(alternatingFixed, i);
         }
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(alternatingFixed);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(alternatingFixed);
         
         assertNotNull(result);
         assertEquals(50, result.cardinality(), "Half the bits should be set");
@@ -536,7 +530,7 @@ public class BitSetConverterTest {
         testCase.setBit(boundaryBits, 32);  // First bit of second int
         testCase.setBit(boundaryBits, 63);  // Last bit
         
-        BitSetConverter.LengthDisabledBitSet result = testCase.convertBits(boundaryBits);
+        BitSetConverter.FixedLengthBitSet result = testCase.convertBits(boundaryBits);
         
         assertNotNull(result);
         assertEquals(4, result.cardinality(), "Four boundary bits should be set");
