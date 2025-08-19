@@ -92,7 +92,9 @@ generate_source_context() {
       "encryptionAtRestEnabled": true,
       "ebsEnabled": true,
       "ebsVolumeSize": 20,
-      "ebsVolumeType": "GP3"
+      "ebsVolumeType": "GP3",
+      "vpcSecurityGroupEnabled": true,
+      "vpcSecurityGroupAllowAllInbound": true
     }
   ]
 }

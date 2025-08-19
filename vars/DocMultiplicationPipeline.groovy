@@ -182,7 +182,8 @@ def call(Map config = [:]) {
                     
                     dir('test') {
                         // Execute CleanUpAndPrepare module with bash -c wrapper for proper shell context
-                        def command = "bash -c \"export INDEX_NAME='${params.indexName}' && " +
+                        def command = "bash -c \"source /.venv/bin/activate && " +
+                            "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
                             "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
@@ -218,7 +219,8 @@ def call(Map config = [:]) {
                     
                     dir('test') {
                         // Execute MultiplyDocuments module with bash -c wrapper for proper shell context
-                        def command = "bash -c \"export INDEX_NAME='${params.indexName}' && " +
+                        def command = "bash -c \"source /.venv/bin/activate && " +
+                            "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
                             "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
@@ -254,7 +256,8 @@ def call(Map config = [:]) {
                     
                     dir('test') {
                         // Execute CreateFinalSnapshot module with bash -c wrapper for proper shell context
-                        def command = "bash -c \"export INDEX_NAME='${params.indexName}' && " +
+                        def command = "bash -c \"source /.venv/bin/activate && " +
+                            "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
                             "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
