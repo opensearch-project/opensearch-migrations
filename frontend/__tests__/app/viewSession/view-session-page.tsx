@@ -38,6 +38,20 @@ describe("ViewSessionPage", () => {
           started: "2023-01-01T00:00:00Z",
           finished: "2023-01-01T01:00:00Z",
         });
+      }),
+      http.get("http://localhost/sessions/test-session/backfill/status", () => {
+        return HttpResponse.json({
+          status: "Completed",
+          percentage_completed: 100,
+          eta_ms: null,
+          started: "2023-01-01T00:00:00Z",
+          finished: "2023-01-01T01:00:00Z",
+          shard_total: 10,
+          shard_complete: 10,
+          shard_failed: 0,
+          shard_in_progress: 0,
+          shard_waiting: 0,
+        });
       })
     );
 
@@ -52,6 +66,7 @@ describe("ViewSessionPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Session Overview")).toBeInTheDocument();
       expect(screen.getByText("Snapshot")).toBeInTheDocument();
+      expect(screen.getByText("Backfill")).toBeInTheDocument();
     });
 
     await waitFor(() => {
