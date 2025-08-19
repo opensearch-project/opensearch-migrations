@@ -332,33 +332,7 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
         logger.debug(f"Working state index does not yet exist, deep status checks can't be performed. {e}")
         raise DeepStatusNotYetAvailable
 
-    current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
-    incomplete_query = {"query": {
-        "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}
-    }}
-    completed_query = {"query": {
-        "bool": {"must": [{"exists": {"field": "completedAt"}}]}
-    }}
-    total_query = {"query": {"match_all": {}}}
-    in_progress_query = {"query": {
-        "bool": {"must": [
-            {"range": {"expiration": {"gte": current_epoch_seconds}}},
-            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-        ]}
-    }}
-    unclaimed_query = {"query": {
-        "bool": {"must": [
-            {"range": {"expiration": {"lt": current_epoch_seconds}}},
-            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-        ]}
-    }}
-    queries = {
-        "total": total_query,
-        "completed": completed_query,
-        "incomplete": incomplete_query,
-        "in progress": in_progress_query,
-        "unclaimed": unclaimed_query
-    }
+    queries = generate_status_queries()
     values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
     logger.info(f"Values: {values}")
     if None in values.values():
@@ -389,6 +363,26 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
     started_iso = datetime.fromtimestamp(started_epoch, tz=timezone.utc).isoformat() if started_epoch else None
 
     # finished: only if everything is done, take max completedAt
+    finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(target_cluster,
+                                                                                 index_to_check,
+                                                                                 total,
+                                                                                 completed,
+                                                                                 started_epoch)
+
+    return BackfillOverallStatus(
+        status=status,
+        percentage_completed=percentage_completed,
+        eta_ms=eta_ms,
+        started=started_iso,
+        finished=finished_iso,
+        shard_total=counts.total,
+        shard_complete=counts.completed,
+        shard_in_progress=counts.in_progress,
+        shard_waiting=counts.unclaimed,
+    )
+
+
+def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch):
     if total > 0 and completed >= total:
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
         finished_iso = (
@@ -404,18 +398,39 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
         percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
         eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed)
         status = StepState.RUNNING
+    return finished_iso, percentage_completed, eta_ms, status
 
-    return BackfillOverallStatus(
-        status=status,
-        percentage_completed=percentage_completed,
-        eta_ms=eta_ms,
-        started=started_iso,
-        finished=finished_iso,
-        shard_total=counts.total,
-        shard_complete=counts.completed,
-        shard_in_progress=counts.in_progress,
-        shard_waiting=counts.unclaimed,
-    )
+
+def generate_status_queries():
+    current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
+    incomplete_query = {"query": {
+        "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}
+    }}
+    completed_query = {"query": {
+        "bool": {"must": [{"exists": {"field": "completedAt"}}]}
+    }}
+    total_query = {"query": {"match_all": {}}}
+    in_progress_query = {"query": {
+        "bool": {"must": [
+            {"range": {"expiration": {"gte": current_epoch_seconds}}},
+            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
+        ]}
+    }}
+    unclaimed_query = {"query": {
+        "bool": {"must": [
+            {"range": {"expiration": {"lt": current_epoch_seconds}}},
+            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
+        ]}
+    }}
+    queries = {
+        "total": total_query,
+        "completed": completed_query,
+        "incomplete": incomplete_query,
+        "in progress": in_progress_query,
+        "unclaimed": unclaimed_query
+    }
+    
+    return queries
 
 
 def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
