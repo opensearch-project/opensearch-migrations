@@ -1,8 +1,8 @@
 "use client";
 
-import { BackfillStatus } from "@/generated/api";
+import { BackfillOverallStatus } from "@/generated/api";
 
-export const BACKFILL_SCENARIOS: Record<string, BackfillStatus> = {
+export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
   notStarted: {
     status: "Pending",
     percentage_completed: 0,

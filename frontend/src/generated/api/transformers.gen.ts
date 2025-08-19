@@ -88,7 +88,7 @@ export const metadataStatusResponseTransformer = async (
   return data;
 };
 
-const backfillStatusSchemaResponseTransformer = (data: any) => {
+const backfillOverallStatusSchemaResponseTransformer = (data: any) => {
   if (data.started) {
     data.started = new Date(data.started);
   }
@@ -101,6 +101,6 @@ const backfillStatusSchemaResponseTransformer = (data: any) => {
 export const backfillStatusResponseTransformer = async (
   data: any,
 ): Promise<BackfillStatusResponse> => {
-  data = backfillStatusSchemaResponseTransformer(data);
+  data = backfillOverallStatusSchemaResponseTransformer(data);
   return data;
 };

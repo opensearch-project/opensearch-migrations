@@ -14,7 +14,7 @@ import {
 } from "./statusComponents";
 import { BACKFILL_SCENARIOS } from "./mockData/backfillScenarios";
 import { BackfillDebugControls } from "./debug/BackfillDebugControls";
-import { BackfillStatus } from "@/generated/api";
+import { BackfillOverallStatus } from "@/generated/api";
 
 export default function BackfillStatusView({
   sessionName,
@@ -25,9 +25,9 @@ export default function BackfillStatusView({
     error,
   } = useBackfillStatus(sessionName);
 
-  const [debugData, setDebugData] = useState<BackfillStatus | null>(null);
+  const [debugData, setDebugData] = useState<BackfillOverallStatus | null>(null);
   const [isLoading, setIsLoading] = useState(apiLoading);
-  const [backfillData, setBackfillData] = useState<BackfillStatus | null>(null);
+  const [backfillData, setBackfillData] = useState<BackfillOverallStatus | null>(null);
 
   useEffect(() => {
     if (!debugData) {

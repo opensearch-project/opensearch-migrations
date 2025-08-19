@@ -96,7 +96,7 @@ describe("ViewSessionPage", () => {
 
     await waitFor(() => {
       // One for snapshot and the other for backfill - metadata doesn't include a percentage
-      expect(screen.getAllByText("100%")).toBe(2);
+      expect(screen.getAllByText("100%")).toHaveLength(2);
     });
   });
 

@@ -331,6 +331,12 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
         logger.debug(f"Working state index does not yet exist, deep status checks can't be performed. {e}")
         raise DeepStatusNotYetAvailable
 
+    total_key = "total"
+    complete_key = "complete"
+    incomplete_key = "incomplete"
+    unclaimed_key = "unclaimed"
+    in_progress_key = "in progress"
+
     queries = generate_status_queries()
     values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
     logger.info(f"Values: {values}")
@@ -339,23 +345,20 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
     disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" + \
                  " with the queries or the working state index"
     # Check the various sums to make sure things add up correctly.
-    if values["incomplete"] + values["completed"] != values["total"]:
-        logger.warning(f"Incomplete ({values['incomplete']}) and completed ({values['completed']}) shards do not "
-                       f"sum to the total ({values['total']}) shards." + disclaimer)
-    if values["unclaimed"] + values["in progress"] != values["incomplete"]:
-        logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
-                       f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
+    if values[incomplete_key] + values[complete_key] != values[total_key]:
+        logger.warning(f"Incomplete ({values[incomplete_key]}) and completed ({values[complete_key]}) shards do not "
+                       f"sum to the total ({values[total_key]}) shards." + disclaimer)
+    if values[unclaimed_key] + values[in_progress_key] != values[incomplete_key]:
+        logger.warning(f"Unclaimed ({values[unclaimed_key]}) and in progress ({values[in_progress_key]}) shards do not"
+                       f" sum to the incomplete ({values[incomplete_key]}) shards." + disclaimer)
 
     counts = ShardStatusCounts(
-        total=values.get("total", 0) or 0,
-        completed=values.get("completed", 0) or 0,
-        incomplete=values.get("incomplete", 0) or 0,
-        in_progress=values.get("in progress", 0) or 0,
-        unclaimed=values.get("unclaimed", 0) or 0,
+        total=values.get(total_key, 0) or 0,
+        completed=values.get(complete_key, 0) or 0,
+        incomplete=values.get(incomplete_key, 0) or 0,
+        in_progress=values.get(in_progress_key, 0) or 0,
+        unclaimed=values.get(unclaimed_key, 0) or 0,
     )
-
-    total = values.get("total", 0) or 0
-    completed = values.get("completed", 0) or 0
 
     # started: read shard_setup.completedAt if available
     started_epoch = _get_shard_setup_started_epoch(target_cluster, index_to_check)
@@ -364,8 +367,8 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
     # finished: only if everything is done, take max completedAt
     finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(target_cluster,
                                                                                  index_to_check,
-                                                                                 total,
-                                                                                 completed,
+                                                                                 counts.total,
+                                                                                 counts.completed,
                                                                                  started_epoch)
 
     return BackfillOverallStatus(
