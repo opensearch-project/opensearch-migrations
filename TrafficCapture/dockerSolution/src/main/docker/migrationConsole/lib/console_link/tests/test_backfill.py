@@ -197,7 +197,7 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
         total_shards = data['hits']['total']['value']
     
     # Mock the deployment status retrieval
-    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, 
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                return_value=mocked_instance_status)
     
     # Mock the detailed status function to return a known value

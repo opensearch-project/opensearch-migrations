@@ -1,9 +1,7 @@
 import logging
-from fastapi import APIRouter, HTTPException, Body
-from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException
 
 from console_link.models import backfill_base as backfill
-from console_link.models.step_state import StepState
 from console_link.api.sessions import http_safe_find_session
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)

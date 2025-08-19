@@ -2,8 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
-import re
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional
 
 
 import requests

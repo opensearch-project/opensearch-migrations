@@ -7,10 +7,9 @@ from unittest.mock import ANY
 
 import pytest
 import requests
-import requests_mock
 
 from console_link.models.cluster import Cluster, HttpMethod
-from console_link.models.backfill_base import Backfill, BackfillStatus, DeepStatusNotYetAvailable
+from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_rfs import (K8sRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist)
 from console_link.models.factories import get_backfill
 from console_link.models.kubectl_runner import KubectlRunner
