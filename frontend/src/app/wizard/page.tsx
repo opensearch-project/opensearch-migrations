@@ -7,12 +7,12 @@ import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Container from "@cloudscape-design/components/container";
 import Wizard from "@cloudscape-design/components/wizard";
-import SourceStep from "./components/SourceStep";
-import TargetStep from "./components/TargetStep";
-import SnapshotStep from "./components/SnapshotStep";
-import MetadataStep from "./components/MetadataStep";
-import BackfillStep from "./components/BackfillStep";
-import ReviewStep from "./components/ReviewStep";
+import SourceStep from "@/components/wizard/SourceStep";
+import TargetStep from "@/components/wizard/TargetStep";
+import SnapshotStep from "@/components/wizard/SnapshotStep";
+import MetadataStep from "@/components/wizard/MetadataStep";
+import BackfillStep from "@/components/wizard/BackfillStep";
+import ReviewStep from "@/components/wizard/ReviewStep";
 
 export default function WizardPage() {
   const searchParams = useSearchParams();
@@ -91,7 +91,7 @@ export default function WizardPage() {
             cancelButton: "Cancel",
             previousButton: "Previous",
             nextButton: "Next",
-            submitButton: "Start migration",
+            submitButton: "Complete migration",
           }}
           onCancel={handleCancel}
           onNavigate={handleNavigate}

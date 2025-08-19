@@ -1,7 +1,10 @@
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-from console_link.api.clusters import convert_cluster_to_api_model, NoAuth, BasicAuth, SigV4Auth, ClusterInfo
+from console_link.api.clusters import (
+    convert_cluster_to_api_model, NoAuth, BasicAuth, SigV4Auth, 
+    ClusterInfo, Version, Flavor
+)
 from console_link.models.cluster import Cluster, AuthMethod
 
 
@@ -60,13 +63,75 @@ class TestConvertClusterToApiModel:
         mock_cluster.auth_type = AuthMethod.NO_AUTH
         mock_cluster.auth_details = None
         mock_cluster.allow_insecure = True
-        mock_cluster.version = "7.10.2"
+        mock_cluster.version = "elasticsearch 7.10.2"
 
         # Convert the cluster
         result = convert_cluster_to_api_model(mock_cluster)
 
         # Verify the result
-        assert result.version_override == "7.10.2"
+        assert isinstance(result.version_override, Version)
+        assert result.version_override.flavor == Flavor.ELASTICSEARCH
+        assert result.version_override.major == 7
+        assert result.version_override.minor == 10
+        assert result.version_override.patch == 2
+        assert str(result.version_override) == "elasticsearch 7.10.2"
+        
+    def test_convert_cluster_with_opensearch_version(self):
+        """Test with OpenSearch version format."""
+        # Create a mock cluster with OpenSearch version
+        mock_cluster = Mock(spec=Cluster)
+        mock_cluster.endpoint = "http://example.com:9200"
+        mock_cluster.auth_type = AuthMethod.NO_AUTH
+        mock_cluster.auth_details = None
+        mock_cluster.allow_insecure = True
+        mock_cluster.version = "opensearch 2.5.0"
+
+        # Convert the cluster
+        result = convert_cluster_to_api_model(mock_cluster)
+
+        # Verify the result
+        assert isinstance(result.version_override, Version)
+        assert result.version_override.flavor == Flavor.OPENSEARCH
+        assert result.version_override.major == 2
+        assert result.version_override.minor == 5
+        assert result.version_override.patch == 0
+        assert str(result.version_override) == "opensearch 2.5.0"
+        
+    def test_convert_cluster_with_shorthand_version(self):
+        """Test with shorthand version format."""
+        # Create a mock cluster with shorthand version
+        mock_cluster = Mock(spec=Cluster)
+        mock_cluster.endpoint = "http://example.com:9200"
+        mock_cluster.auth_type = AuthMethod.NO_AUTH
+        mock_cluster.auth_details = None
+        mock_cluster.allow_insecure = True
+        mock_cluster.version = "os 2.7.0"
+
+        # Convert the cluster
+        result = convert_cluster_to_api_model(mock_cluster)
+
+        # Verify the result
+        assert isinstance(result.version_override, Version)
+        assert result.version_override.flavor == Flavor.OPENSEARCH
+        assert result.version_override.major == 2
+        assert result.version_override.minor == 7
+        assert result.version_override.patch == 0
+        
+    def test_convert_cluster_with_invalid_version(self):
+        """Test with invalid version string."""
+        # Create a mock cluster with invalid version
+        mock_cluster = Mock(spec=Cluster)
+        mock_cluster.endpoint = "http://example.com:9200"
+        mock_cluster.auth_type = AuthMethod.NO_AUTH
+        mock_cluster.auth_details = None
+        mock_cluster.allow_insecure = True
+        mock_cluster.version = "invalid-version"
+
+        # Convert the cluster
+        result = convert_cluster_to_api_model(mock_cluster)
+
+        # Verify the result - invalid version should be None
+        assert result.version_override is None
 
     def test_convert_cluster_with_basic_auth(self):
         """Test converting a cluster with basic authentication."""

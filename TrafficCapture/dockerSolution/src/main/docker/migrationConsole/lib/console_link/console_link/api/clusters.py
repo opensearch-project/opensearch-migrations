@@ -1,10 +1,19 @@
+import logging
 from typing import Optional, Union
-from fastapi import HTTPException, Path
-from pydantic import BaseModel
+from fastapi import HTTPException, Path, APIRouter
+from pydantic import BaseModel, field_validator, ConfigDict
 
-from console_link.api.sessions import find_session, SessionExistence, session_router
-from console_link.environment import Environment
+from console_link.api.sessions import http_safe_find_session
 from console_link.models.cluster import Cluster
+from console_link.models.version import Version
+
+logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+clusters_router = APIRouter(
+    prefix="/clusters",
+    tags=["clusters"],
+)
 
 
 # Define the auth models as described in the plan
@@ -33,25 +42,24 @@ class ClusterInfo(BaseModel):
     protocol: str
     enable_tls_verification: bool
     auth: Union[NoAuth, BasicAuth, SigV4Auth]
-    version_override: Optional[str] = None
-
-
-def get_environment_for_session(session_name: str) -> Environment:
-    """
-    Retrieves the environment associated with a specific session.
-    Raises an HTTPException if the session doesn't exist.
-    """
-    session_data = find_session(session_name, SessionExistence.MUST_EXIST)
+    version_override: Optional[Version] = None
     
-    # In a real implementation, we would retrieve the environment from some storage
-    # associated with the session. For now, we'll simulate this with a mock.
-    try:
-        # This is a placeholder - in a real implementation, this would load the
-        # environment configuration from storage based on the session
-        config = session_data.get("config", {})
-        return Environment(config=config)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load environment: {str(e)}")
+    model_config = ConfigDict(
+        json_encoders={
+            Version: lambda v: str(v)
+        }
+    )
+    
+    @field_validator("version_override", mode="before")
+    @classmethod
+    def parse_version_override(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, Version):
+            return v
+        if isinstance(v, str):
+            return Version.from_string(v)
+        return None
 
 
 def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
@@ -64,7 +72,6 @@ def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
     # Extract protocol from endpoint
     protocol = "https" if cluster.endpoint.startswith("https://") else "http"
     
-    # Create the appropriate auth model based on auth_type
     if cluster.auth_type and cluster.auth_type.name == "BASIC_AUTH":
         # For security reasons, we don't return the password in the API
         auth_details = cluster.get_basic_auth_details()
@@ -75,29 +82,38 @@ def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
     else:
         auth = NoAuth(type="no_auth")
     
+    version_override = None
+    if cluster.version:
+        try:
+            version_override = Version.from_string(cluster.version)
+        except ValueError:
+            logger.info(f"Failed to parse version string: {cluster.version}")
+            raise HTTPException(status_code=400, detail=f"Failed to parse version string: {cluster.version}")
+    
     # Create and return the ClusterInfo model
     return ClusterInfo(
         endpoint=cluster.endpoint,
         protocol=protocol,
         enable_tls_verification=not cluster.allow_insecure,
         auth=auth,
-        version_override=cluster.version,
+        version_override=version_override,
     )
 
 
-@session_router.get("/{session_name}/clusters/source", response_model=ClusterInfo, operation_id="clusterSource")
-def get_source_cluster(session_name: str = Path(..., description="The name of the session")):
-    environment = get_environment_for_session(session_name)
-    if not environment.source_cluster:
+@clusters_router.get("/source", response_model=ClusterInfo, operation_id="clusterSource")
+def get_source_cluster(session_name: str):
+    session = http_safe_find_session(session_name)
+    
+    if not session.env or not session.env.source_cluster:
         raise HTTPException(status_code=404, detail="Source cluster not defined for this session")
     
-    return convert_cluster_to_api_model(environment.source_cluster)
+    return convert_cluster_to_api_model(session.env.source_cluster)
 
 
-@session_router.get("/{session_name}/clusters/target", response_model=ClusterInfo, operation_id="clusterTarget")
-def get_target_cluster(session_name: str = Path(..., description="The name of the session")):
-    environment = get_environment_for_session(session_name)
-    if not environment.target_cluster:
+@clusters_router.get("/target", response_model=ClusterInfo, operation_id="clusterTarget")
+def get_target_cluster(session_name: str):
+    session = http_safe_find_session(session_name)
+    if not session.env or not session.env.target_cluster:
         raise HTTPException(status_code=404, detail="Target cluster not defined for this session")
     
-    return convert_cluster_to_api_model(environment.target_cluster)
+    return convert_cluster_to_api_model(session.env.target_cluster)

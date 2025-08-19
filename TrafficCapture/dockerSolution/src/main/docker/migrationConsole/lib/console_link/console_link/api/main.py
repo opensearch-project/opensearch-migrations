@@ -6,6 +6,7 @@ from console_link.api.system import system_router
 from console_link.api.sessions import session_router
 from console_link.api.snapshot import snapshot_router
 from console_link.api.metadata import metadata_router
+from console_link.api.clusters import clusters_router
 
 app = FastAPI(
     title="Migration Assistant API",
@@ -35,6 +36,7 @@ app.openapi = custom_openapi.openapi_with_nullables
 
 session_router.include_router(snapshot_router, prefix="/{session_name}", tags=["snapshot"])
 session_router.include_router(metadata_router, prefix="/{session_name}", tags=["metadata"])
+session_router.include_router(clusters_router, prefix="/{session_name}", tags=["clusters"])
 
 app.include_router(system_router)
 app.include_router(session_router)
