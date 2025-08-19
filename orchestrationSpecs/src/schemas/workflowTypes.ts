@@ -12,19 +12,19 @@ declare global {
 }
 
 // Specific scope types for different purposes
-export type WorkflowAndTemplatesScope = { workflowParameters?: InputParametersRecord };
+export type WorkflowAndTemplatesScope<TemplateSignatures extends TemplateSignaturesScope = TemplateSignaturesScope> = { workflowParameters?: InputParametersRecord, templates?: TemplateSignatures };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type GenericScope = Record<string, any>;
 //export type DagScope = Record<string, DagTask>;
-export type StepsOutputsScope = Record<string, StepWithOutputs<any, any, any>>;
-export type TemplateSignaturesScope = Record<string, TemplateSigEntry<any>>;
+export type StepsOutputsScope = Record<string, StepWithOutputs<any, any>>;
+export type TemplateSignaturesScope = Record<string, TemplateSigEntry<{ inputs: InputParametersRecord; outputs?: OutputParametersRecord }>>;
 
 export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
 
 // Internal type for scope extension - used internally by builder methods
 export type ExtendScope<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = S & ADDITIONS;
 
-export type TemplateSigEntry<T extends { inputs: any }> = {
+export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
     input: T["inputs"];
     output?: T extends { outputs: infer O } ? O : never;
 };
@@ -89,18 +89,15 @@ export type WorkflowInputsToExpressions<ContextualScope extends { workflowParame
 
 export type StepWithOutputs<
     StepName extends string,
-    TemplateKey extends string,
-    Outputs extends OutputParametersRecord | undefined
+    Outputs extends OutputParametersRecord
 > = {
     name: StepName;
-    template: TemplateKey;
-    outputTypes: Outputs;
+    outputTypes?: Outputs;
 };
 
-export type StepsScopeToStepsWithOutputs<StepsScope extends Record<string, StepWithOutputs<any, any, any>>> = {
+export type StepsScopeToStepsWithOutputs<StepsScope extends Record<string, StepWithOutputs<any, any>>> = {
     [StepName in keyof StepsScope]: StepsScope[StepName] extends StepWithOutputs<
         infer Name,
-        infer Template,
         infer Outputs
     > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
 };

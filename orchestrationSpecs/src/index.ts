@@ -1,5 +1,4 @@
 import {FullMigration} from "@/workflowTemplates/fullMigration";
-import { FieldCount } from "@/utils";
 import {renderWorkflowTemplate} from "@/renderers/argoResourceRenderer";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 
