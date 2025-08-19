@@ -5,7 +5,6 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
-import lombok.EqualsAndHashCode;
 import lombok.experimental.Delegate;
 
 /**
@@ -68,15 +67,18 @@ public class BitSetConverter<B, F extends B, S extends B> {
             return BitSet.valueOf(getBitsFromFixed.apply((F) liveDocs));
         }
         
-        // Fast path for SparseFixedBitSet - use iterator for efficiency
+        // Fast path for SparseFixedBitSet
         if (sparseFixedBitSetClass != null && sparseFixedBitSetClass.isInstance(liveDocs) && nextSetBitFactory != null) {
             int len = getLength.applyAsInt(liveDocs);
             BitSet bitSet = new BitSet(len);
+            if (len == 0) {
+                return bitSet;
+            }
             S sparseBits = (S) liveDocs;
             ToIntFunction<Integer> nextSetBit = nextSetBitFactory.apply(sparseBits);
-            for (int i = nextSetBit.applyAsInt(0); 
-                 i != -1 && i < len;
-                 i = nextSetBit.applyAsInt(i + 1)) {
+            for (int i = nextSetBit.applyAsInt(0);
+                 0 <= i && i < len;
+                 i = (i >= len - 1) ? len : nextSetBit.applyAsInt(i + 1)) {
                 bitSet.set(i);
             }
             return bitSet;
@@ -130,18 +132,29 @@ public class BitSetConverter<B, F extends B, S extends B> {
         return convertedBitSet != null ? new LengthDisabledBitSet(convertedBitSet) : null;
     }
 
-    @EqualsAndHashCode(callSuper = true)
-    public static class LengthDisabledBitSet extends BitSet {
-        @Delegate
+    // Java BitSet contains length operation that returns one greater than the position
+    // of the highest set bit. This is at odds with lucene use of Bits which returns the total number
+    // of Bits. To reduce friction and potential bugs, creating this LengthDisabledBitSet to specifically
+    // not expose length. Length should be delegated to the reader's maxDoc method.
+    public static class LengthDisabledBitSet {
+        @Delegate(excludes=ExcludedMethods.class)
         private final BitSet delegate;
 
         public LengthDisabledBitSet(BitSet delegate) {
             this.delegate = delegate;
         }
 
-        @Override
-        public int length() {
-            throw new UnsupportedOperationException("Ensure no calls to length");
+        public LengthDisabledBitSet(LengthDisabledBitSet toCopy) {
+            this((BitSet) toCopy.delegate.clone());
+        }
+
+        public void andNot(LengthDisabledBitSet other) {
+            delegate.andNot(other.delegate);
+        }
+
+        interface ExcludedMethods {
+            int length();
+            Object clone();
         }
     }
 }
