@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
 import reactor.core.publisher.Flux;
 
@@ -15,6 +16,7 @@ public interface DocumentReaderEngine {
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
-        int startingDocId
+        int startingDocId,
+        BaseRootRfsContext rootContext
     );
 }

@@ -18,6 +18,7 @@ import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
+import io.opentelemetry.sdk.metrics.data.LongPointData;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -42,7 +43,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
     private static Stream<Arguments> scenarios() {
         var target = SearchClusterContainer.OS_LATEST;
         return SupportedClusters.supportedSources(true).stream()
-                .flatMap(source -> Stream.of(Arguments.of(source, target)));
+            .flatMap(source -> Stream.of(Arguments.of(source, target)));
     }
 
     @ParameterizedTest(name = "Source {0} to Target {1}")
@@ -58,13 +59,76 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
         }
     }
 
+    /**
+     * Helper method to verify delta stream metrics match expected values
+     * @param testContext The test context containing metrics
+     * @param expectedSegments Expected number of segments seen
+     * @param expectedAdditions Expected number of document additions
+     * @param expectedDeletions Expected number of document deletions
+     */
+    private void assertDeltaMetrics(
+        DocumentMigrationTestContext testContext,
+        long expectedSegments,
+        long expectedAdditions,
+        long expectedDeletions
+    ) {
+        var allMetrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+        
+        // Verify delta stream calculation metrics were recorded
+        var deltaStreamMetrics = allMetrics.stream()
+            .filter(m -> m.getName().contains("deltaStreamCalculation"))
+            .toList();
+        Assertions.assertEquals(2, deltaStreamMetrics.size(), "Delta stream calculation metrics should be recorded for each of delete and add stream");
+        
+        // Check segments seen metric
+        var segmentsSeenMetric = allMetrics.stream()
+            .filter(m -> m.getName().equals("deltaSegmentsSeen"))
+            .toList();
+        Assertions.assertEquals(1, segmentsSeenMetric.size(), "Delta segments seen metric should be recorded");
+        
+        var actualSegments = segmentsSeenMetric.get(0).getLongSumData()
+            .getPoints()
+            .stream()
+            .mapToLong(LongPointData::getValue)
+            .sum();
+        Assertions.assertEquals(expectedSegments, actualSegments, 
+            String.format("Expected %d segments seen, but got %d", expectedSegments, actualSegments));
+        
+        // Check additions metric
+        var deltaAdditionsMetric = allMetrics.stream()
+            .filter(m -> m.getName().equals("deltaAdditions"))
+            .toList();
+        Assertions.assertEquals(1, deltaAdditionsMetric.size(), "Delta additions metric should be recorded");
+
+        var actualAdditions = deltaAdditionsMetric.get(0).getLongSumData()
+            .getPoints()
+            .stream()
+            .mapToLong(LongPointData::getValue)
+            .sum();
+        Assertions.assertEquals(expectedAdditions, actualAdditions,
+            String.format("Expected %d delta additions, but got %d", expectedAdditions, actualAdditions));
+        
+        // Check deletions metric
+        var deltaDeletionsMetric = allMetrics.stream()
+            .filter(m -> m.getName().equals("deltaDeletions"))
+            .toList();
+        Assertions.assertEquals(1, deltaDeletionsMetric.size(), "Delta deletions metric should be recorded");
+
+        var actualDeletions = deltaDeletionsMetric.get(0).getLongSumData()
+            .getPoints()
+            .stream()
+            .mapToLong(LongPointData::getValue)
+            .sum();
+        Assertions.assertEquals(expectedDeletions, actualDeletions,
+            String.format("Expected %d delta deletions, but got %d", expectedDeletions, actualDeletions));
+    }
+
     @SneakyThrows
     private void performDeltaSnapshotRestoreTest(
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster
     ) {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
 
         try {
             // === ACTION: Set up the source/target clusters ===
@@ -161,6 +225,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             // Create docIdDeletedOnSecondSnapshot to verify it's deleted when going from snapshot1 -> snapshot2
             targetClusterOperations.createDocument(indexName, docIdDeletedOnSecondSnapshot, doc);
             {
+                final var testDocMigrationContext = DocumentMigrationTestContext.factory()
+                    .withTracking(false, true, false);
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
 
@@ -196,7 +262,11 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
                     Assertions.assertEquals(404, response.getKey(), docIdOnBoth + " should not be created");
                 }
+
+                // After first run (snapshot1 -> snapshot2): 3 segments, 1 addition, 1 deletion
+                assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
+            
 
             // Run second time reversing base and current snapshot
             targetClusterOperations.delete("/.migrations_working_state");
@@ -206,6 +276,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should be manually deleted");
             }
             {
+                final var testDocMigrationContext = DocumentMigrationTestContext.factory()
+                    .withTracking(false, true, false);
                 var runCounter = new AtomicInteger();
                 var clockJitter = new Random(1);
 
@@ -241,7 +313,10 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
                     Assertions.assertEquals(404, response.getKey(), docIdOnlyOnSecond + " should not be created");
                 }
+                // After second run (snapshot2 -> snapsho12): 3 segments, 1 addition, 1 deletion
+                assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
+
         } finally {
             deleteTree(localDirectory.toPath());
         }

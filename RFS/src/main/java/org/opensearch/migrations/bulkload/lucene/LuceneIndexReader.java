@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
@@ -84,7 +85,7 @@ public interface LuceneIndexReader {
     }
 
 
-    default Flux<RfsLuceneDocument> readDeltaDocuments(String previousSegmentsFileName, String segmentsFileName, int startDocIdx) {
+    default Flux<RfsLuceneDocument> readDeltaDocuments(String previousSegmentsFileName, String segmentsFileName, int startDocIdx, BaseRootRfsContext rootContext) {
         Consumer<LuceneDirectoryReader> uncheckedReaderClose = reader -> {
             try {
                 reader.close();
@@ -97,7 +98,7 @@ public interface LuceneIndexReader {
             () -> this.getReader(previousSegmentsFileName),
             previousReader -> Flux.using(
                 () -> this.getReader(segmentsFileName),
-                currentReader -> DeltaLuceneReader.readDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx),
+                currentReader -> DeltaLuceneReader.readDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx, rootContext),
                 uncheckedReaderClose),
             uncheckedReaderClose
         );

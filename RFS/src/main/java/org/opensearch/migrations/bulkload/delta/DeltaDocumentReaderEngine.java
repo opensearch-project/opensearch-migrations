@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
 import lombok.AllArgsConstructor;
 import reactor.core.publisher.Flux;
@@ -57,7 +58,8 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         LuceneIndexReader reader,
         String indexName,
         int shardNumber,
-        int startingDocId
+        int startingDocId,
+        BaseRootRfsContext rootContext
     ) {
         ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
@@ -67,7 +69,8 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         return reader.readDeltaDocuments(
             previousShardMetadata.getSegmentFileName(),
             shardMetadata.getSegmentFileName(),
-            startingDocId
+            startingDocId,
+            rootContext
         );
     }
 }

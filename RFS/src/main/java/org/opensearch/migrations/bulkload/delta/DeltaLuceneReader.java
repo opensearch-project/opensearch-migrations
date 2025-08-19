@@ -12,6 +12,8 @@ import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.lucene.ReaderAndBase;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
@@ -80,63 +82,86 @@ public class DeltaLuceneReader {
        If the startDocId is 0, it will start from the first document in the shard.
        Note: The delta calculation is made on the entire shard regardless of where startDocId
      */
-    public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader previousReader, LuceneDirectoryReader currentReader, int startDocId) {
-        log.atInfo()
-            .setMessage("Starting delta backfill from position {}")
-            .addArgument(startDocId)
-            .log();
-        // Start with brute force solution
-        var previousSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
-        previousReader.leaves().forEach(
-            leaf ->
-                previousSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
-        );
+    public static Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(
+        LuceneDirectoryReader previousReader, 
+        LuceneDirectoryReader currentReader, 
+        int startDocId,
+        BaseRootRfsContext rootContext
+    ) {
+        // Create delta stream context for telemetry
+        try (var deltaContext = new RfsContexts.DeltaStreamContext(rootContext, null)) {
+            log.atInfo()
+                .setMessage("Starting delta backfill from position {}")
+                .addArgument(startDocId)
+                .log();
 
-        var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
-        currentReader.leaves().forEach(
-            leaf ->
-                currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
-        );
+            var previousSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+            previousReader.leaves().forEach(
+                leaf ->
+                    previousSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+            );
 
-        log.atInfo()
-            .setMessage("Found {} segments in previous and {} segments in current")
-            .addArgument(previousSegmentToLeafReader.size())
-            .addArgument(currentSegmentToLeafReader.size())
-            .log();
+            var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
+            currentReader.leaves().forEach(
+                leaf ->
+                    currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+            );
+
+            log.atInfo()
+                .setMessage("Found {} segments in previous and {} segments in current")
+                .addArgument(previousSegmentToLeafReader.size())
+                .addArgument(currentSegmentToLeafReader.size())
+                .log();
+
+            // Record total segments seen
+            long totalSegmentsSeen = previousSegmentToLeafReader.size() + currentSegmentToLeafReader.size();
+            deltaContext.recordSegmentsSeen(totalSegmentsSeen);
+
+            log.atInfo()
+                .setMessage("Calculating remove and add docs in snapshot")
+                .log();
+
+            // Docs to remove are additions between new and old
+            // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
+            var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, Integer.MIN_VALUE);
+            var additions = getAdditionsBetweenSnapshot(previousSegmentToLeafReader, currentSegmentToLeafReader, 0);
+
+            // Calculate and record metrics
+            var totalDocsToRemove = removes.stream()
+                .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
+                        s.getLiveDocs().cardinality()
+                    )
+                .sum();
             
-        log.atInfo()
-            .setMessage("Calculating remove and add docs in snapshot")
-            .log();
+            var totalDocsToAdd = additions.stream()
+                .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
+                        s.getLiveDocs().cardinality()
+                    )
+                .sum();
+            
+            // Record metrics
+            deltaContext.recordDeltaDeletions(totalDocsToRemove);
+            deltaContext.recordDeltaAdditions(totalDocsToAdd);
 
-        // Docs to remove are additions between new and old
-        // TODO: Consider updating offset to a int to start at 0 instead of Integer.MIN_VALUE
-        var removes = getAdditionsBetweenSnapshot(currentSegmentToLeafReader, previousSegmentToLeafReader, Integer.MIN_VALUE);
-        var additions = getAdditionsBetweenSnapshot(previousSegmentToLeafReader, currentSegmentToLeafReader, 0);
+            log.atLevel(totalDocsToRemove > 0 ? Level.WARN : Level.INFO)
+                .setMessage("Delta Snapshot in UPDATES_ONLY mode will skip {} possible deleted docs (could be from segment merges)")
+                .addArgument(totalDocsToRemove)
+                .log();
 
-        var totalDocsToRemove = removes.stream()
-            .mapToInt(s -> s.getLiveDocs() == null ? s.getReader().maxDoc() :
-                    s.getLiveDocs().cardinality()
-                )
-            .sum();
+            var maxDocumentsToReadAtOnce = 100; // Arbitrary value
+            var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
-        log.atLevel(totalDocsToRemove > 0 ? Level.WARN : Level.INFO)
-            .setMessage("Delta Snapshot in UPDATES_ONLY mode will skip {} possible deleted docs (could be from segment merges)")
-            .addArgument(totalDocsToRemove)
-            .log();
-
-        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
-        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-
-        return Flux.fromIterable(additions)
-            .flatMapSequential( c ->
-                LuceneReader.readDocsFromSegment(c,
-                    startDocId,
-                    sharedSegmentReaderScheduler,
-                    maxDocumentsToReadAtOnce,
-                    Path.of(c.getReader().getSegmentName()))
-            ).subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
-            .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
-            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+            return Flux.fromIterable(additions)
+                .flatMapSequential( c ->
+                    LuceneReader.readDocsFromSegment(c,
+                        startDocId,
+                        sharedSegmentReaderScheduler,
+                        maxDocumentsToReadAtOnce,
+                        Path.of(c.getReader().getSegmentName()))
+                ).subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
+                .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
+                .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+        }
     }
 
     private static List<ReaderAndBase> getAdditionsBetweenSnapshot(TreeMap<String, LuceneLeafReader>
@@ -173,11 +198,11 @@ public class DeltaLuceneReader {
             BitSetConverter.LengthDisabledBitSet liveDocs;
             if (currentLiveDocs != null) {
                 // Compute currentLiveDocs AND NOT previousLiveDocs
-                liveDocs = (BitSetConverter.LengthDisabledBitSet) currentLiveDocs.clone();
+                liveDocs = new BitSetConverter.LengthDisabledBitSet(currentLiveDocs);
                 liveDocs.andNot(previousLiveDocs);
             } else {
                 // Compute NOT previousLiveDocs (all docs except those in previous)
-                liveDocs = (BitSetConverter.LengthDisabledBitSet) previousLiveDocs.clone();
+                liveDocs = new BitSetConverter.LengthDisabledBitSet(previousLiveDocs);
                 liveDocs.flip(0, currentSegmentReader.maxDoc());
             }
 
