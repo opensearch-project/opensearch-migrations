@@ -14,11 +14,11 @@ import { Alert, StatusIndicator } from "@cloudscape-design/components";
 
 type AuthType = "NO_AUTH" | "BASIC_AUTH" | "SIGV4";
 
-interface SourceStepProps {
+interface SourceConfigureProps {
   readonly sessionName: string;
 }
 
-export default function SourceStep({ sessionName }: SourceStepProps) {
+export default function SourceConfigure({ sessionName }: SourceConfigureProps) {
   const { isLoading, data: cluster, error } = useSourceCluster(sessionName);
   const [selectedAuthType, setSelectedAuthType] = useState<AuthType | null>(null);
   
@@ -31,31 +31,22 @@ export default function SourceStep({ sessionName }: SourceStepProps) {
  
   if (isLoading) {
     return (
-      <Container header={<Header variant="h2">Source Configuration</Header>}>
-        <Box padding="xl" textAlign="center">
-          <StatusIndicator type="loading">Loading source cluster…</StatusIndicator>
-        </Box>
-      </Container>
+      <Box padding="xl">
+        <StatusIndicator type="loading">Loading source cluster…</StatusIndicator>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <Container header={<Header variant="h2">Source Configuration</Header>}>
-        <Alert type="error" header="Failed to load source cluster">
-          {String((error as any)?.message ?? error)}
-        </Alert>
-      </Container>
+      <Alert type="error" header="Failed to load source cluster">
+        {String((error as any)?.message ?? error)}
+      </Alert>
     );
   }
 
   return (
-    <Container header={<Header variant="h2">Source Configuration</Header>}>
       <SpaceBetween size="l">
-        <Box>
-            Configure the source cluster for migration session: {sessionName}
-        </Box>
-        
         <FormField label="Source Endpoint" description="Enter the endpoint URL for your source cluster">
           <Input 
             placeholder="https://source-cluster-endpoint:9200"
@@ -117,6 +108,5 @@ export default function SourceStep({ sessionName }: SourceStepProps) {
           </SpaceBetween>
         )}
       </SpaceBetween>
-    </Container>
   );
 };
