@@ -71,7 +71,7 @@ check_and_bootstrap_region() {
 # Generate source context for AWS Solutions CDK
 generate_source_context() {
     local cluster_id="${VERSION_FAMILY}"
-    local domain_name="multiplication-test-source-${VERSION_FAMILY}-${STAGE}"
+    local domain_name="source-${VERSION_FAMILY}-jenkins-test"
     
     cat > "$TMP_DIR_PATH/sourceContext.json" << EOF
 {
@@ -98,7 +98,7 @@ generate_source_context() {
 }
 EOF
     
-    echo "Generated source context for ${domain_name}"
+    echo "Generated source context for ${domain_name} (${#domain_name} characters)"
     echo "Cluster ID: ${cluster_id}"
 }
 
@@ -128,7 +128,7 @@ clone_aws_solutions_cdk() {
 
 # Deploy source cluster
 deploy_source_cluster() {
-    echo "Deploying source cluster: multiplication-test-source-${VERSION_FAMILY}-${STAGE}"
+    echo "Deploying source cluster: source-${VERSION_FAMILY}-jenkins-test"
     
     cd "$AWS_SOLUTIONS_CDK_DIR"
     
@@ -149,7 +149,7 @@ deploy_source_cluster() {
 # Extract cluster information from CloudFormation outputs
 extract_cluster_info() {
     local cluster_id="${VERSION_FAMILY}"
-    local domain_name="multiplication-test-source-${VERSION_FAMILY}-${STAGE}"
+    local domain_name="source-${VERSION_FAMILY}-jenkins-test"  # Match the domain name used in generate_source_context
     
     # Based on AWS Solutions CDK structure:
     # - OpenSearch Domain Stack: OpenSearchDomain-{clusterId}-{stage}-{region}
