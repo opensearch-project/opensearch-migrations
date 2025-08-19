@@ -41,11 +41,6 @@ export type FailureInfo = {
 };
 
 /**
- * Flavor
- */
-export type Flavor = "elasticsearch" | "opensearch";
-
-/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -335,25 +330,6 @@ export type ValidationError = {
 };
 
 /**
- * Version
- */
-export type Version = {
-  flavor: Flavor;
-  /**
-   * Major
-   */
-  major?: number;
-  /**
-   * Minor
-   */
-  minor?: number;
-  /**
-   * Patch
-   */
-  patch?: number;
-};
-
-/**
  * VersionApiResponse
  */
 export type VersionApiResponse = {
@@ -383,7 +359,10 @@ export type ConsoleLinkApiClustersClusterInfo = {
    * Auth
    */
   auth: NoAuth | BasicAuth | SigV4Auth;
-  version_override?: Version | null;
+  /**
+   * Version Override
+   */
+  version_override?: string | null;
 };
 
 /**
@@ -700,7 +679,6 @@ export type ClusterSourceData = {
   path: {
     /**
      * Session Name
-     * The name of the session
      */
     session_name: string;
   };
@@ -732,7 +710,6 @@ export type ClusterTargetData = {
   path: {
     /**
      * Session Name
-     * The name of the session
      */
     session_name: string;
   };

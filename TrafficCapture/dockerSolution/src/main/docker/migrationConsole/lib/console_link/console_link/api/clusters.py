@@ -1,11 +1,10 @@
 import logging
 from typing import Optional, Union
-from fastapi import HTTPException, Path, APIRouter
-from pydantic import BaseModel, field_validator, ConfigDict
+from fastapi import HTTPException, APIRouter
+from pydantic import BaseModel
 
 from console_link.api.sessions import http_safe_find_session
 from console_link.models.cluster import Cluster
-from console_link.models.version import Version
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,24 +41,7 @@ class ClusterInfo(BaseModel):
     protocol: str
     enable_tls_verification: bool
     auth: Union[NoAuth, BasicAuth, SigV4Auth]
-    version_override: Optional[Version] = None
-    
-    model_config = ConfigDict(
-        json_encoders={
-            Version: lambda v: str(v)
-        }
-    )
-    
-    @field_validator("version_override", mode="before")
-    @classmethod
-    def parse_version_override(cls, v):
-        if v is None:
-            return None
-        if isinstance(v, Version):
-            return v
-        if isinstance(v, str):
-            return Version.from_string(v)
-        return None
+    version_override: Optional[str] = None
 
 
 def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
@@ -82,21 +64,13 @@ def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
     else:
         auth = NoAuth(type="no_auth")
     
-    version_override = None
-    if cluster.version:
-        try:
-            version_override = Version.from_string(cluster.version)
-        except ValueError:
-            logger.info(f"Failed to parse version string: {cluster.version}")
-            raise HTTPException(status_code=400, detail=f"Failed to parse version string: {cluster.version}")
-    
     # Create and return the ClusterInfo model
     return ClusterInfo(
         endpoint=cluster.endpoint,
         protocol=protocol,
         enable_tls_verification=not cluster.allow_insecure,
         auth=auth,
-        version_override=version_override,
+        version_override=cluster.version,
     )
 
 
