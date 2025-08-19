@@ -39,6 +39,24 @@ describe("ViewSessionPage", () => {
           finished: "2023-01-01T01:00:00Z",
         });
       }),
+      http.get("http://localhost/sessions/test-session/metadata/status", () => {
+        return HttpResponse.json({
+          status: "Completed",
+          started: "2023-01-01T00:00:00Z",
+          finished: "2023-01-01T01:00:00Z",
+          clusters: {
+            source: {
+              type: "Snapshot",
+              version: "ELASTICSEARCH 7.10.0",
+            },
+            target: {
+              type: "Remote Cluster",
+              version: "OPENSEARCH 2.11.0",
+            },
+          },
+          errorCount: 0
+        });
+      }),
       http.get("http://localhost/sessions/test-session/backfill/status", () => {
         return HttpResponse.json({
           status: "Completed",
@@ -66,6 +84,7 @@ describe("ViewSessionPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Session Overview")).toBeInTheDocument();
       expect(screen.getByText("Snapshot")).toBeInTheDocument();
+      expect(screen.getByText("Metadata Migration")).toBeInTheDocument();
       expect(screen.getByText("Backfill")).toBeInTheDocument();
     });
 
@@ -76,7 +95,8 @@ describe("ViewSessionPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("100%")).toBeInTheDocument();
+      // One for snapshot and the other for backfill - metadata doesn't include a percentage
+      expect(screen.getAllByText("100%")).toBe(2);
     });
   });
 
