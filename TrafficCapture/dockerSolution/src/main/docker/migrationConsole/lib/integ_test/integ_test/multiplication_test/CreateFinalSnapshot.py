@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from console_link.cli import Context
 from integ_test.multiplication_test.MultiplicationTestUtils import (
@@ -8,18 +9,19 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     modify_temp_config_file,
     display_final_results
 )
-from integ_test.multiplication_test.JenkinsParamConstants import (
-    CONFIG_FILE_PATH,
-    TEMP_CONFIG_FILE_PATH,
-    INDEX_NAME,
-    INGESTED_DOC_COUNT,
-    INDEX_SHARD_COUNT,
-    TEST_REGION,
-    LARGE_SNAPSHOT_BUCKET_PREFIX,
-    LARGE_SNAPSHOT_BUCKET_SUFFIX,
-    LARGE_S3_BASE_PATH,
-    MULTIPLICATION_FACTOR_WITH_ORIGINAL
-)
+from integ_test.multiplication_test import JenkinsParamConstants as constants
+
+# Override constants with environment variables if present (Jenkins parameter injection)
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', constants.CONFIG_FILE_PATH)
+TEMP_CONFIG_FILE_PATH = constants.TEMP_CONFIG_FILE_PATH  # This can stay as constant
+INDEX_NAME = os.getenv('INDEX_NAME', constants.INDEX_NAME)
+INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', str(constants.INGESTED_DOC_COUNT)))
+INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', str(constants.INDEX_SHARD_COUNT)))
+TEST_REGION = os.getenv('SNAPSHOT_REGION', constants.TEST_REGION)
+LARGE_SNAPSHOT_BUCKET_PREFIX = os.getenv('LARGE_SNAPSHOT_BUCKET_PREFIX', constants.LARGE_SNAPSHOT_BUCKET_PREFIX)
+LARGE_SNAPSHOT_BUCKET_SUFFIX = constants.LARGE_SNAPSHOT_BUCKET_SUFFIX  # This can stay as constant
+LARGE_S3_BASE_PATH = os.getenv('LARGE_S3_DIRECTORY_PREFIX', constants.LARGE_S3_BASE_PATH) + os.getenv('CLUSTER_VERSION', constants.CLUSTER_VERSION)
+MULTIPLICATION_FACTOR_WITH_ORIGINAL = int(os.getenv('MULTIPLICATION_FACTOR', str(constants.MULTIPLICATION_FACTOR_WITH_ORIGINAL)))
 
 logger = logging.getLogger(__name__)
 

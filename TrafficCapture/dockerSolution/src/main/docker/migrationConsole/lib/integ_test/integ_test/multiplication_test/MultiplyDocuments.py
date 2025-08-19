@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import unittest
 from console_link.cli import Context
@@ -6,18 +7,19 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     run_console_command,
     get_target_document_count_for_index
 )
-from .JenkinsParamConstants import (
-    CONFIG_FILE_PATH,
-    INDEX_NAME,
-    INGESTED_DOC_COUNT,
-    INDEX_SHARD_COUNT,
-    BACKFILL_TIMEOUT_MINUTES,
-    BACKFILL_POLL_INTERVAL,
-    STABILITY_CHECK_COUNT,
-    STABILITY_CHECK_INTERVAL,
-    MULTIPLICATION_FACTOR_WITH_ORIGINAL,
-    RFS_WORKER_COUNT
-)
+from integ_test.multiplication_test import JenkinsParamConstants as constants
+
+# Override constants with environment variables if present (Jenkins parameter injection)
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', constants.CONFIG_FILE_PATH)
+INDEX_NAME = os.getenv('INDEX_NAME', constants.INDEX_NAME)
+INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', str(constants.INGESTED_DOC_COUNT)))
+INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', str(constants.INDEX_SHARD_COUNT)))
+BACKFILL_TIMEOUT_MINUTES = constants.BACKFILL_TIMEOUT_MINUTES  # This can stay as constant
+BACKFILL_POLL_INTERVAL = constants.BACKFILL_POLL_INTERVAL  # This can stay as constant
+STABILITY_CHECK_COUNT = constants.STABILITY_CHECK_COUNT  # This can stay as constant
+STABILITY_CHECK_INTERVAL = constants.STABILITY_CHECK_INTERVAL  # This can stay as constant
+MULTIPLICATION_FACTOR_WITH_ORIGINAL = int(os.getenv('MULTIPLICATION_FACTOR', str(constants.MULTIPLICATION_FACTOR_WITH_ORIGINAL)))
+RFS_WORKER_COUNT = int(os.getenv('RFS_WORKERS', str(constants.RFS_WORKER_COUNT)))
 
 logger = logging.getLogger(__name__)
 

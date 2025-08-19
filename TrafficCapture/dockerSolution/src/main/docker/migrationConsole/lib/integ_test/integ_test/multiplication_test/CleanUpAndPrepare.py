@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from console_link.cli import Context
 from integ_test.multiplication_test.MultiplicationTestUtils import (
@@ -8,15 +9,16 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     ingest_test_data,
     create_transformation_config
 )
-from integ_test.multiplication_test.JenkinsParamConstants import (
-    CONFIG_FILE_PATH,
-    INDEX_NAME,
-    INGESTED_DOC_COUNT,
-    INDEX_SHARD_COUNT,
-    INGEST_DOC,
-    TEST_REGION,
-    TEST_STAGE
-)
+from integ_test.multiplication_test import JenkinsParamConstants as constants
+
+# Override constants with environment variables if present (Jenkins parameter injection)
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', constants.CONFIG_FILE_PATH)
+INDEX_NAME = os.getenv('INDEX_NAME', constants.INDEX_NAME)
+INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', str(constants.INGESTED_DOC_COUNT)))
+INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', str(constants.INDEX_SHARD_COUNT)))
+INGEST_DOC = constants.INGEST_DOC  # This doesn't change
+TEST_REGION = os.getenv('SNAPSHOT_REGION', constants.TEST_REGION)
+TEST_STAGE = os.getenv('STAGE', constants.TEST_STAGE)
 
 logger = logging.getLogger(__name__)
 

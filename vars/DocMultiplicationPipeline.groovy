@@ -181,13 +181,20 @@ def call(Map config = [:]) {
                     echo "Number of Shards: ${params.numShards}"
                     
                     dir('test') {
-                        // Set environment variables for the test
-                        def testEnvVars = buildTestEnvironmentVariables(params)
-                        
-                        // Execute CleanUpAndPrepare module
-                        def command = "cd /root/lib/integ_test && " +
-                            "${testEnvVars} " +
-                            "python -m integ_test.multiplication_test.CleanUpAndPrepare"
+                        // Execute CleanUpAndPrepare module with bash -c wrapper for proper shell context
+                        def command = "bash -c \"export INDEX_NAME='${params.indexName}' && " +
+                            "export NUM_SHARDS='${params.numShards}' && " +
+                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
+                            "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
+                            "export RFS_WORKERS='${params.rfsWorkers}' && " +
+                            "export STAGE='${params.stage}' && " +
+                            "export SNAPSHOT_REGION='${params.region}' && " +
+                            "export LARGE_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
+                            "export LARGE_S3_DIRECTORY_PREFIX='${params.s3DirectoryPrefix}' && " +
+                            "export CLUSTER_VERSION='${params.clusterVersion}' && " +
+                            "export ENGINE_VERSION='${params.engineVersion}' && " +
+                            "cd /root/lib/integ_test && " +
+                            "python -m integ_test.multiplication_test.CleanUpAndPrepare\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 1800, roleSessionName: 'jenkins-session') {
@@ -210,13 +217,20 @@ def call(Map config = [:]) {
                     echo "RFS Workers: ${params.rfsWorkers}"
                     
                     dir('test') {
-                        // Set environment variables for the test
-                        def testEnvVars = buildTestEnvironmentVariables(params)
-                        
-                        // Execute MultiplyDocuments module (main multiplication logic)
-                        def command = "cd /root/lib/integ_test && " +
-                            "${testEnvVars} " +
-                            "python -m integ_test.multiplication_test.MultiplyDocuments"
+                        // Execute MultiplyDocuments module with bash -c wrapper for proper shell context
+                        def command = "bash -c \"export INDEX_NAME='${params.indexName}' && " +
+                            "export NUM_SHARDS='${params.numShards}' && " +
+                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
+                            "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
+                            "export RFS_WORKERS='${params.rfsWorkers}' && " +
+                            "export STAGE='${params.stage}' && " +
+                            "export SNAPSHOT_REGION='${params.region}' && " +
+                            "export LARGE_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
+                            "export LARGE_S3_DIRECTORY_PREFIX='${params.s3DirectoryPrefix}' && " +
+                            "export CLUSTER_VERSION='${params.clusterVersion}' && " +
+                            "export ENGINE_VERSION='${params.engineVersion}' && " +
+                            "cd /root/lib/integ_test && " +
+                            "python -m integ_test.multiplication_test.MultiplyDocuments\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 10800, roleSessionName: 'jenkins-session') {
@@ -239,13 +253,20 @@ def call(Map config = [:]) {
                     echo "Target S3 Location: ${params.snapshotBucketPrefix}${params.stage}/${params.s3DirectoryPrefix}*"
                     
                     dir('test') {
-                        // Set environment variables for the test
-                        def testEnvVars = buildTestEnvironmentVariables(params)
-                        
-                        // Execute CreateFinalSnapshot module
-                        def command = "cd /root/lib/integ_test && " +
-                            "${testEnvVars} " +
-                            "python -m integ_test.multiplication_test.CreateFinalSnapshot"
+                        // Execute CreateFinalSnapshot module with bash -c wrapper for proper shell context
+                        def command = "bash -c \"export INDEX_NAME='${params.indexName}' && " +
+                            "export NUM_SHARDS='${params.numShards}' && " +
+                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
+                            "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
+                            "export RFS_WORKERS='${params.rfsWorkers}' && " +
+                            "export STAGE='${params.stage}' && " +
+                            "export SNAPSHOT_REGION='${params.region}' && " +
+                            "export LARGE_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
+                            "export LARGE_S3_DIRECTORY_PREFIX='${params.s3DirectoryPrefix}' && " +
+                            "export CLUSTER_VERSION='${params.clusterVersion}' && " +
+                            "export ENGINE_VERSION='${params.engineVersion}' && " +
+                            "cd /root/lib/integ_test && " +
+                            "python -m integ_test.multiplication_test.CreateFinalSnapshot\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
@@ -340,30 +361,4 @@ def call(Map config = [:]) {
             echo ""
         }
     }
-}
-
-
-def buildTestEnvironmentVariables(Map params) {
-    echo "Building test environment variables..."
-    
-    def envVars = [
-        "INDEX_NAME=${params.indexName}",
-        "NUM_SHARDS=${params.numShards}",
-        "DOCS_PER_BATCH=${params.docsPerBatch}",
-        "MULTIPLICATION_FACTOR=${params.multiplicationFactor}",
-        "RFS_WORKERS=${params.rfsWorkers}",
-        "STAGE=${params.stage}",
-        "SNAPSHOT_REGION=${params.region}",
-        "LARGE_SNAPSHOT_BUCKET_PREFIX=${params.snapshotBucketPrefix}",
-        "LARGE_S3_DIRECTORY_PREFIX=${params.s3DirectoryPrefix}",
-        "CLUSTER_VERSION=${params.clusterVersion}",
-        "ENGINE_VERSION=${params.engineVersion}"
-    ]
-    
-    if (params.debugMode) {
-        envVars.add("DEBUG_MODE=true")
-        echo "Environment variables: ${envVars.join(' ')}"
-    }
-    
-    return envVars.join(' ')
 }
