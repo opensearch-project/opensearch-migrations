@@ -6,6 +6,7 @@ import java.lang.reflect.Proxy;
 import java.util.HashSet;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
@@ -96,10 +97,18 @@ public class BitSetConverterTest {
             return (boolean) getMethod.invoke(bits, index);
         }
 
-        Predicate<Integer> createGetBitPredicate(Object bits) {
-            return idx ->  getBit(bits, idx);
+        @SneakyThrows
+        BiPredicate<Object, Integer> createGetBitBiPredicate() {
+            Method getMethod = bitsClass.getMethod("get", int.class);
+            return (Object _bits, Integer idx) -> {
+                try {
+                    return (boolean) getMethod.invoke(_bits, idx);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to invoke Bits#get(int)", e);
+                }
+            };
         }
-        
+
         /**
          * Creates a custom Bits implementation using dynamic proxy
          */
@@ -126,6 +135,7 @@ public class BitSetConverterTest {
          * This method encapsulates the common conversion logic to reduce duplication
          */
         @SuppressWarnings({"unchecked", "rawtypes"})
+        @SneakyThrows
         BitSetConverter.LengthDisabledBitSet convertBits(Object bits) {
             return BitSetConverter.convert(
                 bits,
@@ -133,7 +143,7 @@ public class BitSetConverterTest {
                 (Class) sparseFixedBitSetClass,
                 getBitsFromFixed,
                 getLength,
-                createGetBitPredicate(bits),
+                createGetBitBiPredicate(),
                 nextSetBitFactory
             );
         }
@@ -149,7 +159,7 @@ public class BitSetConverterTest {
                 null,  // No SparseFixedBitSet class
                 obj -> new long[0],  // Won't be used
                 getLength,
-                createGetBitPredicate(bits),
+                createGetBitBiPredicate(),
                 null  // No nextSetBit function
             );
         }

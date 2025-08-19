@@ -30,7 +30,7 @@ public class LeafReader5 implements LuceneLeafReader {
             SparseFixedBitSet.class,
             FixedBitSet::getBits,
             Bits::length,
-            idx -> bits != null && bits.get(idx),
+            Bits::get,
             sparseBits -> sparseBits::nextSetBit
         );
     }
