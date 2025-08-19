@@ -20,6 +20,15 @@ STAGE="dev"
 REGION="us-west-2"
 CLEANUP=false
 
+# One-time required service-linked-role creation for AWS accounts which do not have these roles
+create_service_linked_roles() {
+    echo "Creating required service-linked roles..."
+    aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com 2>/dev/null || echo "OpenSearch service-linked role already exists"
+    aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com 2>/dev/null || echo "ECS service-linked role already exists"
+    aws iam create-service-linked-role --aws-service-name osis.amazonaws.com 2>/dev/null || echo "OSIS service-linked role already exists"
+    echo "Service-linked roles creation completed"
+}
+
 # Check and bootstrap CDK in the region if needed
 check_and_bootstrap_region() {
     local region=$1
@@ -171,6 +180,109 @@ deploy_migration_infrastructure() {
     fi
     
     echo "Migration infrastructure deployed successfully"
+}
+
+# Configure security groups for OpenSearch Service connectivity
+configure_source_cluster_security_groups() {
+    echo "Configuring security groups for source cluster connectivity..."
+    
+    # Get migration console security group ID from SSM (stored by migration CDK)
+    local migration_sg_id=$(aws ssm get-parameter \
+        --name "/migration/${STAGE}/default/serviceSecurityGroupId" \
+        --query 'Parameter.Value' \
+        --output text \
+        --region "$REGION" 2>/dev/null)
+    
+    if [ -z "$migration_sg_id" ] || [ "$migration_sg_id" = "None" ]; then
+        echo "Warning: Could not retrieve migration console security group ID from SSM"
+        echo "Trying to find it from CloudFormation stacks..."
+        
+        # Try to get it from migration infrastructure stack outputs
+        migration_sg_id=$(aws cloudformation describe-stacks \
+            --stack-name "migration-${STAGE}-migration-infrastructure" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?contains(OutputKey, 'ServiceSecurityGroup')].OutputValue" \
+            --output text 2>/dev/null)
+    fi
+    
+    if [ -z "$migration_sg_id" ] || [ "$migration_sg_id" = "None" ]; then
+        echo "Warning: Could not find migration console security group ID"
+        echo "Security group integration will be skipped"
+        return 1
+    fi
+    
+    echo "Found migration console security group: $migration_sg_id"
+    
+    # Try to get source cluster security group ID from SSM (stored by source cluster setup)
+    local source_sg_id=$(aws ssm get-parameter \
+        --name "/migration/${STAGE}/default/sourceSecurityGroupId" \
+        --query 'Parameter.Value' \
+        --output text \
+        --region "$REGION" 2>/dev/null)
+    
+    if [ -z "$source_sg_id" ] || [ "$source_sg_id" = "None" ]; then
+        echo "Warning: Could not retrieve source cluster security group ID from SSM"
+        echo "Trying to discover OpenSearch Service security group dynamically..."
+        
+        # Try to find OpenSearch Service security groups in the VPC
+        source_sg_id=$(aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=*opensearch*" \
+            --query 'SecurityGroups[0].GroupId' \
+            --output text \
+            --region "$REGION" 2>/dev/null)
+        
+        if [ -z "$source_sg_id" ] || [ "$source_sg_id" = "None" ]; then
+            # Try alternative naming patterns
+            source_sg_id=$(aws ec2 describe-security-groups \
+                --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=*cluster*" \
+                --query 'SecurityGroups[0].GroupId' \
+                --output text \
+                --region "$REGION" 2>/dev/null)
+        fi
+    fi
+    
+    if [ -z "$source_sg_id" ] || [ "$source_sg_id" = "None" ]; then
+        echo "Warning: Could not find source cluster security group ID"
+        echo "Manual security group configuration may be required"
+        return 1
+    fi
+    
+    echo "Found source cluster security group: $source_sg_id"
+    
+    # Add inbound rule to source cluster security group to allow migration console access
+    echo "Adding security group rule to allow migration console access to source cluster..."
+    
+    # Check if rule already exists
+    local existing_rule=$(aws ec2 describe-security-groups \
+        --group-ids "$source_sg_id" \
+        --query "SecurityGroups[0].IpPermissions[?FromPort==\`443\` && ToPort==\`443\` && UserIdGroupPairs[?GroupId==\`${migration_sg_id}\`]]" \
+        --output text \
+        --region "$REGION" 2>/dev/null)
+    
+    if [ -n "$existing_rule" ] && [ "$existing_rule" != "None" ]; then
+        echo "Security group rule already exists, skipping creation"
+    else
+        # Add the security group rule
+        aws ec2 authorize-security-group-ingress \
+            --group-id "$source_sg_id" \
+            --protocol tcp \
+            --port 443 \
+            --source-group "$migration_sg_id" \
+            --region "$REGION" 2>/dev/null || echo "Warning: Failed to add security group rule (may already exist)"
+        
+        echo "Security group rule added successfully"
+    fi
+    
+    # Store the security group IDs in SSM for future reference
+    aws ssm put-parameter \
+        --name "/migration/${STAGE}/default/configuredSourceSecurityGroupId" \
+        --value "$source_sg_id" \
+        --type "String" \
+        --overwrite \
+        --region "$REGION" || echo "Warning: Failed to store configured source security group ID in SSM"
+    
+    echo "Security group configuration completed"
+    echo "Migration console ($migration_sg_id) can now access source cluster ($source_sg_id) on port 443"
 }
 
 # Verify migration console connectivity
@@ -330,11 +442,13 @@ echo "Stage: $STAGE"
 echo "Region: $REGION"
 
 # Execute deployment steps
+create_service_linked_roles
 generate_migration_context
 build_docker_images
 install_cdk_dependencies
 check_and_bootstrap_region "$REGION"
 deploy_migration_infrastructure
+configure_source_cluster_security_groups
 verify_migration_console
 cleanup_temp_files
 
