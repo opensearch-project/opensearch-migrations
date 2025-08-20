@@ -5,22 +5,24 @@ import unittest
 from console_link.cli import Context
 from integ_test.multiplication_test.MultiplicationTestUtils import (
     run_console_command,
-    get_target_document_count_for_index
+    get_target_document_count_for_index,
+    get_environment_values,
+    BACKFILL_POLL_INTERVAL,
+    STABILITY_CHECK_INTERVAL,
+    STABILITY_CHECK_COUNT
 )
-from integ_test.multiplication_test import JenkinsParamConstants as constants
+
+# Get values from environment variables with defaults
+env_values = get_environment_values()
 
 # Override constants with environment variables if present (Jenkins parameter injection)
-CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', constants.CONFIG_FILE_PATH)
-INDEX_NAME = os.getenv('INDEX_NAME', constants.INDEX_NAME)
-INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', str(constants.INGESTED_DOC_COUNT)))
-INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', str(constants.INDEX_SHARD_COUNT)))
-BACKFILL_TIMEOUT_MINUTES = constants.BACKFILL_TIMEOUT_MINUTES  # This can stay as constant
-BACKFILL_POLL_INTERVAL = constants.BACKFILL_POLL_INTERVAL  # This can stay as constant
-STABILITY_CHECK_COUNT = constants.STABILITY_CHECK_COUNT  # This can stay as constant
-STABILITY_CHECK_INTERVAL = constants.STABILITY_CHECK_INTERVAL  # This can stay as constant
-MULTIPLICATION_FACTOR_WITH_ORIGINAL = int(os.getenv(
-    'MULTIPLICATION_FACTOR', str(constants.MULTIPLICATION_FACTOR_WITH_ORIGINAL)))
-RFS_WORKER_COUNT = int(os.getenv('RFS_WORKERS', str(constants.RFS_WORKER_COUNT)))
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/config/migration_services.yaml')
+INDEX_NAME = os.getenv('INDEX_NAME', 'basic_index')
+INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', '50'))
+INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', '10'))
+BACKFILL_TIMEOUT_MINUTES = int(float(os.getenv('BACKFILL_TIMEOUT_HOURS', '0.5')) * 60)
+MULTIPLICATION_FACTOR = env_values['multiplication_factor']
+RFS_WORKER_COUNT = int(os.getenv('RFS_WORKERS', '5'))
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class ProgressTracker:
         self.start_time = time.time()
         self.previous_count = 0
         self.previous_time = self.start_time
-        self.migration_rates = []  # Store recent rates for smoothing
+        self.migration_rates = []
         
     def update(self, current_count):
         """Update progress and calculate metrics"""
@@ -109,29 +111,29 @@ class MultiplyDocuments(unittest.TestCase):
         logger.info("Starting document multiplication test")
         logger.info(f"Expected {cls.INGESTED_DOC_COUNT} documents with {cls.INDEX_SHARD_COUNT} shards")
 
-    def wait_for_backfill_completion_on_index(self, INDEX_NAME, EXPECTED_COUNT,
-                                              TIMEOUT_MINUTES=BACKFILL_TIMEOUT_MINUTES):
+    def wait_for_backfill_completion_on_index(self, index_name, expected_count,
+                                              timeout_minutes=BACKFILL_TIMEOUT_MINUTES):
         """
         Poll specific index document count until expected count is reached.
         Then verify stability with additional checks.
         """
-        TIMEOUT_SECONDS = TIMEOUT_MINUTES * 60
-        START_TIME = time.time()
+        timeout_seconds = timeout_minutes * 60
+        start_time = time.time()
         
         logger.info("Starting backfill monitoring: %s (target: %s documents, timeout: %s minutes)",
-                    INDEX_NAME, EXPECTED_COUNT, TIMEOUT_MINUTES)
+                    index_name, expected_count, timeout_minutes)
         
         # Initialize progress tracker
-        progress_tracker = ProgressTracker(EXPECTED_COUNT)
+        progress_tracker = ProgressTracker(expected_count)
         
         # Phase 1: Wait for expected document count
-        logger.info(f"Migration Progress: 0/{EXPECTED_COUNT} documents (0.0%) | Starting backfill monitoring...")
+        logger.info(f"Migration Progress: 0/{expected_count} documents (0.0%) | Starting backfill monitoring...")
         
-        while time.time() - START_TIME < TIMEOUT_SECONDS:
-            ACTUAL_COUNT = get_target_document_count_for_index(INDEX_NAME)
+        while time.time() - start_time < timeout_seconds:
+            actual_count = get_target_document_count_for_index(index_name)
             
             # Update progress and get metrics for logs
-            metrics = progress_tracker.update(ACTUAL_COUNT)
+            metrics = progress_tracker.update(actual_count)
             if metrics['current_count'] == 0:
                 logger.info(
                     f"Migration Progress: {metrics['current_count']}/{metrics['expected_count']} "
@@ -154,21 +156,21 @@ class MultiplyDocuments(unittest.TestCase):
                             f"Elapsed: {ProgressTracker.format_duration(metrics['elapsed_total'])} | "
                             f"Rate: calculating...")
             
-            if ACTUAL_COUNT == EXPECTED_COUNT:
-                total_time = time.time() - START_TIME
-                final_rate = EXPECTED_COUNT / total_time if total_time > 0 else 0
-                logger.info(f"Target reached: {ACTUAL_COUNT}/{EXPECTED_COUNT} documents (100.0%) | "
+            if actual_count == expected_count:
+                total_time = time.time() - start_time
+                final_rate = expected_count / total_time if total_time > 0 else 0
+                logger.info(f"Target reached: {actual_count}/{expected_count} documents (100.0%) | "
                             f"Total time: {ProgressTracker.format_duration(total_time)} | "
                             f"Avg rate: {final_rate:.1f} docs/sec")
                 break
-            elif ACTUAL_COUNT > EXPECTED_COUNT:
-                self.fail(f"Document count exceeded expected: {ACTUAL_COUNT} > {EXPECTED_COUNT}")
+            elif actual_count > expected_count:
+                self.fail(f"Document count exceeded expected: {actual_count} > {expected_count}")
             
             time.sleep(BACKFILL_POLL_INTERVAL)
         else:
-            FINAL_COUNT = get_target_document_count_for_index(INDEX_NAME)
-            self.fail(f"Backfill timed out after {TIMEOUT_MINUTES} minutes. "
-                      f"Final count: {FINAL_COUNT}/{EXPECTED_COUNT}")
+            final_count = get_target_document_count_for_index(index_name)
+            self.fail(f"Backfill timed out after {timeout_minutes} minutes. "
+                      f"Final count: {final_count}/{expected_count}")
         
         # Phase 2: Verify stability with enhanced logging
         stability_duration = STABILITY_CHECK_COUNT * STABILITY_CHECK_INTERVAL
@@ -177,16 +179,16 @@ class MultiplyDocuments(unittest.TestCase):
         
         for i in range(STABILITY_CHECK_COUNT):
             time.sleep(STABILITY_CHECK_INTERVAL)
-            ACTUAL_COUNT = get_target_document_count_for_index(INDEX_NAME)
+            actual_count = get_target_document_count_for_index(index_name)
             
-            if ACTUAL_COUNT != EXPECTED_COUNT:
-                self.fail(f"Document count became unstable: {ACTUAL_COUNT} != {EXPECTED_COUNT} "
+            if actual_count != expected_count:
+                self.fail(f"Document count became unstable: {actual_count} != {expected_count} "
                           f"(check {i + 1}/{STABILITY_CHECK_COUNT})")
             
             logger.info(f"Stability Check {i + 1}/{STABILITY_CHECK_COUNT}: "
-                        f"Count = {ACTUAL_COUNT} (STABLE)")
+                        f"Count = {actual_count} (STABLE)")
         
-        logger.info(f"Document count verified as stable: {EXPECTED_COUNT} documents")
+        logger.info(f"Document count verified as stable: {expected_count} documents")
 
     def test_multiply_documents(self):
         """
@@ -205,14 +207,14 @@ class MultiplyDocuments(unittest.TestCase):
         
         # Step 2: Wait for backfill completion
         logger.info("Phase 2, Step 2: Waiting for backfill completion")
-        EXPECTED_COUNT = self.INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR_WITH_ORIGINAL
-        logger.info(f"Expecting {EXPECTED_COUNT} documents after transformation "
-                    f"({self.INGESTED_DOC_COUNT} ingested × {MULTIPLICATION_FACTOR_WITH_ORIGINAL} multiplication)")
+        expected_count = self.INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR
+        logger.info(f"Expecting {expected_count} documents after transformation "
+                    f"({self.INGESTED_DOC_COUNT} ingested × {MULTIPLICATION_FACTOR} multiplication)")
         
         self.wait_for_backfill_completion_on_index(
-            INDEX_NAME=INDEX_NAME,
-            EXPECTED_COUNT=EXPECTED_COUNT,
-            TIMEOUT_MINUTES=BACKFILL_TIMEOUT_MINUTES
+            index_name=INDEX_NAME,
+            expected_count=expected_count,
+            timeout_minutes=BACKFILL_TIMEOUT_MINUTES
         )
         
         # Step 3: Stop backfill
@@ -221,14 +223,13 @@ class MultiplyDocuments(unittest.TestCase):
         
         # Step 4: Final verification
         logger.info("Phase 2, Step 4: Final verification")
-        FINAL_COUNT = get_target_document_count_for_index(INDEX_NAME)
-        self.assertEqual(FINAL_COUNT, EXPECTED_COUNT,
-                         f"Final document count mismatch in {INDEX_NAME}: {FINAL_COUNT} != {EXPECTED_COUNT}")
+        final_count = get_target_document_count_for_index(INDEX_NAME)
+        self.assertEqual(final_count, expected_count,
+                         f"Final document count mismatch in {INDEX_NAME}: {final_count} != {expected_count}")
         
         logger.info("=== Document Multiplication Phase Completed Successfully! ===")
         logger.info(f"Successfully migrated {self.INGESTED_DOC_COUNT} documents to '{INDEX_NAME}' "
-                    f"with {MULTIPLICATION_FACTOR_WITH_ORIGINAL}x multiplication (total: {FINAL_COUNT} documents)")
-        logger.info("Ready for serving phase (large snapshot creation)")
+                    f"with {MULTIPLICATION_FACTOR}x multiplication (total: {final_count} documents)")
 
     @classmethod
     def tearDownClass(cls):

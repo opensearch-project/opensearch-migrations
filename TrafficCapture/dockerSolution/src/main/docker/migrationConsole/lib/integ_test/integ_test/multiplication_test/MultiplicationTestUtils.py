@@ -10,20 +10,104 @@ import shutil
 import subprocess
 import yaml
 from integ_test.default_operations import DefaultOperationsLibrary
-from integ_test.multiplication_test.JenkinsParamConstants import (
-    COMMAND_TIMEOUT_SECONDS,
-    S3_BUCKET_URI_PREFIX,
-    S3_BUCKET_SUFFIX,
-    SNAPSHOT_REPO_NAME,
-    LARGE_SNAPSHOT_BUCKET_PREFIX,
-    LARGE_SNAPSHOT_BUCKET_SUFFIX,
-    LARGE_S3_BASE_PATH,
-    TRANSFORMATION_DIRECTORY,
-    MULTIPLICATION_FACTOR_WITH_ORIGINAL,
-    TRANSFORMATION_FILE_PATH
-)
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CONSTANTS (True constants that don't come from config or env vars)
+# =============================================================================
+
+# Timeout and Polling Configurations
+COMMAND_TIMEOUT_SECONDS = 300
+SNAPSHOT_POLL_INTERVAL = 3
+BACKFILL_POLL_INTERVAL = 5
+STABILITY_CHECK_INTERVAL = 15
+STABILITY_CHECK_COUNT = 4
+
+# Fixed Identifiers for this test
+UNIQUE_ID = "large_snapshot_test"
+
+# File Paths
+TEMP_CONFIG_FILE_PATH = "/config/migration_large_snapshot.yaml"
+TRANSFORMATION_DIRECTORY = "/shared-logs-output/test-transformations"
+
+# Template Objects
+INGEST_DOC = {"title": "Large Snapshot Migration Test Document"}
+
+
+# =============================================================================
+# CONFIGURATION HELPERS
+# =============================================================================
+
+def get_config_values(config_file_path=None):
+    """Extract all needed values from migration services configuration."""
+    if config_file_path is None:
+        config_file_path = "/config/migration_services.yaml"
+    
+    try:
+        with open(config_file_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        snapshot_config = config.get('snapshot', {})
+        s3_config = snapshot_config.get('s3', {})
+        
+        return {
+            'snapshot_repo_name': snapshot_config.get('snapshot_repo_name', 'migration_assistant_repo'),
+            'repo_uri': s3_config.get('repo_uri', ''),
+            'role_arn': s3_config.get('role', ''),
+            'aws_region': s3_config.get('aws_region', 'us-west-2'),
+        }
+    except FileNotFoundError:
+        raise ValueError(f"Config file not found: {config_file_path}")
+    except yaml.YAMLError as e:
+        raise ValueError(f"Error parsing YAML config file: {e}")
+
+
+def get_environment_values():
+    """Get values from environment variables with defaults."""
+    return {
+        'stage': os.getenv('STAGE', 'dev'),
+        'large_snapshot_bucket_prefix': os.getenv('LARGE_SNAPSHOT_BUCKET_PREFIX', 'migrations-jenkins-snapshot-'),
+        'large_s3_directory_prefix': os.getenv('LARGE_S3_DIRECTORY_PREFIX', 'large-snapshot-'),
+        'cluster_version': os.getenv('CLUSTER_VERSION', 'es7x'),
+        'snapshot_region': os.getenv('SNAPSHOT_REGION', 'us-west-2'),
+        'multiplication_factor': int(os.getenv('MULTIPLICATION_FACTOR', '10')),
+    }
+
+
+def build_bucket_names_and_paths(account_id, env_values, config_values):
+    """Build S3 bucket names and paths using account ID and configuration."""
+    stage = env_values['stage']
+    region = env_values['snapshot_region']
+    
+    # Default RFS bucket pattern: migration-artifacts-{account_id}-{stage}-{region}
+    default_s3_bucket_uri = f"s3://migration-artifacts-{account_id}-{stage}-{region}/rfs-snapshot-repo/"
+    
+    # Large snapshot bucket pattern: migrations-jenkins-snapshot-{account_id}-{region}
+    large_snapshot_bucket_name = f"{env_values['large_snapshot_bucket_prefix']}{account_id}-{region}"
+    
+    # Large S3 directory path
+    large_s3_base_path = f"{env_values['large_s3_directory_prefix']}{env_values['cluster_version']}"
+    
+    # Large snapshot S3 URI
+    large_snapshot_uri = f"s3://{large_snapshot_bucket_name}/{large_s3_base_path}/"
+    
+    # Role ARN for large snapshot
+    large_snapshot_role_arn = f"arn:aws:iam::{account_id}:role/largesnapshotfinal"
+    
+    return {
+        'default_s3_bucket_uri': default_s3_bucket_uri,
+        'large_snapshot_bucket_name': large_snapshot_bucket_name,
+        'large_s3_base_path': large_s3_base_path,
+        'large_snapshot_uri': large_snapshot_uri,
+        'large_snapshot_role_arn': large_snapshot_role_arn,
+    }
+
+
+def get_transformation_file_path():
+    """Get the transformation file path."""
+    return f"{TRANSFORMATION_DIRECTORY}/transformation.json"
 
 
 # =============================================================================
@@ -53,34 +137,34 @@ def run_console_command(COMMAND_ARGS, TIMEOUT=COMMAND_TIMEOUT_SECONDS):
         raise TimeoutError(ERROR_MSG)
 
 
-def extract_account_id_from_config(CONFIG_FILE_PATH=None):
+def extract_account_id_from_config(config_file_path=None):
     """Extract AWS account ID from migration services configuration file."""
-    if CONFIG_FILE_PATH is None:
-        CONFIG_FILE_PATH = "/config/migration_services.yaml"
+    if config_file_path is None:
+        config_file_path = "/config/migration_services.yaml"
         
     try:
-        with open(CONFIG_FILE_PATH, 'r') as f:
-            CONFIG = yaml.safe_load(f)
+        with open(config_file_path, 'r') as f:
+            config = yaml.safe_load(f)
         
         # Extract role ARN from snapshot.s3.role
-        ROLE_ARN = CONFIG.get('snapshot', {}).get('s3', {}).get('role', '')
+        role_arn = config.get('snapshot', {}).get('s3', {}).get('role', '')
         
-        if not ROLE_ARN:
+        if not role_arn:
             raise ValueError("No role ARN found in snapshot.s3.role")
         
         # Parse account ID from ARN format: arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME
-        if ':' in ROLE_ARN:
-            ARN_PARTS = ROLE_ARN.split(':')
-            if len(ARN_PARTS) >= 5:
-                ACCOUNT_ID = ARN_PARTS[4]
-                if ACCOUNT_ID and ACCOUNT_ID.isdigit():
-                    logger.debug(f"Extracted account ID: {ACCOUNT_ID}")
-                    return ACCOUNT_ID
+        if ':' in role_arn:
+            arn_parts = role_arn.split(':')
+            if len(arn_parts) >= 5:
+                account_id = arn_parts[4]
+                if account_id and account_id.isdigit():
+                    logger.debug(f"Extracted account ID: {account_id}")
+                    return account_id
         
-        raise ValueError(f"Could not extract account ID from role ARN: {ROLE_ARN}")
+        raise ValueError(f"Could not extract account ID from role ARN: {role_arn}")
         
     except FileNotFoundError:
-        raise ValueError(f"Config file not found: {CONFIG_FILE_PATH}")
+        raise ValueError(f"Config file not found: {config_file_path}")
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML config file: {e}")
     except Exception as e:
@@ -91,33 +175,37 @@ def extract_account_id_from_config(CONFIG_FILE_PATH=None):
 # CLEANUP AND PREPARE UTILITIES
 # =============================================================================
 
-def cleanup_snapshots_and_repos(ACCOUNT_ID, TEST_STAGE, REGION):
+def cleanup_snapshots_and_repos(account_id, stage, region):
     """Clean up existing snapshots and repositories for fresh test state."""
     logger.info("Cleaning up existing snapshots and repositories")
     
-    # Build S3 bucket URI dynamically
-    S3_BUCKET_URI = f"{S3_BUCKET_URI_PREFIX}{ACCOUNT_ID}-{TEST_STAGE}-{REGION}{S3_BUCKET_SUFFIX}"
+    # Get config values
+    config_values = get_config_values()
+    snapshot_repo_name = config_values['snapshot_repo_name']
     
-    CLEANUP_COMMANDS = [
+    # Build S3 bucket URI dynamically using the standard pattern
+    s3_bucket_uri = f"s3://migration-artifacts-{account_id}-{stage}-{region}/rfs-snapshot-repo/"
+    
+    cleanup_commands = [
         ["console", "snapshot", "delete", "--acknowledge-risk"],  # Delete snapshot
         ["console", "clusters", "curl", "source_cluster", "-XDELETE",
-         f"/_snapshot/{SNAPSHOT_REPO_NAME}"],  # Delete repo
-        ["aws", "s3", "rm", S3_BUCKET_URI, "--recursive"]  # Clear S3 contents
+         f"/_snapshot/{snapshot_repo_name}"],  # Delete repo
+        ["aws", "s3", "rm", s3_bucket_uri, "--recursive"]  # Clear S3 contents
     ]
     
-    for CMD in CLEANUP_COMMANDS:
+    for cmd in cleanup_commands:
         try:
-            run_console_command(CMD)
-            logger.info(f"Cleanup succeeded: {' '.join(CMD)}")
+            run_console_command(cmd)
+            logger.info(f"Cleanup succeeded: {' '.join(cmd)}")
         except Exception:
-            logger.warning(f"Cleanup failed (expected if resource doesn't exist): {' '.join(CMD)}")
+            logger.warning(f"Cleanup failed (expected if resource doesn't exist): {' '.join(cmd)}")
 
 
-def clear_clusters(TEST_STAGE, TEST_REGION):
+def clear_clusters(stage, region):
     """Clear both source and target clusters and clean up existing snapshots."""
     # Clean up snapshots/repos first
-    ACCOUNT_ID = extract_account_id_from_config()
-    cleanup_snapshots_and_repos(ACCOUNT_ID, TEST_STAGE, TEST_REGION)
+    account_id = extract_account_id_from_config()
+    cleanup_snapshots_and_repos(account_id, stage, region)
     
     # Clear cluster indices
     run_console_command([
@@ -126,48 +214,48 @@ def clear_clusters(TEST_STAGE, TEST_REGION):
     ])
 
 
-def create_index_with_shards(INDEX_NAME, INDEX_SHARD_COUNT):
+def create_index_with_shards(index_name, index_shard_count):
     """Create index with specified number of shards."""
-    INDEX_SETTINGS = {
+    index_settings = {
         "settings": {
-            "number_of_shards": INDEX_SHARD_COUNT,
+            "number_of_shards": index_shard_count,
             "number_of_replicas": 0
         }
     }
     
     run_console_command([
         "console", "clusters", "curl", "source_cluster",
-        "-XPUT", f"/{INDEX_NAME}",
-        "-d", json.dumps(INDEX_SETTINGS),
+        "-XPUT", f"/{index_name}",
+        "-d", json.dumps(index_settings),
         "-H", "Content-Type: application/json"
     ])
     
-    logger.info(f"Index '{INDEX_NAME}' created with {INDEX_SHARD_COUNT} shards")
+    logger.info(f"Index '{index_name}' created with {index_shard_count} shards")
 
 
-def ingest_test_data(INDEX_NAME, INGESTED_DOC_COUNT, INGEST_DOC):
+def ingest_test_data(index_name, ingested_doc_count, ingest_doc):
     """Ingest test documents to source cluster using bulk API."""
-    BULK_BODY_LINES = []
-    for DOC_INDEX in range(1, INGESTED_DOC_COUNT + 1):
-        DOC_ID = str(DOC_INDEX)
+    bulk_body_lines = []
+    for doc_index in range(1, ingested_doc_count + 1):
+        doc_id = str(doc_index)
         
         # Create document from template
-        DOCUMENT = INGEST_DOC.copy()
-        DOCUMENT["doc_number"] = str(DOC_INDEX)
+        document = ingest_doc.copy()
+        document["doc_number"] = str(doc_index)
         
         # Add bulk API format: index action + document source
-        INDEX_ACTION = {"index": {"_index": INDEX_NAME, "_id": DOC_ID}}
-        BULK_BODY_LINES.append(json.dumps(INDEX_ACTION))
-        BULK_BODY_LINES.append(json.dumps(DOCUMENT))
+        index_action = {"index": {"_index": index_name, "_id": doc_id}}
+        bulk_body_lines.append(json.dumps(index_action))
+        bulk_body_lines.append(json.dumps(document))
     
     # Join with newlines and add final newline (bulk API requirement)
-    BULK_BODY = "\n".join(BULK_BODY_LINES) + "\n"
+    bulk_body = "\n".join(bulk_body_lines) + "\n"
     
     # Execute bulk request
     run_console_command([
         "console", "clusters", "curl", "source_cluster",
         "-XPOST", "/_bulk",
-        "-d", BULK_BODY,
+        "-d", bulk_body,
         "-H", "Content-Type: application/x-ndjson"
     ])
     
@@ -178,21 +266,21 @@ def ingest_test_data(INDEX_NAME, INGESTED_DOC_COUNT, INGEST_DOC):
         "console", "clusters", "curl", "source_cluster",
         "-XPOST", "/_refresh"
     ])
-    RESULT = run_console_command([
+    result = run_console_command([
         "console", "clusters", "curl", "source_cluster",
-        "-XGET", f"/{INDEX_NAME}/_count"
+        "-XGET", f"/{index_name}/_count"
     ])
     
     # Parse and validate count
-    RESPONSE_DATA = json.loads(RESULT.stdout)
-    ACTUAL_COUNT = RESPONSE_DATA.get("count", 0)
-    if ACTUAL_COUNT != INGESTED_DOC_COUNT:
-        raise RuntimeError(f"Document count mismatch: Expected {INGESTED_DOC_COUNT}, found {ACTUAL_COUNT}")
+    response_data = json.loads(result.stdout)
+    actual_count = response_data.get("count", 0)
+    if actual_count != ingested_doc_count:
+        raise RuntimeError(f"Document count mismatch: Expected {ingested_doc_count}, found {actual_count}")
     
-    logger.info(f"Successfully ingested {ACTUAL_COUNT} documents to source cluster")
+    logger.info(f"Successfully ingested {actual_count} documents to source cluster")
 
 
-def create_transformation_config():
+def create_transformation_config(multiplication_factor):
     """Create transformation file with document multiplication configuration."""
     try:
         shutil.rmtree(TRANSFORMATION_DIRECTORY)
@@ -201,8 +289,8 @@ def create_transformation_config():
         logger.info("No existing transformation files to cleanup")
     
     # Create multiplication transformation JavaScript
-    INITIALIZATION_SCRIPT = (
-        f"const MULTIPLICATION_FACTOR_WITH_ORIGINAL = {MULTIPLICATION_FACTOR_WITH_ORIGINAL}; "
+    initialization_script = (
+        f"const MULTIPLICATION_FACTOR_WITH_ORIGINAL = {multiplication_factor}; "
         "function transform(document) { "
         "if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } "
         "const indexCommandMap = document.get(\"index\"); "
@@ -229,20 +317,23 @@ def create_transformation_config():
         "(() => main)();"
     )
     
-    MULTIPLICATION_TRANSFORM = {
+    multiplication_transform = {
         "JsonJSTransformerProvider": {
-            "initializationScript": INITIALIZATION_SCRIPT,
+            "initializationScript": initialization_script,
             "bindingsObject": "{}"
         }
     }
     
     # Create transformation config
-    COMBINED_CONFIG = [MULTIPLICATION_TRANSFORM]
+    combined_config = [multiplication_transform]
+    
+    # Get transformation file path
+    transformation_file_path = get_transformation_file_path()
     
     # Save to file using default operations library
-    OPS = DefaultOperationsLibrary()
-    OPS.create_transformation_json_file(COMBINED_CONFIG, TRANSFORMATION_FILE_PATH)
-    logger.info(f"Created transformation config at {TRANSFORMATION_FILE_PATH}")
+    ops = DefaultOperationsLibrary()
+    ops.create_transformation_json_file(combined_config, transformation_file_path)
+    logger.info(f"Created transformation config at {transformation_file_path}")
 
 
 # =============================================================================
@@ -310,67 +401,70 @@ def check_and_prepare_s3_bucket(JENKINS_BUCKET_NAME, DIRECTORY_PATH, REGION):
     logger.info("S3 bucket directory preparation completed")
 
 
-def modify_temp_config_file(ACTION, CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH, **KWARGS):
+def modify_temp_config_file(action, config_file_path, temp_config_file_path, **kwargs):
     """Create or delete temporary config file for console commands."""
-    if ACTION == "create":
+    if action == "create":
         logger.info("Creating temporary config file")
         
-        # Get account ID and build dynamic values
-        ACCOUNT_ID = extract_account_id_from_config(CONFIG_FILE_PATH)
-        JENKINS_BUCKET_NAME = f"{LARGE_SNAPSHOT_BUCKET_PREFIX}{ACCOUNT_ID}{LARGE_SNAPSHOT_BUCKET_SUFFIX}"
-        LARGE_SNAPSHOT_URI = f"s3://{JENKINS_BUCKET_NAME}/{LARGE_S3_BASE_PATH}/"
-        LARGE_SNAPSHOT_ROLE_ARN = f"arn:aws:iam::{ACCOUNT_ID}:role/largesnapshotfinal"
+        # Get account ID and environment values
+        account_id = extract_account_id_from_config(config_file_path)
+        env_values = get_environment_values()
+        config_values = get_config_values(config_file_path)
+        
+        # Build bucket names and paths
+        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values)
         
         # Read and modify config
-        with open(CONFIG_FILE_PATH, 'r') as f:
-            CONFIG = yaml.safe_load(f)
+        with open(config_file_path, 'r') as f:
+            config = yaml.safe_load(f)
         
         # Update snapshot configuration with all required fields
-        CONFIG['snapshot']['snapshot_name'] = 'large-snapshot'
-        CONFIG['snapshot']['snapshot_repo_name'] = 'migrations_jenkins_repo'
-        CONFIG['snapshot']['s3']['repo_uri'] = LARGE_SNAPSHOT_URI
-        CONFIG['snapshot']['s3']['aws_region'] = 'us-west-2'
-        CONFIG['snapshot']['s3']['role'] = LARGE_SNAPSHOT_ROLE_ARN
+        config['snapshot']['snapshot_name'] = 'large-snapshot'
+        config['snapshot']['snapshot_repo_name'] = 'migrations_jenkins_repo'
+        config['snapshot']['s3']['repo_uri'] = bucket_info['large_snapshot_uri']
+        config['snapshot']['s3']['aws_region'] = env_values['snapshot_region']
+        config['snapshot']['s3']['role'] = bucket_info['large_snapshot_role_arn']
         
         # Write temporary config
-        with open(TEMP_CONFIG_FILE_PATH, 'w') as f:
-            yaml.dump(CONFIG, f, default_flow_style=False)
+        with open(temp_config_file_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
         
-        logger.info(f"Created temporary config file: {TEMP_CONFIG_FILE_PATH}")
-        logger.info(f"Large snapshot URI: {LARGE_SNAPSHOT_URI}")
+        logger.info(f"Created temporary config file: {temp_config_file_path}")
+        logger.info(f"Large snapshot URI: {bucket_info['large_snapshot_uri']}")
         logger.info("Large snapshot repository: migrations_jenkins_repo")
-        logger.info(f"Large snapshot role ARN: {LARGE_SNAPSHOT_ROLE_ARN}")
+        logger.info(f"Large snapshot role ARN: {bucket_info['large_snapshot_role_arn']}")
         
-    elif ACTION == "delete":
+    elif action == "delete":
         logger.info("Deleting temporary config file")
         try:
-            os.remove(TEMP_CONFIG_FILE_PATH)
-            logger.info(f"Deleted temporary config file: {TEMP_CONFIG_FILE_PATH}")
+            os.remove(temp_config_file_path)
+            logger.info(f"Deleted temporary config file: {temp_config_file_path}")
         except FileNotFoundError:
-            logger.info(f"Temporary config file not found: {TEMP_CONFIG_FILE_PATH}")
+            logger.info(f"Temporary config file not found: {temp_config_file_path}")
     else:
-        raise ValueError(f"Invalid action: {ACTION}. Must be 'create' or 'delete'")
+        raise ValueError(f"Invalid action: {action}. Must be 'create' or 'delete'")
 
 
-def display_final_results(LARGE_SNAPSHOT_URI, FINAL_COUNT, INGESTED_DOC_COUNT, INDEX_SHARD_COUNT):
+def display_final_results(large_snapshot_uri, final_count, ingested_doc_count,
+                          index_shard_count, multiplication_factor):
     """Display comprehensive migration test results."""
     logger.info("=== MIGRATION TEST RESULTS ===")
-    logger.info(f"Original Documents Ingested: {INGESTED_DOC_COUNT}")
-    logger.info(f"Index Configuration: {INDEX_SHARD_COUNT} shards, 0 replicas")
-    logger.info(f"Transformation Applied: {MULTIPLICATION_FACTOR_WITH_ORIGINAL}x multiplication")
+    logger.info(f"Original Documents Ingested: {ingested_doc_count}")
+    logger.info(f"Index Configuration: {index_shard_count} shards, 0 replicas")
+    logger.info(f"Transformation Applied: {multiplication_factor}x multiplication")
     
     # Final results
-    logger.info(f"Final Document Count: {FINAL_COUNT}")
-    MULTIPLICATION_SUCCESS = FINAL_COUNT == (INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR_WITH_ORIGINAL)
-    logger.info(f"Multiplication Success: {MULTIPLICATION_SUCCESS}")
+    logger.info(f"Final Document Count: {final_count}")
+    multiplication_success = final_count == (ingested_doc_count * multiplication_factor)
+    logger.info(f"Multiplication Success: {multiplication_success}")
     
     # Snapshot information
-    logger.info(f"Large Snapshot Location: {LARGE_SNAPSHOT_URI}")
+    logger.info(f"Large Snapshot Location: {large_snapshot_uri}")
     logger.info("Large Snapshot Name: 'large-snapshot'")
     logger.info("Large Snapshot Repository: 'migration_assistant_repo'")
     
     # Summary
     logger.info("=== SUMMARY ===")
-    logger.info(f"Successfully migrated {INGESTED_DOC_COUNT} → {FINAL_COUNT} documents")
-    logger.info(f"Large snapshot available at: {LARGE_SNAPSHOT_URI}")
+    logger.info(f"Successfully migrated {ingested_doc_count} → {final_count} documents")
+    logger.info(f"Large snapshot available at: {large_snapshot_uri}")
     logger.info("Migration test completed successfully!")

@@ -7,18 +7,22 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     clear_clusters,
     create_index_with_shards,
     ingest_test_data,
-    create_transformation_config
+    create_transformation_config,
+    get_environment_values,
+    INGEST_DOC
 )
-from integ_test.multiplication_test import JenkinsParamConstants as constants
 
-# Override constants with environment variables if present (Jenkins parameter injection)
-CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', constants.CONFIG_FILE_PATH)
-INDEX_NAME = os.getenv('INDEX_NAME', constants.INDEX_NAME)
-INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', str(constants.INGESTED_DOC_COUNT)))
-INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', str(constants.INDEX_SHARD_COUNT)))
-INGEST_DOC = constants.INGEST_DOC  # This doesn't change
-TEST_REGION = os.getenv('SNAPSHOT_REGION', constants.TEST_REGION)
-TEST_STAGE = os.getenv('STAGE', constants.TEST_STAGE)
+# Get values from environment variables with defaults
+env_values = get_environment_values()
+
+# Override with environment variables if present (Jenkins parameter injection)
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/config/migration_services.yaml')
+INDEX_NAME = os.getenv('INDEX_NAME', 'basic_index')
+INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', '50'))
+INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', '10'))
+TEST_REGION = env_values['snapshot_region']
+TEST_STAGE = env_values['stage']
+MULTIPLICATION_FACTOR = env_values['multiplication_factor']
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,7 @@ class CleanUpAndPrepare:
             return 1
         
         logger.info("Phase 1, Step 4: Creating transformation configuration")
-        create_transformation_config()
+        create_transformation_config(MULTIPLICATION_FACTOR)
         
         logger.info("Phase 1, Step 5: Creating initial RFS snapshot")
         try:
@@ -76,7 +80,6 @@ class CleanUpAndPrepare:
         logger.info("=== Preparation Phase Completed Successfully! ===")
         logger.info(f"Successfully prepared {INGESTED_DOC_COUNT} documents in '{INDEX_NAME}' "
                     f"with {INDEX_SHARD_COUNT} shards")
-        logger.info("Ready for Multiplication Test")
 
         return 0
 

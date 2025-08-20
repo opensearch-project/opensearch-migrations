@@ -7,23 +7,23 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     extract_account_id_from_config,
     check_and_prepare_s3_bucket,
     modify_temp_config_file,
-    display_final_results
+    display_final_results,
+    get_environment_values,
+    build_bucket_names_and_paths,
+    get_config_values,
+    TEMP_CONFIG_FILE_PATH
 )
-from integ_test.multiplication_test import JenkinsParamConstants as constants
 
-# Override constants with environment variables if present (Jenkins parameter injection)
-CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', constants.CONFIG_FILE_PATH)
-TEMP_CONFIG_FILE_PATH = constants.TEMP_CONFIG_FILE_PATH  # This can stay as constant
-INDEX_NAME = os.getenv('INDEX_NAME', constants.INDEX_NAME)
-INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', str(constants.INGESTED_DOC_COUNT)))
-INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', str(constants.INDEX_SHARD_COUNT)))
-TEST_REGION = os.getenv('SNAPSHOT_REGION', constants.TEST_REGION)
-LARGE_SNAPSHOT_BUCKET_PREFIX = os.getenv('LARGE_SNAPSHOT_BUCKET_PREFIX', constants.LARGE_SNAPSHOT_BUCKET_PREFIX)
-LARGE_SNAPSHOT_BUCKET_SUFFIX = constants.LARGE_SNAPSHOT_BUCKET_SUFFIX  # This can stay as constant
-LARGE_S3_BASE_PATH = (os.getenv('LARGE_S3_DIRECTORY_PREFIX', constants.LARGE_S3_BASE_PATH) +
-                      os.getenv('CLUSTER_VERSION', constants.CLUSTER_VERSION))
-MULTIPLICATION_FACTOR_WITH_ORIGINAL = int(os.getenv(
-    'MULTIPLICATION_FACTOR', str(constants.MULTIPLICATION_FACTOR_WITH_ORIGINAL)))
+# Get values from environment variables with defaults
+env_values = get_environment_values()
+
+# Override with environment variables if present (Jenkins parameter injection)
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/config/migration_services.yaml')
+INDEX_NAME = os.getenv('INDEX_NAME', 'basic_index')
+INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', '50'))
+INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', '10'))
+TEST_REGION = env_values['snapshot_region']
+MULTIPLICATION_FACTOR = env_values['multiplication_factor']
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,10 @@ class CreateFinalSnapshot:
     def take_large_snapshot_with_console(self):
         """Take large snapshot using console commands with temp config"""
         
-        # Get account ID for building S3 URI
-        ACCOUNT_ID = extract_account_id_from_config(CONFIG_FILE_PATH)
-        JENKINS_BUCKET_NAME = f"{LARGE_SNAPSHOT_BUCKET_PREFIX}{ACCOUNT_ID}{LARGE_SNAPSHOT_BUCKET_SUFFIX}"
+        # Get account ID and bucket info for building S3 URI
+        account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
+        config_values = get_config_values(CONFIG_FILE_PATH)
+        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values)
         
         # Step 1: Unregister existing repo (if exists) using temp config
         logger.info("Unregistering existing repository (if exists)")
@@ -70,20 +71,20 @@ class CreateFinalSnapshot:
         
         # Step 3: Verify snapshot completion using console command
         logger.info("Verifying large snapshot completion")
-        RESULT = run_console_command([
+        result = run_console_command([
             "console", "--config-file", TEMP_CONFIG_FILE_PATH,
             "snapshot", "status", "--deep-check"
         ])
         
         # Check if snapshot was successful
-        if "SUCCESS" in RESULT.stdout and "Percent completed: 100.00%" in RESULT.stdout:
+        if "SUCCESS" in result.stdout and "Percent completed: 100.00%" in result.stdout:
             logger.info("Large snapshot completed successfully!")
-            logger.info(f"Snapshot details:\n{RESULT.stdout}")
+            logger.info(f"Snapshot details:\n{result.stdout}")
         else:
-            logger.warning(f"Large snapshot may not be complete: {RESULT.stdout}")
+            logger.warning(f"Large snapshot may not be complete: {result.stdout}")
         
         # Return the S3 URI for final results
-        return f"s3://{JENKINS_BUCKET_NAME}/{LARGE_S3_BASE_PATH}/"
+        return bucket_info['large_snapshot_uri']
 
     def run(self):
         """
@@ -98,17 +99,22 @@ class CreateFinalSnapshot:
         """
         logger.info("=== Starting Large Snapshot Serving Phase ===")
         
-        ACCOUNT_ID = extract_account_id_from_config(CONFIG_FILE_PATH)
-        JENKINS_BUCKET_NAME = f"{LARGE_SNAPSHOT_BUCKET_PREFIX}{ACCOUNT_ID}{LARGE_SNAPSHOT_BUCKET_SUFFIX}"
+        account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
+        config_values = get_config_values(CONFIG_FILE_PATH)
+        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values)
 
         logger.info("Phase 3, Step 1: Checking and preparing large S3 bucket and directory")
-        check_and_prepare_s3_bucket(JENKINS_BUCKET_NAME, LARGE_S3_BASE_PATH, TEST_REGION)
+        check_and_prepare_s3_bucket(
+            bucket_info['large_snapshot_bucket_name'],
+            bucket_info['large_s3_base_path'],
+            TEST_REGION
+        )
 
         logger.info("Phase 3, Step 2: Creating temporary config file for console commands")
         modify_temp_config_file("create", CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH)
         
         logger.info("Phase 3, Step 3: Taking large snapshot using console commands")
-        LARGE_SNAPSHOT_URI = self.take_large_snapshot_with_console()
+        large_snapshot_uri = self.take_large_snapshot_with_console()
 
         logger.info("Phase 3, Step 4: Cleaning up repository and deleting temporary config file")
         
@@ -127,14 +133,17 @@ class CreateFinalSnapshot:
         modify_temp_config_file("delete", CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH)
         
         logger.info("Phase 3, Step 5: Displaying final results")
-        FINAL_COUNT = INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR_WITH_ORIGINAL
-        display_final_results(LARGE_SNAPSHOT_URI, FINAL_COUNT, INGESTED_DOC_COUNT, INDEX_SHARD_COUNT)
+        final_count = INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR
+        display_final_results(
+            large_snapshot_uri, final_count, INGESTED_DOC_COUNT,
+            INDEX_SHARD_COUNT, MULTIPLICATION_FACTOR
+        )
         
         logger.info("=== Large Snapshot Serving Phase Completed Successfully! ===")
         logger.info(f"Successfully created large snapshot from {INGESTED_DOC_COUNT} documents in "
-                    f"'{INDEX_NAME}' with {MULTIPLICATION_FACTOR_WITH_ORIGINAL}x multiplication "
-                    f"(total: {FINAL_COUNT} documents)")
-        logger.info(f"Large snapshot available at: {LARGE_SNAPSHOT_URI}")
+                    f"'{INDEX_NAME}' with {MULTIPLICATION_FACTOR}x multiplication "
+                    f"(total: {final_count} documents)")
+        logger.info(f"Large snapshot available at: {large_snapshot_uri}")
         
         return 0
 
