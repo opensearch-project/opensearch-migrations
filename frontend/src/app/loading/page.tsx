@@ -68,16 +68,7 @@ export default function LoadingPage() {
         variant="h1"
         actions={
           <SpaceBetween direction="horizontal" size="xs">
-            {isReady ? (
-              <Button
-                variant="primary"
-                onClick={() => router.push("/migration")}
-              >
-                Start data migration
-              </Button>
-            ) : (
-              <Button iconName="refresh"></Button>
-            )}
+            <Button iconName="refresh" disabled={isReady}></Button>
           </SpaceBetween>
         }
       >

@@ -9,7 +9,7 @@ describe('Solutions stack', () => {
         solutionName: 'test-solution',
         solutionVersion: '0.0.1',
         codeBucket: 'test-bucket',
-        createVPC: true, 
+        createVPC: true,
         env: {
             region: 'us-west-1'
         }
@@ -66,6 +66,13 @@ describe('Solutions stack', () => {
         template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1);
         template.hasResourceProperties('AWS::EC2::Instance', {
             InstanceType: "t3.large"
+        });
+        template.hasResourceProperties('AWS::EC2::LaunchTemplate', {
+            LaunchTemplateData: {
+                MetadataOptions: {
+                    HttpTokens: "required"
+                }
+            }
         });
     }
 });

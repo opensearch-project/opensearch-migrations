@@ -8,6 +8,7 @@ import io.opentelemetry.api.OpenTelemetry;
 public class BaseRootRfsContext extends RootOtelContext {
     public final RfsContexts.GenericRequestContext.MetricInstruments genericRequestInstruments;
     public final RfsContexts.CheckedIdempotentPutRequestContext.MetricInstruments getTwoStepIdempotentRequestInstruments;
+    public final RfsContexts.DeltaStreamContext.MetricInstruments deltaStreamInstruments;
 
     public BaseRootRfsContext(String scopeName, OpenTelemetry sdk, IContextTracker contextTracker) {
         super(scopeName, contextTracker, sdk);
@@ -15,5 +16,6 @@ public class BaseRootRfsContext extends RootOtelContext {
 
         genericRequestInstruments = RfsContexts.GenericRequestContext.makeMetrics(meter);
         getTwoStepIdempotentRequestInstruments = RfsContexts.CheckedIdempotentPutRequestContext.makeMetrics(meter);
+        deltaStreamInstruments = RfsContexts.DeltaStreamContext.makeMetrics(meter);
     }
 }

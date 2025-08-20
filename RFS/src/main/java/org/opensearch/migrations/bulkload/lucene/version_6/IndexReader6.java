@@ -17,12 +17,14 @@ public class IndexReader6 implements LuceneIndexReader {
 
     protected final Path indexDirectoryPath;
 
-    public LuceneDirectoryReader getReader() throws IOException {
+    public LuceneDirectoryReader getReader(String segmentsFileName) throws IOException {
         try (var directory = FSDirectory.open(indexDirectoryPath)) {
             var commits = DirectoryReader.listCommits(directory);
-            var latestCommit = commits.get(commits.size() - 1);
-
-            var reader = DirectoryReader.open(latestCommit);
+            var relevantCommit = commits.stream()
+                .filter(commit -> segmentsFileName.equals(commit.getSegmentsFileName()))
+                .findAny()
+                .orElseThrow(() -> new IOException("No such commit with segments file: " + segmentsFileName));
+            var reader = DirectoryReader.open(relevantCommit);
             return new DirectoryReader6(reader, indexDirectoryPath);
         }
     }

@@ -9,7 +9,7 @@ import Box from '@cloudscape-design/components/box';
 /**
  * A field definition for a status item that can be used to generate both loading and data states.
  */
-export interface StatusFieldDefinition<T> {
+export interface StatusFieldDefinition {
   label: string;
   /** Function that extracts and formats the value from data */
   value: React.ReactNode;
@@ -35,16 +35,16 @@ export function mapStatus(state: StepState): StatusIndicatorProps.Type {
   }
 }
 
-export function durationFromTimes(start: string | undefined | null, end: string | undefined | null) {
+export function durationFromTimes(start: Date | undefined | null, end: Date | undefined | null) {
   return start != null
     && end != null
-    && formatDuration(((new Date(end).getTime() - new Date(start).getTime()))/1000);
+    && formatDuration(((end.getTime() - start.getTime()))/1000);
 }
 
 /**
  * Generates KeyValuePairs items for loading state based on field definitions.
  */
-export function generateLoadingItems<T>(fields: StatusFieldDefinition<T>[]) {
+export function generateLoadingItems(fields: StatusFieldDefinition[]) {
   return fields.map(field => ({
     label: field.label,
     value: (
@@ -56,9 +56,9 @@ export function generateLoadingItems<T>(fields: StatusFieldDefinition<T>[]) {
 }
 
 /**
- * Generates KeyValuePairs items for data state based on field definitions and data.
+ * Generates KeyValuePairs items for data state.
  */
-export function generateDataItems<T>(fields: StatusFieldDefinition<T>[], data: T) {
+export function generateDataItems(fields: StatusFieldDefinition[]) {
   return fields.map(field => ({
     label: field.label,
     value: field.value
