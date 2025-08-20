@@ -8,4 +8,5 @@ import lombok.Getter;
 public class ReaderAndBase {
     LuceneLeafReader reader;
     int docBaseInParent;
+    BitSetConverter.FixedLengthBitSet liveDocs;
 }

@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.util.BytesRef;
@@ -109,6 +110,7 @@ public class ShardMetadataData_ES_2_4 implements ShardMetadata {
     }
 
     @Getter
+    @EqualsAndHashCode
     public static class FileInfo implements ShardFileInfo {
         private final String name;
         private final String physicalName;

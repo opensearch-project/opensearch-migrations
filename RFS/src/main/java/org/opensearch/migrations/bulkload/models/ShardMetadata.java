@@ -42,6 +42,15 @@ public interface ShardMetadata {
 
     public List<ShardFileInfo> getFiles();
 
+    default String getSegmentFileName() {
+        var segmentFiles = getFiles().stream()
+            .filter(
+                file -> file.getPhysicalName().startsWith("segments_")
+            ).toList();
+        assert segmentFiles.size() == 1 : "Expect exactly one segment file but got " + segmentFiles.size();
+        return segmentFiles.get(0).getPhysicalName();
+    }
+
     /**
     * Defines the behavior required to read a snapshot's shard metadata as JSON and convert it into a Data object
     */
