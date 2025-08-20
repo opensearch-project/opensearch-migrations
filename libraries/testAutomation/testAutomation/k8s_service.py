@@ -124,6 +124,18 @@ class K8sService:
                     print(resp.read_stderr(), end="")
         return resp
 
+    def copy_log_files(self, destination: str):
+        console_pod_id = self.get_migration_console_pod_id()
+        command_list = [
+            "sh",
+            "-c",
+            f"rm -rf {destination} && mkdir -p {destination} && "
+            f"kubectl -n ma exec {console_pod_id} -- sh -c "
+            f"'cd /shared-logs-output && tar -cf - fluentbit-*' | "
+            f"tar -xf - -C {destination}"
+        ]
+        self.run_command(command=command_list, ignore_errors=True)
+
     def delete_all_pvcs(self) -> None:
         """Deletes all PersistentVolumeClaims (PVCs) in the namespace."""
         logger.info(f"Removing all PVCs in '{self.namespace}' namespace")

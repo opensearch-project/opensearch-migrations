@@ -15,8 +15,6 @@ logger = logging.getLogger(__name__)
 
 VALID_SOURCE_VERSIONS = ["ES_5.6"]
 VALID_TARGET_VERSIONS = ["OS_2.19"]
-SOURCE_RELEASE_NAME = "source"
-TARGET_RELEASE_NAME = "target"
 MA_RELEASE_NAME = "ma"
 
 
@@ -142,6 +140,9 @@ class TestRunner:
         self.k8s_service.wait_for_all_healthy_pods()
         self.k8s_service.delete_all_pvcs()
 
+    def copy_logs(self, destination: str = "./logs") -> None:
+        self.k8s_service.copy_log_files(destination=destination)
+
     def run(self, skip_delete: bool = False) -> None:
         for source_version, target_version in self.combinations:
             try:
@@ -230,6 +231,11 @@ def parse_args() -> argparse.Namespace:
         help="If set, only perform deletion operations."
     )
     parser.add_argument(
+        "--copy-logs-only",
+        action="store_true",
+        help="If set, only copy found argo workflow logs to this local directory."
+    )
+    parser.add_argument(
         '--unique-id',
         type=str,
         default=_generate_unique_id(),
@@ -260,6 +266,8 @@ def main() -> None:
 
     if args.delete_only:
         return test_runner.cleanup_deployment()
+    elif args.copy_logs_only:
+        return test_runner.copy_logs()
     test_runner.run(skip_delete=args.skip_delete)
 
 

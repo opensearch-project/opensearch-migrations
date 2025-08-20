@@ -111,6 +111,8 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
+                            sh "pipenv run app --copy-logs-only"
+                            archiveArtifacts artifacts: 'logs/**', fingerprint: true, onlyIfSuccessful: false
                             sh "pipenv run app --delete-only"
                         }
                     }
