@@ -217,35 +217,58 @@ def create_index_with_shards(index_name, index_shard_count):
     logger.info(f"Index '{index_name}' created with {index_shard_count} shards")
 
 
+def calculate_optimal_batch_size(total_docs, max_batch_size=1000):
+    """Calculate optimal batch size to prevent bulk request errors."""
+    if total_docs <= max_batch_size:
+        return total_docs
+    
+    optimal_size = max_batch_size
+    while total_docs % optimal_size > optimal_size * 0.1 and optimal_size > 100:
+        optimal_size -= 50
+    
+    return max(optimal_size, 100)
+
+
 def ingest_test_data(index_name, ingested_doc_count, ingest_doc):
-    """Ingest test documents to source cluster using bulk API."""
-    bulk_body_lines = []
-    for doc_index in range(1, ingested_doc_count + 1):
-        doc_id = str(doc_index)
+    """Ingest test documents to source cluster using dynamic batching for scalability."""
+    total_docs = ingested_doc_count
+    batch_size = calculate_optimal_batch_size(total_docs)
+    num_batches = (total_docs + batch_size - 1) // batch_size
+    
+    logger.info(f"Ingesting {total_docs} documents in {num_batches} batches of ~{batch_size} documents each")
+    
+    total_ingested = 0
+    
+    for batch_num in range(num_batches):
+        start_doc = batch_num * batch_size + 1
+        end_doc = min((batch_num + 1) * batch_size, total_docs)
+        batch_doc_count = end_doc - start_doc + 1
         
-        # Create document from template
-        document = ingest_doc.copy()
-        document["doc_number"] = str(doc_index)
+        bulk_body_lines = []
+        for doc_index in range(start_doc, end_doc + 1):
+            doc_id = str(doc_index)
+            
+            document = ingest_doc.copy()
+            document["doc_number"] = str(doc_index)
+            
+            index_action = {"index": {"_index": index_name, "_id": doc_id}}
+            bulk_body_lines.append(json.dumps(index_action))
+            bulk_body_lines.append(json.dumps(document))
         
-        # Add bulk API format: index action + document source
-        index_action = {"index": {"_index": index_name, "_id": doc_id}}
-        bulk_body_lines.append(json.dumps(index_action))
-        bulk_body_lines.append(json.dumps(document))
+        bulk_body = "\n".join(bulk_body_lines) + "\n"
+        
+        logger.info(f"Batch {batch_num + 1}/{num_batches}: Ingesting documents "
+                    f"{start_doc}-{end_doc} ({batch_doc_count} docs)")
+        
+        run_console_command([
+            "console", "clusters", "curl", "source_cluster",
+            "-XPOST", "/_bulk",
+            "-d", bulk_body,
+            "-H", "Content-Type: application/x-ndjson"
+        ])
+        
+        total_ingested += batch_doc_count
     
-    # Join with newlines and add final newline (bulk API requirement)
-    bulk_body = "\n".join(bulk_body_lines) + "\n"
-    
-    # Execute bulk request
-    run_console_command([
-        "console", "clusters", "curl", "source_cluster",
-        "-XPOST", "/_bulk",
-        "-d", bulk_body,
-        "-H", "Content-Type: application/x-ndjson"
-    ])
-    
-    # Verify document count
-    logger.info("Verifying document ingestion")
-    # Add explicit refresh before counting to ensure accurate results
     run_console_command([
         "console", "clusters", "curl", "source_cluster",
         "-XPOST", "/_refresh"
@@ -255,13 +278,12 @@ def ingest_test_data(index_name, ingested_doc_count, ingest_doc):
         "-XGET", f"/{index_name}/_count"
     ])
     
-    # Parse and validate count
     response_data = json.loads(result.stdout)
     actual_count = response_data.get("count", 0)
     if actual_count != ingested_doc_count:
         raise RuntimeError(f"Document count mismatch: Expected {ingested_doc_count}, found {actual_count}")
     
-    logger.info(f"Successfully ingested {actual_count} documents to source cluster")
+    logger.info(f"Successfully ingested {actual_count} documents to source cluster using {num_batches} batches")
 
 
 def create_transformation_config(multiplication_factor):

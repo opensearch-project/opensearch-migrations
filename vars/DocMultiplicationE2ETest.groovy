@@ -43,7 +43,7 @@ def processParameters(Map params) {
         s3DirectoryPrefix: params.LARGE_S3_DIRECTORY_PREFIX ?: "large-snapshot-${params.CLUSTER_VERSION}-",
         numShards: params.NUM_SHARDS ?: '10',
         indexName: params.INDEX_NAME ?: 'basic_index',
-        docsPerBatch: params.DOCS_PER_BATCH ?: '50',
+        docsToIngest: params.TOTAL_DOCUMENTS_TO_INGEST ?: '50',
         multiplicationFactor: params.MULTIPLICATION_FACTOR ?: '10',
         rfsWorkers: params.RFS_WORKERS ?: '5',
         testUniqueId: testUniqueId,
@@ -152,7 +152,7 @@ def validateParameters(Map params) {
     }
     
     // Validate numeric parameters
-    def numericParams = ['numShards', 'docsPerBatch', 'multiplicationFactor', 'rfsWorkers', 'dataNodeCount']
+    def numericParams = ['numShards', 'docsToIngest', 'multiplicationFactor', 'rfsWorkers', 'dataNodeCount']
     numericParams.each { param ->
         if (params[param] != null) {
             try {
@@ -233,6 +233,7 @@ def generateSourceContext(Map params) {
     
     return sourceContext
 }
+
 
 def generateEnhancedMigrationContext(Map params) {
     echo "Generating enhanced migration infrastructure context..."

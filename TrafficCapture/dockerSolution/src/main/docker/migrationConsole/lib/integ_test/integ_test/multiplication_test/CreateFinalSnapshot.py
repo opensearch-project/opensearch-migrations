@@ -18,7 +18,7 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
 ENV_VALUES = get_environment_values()
 CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/config/migration_services.yaml')
 INDEX_NAME = os.getenv('INDEX_NAME', 'basic_index')
-INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', '50'))
+INGESTED_DOC_COUNT = int(os.getenv('TOTAL_DOCUMENTS_TO_INGEST', '50'))
 INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', '10'))
 TEST_REGION = ENV_VALUES['snapshot_region']
 MULTIPLICATION_FACTOR = ENV_VALUES['multiplication_factor']

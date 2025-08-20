@@ -180,7 +180,7 @@ def call(Map config = [:]) {
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
-                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
+                            "export TOTAL_DOCUMENTS_TO_INGEST='${params.docsToIngest}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
@@ -208,7 +208,7 @@ def call(Map config = [:]) {
                 timeout(time: 3, unit: 'HOURS') {
                     echo "Stage 7: MultiplyDocuments - Creating large dataset"
                     echo "CORE STAGE: This creates the big dataset for the snapshot"
-                    echo "Docs per Batch: ${params.docsPerBatch}"
+                    echo "Docs Ingested: ${params.docsToIngest}"
                     echo "Multiplication Factor: ${params.multiplicationFactor}"
                     echo "RFS Workers: ${params.rfsWorkers}"
                     
@@ -217,7 +217,7 @@ def call(Map config = [:]) {
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
-                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
+                            "export TOTAL_DOCUMENTS_TO_INGEST='${params.docsToIngest}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
@@ -254,7 +254,7 @@ def call(Map config = [:]) {
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
-                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
+                            "export TOTAL_DOCUMENTS_TO_INGEST='${params.docsToIngest}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
