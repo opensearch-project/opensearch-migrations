@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -14,16 +15,13 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     TEMP_CONFIG_FILE_PATH
 )
 
-# Get values from environment variables with defaults
-env_values = get_environment_values()
-
-# Override with environment variables if present (Jenkins parameter injection)
+ENV_VALUES = get_environment_values()
 CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/config/migration_services.yaml')
 INDEX_NAME = os.getenv('INDEX_NAME', 'basic_index')
 INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', '50'))
 INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', '10'))
-TEST_REGION = env_values['snapshot_region']
-MULTIPLICATION_FACTOR = env_values['multiplication_factor']
+TEST_REGION = ENV_VALUES['snapshot_region']
+MULTIPLICATION_FACTOR = ENV_VALUES['multiplication_factor']
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +47,7 @@ class CreateFinalSnapshot:
         # Get account ID and bucket info for building S3 URI
         account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
         config_values = get_config_values(CONFIG_FILE_PATH)
-        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values)
+        bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values)
         
         # Step 1: Unregister existing repo (if exists) using temp config
         logger.info("Unregistering existing repository (if exists)")
@@ -61,7 +59,47 @@ class CreateFinalSnapshot:
         except Exception:
             logger.info("No existing repo to unregister, proceeding with snapshot creation")
         
-        # Step 2: Create snapshot using temp config (console will handle repo registration automatically)
+        # Step 2: Register new repository with S3 bucket and IAM role
+        logger.info("Registering new snapshot repository with S3 bucket")
+        repo_settings = {
+            "type": "s3",
+            "settings": {
+                "bucket": bucket_info['large_snapshot_bucket_name'],
+                "base_path": bucket_info['large_s3_base_path'],
+                "region": TEST_REGION,
+                "role_arn": bucket_info['large_snapshot_role_arn']
+            }
+        }
+        
+        try:
+            run_console_command([
+                "console", "clusters", "curl", "source_cluster",
+                "-XPUT", "/_snapshot/migrations_jenkins_repo",
+                "-H", "Content-Type: application/json",
+                "-d", json.dumps(repo_settings)
+            ])
+            logger.info("Successfully registered new snapshot repository")
+            logger.info("Repository: migrations_jenkins_repo")
+            logger.info(f"S3 Bucket: {bucket_info['large_snapshot_bucket_name']}")
+            logger.info(f"Base Path: {bucket_info['large_s3_base_path']}")
+            logger.info(f"Role ARN: {bucket_info['large_snapshot_role_arn']}")
+        except Exception as e:
+            logger.error(f"Failed to register snapshot repository: {e}")
+            raise RuntimeError(f"Repository registration failed: {e}")
+        
+        # Step 3: Verify repository registration
+        logger.info("Verifying repository registration")
+        try:
+            result = run_console_command([
+                "console", "clusters", "curl", "source_cluster",
+                "-XGET", "/_snapshot/migrations_jenkins_repo"
+            ])
+            logger.info("Repository registration verified successfully")
+            logger.debug(f"Repository details: {result.stdout}")
+        except Exception as e:
+            logger.warning(f"Repository verification failed: {e}")
+        
+        # Step 4: Create snapshot using temp config
         logger.info("Creating large snapshot using console command with temp config")
         run_console_command([
             "console", "--config-file", TEMP_CONFIG_FILE_PATH,
@@ -101,7 +139,7 @@ class CreateFinalSnapshot:
         
         account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
         config_values = get_config_values(CONFIG_FILE_PATH)
-        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values)
+        bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values)
 
         logger.info("Phase 3, Step 1: Checking and preparing large S3 bucket and directory")
         check_and_prepare_s3_bucket(

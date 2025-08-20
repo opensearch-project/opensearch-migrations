@@ -12,16 +12,13 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     STABILITY_CHECK_COUNT
 )
 
-# Get values from environment variables with defaults
-env_values = get_environment_values()
-
-# Override constants with environment variables if present (Jenkins parameter injection)
+ENV_VALUES = get_environment_values()
 CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/config/migration_services.yaml')
 INDEX_NAME = os.getenv('INDEX_NAME', 'basic_index')
 INGESTED_DOC_COUNT = int(os.getenv('DOCS_PER_BATCH', '50'))
 INDEX_SHARD_COUNT = int(os.getenv('NUM_SHARDS', '10'))
 BACKFILL_TIMEOUT_MINUTES = int(float(os.getenv('BACKFILL_TIMEOUT_HOURS', '0.5')) * 60)
-MULTIPLICATION_FACTOR = env_values['multiplication_factor']
+MULTIPLICATION_FACTOR = ENV_VALUES['multiplication_factor']
 RFS_WORKER_COUNT = int(os.getenv('RFS_WORKERS', '5'))
 
 logger = logging.getLogger(__name__)

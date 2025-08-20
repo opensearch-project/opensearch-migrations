@@ -1,19 +1,12 @@
 import groovy.json.JsonOutput
 
 def call(Map params) {
-    // Main orchestrator for Document Multiplication E2E Test
-    // Processes parameters, generates contexts, and calls the core pipeline
-    
     echo "Starting Document Multiplication E2E Test"
     echo "Parameters received: ${params}"
     
-    // Process and validate parameters with enhanced version-based configuration
     def processedParams = processParameters(params)
-    
-    // Generate CDK contexts based on parameters
     def contexts = generateCDKContexts(processedParams)
     
-    // Call the core pipeline with processed parameters and contexts
     DocMultiplicationPipeline([
         params: processedParams,
         contexts: contexts,

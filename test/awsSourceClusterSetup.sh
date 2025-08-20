@@ -1,23 +1,17 @@
 #!/bin/bash
 
-# AWS Source Cluster Setup Script
-# Purpose: Deploy managed OpenSearch Service clusters using AWS Solutions CDK
-# Usage: ./awsSourceClusterSetup.sh --cluster-version ES_7.10 --stage dev --region us-west-2
-
 set -e
 
-script_abs_path=$(readlink -f "$0")
-TEST_DIR_PATH=$(dirname "$script_abs_path")
+SCRIPT_ABS_PATH=$(readlink -f "$0")
+TEST_DIR_PATH=$(dirname "$SCRIPT_ABS_PATH")
 TMP_DIR_PATH="$TEST_DIR_PATH/tmp"
 AWS_SOLUTIONS_CDK_DIR="$TMP_DIR_PATH/amazon-opensearch-service-sample-cdk"
 
-# Default values
 CLUSTER_VERSION=""
 STAGE="dev"
 REGION="us-west-2"
 CLEANUP=false
 
-# Version mapping function
 map_version_to_family() {
     case $CLUSTER_VERSION in
         "ES_5.6")
@@ -43,7 +37,6 @@ map_version_to_family() {
     esac
 }
 
-# One-time required service-linked-role creation for AWS accounts which do not have these roles
 create_service_linked_roles() {
     echo "Creating required service-linked roles..."
     aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com 2>/dev/null || echo "OpenSearch service-linked role already exists"

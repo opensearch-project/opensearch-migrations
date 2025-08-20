@@ -13,32 +13,16 @@ from integ_test.default_operations import DefaultOperationsLibrary
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# CONSTANTS (True constants that don't come from config or env vars)
-# =============================================================================
-
-# Timeout and Polling Configurations
 COMMAND_TIMEOUT_SECONDS = 300
 SNAPSHOT_POLL_INTERVAL = 3
 BACKFILL_POLL_INTERVAL = 5
 STABILITY_CHECK_INTERVAL = 15
 STABILITY_CHECK_COUNT = 4
-
-# Fixed Identifiers for this test
 UNIQUE_ID = "large_snapshot_test"
-
-# File Paths
 TEMP_CONFIG_FILE_PATH = "/config/migration_large_snapshot.yaml"
 TRANSFORMATION_DIRECTORY = "/shared-logs-output/test-transformations"
-
-# Template Objects
 INGEST_DOC = {"title": "Large Snapshot Migration Test Document"}
 
-
-# =============================================================================
-# CONFIGURATION HELPERS
-# =============================================================================
 
 def get_config_values(config_file_path=None):
     """Extract all needed values from migration services configuration."""

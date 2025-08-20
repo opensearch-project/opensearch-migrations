@@ -8,27 +8,22 @@ def call(Map config = [:]) {
             echo "Starting Document Multiplication Pipeline"
             echo "Target: Create large snapshot in S3 bucket: ${params.snapshotBucketPrefix}${params.stage}"
             
-            // Set environment variables
             env.AWS_DEFAULT_REGION = "${params.region}"
             env.STAGE = "${params.stage}"
             env.DEBUG_MODE = "${params.debugMode}"
             
-            // Stage 1: Checkout
             stage('1. Checkout') {
                 echo "Stage 1: Checking out repository"
                 echo "Repository: ${params.gitRepoUrl}"
                 echo "Branch: ${params.gitBranch}"
                 
-                // Clean workspace
                 sh 'sudo chown -R $(whoami) . || true'
                 sh 'sudo chmod -R u+w . || true'
                 
-                // Reset git if already exists
                 if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
                     sh 'git reset --hard && git clean -fd'
                 }
                 
-                // Checkout the specified branch
                 git branch: "${params.gitBranch}", url: "${params.gitRepoUrl}"
                 
                 echo "Repository checked out successfully"

@@ -1,18 +1,13 @@
 #!/bin/bash
 
-# AWS Migration Infrastructure Setup Script
-# Purpose: Deploy Migration Assistant infrastructure with dynamic context generation
-# Usage: ./awsMigrationInfraSetup.sh --source-endpoint https://... --source-version ES_7.10 --vpc-id vpc-123 --stage dev
-
 set -e
 
-script_abs_path=$(readlink -f "$0")
-TEST_DIR_PATH=$(dirname "$script_abs_path")
+SCRIPT_ABS_PATH=$(readlink -f "$0")
+TEST_DIR_PATH=$(dirname "$SCRIPT_ABS_PATH")
 ROOT_REPO_PATH=$(dirname "$TEST_DIR_PATH")
 MIGRATION_CDK_PATH="$ROOT_REPO_PATH/deployment/cdk/opensearch-service-migration"
 TMP_DIR_PATH="$TEST_DIR_PATH/tmp"
 
-# Default values
 SOURCE_ENDPOINT=""
 SOURCE_VERSION=""
 VPC_ID=""
@@ -20,7 +15,6 @@ STAGE="dev"
 REGION="us-west-2"
 CLEANUP=false
 
-# One-time required service-linked-role creation for AWS accounts which do not have these roles
 create_service_linked_roles() {
     echo "Creating required service-linked roles..."
     aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com 2>/dev/null || echo "OpenSearch service-linked role already exists"
