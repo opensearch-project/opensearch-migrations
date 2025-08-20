@@ -248,7 +248,7 @@ class ECSRFSBackfill(RFSBackfill):
 
 def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Optional[str]:
     values = get_detailed_status_obj(target_cluster, session_name)
-    return "\n".join([f"Work items {key}: {value}" for key, value in values.__dict__.items() if value is not None])
+    return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
 
 
 def _get_shard_setup_started_epoch(cluster, index_name: str) -> Optional[int]:
@@ -332,7 +332,7 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
         raise DeepStatusNotYetAvailable
 
     total_key = "total"
-    complete_key = "complete"
+    completed_key = "completed"
     incomplete_key = "incomplete"
     unclaimed_key = "unclaimed"
     in_progress_key = "in progress"
@@ -345,8 +345,8 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
     disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" + \
                  " with the queries or the working state index"
     # Check the various sums to make sure things add up correctly.
-    if values[incomplete_key] + values[complete_key] != values[total_key]:
-        logger.warning(f"Incomplete ({values[incomplete_key]}) and completed ({values[complete_key]}) shards do not "
+    if values[incomplete_key] + values[completed_key] != values[total_key]:
+        logger.warning(f"Incomplete ({values[incomplete_key]}) and completed ({values[completed_key]}) shards do not "
                        f"sum to the total ({values[total_key]}) shards." + disclaimer)
     if values[unclaimed_key] + values[in_progress_key] != values[incomplete_key]:
         logger.warning(f"Unclaimed ({values[unclaimed_key]}) and in progress ({values[in_progress_key]}) shards do not"
@@ -354,7 +354,7 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
 
     counts = ShardStatusCounts(
         total=values.get(total_key, 0) or 0,
-        completed=values.get(complete_key, 0) or 0,
+        completed=values.get(completed_key, 0) or 0,
         incomplete=values.get(incomplete_key, 0) or 0,
         in_progress=values.get(in_progress_key, 0) or 0,
         unclaimed=values.get(unclaimed_key, 0) or 0,
@@ -403,27 +403,42 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
     return finished_iso, percentage_completed, eta_ms, status
 
 
+EXTRACT_UNIQUE_INDEX_SHARD_SCRIPT = (
+    "def id = doc['_id'].value;"
+    "int a = id.indexOf('__');"
+    "int b = id.indexOf('__', a + 2);"
+    "if (a > -1 && b > -1) { return id.substring(0, a) + '__' + id.substring(a + 2, b); }"
+)
+
+
+def with_uniques(filter_query):
+    return {
+        "size": 0,
+        "query": filter_query,
+        "aggs": {
+            "unique_pair_count": {"cardinality": {"script": {"lang": "painless", "source":
+                                                             EXTRACT_UNIQUE_INDEX_SHARD_SCRIPT}}}
+        },
+    }
+
+
 def generate_status_queries():
     current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
-    incomplete_query = {"query": {
-        "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}
-    }}
-    completed_query = {"query": {
-        "bool": {"must": [{"exists": {"field": "completedAt"}}]}
-    }}
-    total_query = {"query": {"match_all": {}}}
-    in_progress_query = {"query": {
-        "bool": {"must": [
-            {"range": {"expiration": {"gte": current_epoch_seconds}}},
-            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-        ]}
-    }}
-    unclaimed_query = {"query": {
-        "bool": {"must": [
-            {"range": {"expiration": {"lt": current_epoch_seconds}}},
-            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-        ]}
-    }}
+    incomplete_query = with_uniques({"bool": {"must_not": [{"exists": {"field": "completedAt"}},
+                                                           {"match": {"_id": "shard_setup"}}]}})
+    completed_query = with_uniques({"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                                             "must_not": [{"match": {"_id": "shard_setup"}}]}})
+    total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}}]}})
+    in_progress_query = with_uniques({"bool": {"must": [
+        {"range": {"expiration": {"gte": current_epoch_seconds}}},
+        {"bool": {"must_not": [{"exists": {"field": "completedAt"}},
+                               {"match": {"_id": "shard_setup"}}]}}
+    ]}})
+    unclaimed_query = with_uniques({"bool": {"must": [
+        {"range": {"expiration": {"lt": current_epoch_seconds}}},
+        {"bool": {"must_not": [{"exists": {"field": "completedAt"}},
+                               {"match": {"_id": "shard_setup"}}]}}
+    ]}})
     queries = {
         "total": total_query,
         "completed": completed_query,
