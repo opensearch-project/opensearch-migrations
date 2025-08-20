@@ -57,11 +57,12 @@ def call(Map config = [:]) {
                     echo "Region: ${params.region}"
                     
                     dir('test') {
-                        // Write source context to file
-                        writeJSON file: 'sourceJenkinsContext.json', json: contexts.source
+                        // Write source context to file in tmp directory for the setup script
+                        sh 'mkdir -p tmp'
+                        writeJSON file: 'tmp/sourceContext.json', json: contexts.source
                         
                         if (params.debugMode) {
-                            sh "echo 'Source Context:' && cat sourceJenkinsContext.json"
+                            sh "echo 'Source Context:' && cat tmp/sourceContext.json"
                         }
                         
                         // Use the new decoupled source cluster setup script and capture output

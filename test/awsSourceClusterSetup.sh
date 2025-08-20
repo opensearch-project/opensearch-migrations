@@ -85,11 +85,16 @@ generate_source_context() {
     local cluster_id="${VERSION_FAMILY}"
     local domain_name="source-${VERSION_FAMILY}-jenkins-test"
     
-    # This function now only generates a minimal context
-    # The actual cluster specifications come from the Groovy pipeline context
-    echo "Source context will be provided by Jenkins pipeline"
-    echo "Cluster ID: ${cluster_id}"
-    echo "Domain Name: ${domain_name}"
+    # Check if source context file exists (provided by Jenkins pipeline)
+    if [ -f "$TMP_DIR_PATH/sourceContext.json" ]; then
+        echo "Source context provided by Jenkins pipeline"
+        echo "Cluster ID: ${cluster_id}"
+        echo "Domain Name: ${domain_name}"
+    else
+        echo "Warning: Source context file not found at $TMP_DIR_PATH/sourceContext.json"
+        echo "This may indicate a pipeline configuration issue"
+        exit 1
+    fi
 }
 
 # Clone AWS Solutions CDK repository
@@ -122,8 +127,26 @@ deploy_source_cluster() {
     
     cd "$AWS_SOLUTIONS_CDK_DIR"
     
+    # Verify source context file exists before copying
+    if [ ! -f "$TMP_DIR_PATH/sourceContext.json" ]; then
+        echo "Error: Source context file not found at $TMP_DIR_PATH/sourceContext.json"
+        echo "Expected file to be created by Jenkins pipeline"
+        cleanup_temp_directory
+        exit 1
+    fi
+    
     # Copy context file to CDK directory
+    echo "Copying source context to CDK directory..."
     cp "$TMP_DIR_PATH/sourceContext.json" "./cdk.context.json"
+    
+    # Verify the copy was successful
+    if [ ! -f "./cdk.context.json" ]; then
+        echo "Error: Failed to copy source context to CDK directory"
+        cleanup_temp_directory
+        exit 1
+    fi
+    
+    echo "Source context copied successfully"
     
     # Deploy the CDK stacks
     cdk deploy "*" --require-approval never --concurrency 3
