@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 class CleanUpAndPrepare:
     """
-    Phase : Clean up and Preparation
+    Part 1 : Clean up and Preparation
     
     - clear_clusters()
         - cleanup_snapshots_and_repos()
@@ -43,38 +43,38 @@ class CleanUpAndPrepare:
 
     def run(self):
         """
-        Main method that performs the preparation phase of the migration workflow.
+        Main method that performs the preparation part of the migration workflow.
         Assumptions:
             - Clusters and console are connected successfully.
             - Source and target cluster config is exactly the same in `cdk.context.json`.
             - User has performed a CDK deployment.
         """
-        logger.info("=== Starting Large Snapshot Preparation Phase ===")
+        logger.info("=== Starting Large Snapshot Preparation Part ===")
         
-        logger.info("Phase 1, Step 1: Clearing source and target clusters")
+        logger.info("Step 1: Clearing source and target clusters")
         clear_clusters(TEST_STAGE, TEST_REGION)
         
-        logger.info(f"Phase 1, Step 2: Creating index '{INDEX_NAME}' with {INDEX_SHARD_COUNT} shards")
+        logger.info(f"Step 2: Creating index '{INDEX_NAME}' with {INDEX_SHARD_COUNT} shards")
         create_index_with_shards(INDEX_NAME, INDEX_SHARD_COUNT)
         
-        logger.info(f"Phase 1, Step 3: Ingesting {INGESTED_DOC_COUNT} test documents to source cluster")
+        logger.info(f"Step 3: Ingesting {INGESTED_DOC_COUNT} test documents to source cluster")
         try:
             ingest_test_data(INDEX_NAME, INGESTED_DOC_COUNT, INGEST_DOC)
         except Exception as e:
             logger.error(f"Data ingestion failed: {e}")
             return 1
         
-        logger.info("Phase 1, Step 4: Creating transformation configuration")
+        logger.info("Step 4: Creating transformation configuration")
         create_transformation_config(MULTIPLICATION_FACTOR)
         
-        logger.info("Phase 1, Step 5: Creating initial RFS snapshot")
+        logger.info("Step 5: Creating initial RFS snapshot")
         try:
             run_console_command(["console", "snapshot", "create"])
         except Exception as e:
             logger.error(f"Initial RFS snapshot creation failed: {e}")
             return 1
    
-        logger.info("=== Preparation Phase Completed Successfully! ===")
+        logger.info("=== Preparation Part Completed Successfully! ===")
         logger.info(f"Successfully prepared {INGESTED_DOC_COUNT} documents in '{INDEX_NAME}' "
                     f"with {INDEX_SHARD_COUNT} shards")
 
