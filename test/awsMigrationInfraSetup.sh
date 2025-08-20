@@ -207,32 +207,23 @@ configure_source_cluster_security_groups() {
     
     echo "Found migration console security group: $migration_sg_id"
     
-    # Try to get source cluster security group ID from SSM (stored by source cluster setup)
-    local source_sg_id=$(aws ssm get-parameter \
-        --name "/migration/${STAGE}/default/sourceSecurityGroupId" \
-        --query 'Parameter.Value' \
+    # Discover OpenSearch Service security group dynamically in the VPC
+    echo "Discovering OpenSearch Service security group in VPC: ${VPC_ID}..."
+    
+    # Try to find OpenSearch Service security groups in the VPC
+    local source_sg_id=$(aws ec2 describe-security-groups \
+        --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=*opensearch*" \
+        --query 'SecurityGroups[0].GroupId' \
         --output text \
         --region "$REGION" 2>/dev/null)
     
     if [ -z "$source_sg_id" ] || [ "$source_sg_id" = "None" ]; then
-        echo "Warning: Could not retrieve source cluster security group ID from SSM"
-        echo "Trying to discover OpenSearch Service security group dynamically..."
-        
-        # Try to find OpenSearch Service security groups in the VPC
+        # Try alternative naming patterns
         source_sg_id=$(aws ec2 describe-security-groups \
-            --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=*opensearch*" \
+            --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=*cluster*" \
             --query 'SecurityGroups[0].GroupId' \
             --output text \
             --region "$REGION" 2>/dev/null)
-        
-        if [ -z "$source_sg_id" ] || [ "$source_sg_id" = "None" ]; then
-            # Try alternative naming patterns
-            source_sg_id=$(aws ec2 describe-security-groups \
-                --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=*cluster*" \
-                --query 'SecurityGroups[0].GroupId' \
-                --output text \
-                --region "$REGION" 2>/dev/null)
-        fi
     fi
     
     if [ -z "$source_sg_id" ] || [ "$source_sg_id" = "None" ]; then

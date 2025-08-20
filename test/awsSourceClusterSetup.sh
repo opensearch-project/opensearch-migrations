@@ -236,33 +236,9 @@ extract_cluster_info() {
         echo "Found OpenSearch Security Group ID: $opensearch_sg_id"
     fi
     
-    # Store source cluster information in SSM Parameter Store for migration infrastructure to use
-    echo "Storing source cluster information in SSM Parameter Store..."
-    
-    aws ssm put-parameter \
-        --name "/migration/${STAGE}/default/sourceClusterEndpoint" \
-        --value "https://$cluster_endpoint" \
-        --type "String" \
-        --overwrite \
-        --region "$REGION" || echo "Warning: Failed to store source cluster endpoint in SSM"
-    
-    aws ssm put-parameter \
-        --name "/migration/${STAGE}/default/sourceVpcId" \
-        --value "$vpc_id" \
-        --type "String" \
-        --overwrite \
-        --region "$REGION" || echo "Warning: Failed to store VPC ID in SSM"
-    
-    if [ -n "$opensearch_sg_id" ] && [ "$opensearch_sg_id" != "None" ]; then
-        aws ssm put-parameter \
-            --name "/migration/${STAGE}/default/sourceSecurityGroupId" \
-            --value "$opensearch_sg_id" \
-            --type "String" \
-            --overwrite \
-            --region "$REGION" || echo "Warning: Failed to store security group ID in SSM"
-    fi
-    
-    echo "SSM parameters stored successfully"
+    # Note: SSM parameters are now managed by the Migration Infrastructure CDK
+    # The CDK will read the source cluster information from the context provided
+    echo "Source cluster information will be managed by Migration Infrastructure CDK"
     
     # Output cluster information
     echo "=== SOURCE CLUSTER INFORMATION ==="
