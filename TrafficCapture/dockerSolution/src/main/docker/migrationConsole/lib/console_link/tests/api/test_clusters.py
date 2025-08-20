@@ -1,184 +1,193 @@
 import pytest
-from unittest.mock import Mock
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
 
-from console_link.api.clusters import (
-    convert_cluster_to_api_model, NoAuth, BasicAuth, SigV4Auth, 
-    ClusterInfo, Version, Flavor
-)
+from console_link.api.main import app
 from console_link.models.cluster import Cluster, AuthMethod
+from console_link.models.session import Session
+
+client = TestClient(app)
 
 
-class TestConvertClusterToApiModel:
-    def test_convert_none_cluster_raises_exception(self):
-        """Test that None cluster raises an exception."""
-        # Note: This is deliberately passing None to test exception handling
-        with pytest.raises(Exception):
-            # mypy/pylance will complain about this, but it's intentional for the test
-            convert_cluster_to_api_model(None)  # type: ignore
+@pytest.fixture
+def mock_http_safe_find_session():
+    """Fixture to mock the http_safe_find_session function from sessions module"""
+    with patch("console_link.api.clusters.http_safe_find_session") as mock_find_session:
+        yield mock_find_session
 
-    def test_convert_cluster_with_no_auth(self):
-        """Test converting a cluster with no authentication."""
-        # Create a mock cluster with no auth
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "http://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.NO_AUTH
-        mock_cluster.auth_details = None
-        mock_cluster.allow_insecure = True
-        mock_cluster.version = None
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
+@pytest.fixture
+def example_session_with_clusters():
+    """Create an example session with both source and target clusters for testing"""
+    session = MagicMock(spec=Session)
+    session.env = MagicMock()
+    
+    # Mock source cluster with no_auth
+    source_cluster = MagicMock(spec=Cluster)
+    source_cluster.endpoint = "http://source-cluster:9200"
+    source_cluster.auth_type = AuthMethod.NO_AUTH
+    source_cluster.auth_details = None
+    source_cluster.allow_insecure = True
+    source_cluster.version = "2.7.0"
+    
+    # Mock target cluster with basic_auth
+    target_cluster = MagicMock(spec=Cluster)
+    target_cluster.endpoint = "https://target-cluster:9200"
+    target_cluster.auth_type = AuthMethod.BASIC_AUTH
+    target_cluster.auth_details = {"username": "admin", "password": "admin"}
+    target_cluster.allow_insecure = False
+    target_cluster.version = "2.9.0"
+    target_cluster.get_basic_auth_details.return_value = MagicMock(username="admin", password="admin")
+    
+    session.env.source_cluster = source_cluster
+    session.env.target_cluster = target_cluster
+    
+    return session
 
-        # Verify the result
-        assert isinstance(result, ClusterInfo)
-        assert result.endpoint == "http://example.com:9200"
-        assert result.protocol == "http"
-        assert result.enable_tls_verification is False
-        assert isinstance(result.auth, NoAuth)
-        assert result.auth.type == "no_auth"
-        assert result.version_override is None
 
-    def test_convert_cluster_with_https_protocol(self):
-        """Test that https protocol is properly extracted."""
-        # Create a mock cluster with HTTPS endpoint
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "https://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.NO_AUTH
-        mock_cluster.auth_details = None
-        mock_cluster.allow_insecure = False
-        mock_cluster.version = None
+@pytest.fixture
+def example_session_with_basic_auth_arn():
+    """Create an example session with a source cluster using basic_auth_arn for testing"""
+    session = MagicMock(spec=Session)
+    session.env = MagicMock()
+    
+    # Mock source cluster with basic_auth_arn
+    source_cluster = MagicMock(spec=Cluster)
+    source_cluster.endpoint = "https://source-cluster:9200"
+    source_cluster.auth_type = AuthMethod.BASIC_AUTH
+    # Must match structure expected by convert_cluster_to_api_model function
+    source_cluster.auth_details = {
+        "user_secret_arn": {"user_secret_arn": "arn:aws:secretsmanager:region:account:secret:name"}
+    }
+    source_cluster.allow_insecure = False
+    source_cluster.version = "2.7.0"
+    
+    # No target cluster in this session
+    session.env.source_cluster = source_cluster
+    session.env.target_cluster = None
+    
+    return session
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
 
-        # Verify the result
-        assert result.protocol == "https"
-        assert result.enable_tls_verification is True
+@pytest.fixture
+def example_session_with_sigv4():
+    """Create an example session with a source cluster using sigv4 auth for testing"""
+    session = MagicMock(spec=Session)
+    session.env = MagicMock()
+    
+    # Mock source cluster with sigv4
+    source_cluster = MagicMock(spec=Cluster)
+    source_cluster.endpoint = "https://source-cluster.amazonaws.com"
+    source_cluster.auth_type = AuthMethod.SIGV4
+    source_cluster.auth_details = {"region": "us-west-2", "service": "es"}
+    source_cluster.allow_insecure = False
+    source_cluster.version = None
+    source_cluster._get_sigv4_details.return_value = ("es", "us-west-2")
+    
+    # No target cluster in this session
+    session.env.source_cluster = source_cluster
+    session.env.target_cluster = None
+    
+    return session
 
-    def test_convert_cluster_with_version_override(self):
-        """Test that version_override is properly mapped."""
-        # Create a mock cluster with version override
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "http://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.NO_AUTH
-        mock_cluster.auth_details = None
-        mock_cluster.allow_insecure = True
-        mock_cluster.version = "elasticsearch 7.10.2"
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
+def test_get_source_cluster_no_auth(mock_http_safe_find_session, example_session_with_clusters):
+    """Test getting source cluster with no_auth configuration"""
+    mock_http_safe_find_session.return_value = example_session_with_clusters
+    
+    response = client.get("/sessions/test-session/clusters/source")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["endpoint"] == "http://source-cluster:9200"
+    assert data["protocol"] == "http"
+    assert data["enable_tls_verification"] is False
+    assert data["version_override"] == "2.7.0"
+    assert data["auth"]["type"] == "no_auth"
 
-        # Verify the result
-        assert isinstance(result.version_override, Version)
-        assert result.version_override.flavor == Flavor.ELASTICSEARCH
-        assert result.version_override.major == 7
-        assert result.version_override.minor == 10
-        assert result.version_override.patch == 2
-        assert str(result.version_override) == "elasticsearch 7.10.2"
-        
-    def test_convert_cluster_with_opensearch_version(self):
-        """Test with OpenSearch version format."""
-        # Create a mock cluster with OpenSearch version
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "http://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.NO_AUTH
-        mock_cluster.auth_details = None
-        mock_cluster.allow_insecure = True
-        mock_cluster.version = "opensearch 2.5.0"
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
+def test_get_target_cluster_basic_auth(mock_http_safe_find_session, example_session_with_clusters):
+    """Test getting target cluster with basic_auth configuration"""
+    mock_http_safe_find_session.return_value = example_session_with_clusters
+    
+    response = client.get("/sessions/test-session/clusters/target")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["endpoint"] == "https://target-cluster:9200"
+    assert data["protocol"] == "https"
+    assert data["enable_tls_verification"] is True
+    assert data["version_override"] == "2.9.0"
+    assert data["auth"]["type"] == "basic_auth"
+    assert data["auth"]["username"] == "admin"
+    assert data["auth"]["password"] == "admin"
 
-        # Verify the result
-        assert isinstance(result.version_override, Version)
-        assert result.version_override.flavor == Flavor.OPENSEARCH
-        assert result.version_override.major == 2
-        assert result.version_override.minor == 5
-        assert result.version_override.patch == 0
-        assert str(result.version_override) == "opensearch 2.5.0"
-        
-    def test_convert_cluster_with_shorthand_version(self):
-        """Test with shorthand version format."""
-        # Create a mock cluster with shorthand version
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "http://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.NO_AUTH
-        mock_cluster.auth_details = None
-        mock_cluster.allow_insecure = True
-        mock_cluster.version = "os 2.7.0"
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
+def test_get_source_cluster_basic_auth_arn(mock_http_safe_find_session, example_session_with_basic_auth_arn):
+    """Test getting source cluster with basic_auth_arn configuration"""
+    mock_http_safe_find_session.return_value = example_session_with_basic_auth_arn
+    
+    response = client.get("/sessions/test-session/clusters/source")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["endpoint"] == "https://source-cluster:9200"
+    assert data["protocol"] == "https"
+    assert data["enable_tls_verification"] is True
+    assert data["auth"]["type"] == "basic_auth_arn"
+    assert data["auth"]["user_secret_arn"] == "arn:aws:secretsmanager:region:account:secret:name"
 
-        # Verify the result
-        assert isinstance(result.version_override, Version)
-        assert result.version_override.flavor == Flavor.OPENSEARCH
-        assert result.version_override.major == 2
-        assert result.version_override.minor == 7
-        assert result.version_override.patch == 0
-        
-    def test_convert_cluster_with_invalid_version(self):
-        """Test with invalid version string."""
-        # Create a mock cluster with invalid version
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "http://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.NO_AUTH
-        mock_cluster.auth_details = None
-        mock_cluster.allow_insecure = True
-        mock_cluster.version = "invalid-version"
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
+def test_get_source_cluster_sigv4(mock_http_safe_find_session, example_session_with_sigv4):
+    """Test getting source cluster with sigv4 auth configuration"""
+    mock_http_safe_find_session.return_value = example_session_with_sigv4
+    
+    response = client.get("/sessions/test-session/clusters/source")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["endpoint"] == "https://source-cluster.amazonaws.com"
+    assert data["protocol"] == "https"
+    assert data["enable_tls_verification"] is True
+    assert data["version_override"] is None
+    assert data["auth"]["type"] == "sigv4_auth"
+    assert data["auth"]["service"] == "es"
+    assert data["auth"]["region"] == "us-west-2"
 
-        # Verify the result - invalid version should be None
-        assert result.version_override is None
 
-    def test_convert_cluster_with_basic_auth(self):
-        """Test converting a cluster with basic authentication."""
-        # Create a mock cluster with basic auth
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "https://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.BASIC_AUTH
-        mock_cluster.auth_details = {"username": "admin", "password": "secret"}
-        mock_cluster.allow_insecure = False
-        mock_cluster.version = None
+@pytest.mark.parametrize(
+    "path,status,detail",
+    [
+        ("/sessions/nonexistent-session/clusters/source", 404, "Session not found."),
+        ("/sessions/nonexistent-session/clusters/target", 404, "Session not found."),
+    ],
+    ids=["source", "target"],
+)
+def test_get_cluster_session_not_found_paths(mock_http_safe_find_session, path, status, detail):
+    mock_http_safe_find_session.side_effect = HTTPException(status_code=status, detail=detail)
 
-        # Mock get_basic_auth_details to return a named tuple with username and password
-        mock_auth_details = Mock()
-        mock_auth_details.username = "admin"
-        mock_auth_details.password = "secret"
-        mock_cluster.get_basic_auth_details.return_value = mock_auth_details
+    response = client.get(path)
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
+    assert response.status_code == status
+    assert response.json()["detail"] == detail
 
-        # Verify the result
-        assert isinstance(result, ClusterInfo)
-        assert isinstance(result.auth, BasicAuth)
-        assert result.auth.type == "basic_auth"
-        assert result.auth.username == "admin"
-        # Ensure password is not included in the response
-        assert not hasattr(result.auth, "password")
 
-    def test_convert_cluster_with_sigv4_auth(self):
-        """Test converting a cluster with SigV4 authentication."""
-        # Create a mock cluster with SigV4 auth
-        mock_cluster = Mock(spec=Cluster)
-        mock_cluster.endpoint = "https://example.com:9200"
-        mock_cluster.auth_type = AuthMethod.SIGV4
-        mock_cluster.auth_details = {"region": "us-west-2", "service": "es"}
-        mock_cluster.allow_insecure = False
-        mock_cluster.version = None
+@pytest.mark.parametrize(
+    "path,cluster_attr,detail",
+    [
+        ("/sessions/test-session/clusters/source", "source_cluster", "Source cluster not defined for this session"),
+        ("/sessions/test-session/clusters/target", "target_cluster", "Target cluster not defined for this session"),
+    ],
+    ids=["source-not-defined", "target-not-defined"],
+)
+def test_get_cluster_not_defined(mock_http_safe_find_session, path, cluster_attr, detail):
+    session = MagicMock(spec=Session)
+    session.env = MagicMock()
+    setattr(session.env, cluster_attr, None)
+    mock_http_safe_find_session.return_value = session
 
-        # Mock _get_sigv4_details to return the expected values
-        mock_cluster._get_sigv4_details.return_value = ("es", "us-west-2")
+    response = client.get(path)
 
-        # Convert the cluster
-        result = convert_cluster_to_api_model(mock_cluster)
-
-        # Verify the result
-        assert isinstance(result, ClusterInfo)
-        assert isinstance(result.auth, SigV4Auth)
-        assert result.auth.type == "sigv4_auth"
-        assert result.auth.region == "us-west-2"
-        assert result.auth.service == "es"
+    assert response.status_code == 404
+    assert response.json()["detail"] == detail

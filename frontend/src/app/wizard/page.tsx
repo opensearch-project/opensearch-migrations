@@ -2,10 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import ContentLayout from "@cloudscape-design/components/content-layout";
-import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import Container from "@cloudscape-design/components/container";
 import Wizard from "@cloudscape-design/components/wizard";
 import SourceConfigure from "@/components/wizard/SourceConfigure";
 import TargetConfigure from "@/components/wizard/TargetConfigure";
@@ -17,15 +14,19 @@ import MetadataStatusView from "@/components/session/MetadataStatusView";
 export default function WizardPage() {
   const searchParams = useSearchParams();
   const [activeStepIndex, setActiveStepIndex] = useState(0);
-  
+
   const sessionName = searchParams?.get("sessionName") || "";
-  
+
   if (!sessionName) {
     // TODO: lets automatically create a session
     console.warn("No sessionName provided");
   }
 
-  const handleNavigate = ({ detail }: { detail: { requestedStepIndex: number } }) => {
+  const handleNavigate = ({
+    detail,
+  }: {
+    detail: { requestedStepIndex: number };
+  }) => {
     setActiveStepIndex(detail.requestedStepIndex);
   };
 
@@ -42,57 +43,57 @@ export default function WizardPage() {
     {
       title: "Source",
       description: "Configure source cluster",
-      content: <SourceConfigure sessionName={sessionName} />
+      content: <SourceConfigure sessionName={sessionName} />,
     },
     {
       title: "Target",
       description: "Configure target cluster",
-      content: <TargetConfigure sessionName={sessionName} />
+      content: <TargetConfigure sessionName={sessionName} />,
     },
     {
       title: "Snapshot",
       description: "Create or select snapshot",
-      content: <Box>Nothing yet</Box>
+      content: <Box>Placeholder</Box>,
     },
     {
       title: "Metadata",
       description: "Migrate metadata",
-      content: <Box>Nothing yet</Box>
+      content: <Box>Placeholder</Box>,
     },
     {
       title: "Backfill",
       description: "Configure data backfill",
-      content: <Box>Nothing yet</Box>
+      content: <Box>Placeholder</Box>,
     },
     {
       title: "Review",
       description: "Review and start migration",
       content: (
-                <SpaceBetween size="l">
-                  <SessionOverviewView sessionName={sessionName} />
-                  <SnapshotStatusView sessionName={sessionName} />
-                  <MetadataStatusView sessionName={sessionName} />
-                </SpaceBetween>
-               )
-    }
+        <SpaceBetween size="l">
+          <SessionOverviewView sessionName={sessionName} />
+          <SnapshotStatusView sessionName={sessionName} />
+          <MetadataStatusView sessionName={sessionName} />
+        </SpaceBetween>
+      ),
+    },
   ];
 
   return (
-      <Wizard
-        steps={steps}
-        i18nStrings={{
-          stepNumberLabel: stepNumber => `Step ${stepNumber}`,
-          collapsedStepsLabel: (stepNumber, stepsCount) =>
-            `Step ${stepNumber} of ${stepsCount}`,
-          cancelButton: "Cancel",
-          previousButton: "Previous",
-          nextButton: "Next",
-          submitButton: "Complete migration",
-        }}
-        onCancel={handleCancel}
-        onNavigate={handleNavigate}
-        onSubmit={handleSubmit}
-        activeStepIndex={activeStepIndex}
-      />
+    <Wizard
+      steps={steps}
+      i18nStrings={{
+        stepNumberLabel: (stepNumber) => `Step ${stepNumber}`,
+        collapsedStepsLabel: (stepNumber, stepsCount) =>
+          `Step ${stepNumber} of ${stepsCount}`,
+        cancelButton: "Cancel",
+        previousButton: "Previous",
+        nextButton: "Next",
+        submitButton: "Complete migration",
+      }}
+      onCancel={handleCancel}
+      onNavigate={handleNavigate}
+      onSubmit={handleSubmit}
+      activeStepIndex={activeStepIndex}
+    />
   );
 }

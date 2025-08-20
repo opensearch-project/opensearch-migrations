@@ -12,14 +12,50 @@ export type BasicAuth = {
    * Username
    */
   username: string;
+  /**
+   * Password
+   */
+  password: string;
 };
 
 /**
- * ClustersInfo
+ * BasicAuthArn
  */
-export type ClustersInfo = {
-  source: ConsoleLinkModelsMetadataClusterInfo;
-  target: ConsoleLinkModelsMetadataClusterInfo;
+export type BasicAuthArn = {
+  /**
+   * Type
+   */
+  type?: string;
+  /**
+   * User Secret Arn
+   */
+  user_secret_arn: string;
+};
+
+/**
+ * ClusterInfo
+ */
+export type ClusterInfo = {
+  /**
+   * Endpoint
+   */
+  endpoint: string;
+  /**
+   * Protocol
+   */
+  protocol: string;
+  /**
+   * Enable Tls Verification
+   */
+  enable_tls_verification: boolean;
+  /**
+   * Auth
+   */
+  auth: NoAuth | BasicAuth | BasicAuthArn | SigV4Auth;
+  /**
+   * Version Override
+   */
+  version_override?: string | null;
 };
 
 /**
@@ -110,6 +146,52 @@ export type ItemsInfo = {
 };
 
 /**
+ * MetadataClusterInfo
+ */
+export type MetadataClusterInfo = {
+  /**
+   * Type
+   */
+  type?: string | null;
+  /**
+   * Version
+   */
+  version?: string | null;
+  /**
+   * Uri
+   */
+  uri?: string | null;
+  /**
+   * Protocol
+   */
+  protocol?: string | null;
+  /**
+   * Insecure
+   */
+  insecure?: boolean | null;
+  /**
+   * Awsspecificauthentication
+   */
+  awsSpecificAuthentication?: boolean | null;
+  /**
+   * Disablecompression
+   */
+  disableCompression?: boolean | null;
+  /**
+   * Localrepository
+   */
+  localRepository?: string | null;
+};
+
+/**
+ * MetadataClustersInfo
+ */
+export type MetadataClustersInfo = {
+  source: MetadataClusterInfo;
+  target: MetadataClusterInfo;
+};
+
+/**
  * MetadataMigrateRequest
  */
 export type MetadataMigrateRequest = {
@@ -150,7 +232,7 @@ export type MetadataStatus = {
    * Dryrun
    */
   dryRun?: boolean | null;
-  clusters?: ClustersInfo | null;
+  clusters?: MetadataClustersInfo | null;
   items?: ItemsInfo | null;
   transformations?: TransformationInfo | null;
   /**
@@ -337,70 +419,6 @@ export type VersionApiResponse = {
    * Version
    */
   version: string;
-};
-
-/**
- * ClusterInfo
- */
-export type ConsoleLinkApiClustersClusterInfo = {
-  /**
-   * Endpoint
-   */
-  endpoint: string;
-  /**
-   * Protocol
-   */
-  protocol: string;
-  /**
-   * Enable Tls Verification
-   */
-  enable_tls_verification: boolean;
-  /**
-   * Auth
-   */
-  auth: NoAuth | BasicAuth | SigV4Auth;
-  /**
-   * Version Override
-   */
-  version_override?: string | null;
-};
-
-/**
- * ClusterInfo
- */
-export type ConsoleLinkModelsMetadataClusterInfo = {
-  /**
-   * Type
-   */
-  type?: string | null;
-  /**
-   * Version
-   */
-  version?: string | null;
-  /**
-   * Uri
-   */
-  uri?: string | null;
-  /**
-   * Protocol
-   */
-  protocol?: string | null;
-  /**
-   * Insecure
-   */
-  insecure?: boolean | null;
-  /**
-   * Awsspecificauthentication
-   */
-  awsSpecificAuthentication?: boolean | null;
-  /**
-   * Disablecompression
-   */
-  disableCompression?: boolean | null;
-  /**
-   * Localrepository
-   */
-  localRepository?: string | null;
 };
 
 export type SystemHealthData = {
@@ -699,7 +717,7 @@ export type ClusterSourceResponses = {
   /**
    * Successful Response
    */
-  200: ConsoleLinkApiClustersClusterInfo;
+  200: ClusterInfo;
 };
 
 export type ClusterSourceResponse =
@@ -730,7 +748,7 @@ export type ClusterTargetResponses = {
   /**
    * Successful Response
    */
-  200: ConsoleLinkApiClustersClusterInfo;
+  200: ClusterInfo;
 };
 
 export type ClusterTargetResponse =

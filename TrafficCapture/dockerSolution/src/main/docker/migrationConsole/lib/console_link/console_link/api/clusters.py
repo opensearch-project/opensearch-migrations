@@ -1,10 +1,8 @@
 import logging
-from typing import Optional, Union
 from fastapi import HTTPException, APIRouter
-from pydantic import BaseModel
 
 from console_link.api.sessions import http_safe_find_session
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import BasicAuth, BasicAuthArn, Cluster, ClusterInfo, NoAuth, SigV4Auth
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,35 +11,6 @@ clusters_router = APIRouter(
     prefix="/clusters",
     tags=["clusters"],
 )
-
-
-# Define the auth models as described in the plan
-class AuthBase(BaseModel):
-    type: str
-
-
-class NoAuth(AuthBase):
-    type: str = "no_auth"
-
-
-class BasicAuth(AuthBase):
-    type: str = "basic_auth"
-    username: str
-
-
-class SigV4Auth(AuthBase):
-    type: str = "sigv4_auth"
-    region: str
-    service: str
-
-
-# Main cluster info model
-class ClusterInfo(BaseModel):
-    endpoint: str
-    protocol: str
-    enable_tls_verification: bool
-    auth: Union[NoAuth, BasicAuth, SigV4Auth]
-    version_override: Optional[str] = None
 
 
 def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
@@ -55,9 +24,12 @@ def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
     protocol = "https" if cluster.endpoint.startswith("https://") else "http"
     
     if cluster.auth_type and cluster.auth_type.name == "BASIC_AUTH":
-        # For security reasons, we don't return the password in the API
-        auth_details = cluster.get_basic_auth_details()
-        auth = BasicAuth(type="basic_auth", username=auth_details.username)
+        if cluster.auth_details and "user_secret_arn" in cluster.auth_details:
+            auth_details = cluster.auth_details["user_secret_arn"]
+            auth = BasicAuthArn(type="basic_auth_arn", user_secret_arn=auth_details["user_secret_arn"])
+        else:
+            auth_details = cluster.get_basic_auth_details()
+            auth = BasicAuth(type="basic_auth", username=auth_details.username, password=auth_details.password)
     elif cluster.auth_type and cluster.auth_type.name == "SIGV4":
         service_name, region_name = cluster._get_sigv4_details()
         auth = SigV4Auth(type="sigv4_auth", region=region_name, service=service_name)
