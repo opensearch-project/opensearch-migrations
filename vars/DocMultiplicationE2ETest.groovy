@@ -40,7 +40,7 @@ def processParameters(Map params) {
         ebsVolumeSize: versionMapping.ebsVolumeSize,
         nodeToNodeEncryption: versionMapping.nodeToNodeEncryption,
         snapshotBucketPrefix: params.LARGE_SNAPSHOT_BUCKET_PREFIX ?: 'migrations-jenkins-snapshot-',
-        s3DirectoryPrefix: params.LARGE_S3_DIRECTORY_PREFIX ?: 'large-snapshot-',
+        s3DirectoryPrefix: params.LARGE_S3_DIRECTORY_PREFIX ?: "large-snapshot-${params.CLUSTER_VERSION}-",
         numShards: params.NUM_SHARDS ?: '10',
         indexName: params.INDEX_NAME ?: 'basic_index',
         docsPerBatch: params.DOCS_PER_BATCH ?: '50',
@@ -68,7 +68,7 @@ def processParameters(Map params) {
 }
 
 def mapClusterVersionWithDetails(String clusterVersion, String version) {
-    echo "Mapping cluster version with enhanced details: ${clusterVersion} -> ${version}"
+    echo "Mapping cluster version with enhanced details: ${clusterVersion}"
     
     def mapping = [:]
     
@@ -82,7 +82,7 @@ def mapClusterVersionWithDetails(String clusterVersion, String version) {
                 dataNodeCount: 60,
                 ebsEnabled: true,
                 ebsVolumeSize: 300,
-                nodeToNodeEncryption: false  // ES 5.x doesn't support node-to-node encryption
+                nodeToNodeEncryption: false
             ]
             break
         case 'es6x':
@@ -104,19 +104,37 @@ def mapClusterVersionWithDetails(String clusterVersion, String version) {
                 dataNodeType: "r6gd.4xlarge.search",
                 dedicatedManagerNodeType: "m6g.xlarge.search",
                 dataNodeCount: 60,
-                ebsEnabled: false,  // r6gd has local NVMe storage
+                ebsEnabled: false,
                 ebsVolumeSize: null,
                 nodeToNodeEncryption: true
             ]
             break
+        case 'os1x':
+            mapping = [
+                engineVersion: "OS_1.3",
+                distVersion: "1.3",
+                dataNodeType: "r6g.4xlarge.search",
+                dedicatedManagerNodeType: "m6g.xlarge.search",
+                dataNodeCount: 16,
+                ebsEnabled: true,
+                ebsVolumeSize: 1024,
+                nodeToNodeEncryption: true
+            ]
+            break
+        case 'os2x':
+            mapping = [
+                engineVersion: "OS_2.19",
+                distVersion: "2.19",
+                dataNodeType: "r6g.4xlarge.search",
+                dedicatedManagerNodeType: "m6g.xlarge.search",
+                dataNodeCount: 16,
+                ebsEnabled: true,
+                ebsVolumeSize: 1024,
+                nodeToNodeEncryption: true
+            ]
+            break
         default:
-            error("Unsupported cluster version: ${clusterVersion}")
-    }
-    
-    // Validate that the provided VERSION matches the mapped engineVersion
-    if (version && version != mapping.engineVersion) {
-        echo "Warning: Provided VERSION (${version}) doesn't match cluster version mapping (${mapping.engineVersion})"
-        echo "Using mapped version: ${mapping.engineVersion}"
+            error("Unsupported cluster version: ${clusterVersion}. Supported versions: es5x, es6x, es7x, os1x, os2x")
     }
     
     return mapping

@@ -302,7 +302,7 @@ def call(Map config = [:]) {
                                     // Check if source cluster stacks still exist and clean them up
                                     sh """
                                         echo "Checking for remaining source cluster stacks..."
-                                        if aws cloudformation describe-stacks --stack-name "OpenSearchDomain-es7x-${params.stage}-${params.region}" --region ${params.region} >/dev/null 2>&1; then
+                                        if aws cloudformation describe-stacks --stack-name "OpenSearchDomain-${params.clusterVersion}-${params.stage}-${params.region}" --region ${params.region} >/dev/null 2>&1; then
                                             echo "Source cluster stacks still exist, cleaning up using AWS Samples CDK..."
                                             cd tmp/amazon-opensearch-service-sample-cdk
                                             if [ -d "tmp/amazon-opensearch-service-sample-cdk" ]; then

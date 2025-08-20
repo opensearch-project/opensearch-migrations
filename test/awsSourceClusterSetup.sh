@@ -29,9 +29,19 @@ map_version_to_family() {
             OS_VERSION="7.10"
             CDK_CLUSTER_VERSION="ES_7.10"
             ;;
+        "OS_1.3")
+            VERSION_FAMILY="os1x"
+            OS_VERSION="1.3"
+            CDK_CLUSTER_VERSION="OS_1.3"
+            ;;
+        "OS_2.19")
+            VERSION_FAMILY="os2x"
+            OS_VERSION="2.19"
+            CDK_CLUSTER_VERSION="OS_2.19"
+            ;;
         *)
             echo "Error: Unsupported cluster version: $CLUSTER_VERSION"
-            echo "Supported versions: ES_5.6, ES_6.8, ES_7.10"
+            echo "Supported versions: ES_5.6, ES_6.8, ES_7.10, OS_1.3, OS_2.19"
             exit 1
             ;;
     esac
@@ -301,7 +311,7 @@ usage() {
     echo "  ./awsSourceClusterSetup.sh --cluster-version ES_7.10 --stage dev --region us-west-2"
     echo ""
     echo "Options:"
-    echo "  --cluster-version    Required. Cluster version (ES_5.6, ES_6.8, ES_7.10)"
+    echo "  --cluster-version    Required. Cluster version (ES_5.6, ES_6.8, ES_7.10, OS_1.3, OS_2.19)"
     echo "  --stage             Stage name for deployment (default: dev)"
     echo "  --region            AWS region (default: us-west-2)"
     echo "  --cleanup           Cleanup deployed resources and exit"
