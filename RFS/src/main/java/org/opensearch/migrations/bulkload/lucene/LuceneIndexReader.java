@@ -98,10 +98,36 @@ public interface LuceneIndexReader {
             () -> this.getReader(previousSegmentsFileName),
             previousReader -> Flux.using(
                 () -> this.getReader(segmentsFileName),
-                currentReader -> DeltaLuceneReader.readDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx, rootContext),
+                currentReader -> DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx, rootContext).additions,
                 uncheckedReaderClose),
             uncheckedReaderClose
         );
+    }
+
+    default DeltaLuceneReader.DeltaResult readDeltaDocumentsWithDeletes(String previousSegmentsFileName, String segmentsFileName, int startDocIdx, BaseRootRfsContext rootContext) {
+        Consumer<LuceneDirectoryReader> uncheckedReaderClose = reader -> {
+            try {
+                reader.close();
+            } catch (IOException e) {
+                throw Lombok.sneakyThrow(e);
+            }
+        };
+
+        LuceneDirectoryReader previousReader = null;
+        LuceneDirectoryReader currentReader = null;
+        try {
+            previousReader = this.getReader(previousSegmentsFileName);
+            currentReader = this.getReader(segmentsFileName);
+            return DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx, rootContext);
+        } catch (IOException e) {
+            if (previousReader != null) {
+                uncheckedReaderClose.accept(previousReader);
+            }
+            if (currentReader != null) {
+                uncheckedReaderClose.accept(currentReader);
+            }
+            throw Lombok.sneakyThrow(e);
+        }
     }
 
     LuceneDirectoryReader getReader(String segmentsFileName) throws IOException;

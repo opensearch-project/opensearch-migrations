@@ -36,16 +36,19 @@ public class BulkDocSection {
     private static final int MAX_STRING_LENGTH = 100 * 1024 * 1024; // ~100 MB
 
     private static final ObjectMapper OBJECT_MAPPER;
-    private static final ObjectMapper BULK_INDEX_REQUEST_MAPPER;
+    private static final ObjectMapper BULK_REQUEST_MAPPER;
 
     static {
         OBJECT_MAPPER = JsonMapper.builder().build();
         OBJECT_MAPPER.getFactory()
                 .setStreamReadConstraints(StreamReadConstraints.builder()
                         .maxStringLength(MAX_STRING_LENGTH).build());
-        BULK_INDEX_REQUEST_MAPPER = OBJECT_MAPPER.copy()
-                .registerModule(new SimpleModule()
-                        .addSerializer(BulkIndex.class, new BulkIndex.BulkIndexRequestSerializer()));
+        
+        SimpleModule module = new SimpleModule();
+        module.addSerializer(BulkOperation.class, new BulkOperationSerializer());
+        
+        BULK_REQUEST_MAPPER = OBJECT_MAPPER.copy()
+                .registerModule(module);
     }
 
     private static final String NEWLINE = "\n";
@@ -53,20 +56,39 @@ public class BulkDocSection {
     @EqualsAndHashCode.Include
     @Getter
     private final String docId;
-    private final BulkIndex bulkIndex;
+    private final BulkOperation bulkOperation;
 
+    // Constructor for index operations
     public BulkDocSection(String id, String indexName, String type, String docBody) {
         this(id, indexName, type, docBody, null);
     }
 
+    // Constructor for index operations with routing
     public BulkDocSection(String id, String indexName, String type, String docBody, String routing) {
         this.docId = id;
-        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(id, type, indexName, routing), parseSource(docBody));
+        this.bulkOperation = new BulkIndex(new Metadata(id, type, indexName, routing), parseSource(docBody));
     }
 
-    private BulkDocSection(BulkIndex bulkIndex) {
-        this.docId = bulkIndex.metadata.id;
-        this.bulkIndex = bulkIndex;
+    // Constructor for delete operations
+    public static BulkDocSection createDelete(String id, String indexName, String type) {
+        return createDelete(id, indexName, type, null);
+    }
+
+    // Constructor for delete operations with routing
+    public static BulkDocSection createDelete(String id, String indexName, String type, String routing) {
+        return new BulkDocSection(id, indexName, type, routing, true);
+    }
+
+    // Private constructor for delete operations
+    private BulkDocSection(String id, String indexName, String type, String routing, boolean isDelete) {
+        this.docId = id;
+        this.bulkOperation = new BulkDelete(new Metadata(id, type, indexName, routing));
+    }
+
+    // Constructor from BulkOperation
+    private BulkDocSection(BulkOperation bulkOperation) {
+        this.docId = bulkOperation.getMetadata().id;
+        this.bulkOperation = bulkOperation;
     }
 
     @SuppressWarnings("unchecked")
@@ -84,7 +106,7 @@ public class BulkDocSection {
         // Using a single SegmentedStringWriter across all object serializations
         try (SegmentedStringWriter writer = new SegmentedStringWriter(new BufferRecycler())) {
             for (BulkDocSection section : bulkSections) {
-                BULK_INDEX_REQUEST_MAPPER.writeValue(writer, section.bulkIndex);
+                BULK_REQUEST_MAPPER.writeValue(writer, section.bulkOperation);
                 writer.append(NEWLINE);
             }
             return writer.getAndClear();
@@ -93,75 +115,158 @@ public class BulkDocSection {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public static BulkDocSection fromMap(Object map) {
-        BulkIndex bulkIndex = OBJECT_MAPPER.convertValue(map, BulkIndex.class);
-        return new BulkDocSection(bulkIndex);
+        if (!(map instanceof Map)) {
+            throw new IllegalArgumentException("Expected a Map but got: " + map.getClass());
+        }
+        
+        Map<String, Object> mapObj = (Map<String, Object>) map;
+        
+        // Determine the operation type based on the keys in the map
+        if (mapObj.containsKey("index")) {
+            Map<String, Object> indexData = (Map<String, Object>) mapObj.get("index");
+            Map<String, Object> sourceData = (Map<String, Object>) mapObj.get("source");
+            
+            Metadata metadata = OBJECT_MAPPER.convertValue(indexData, Metadata.class);
+            BulkOperation bulkOperation = new BulkIndex(metadata, sourceData);
+            return new BulkDocSection(bulkOperation);
+        } else if (mapObj.containsKey("delete")) {
+            Map<String, Object> deleteData = (Map<String, Object>) mapObj.get("delete");
+            
+            Metadata metadata = OBJECT_MAPPER.convertValue(deleteData, Metadata.class);
+            BulkOperation bulkOperation = new BulkDelete(metadata);
+            return new BulkDocSection(bulkOperation);
+        } else {
+            throw new IllegalArgumentException("Unknown bulk operation type in map: " + mapObj.keySet());
+        }
     }
 
     public long getSerializedLength() {
         try (var stream = new CountingNullOutputStream()) {
-            BULK_INDEX_REQUEST_MAPPER.writeValue(stream, this.bulkIndex);
+            BULK_REQUEST_MAPPER.writeValue(stream, this.bulkOperation);
             return stream.length;
         } catch (IOException e) {
-            log.atError().setMessage("Failed to get bulk index length").setCause(e).log();
-            throw new SerializationException("Failed to get bulk index length " + this.bulkIndex +
+            log.atError().setMessage("Failed to get bulk operation length").setCause(e).log();
+            throw new SerializationException("Failed to get bulk operation length " + this.bulkOperation +
                     " from string: " + e.getMessage(), e);
         }
     }
 
     public String asBulkIndexString() {
         try {
-            return BULK_INDEX_REQUEST_MAPPER.writeValueAsString(this.bulkIndex);
+            return BULK_REQUEST_MAPPER.writeValueAsString(this.bulkOperation);
         } catch (IOException e) {
-            throw new SerializationException("Failed to write bulk index " + this.bulkIndex
+            throw new SerializationException("Failed to write bulk operation " + this.bulkOperation
                     + " from string: " + e.getMessage(), e);
         }
     }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> toMap() {
-        return OBJECT_MAPPER.convertValue(bulkIndex, Map.class);
+        return OBJECT_MAPPER.convertValue(bulkOperation, Map.class);
     }
 
     /**
-     * BulkIndex represents the serialization format of a single document in a bulk request.
+     * Base class for bulk operations
+     */
+    private abstract static class BulkOperation {
+        abstract Metadata getMetadata();
+    }
+
+    /**
+     * BulkIndex represents the serialization format of an index operation in a bulk request.
      */
     @NoArgsConstructor(force = true) // For Jackson
     @AllArgsConstructor
     @ToString
     @EqualsAndHashCode
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private static class BulkIndex {
+    private static class BulkIndex extends BulkOperation {
         @JsonProperty("index")
         private final Metadata metadata;
         @ToString.Exclude
         @JsonProperty("source")
         private final Map<String, Object> sourceDoc;
 
-        @NoArgsConstructor(force = true) // For Jackson
-        @AllArgsConstructor
-        @ToString
-        @JsonInclude(JsonInclude.Include.NON_NULL)
-        private static class Metadata {
-            @JsonProperty("_id")
-            private final String id;
-            @JsonProperty("_type")
-            private final String type;
-            @JsonProperty("_index")
-            private final String index;
-            @JsonProperty("routing")
-            private final String routing;
+        @Override
+        Metadata getMetadata() {
+            return metadata;
         }
+    }
 
-        public static class BulkIndexRequestSerializer extends JsonSerializer<BulkIndex> {
-            public static final String BULK_INDEX_COMMAND = "index";
-            @Override
-            public void serialize(BulkIndex value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
-                gen.setRootValueSeparator(new SerializedString(NEWLINE));
+    /**
+     * BulkDelete represents the serialization format of a delete operation in a bulk request.
+     */
+    @NoArgsConstructor(force = true) // For Jackson
+    @AllArgsConstructor
+    @ToString
+    @EqualsAndHashCode
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private static class BulkDelete extends BulkOperation {
+        @JsonProperty("delete")
+        private final Metadata metadata;
+
+        @Override
+        Metadata getMetadata() {
+            return metadata;
+        }
+    }
+
+    /**
+     * Metadata for bulk operations
+     */
+    @NoArgsConstructor(force = true) // For Jackson
+    @AllArgsConstructor
+    @ToString
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private static class Metadata {
+        @JsonProperty("_id")
+        private final String id;
+        
+        private final String type;
+        
+        @JsonProperty("_index")
+        private final String index;
+        
+        @JsonProperty("routing")
+        private final String routing;
+        
+        // Custom getter to exclude _type when it's "_doc"
+        @JsonProperty("_type")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        public String getType() {
+            // Don't include _type if it's the default value "_doc"
+            // This is for compatibility with modern OpenSearch/Elasticsearch versions
+            if ("_doc".equals(type)) {
+                return null;
+            }
+            return type;
+        }
+    }
+
+    /**
+     * Custom serializer for BulkOperation to handle the different formats
+     */
+    public static class BulkOperationSerializer extends JsonSerializer<BulkOperation> {
+        @Override
+        public void serialize(BulkOperation value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            gen.setRootValueSeparator(new SerializedString(NEWLINE));
+            
+            if (value instanceof BulkIndex) {
+                BulkIndex bulkIndex = (BulkIndex) value;
+                // Write the index command
                 gen.writeStartObject();
-                gen.writePOJOField(BULK_INDEX_COMMAND, value.metadata);
+                gen.writePOJOField("index", bulkIndex.metadata);
                 gen.writeEndObject();
-                gen.writePOJO(value.sourceDoc);
+                // Write the source document on the next line
+                gen.writePOJO(bulkIndex.sourceDoc);
+            } else if (value instanceof BulkDelete) {
+                BulkDelete bulkDelete = (BulkDelete) value;
+                // Write only the delete command (no source document)
+                gen.writeStartObject();
+                gen.writePOJOField("delete", bulkDelete.metadata);
+                gen.writeEndObject();
             }
         }
     }

@@ -428,7 +428,11 @@ function routeHttpRequest(source_document, context) {
 }
 
 function processBulkIndex(docBackfillPair, context) {
-    const parameters = docBackfillPair.index
+    // Handle both index and delete operations
+    const operationType = docBackfillPair.index ? 'index' : (docBackfillPair.delete ? 'delete' : null);
+    if (!operationType) return docBackfillPair;
+
+    const parameters = docBackfillPair[operationType];
     const sourceIndexName = parameters._index;
     const typeName = parameters._type ?? "_doc";
 
@@ -441,7 +445,7 @@ function processBulkIndex(docBackfillPair, context) {
 
     if (!targetIndex) return [];
 
-    docBackfillPair.index = retargetCommandParameters(parameters, targetIndex);
+    docBackfillPair[operationType] = retargetCommandParameters(parameters, targetIndex);
     return docBackfillPair;
 }
 
@@ -463,6 +467,10 @@ function detectAndTransform(document, context) {
     } else if (document.has("method") && document.has("URI")) {
         return routeHttpRequest(document, context);
     } else if (document.has("index") && document.has("source")) {
+        // Handle index operations with source
+        return processBulkIndex(document, context);
+    } else if (document.has("delete")) {
+        // Handle delete operations (no source)
         return processBulkIndex(document, context);
     } else {
         return document;

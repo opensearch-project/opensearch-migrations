@@ -27,6 +27,7 @@ import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -339,7 +340,7 @@ public class SourceTestBase {
                     sourceResourceProvider.getIndexMetadata(),
                     snapshotName,
                     previousSnapshotName,
-                    previousSnapshotName != null ? org.opensearch.migrations.bulkload.common.DeltaMode.UPDATES_ONLY : null,
+                    previousSnapshotName != null ? DeltaMode.UPDATES_AND_DELETES : null,
                     indexAllowlist,
                     sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,

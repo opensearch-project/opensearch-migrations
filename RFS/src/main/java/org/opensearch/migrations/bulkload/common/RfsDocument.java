@@ -23,16 +23,31 @@ public class RfsDocument {
     public final BulkDocSection document;
 
     public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
-        return new RfsDocument(
-            doc.luceneDocNumber,
-            new BulkDocSection(
-                doc.id,
-                indexName,
-                doc.type,
-                doc.source,
-                doc.routing
-            )
-        );
+        // Check if this is a delete operation
+        if (doc.source != null && doc.source.equals("{\"_delete\":true}")) {
+            // Create a delete operation
+            return new RfsDocument(
+                doc.luceneDocNumber,
+                BulkDocSection.createDelete(
+                    doc.id,
+                    indexName,
+                    doc.type != null ? doc.type : "_doc",
+                    doc.routing
+                )
+            );
+        } else {
+            // Create a normal index operation
+            return new RfsDocument(
+                doc.luceneDocNumber,
+                new BulkDocSection(
+                    doc.id,
+                    indexName,
+                    doc.type,
+                    doc.source,
+                    doc.routing
+                )
+            );
+        }
     }
 
     @SuppressWarnings("unchecked")
