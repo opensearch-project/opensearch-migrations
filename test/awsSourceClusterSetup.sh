@@ -85,35 +85,11 @@ generate_source_context() {
     local cluster_id="${VERSION_FAMILY}"
     local domain_name="source-${VERSION_FAMILY}-jenkins-test"
     
-    cat > "$TMP_DIR_PATH/sourceContext.json" << EOF
-{
-  "stage": "${STAGE}",
-  "vpcAZCount": 2,
-  "clusters": [
-    {
-      "clusterId": "${cluster_id}",
-      "clusterName": "${domain_name}",
-      "clusterVersion": "${CDK_CLUSTER_VERSION}",
-      "clusterType": "OPENSEARCH_MANAGED_SERVICE",
-      "dataNodeCount": 2,
-      "dataNodeType": "r6g.large.search",
-      "openAccessPolicyEnabled": true,
-      "domainRemovalPolicy": "DESTROY",
-      "enforceHTTPS": true,
-      "nodeToNodeEncryptionEnabled": true,
-      "encryptionAtRestEnabled": true,
-      "ebsEnabled": true,
-      "ebsVolumeSize": 20,
-      "ebsVolumeType": "GP3",
-      "vpcSecurityGroupEnabled": true,
-      "vpcSecurityGroupAllowAllInbound": true
-    }
-  ]
-}
-EOF
-    
-    echo "Generated source context for ${domain_name} (${#domain_name} characters)"
+    # This function now only generates a minimal context
+    # The actual cluster specifications come from the Groovy pipeline context
+    echo "Source context will be provided by Jenkins pipeline"
     echo "Cluster ID: ${cluster_id}"
+    echo "Domain Name: ${domain_name}"
 }
 
 # Clone AWS Solutions CDK repository

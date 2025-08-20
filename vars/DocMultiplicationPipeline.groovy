@@ -278,50 +278,75 @@ def call(Map config = [:]) {
                 }
             }
             
-            // Stage 9: Combined Cleanup
+            // Stage 9: CDK-Based Cleanup
             if (!params.skipCleanup && (currentBuild.result == null || currentBuild.result == 'SUCCESS')) {
-                stage('9. Combined Cleanup') {
+                stage('9. CDK-Based Cleanup') {
                     timeout(time: 1, unit: 'HOURS') {
-                        echo "Stage 9: Combined Cleanup - Using proven cleanup deployment script"
+                        echo "Stage 9: CDK-Based Cleanup - Using proper CDK destroy commands"
                         echo "Cleanup Mode: Success-only (preserves resources on failure for debugging)"
+                        echo "This matches the official customer cleanup process"
                         
-                        // First: Use proven cleanup for migration infrastructure
-                        dir('test/cleanupDeployment') {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "pipenv install --deploy --ignore-pipfile"
-                                    sh "pipenv run python3 cleanup_deployment.py --stage ${params.stage}"
-                                }
-                            }
-                        }
-                        
-                        // Second: Clean up source cluster (AWS Samples CDK) if migration cleanup didn't handle it
-                        dir('test') {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 1800, roleSessionName: 'jenkins-session') {
-                                    // Check if source cluster stacks still exist and clean them up
+                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                
+                                // First: Clean up Migration Assistant infrastructure using CDK destroy
+                                echo "Cleaning up Migration Assistant infrastructure using CDK destroy..."
+                                dir('deployment/cdk/opensearch-service-migration') {
                                     sh """
-                                        echo "Checking for remaining source cluster stacks..."
-                                        if aws cloudformation describe-stacks --stack-name "OpenSearchDomain-${params.clusterVersion}-${params.stage}-${params.region}" --region ${params.region} >/dev/null 2>&1; then
-                                            echo "Source cluster stacks still exist, cleaning up using AWS Samples CDK..."
-                                            cd tmp/amazon-opensearch-service-sample-cdk
-                                            if [ -d "tmp/amazon-opensearch-service-sample-cdk" ]; then
-                                                echo "Using existing AWS Samples CDK directory for cleanup"
-                                                cdk destroy "*" --force
-                                            else
-                                                echo "AWS Samples CDK directory not found, using fallback cleanup"
-                                                cd ../..
-                                                ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}
-                                            fi
+                                        echo "Destroying Migration Assistant CDK stacks..."
+                                        echo "This will destroy in proper dependency order:"
+                                        echo "  - MigrationConsole"
+                                        echo "  - ReindexFromSnapshot" 
+                                        echo "  - MigrationInfra"
+                                        echo "  - NetworkInfra"
+                                        
+                                        # Use CDK destroy with context (matches customer workflow)
+                                        cdk destroy "*" --c contextId=default --force --verbose
+                                        
+                                        if [ \$? -eq 0 ]; then
+                                            echo "Migration Assistant infrastructure cleaned up successfully"
                                         else
-                                            echo "Source cluster stacks already cleaned up by proven cleanup script"
+                                            echo "CDK destroy completed with warnings (some resources may have been already deleted)"
                                         fi
                                     """
                                 }
+                                
+                                // Second: Clean up source cluster (AWS Samples CDK) - Optional based on reuse strategy
+                                echo "Checking source cluster cleanup strategy..."
+                                dir('test') {
+                                    sh """
+                                        echo "Source cluster reuse strategy: Keep source cluster for faster re-runs"
+                                        echo "Source cluster stacks will be preserved:"
+                                        echo "  - OpenSearchDomain-${params.clusterVersion}-${params.stage}-${params.region}"
+                                        echo "  - NetworkInfra-${params.stage}-${params.region}"
+                                        echo ""
+                                        echo "To manually clean up source cluster later (saves 20+ minutes on next run):"
+                                        echo "  cd test/tmp/amazon-opensearch-service-sample-cdk"
+                                        echo "  cdk destroy '*' --force"
+                                        echo ""
+                                        echo "Or use the cleanup script:"
+                                        echo "  ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}"
+                                    """
+                                }
+                                
+                                // Third: Clean up any orphaned bootstrap stacks if they exist
+                                echo "Checking for orphaned bootstrap stacks..."
+                                sh """
+                                    echo "Checking for MigrationBootstrap stack..."
+                                    if aws cloudformation describe-stacks --stack-name "MigrationBootstrap" --region ${params.region} >/dev/null 2>&1; then
+                                        echo "Found MigrationBootstrap stack, cleaning up..."
+                                        aws cloudformation delete-stack --stack-name "MigrationBootstrap" --region ${params.region}
+                                        echo "MigrationBootstrap stack deletion initiated"
+                                    else
+                                        echo "No MigrationBootstrap stack found"
+                                    fi
+                                """
                             }
                         }
                         
-                        echo "Combined cleanup completed successfully using proven cleanup script"
+                        echo "CDK-based cleanup completed successfully"
+                        echo "Migration Assistant infrastructure destroyed using proper CDK commands"
+                        echo "Source cluster preserved for reuse (saves 20+ minutes on next run)"
                     }
                 }
             }
@@ -354,18 +379,23 @@ def call(Map config = [:]) {
             echo "  - Error: ${e.message}"
             echo ""
             echo "Resources preserved for debugging"
-            echo "Manual cleanup commands:"
+            echo ""
+            echo "CDK-Based Manual Cleanup Commands (Recommended):"
+            echo "  # Clean up Migration Assistant infrastructure"
+            echo "  cd deployment/cdk/opensearch-service-migration"
+            echo "  cdk destroy '*' --c contextId=default --force"
+            echo ""
+            echo "  # Clean up source cluster (optional - saves 20+ minutes on next run if kept)"
+            echo "  cd test/tmp/amazon-opensearch-service-sample-cdk"
+            echo "  cdk destroy '*' --force"
+            echo ""
+            echo "  # Or use source cluster cleanup script"
+            echo "  ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}"
+            echo ""
+            echo "Legacy Cleanup (Fallback):"
             echo "  cd test/cleanupDeployment"
             echo "  pipenv install --deploy --ignore-pipfile"
             echo "  pipenv run python3 cleanup_deployment.py --stage ${params.stage}"
-            echo ""
-            echo "Alternative manual cleanup (if needed):"
-            if (env.SOURCE_CLUSTER_ENDPOINT && env.SOURCE_VPC_ID) {
-                echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint ${env.SOURCE_CLUSTER_ENDPOINT} --source-version ${params.engineVersion} --vpc-id ${env.SOURCE_VPC_ID} --stage ${params.stage} --region ${params.region}"
-            } else {
-                echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint <ENDPOINT> --source-version ${params.engineVersion} --vpc-id <VPC_ID> --stage ${params.stage} --region ${params.region}"
-            }
-            echo "  ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}"
             
             throw e
         } finally {

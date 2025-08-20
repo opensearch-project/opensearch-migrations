@@ -193,29 +193,43 @@ def generateSourceContext(Map params) {
     echo "Generating source cluster context..."
     
     def domainName = "source-${params.clusterVersion}-jenkins-test"
-    def clusterId = "multiplication-test-source-${params.clusterVersion}-${params.stage}"
+    def clusterId = "${params.clusterVersion}"
     
     def sourceContext = [
-        "multiplication-test-source": [
-            "suffix": "ec2-source-${params.stage}",
-            "networkStackSuffix": "ec2-source-${params.stage}",
-            "distVersion": params.distVersion,
-            "captureProxyEnabled": false,
-            "securityDisabled": true,
-            "singleNodeCluster": false,
-            "dataNodeCount": 2,  // For source cluster, keep it smaller
-            "region": params.region,
-            "stage": params.stage,
-            "domainName": domainName,
-            "clusterId": clusterId
+        "stage": params.stage,
+        "vpcAZCount": 2,
+        "clusters": [
+            [
+                "clusterId": clusterId,
+                "clusterName": domainName,
+                "clusterVersion": params.engineVersion,
+                "clusterType": "OPENSEARCH_MANAGED_SERVICE",
+                "dataNodeCount": params.dataNodeCount,
+                "dataNodeType": params.dataNodeType,
+                "dedicatedManagerNodeType": params.dedicatedManagerNodeType,
+                "openAccessPolicyEnabled": true,
+                "domainRemovalPolicy": "DESTROY",
+                "enforceHTTPS": true,
+                "nodeToNodeEncryptionEnabled": params.nodeToNodeEncryption,
+                "encryptionAtRestEnabled": true,
+                "ebsEnabled": params.ebsEnabled,
+                "ebsVolumeSize": params.ebsVolumeSize ?: 20,
+                "ebsVolumeType": "GP3",
+                "vpcSecurityGroupEnabled": true,
+                "vpcSecurityGroupAllowAllInbound": true
+            ]
         ]
     ]
     
     echo "Source cluster will be created with:"
     echo "  - Domain Name: ${domainName} (${domainName.length()} characters)"
-    echo "  - Distribution: ${params.distVersion}"
-    echo "  - Region: ${params.region}"
-    echo "  - Data Node Count: 2"
+    echo "  - Engine Version: ${params.engineVersion}"
+    echo "  - Data Node Count: ${params.dataNodeCount}"
+    echo "  - Data Node Type: ${params.dataNodeType}"
+    echo "  - EBS Enabled: ${params.ebsEnabled}"
+    if (params.ebsVolumeSize) {
+        echo "  - EBS Volume Size: ${params.ebsVolumeSize} GB"
+    }
     
     return sourceContext
 }
@@ -243,24 +257,6 @@ def generateEnhancedMigrationContext(Map params) {
             "replayerOutputEFSRemovalPolicy": "DESTROY",
             "migrationConsoleServiceEnabled": true,
             "otelCollectorEnabled": true,
-            "engineVersion": params.engineVersion,
-            "distVersion": params.distVersion,
-            "domainName": "${params.clusterVersion}-jenkins-test",
-            "dataNodeCount": params.dataNodeCount,
-            "dataNodeType": params.dataNodeType,
-            "masterEnabled": true,
-            "dedicatedManagerNodeCount": 3,
-            "dedicatedManagerNodeType": params.dedicatedManagerNodeType,
-            "ebsEnabled": params.ebsEnabled,
-            "openAccessPolicyEnabled": false,
-            "domainRemovalPolicy": "DESTROY",
-            "tlsSecurityPolicy": "TLS_1_2",
-            "enforceHTTPS": true,
-            "nodeToNodeEncryptionEnabled": params.nodeToNodeEncryption,
-            "encryptionAtRestEnabled": true,
-            
-            // Add EBS volume size only if EBS is enabled
-            *:(params.ebsVolumeSize ? ["ebsVolumeSize": params.ebsVolumeSize] : [:]),
             
             // Test-specific configuration
             "testConfiguration": [

@@ -60,9 +60,15 @@ map_version_to_family() {
         "ES_7.10")
             VERSION_FAMILY="es7x"
             ;;
+        "OS_1.3")
+            VERSION_FAMILY="os1x"
+            ;;
+        "OS_2.19")
+            VERSION_FAMILY="os2x"
+            ;;
         *)
             echo "Error: Unsupported source version: $SOURCE_VERSION"
-            echo "Supported versions: ES_5.6, ES_6.8, ES_7.10"
+            echo "Supported versions: ES_5.6, ES_6.8, ES_7.10, OS_1.3, OS_2.19"
             exit 1
             ;;
     esac
