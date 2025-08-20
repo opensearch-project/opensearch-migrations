@@ -328,8 +328,14 @@ cleanup_migration_infrastructure() {
     
     cd "$MIGRATION_CDK_PATH"
     
-    # Destroy all migration stacks
-    cdk destroy "*" --force
+    # Recreate the migration context file for cleanup
+    generate_migration_context
+    
+    # Destroy all migration stacks with proper context
+    cdk destroy "*" \
+        --c contextFile="$TMP_DIR_PATH/migrationContext.json" \
+        --c contextId="default" \
+        --force
     if [ $? -ne 0 ]; then
         echo "Warning: Some stacks may not have been destroyed completely"
     fi
@@ -404,6 +410,17 @@ export AWS_DEFAULT_REGION="$REGION"
 
 # Handle cleanup mode
 if [ "$CLEANUP" = true ]; then
+    # Validate required parameters for cleanup
+    if [ -z "$SOURCE_ENDPOINT" ] || [ -z "$SOURCE_VERSION" ] || [ -z "$VPC_ID" ]; then
+        echo "Error: Cleanup requires the same parameters used during deployment:"
+        echo "  --source-endpoint (original endpoint used)"
+        echo "  --source-version (original version used)"
+        echo "  --vpc-id (original VPC ID used)"
+        echo ""
+        echo "Example:"
+        echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint https://... --source-version ES_7.10 --vpc-id vpc-123 --stage dev --region us-west-2"
+        exit 1
+    fi
     cleanup_migration_infrastructure
     exit 0
 fi

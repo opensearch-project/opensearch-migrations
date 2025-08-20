@@ -286,16 +286,23 @@ def call(Map config = [:]) {
                         echo "Cleanup Mode: Success-only (preserves resources on failure for debugging)"
                         
                         dir('test') {
+                            // Get the source endpoint and VPC ID from environment variables set in Stage 4
+                            def sourceEndpoint = env.SOURCE_CLUSTER_ENDPOINT
+                            def vpcId = env.SOURCE_VPC_ID
+                            
+                            // Cleanup migration infrastructure first (requires source endpoint, version, and VPC ID)
+                            def migrationCleanupCommand = "./awsMigrationInfraSetup.sh " +
+                                "--cleanup " +
+                                "--source-endpoint ${sourceEndpoint} " +
+                                "--source-version ${params.engineVersion} " +
+                                "--vpc-id ${vpcId} " +
+                                "--stage ${params.stage} " +
+                                "--region ${params.region}"
+                            
                             // Cleanup source cluster
                             def sourceCleanupCommand = "./awsSourceClusterSetup.sh " +
                                 "--cleanup " +
                                 "--cluster-version ${params.engineVersion} " +
-                                "--stage ${params.stage} " +
-                                "--region ${params.region}"
-                            
-                            // Cleanup migration infrastructure
-                            def migrationCleanupCommand = "./awsMigrationInfraSetup.sh " +
-                                "--cleanup " +
                                 "--stage ${params.stage} " +
                                 "--region ${params.region}"
                             
@@ -344,7 +351,11 @@ def call(Map config = [:]) {
             echo ""
             echo "Resources preserved for debugging"
             echo "Manual cleanup commands:"
-            echo "  ./awsMigrationInfraSetup.sh --cleanup --stage ${params.stage} --region ${params.region}"
+            if (env.SOURCE_CLUSTER_ENDPOINT && env.SOURCE_VPC_ID) {
+                echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint ${env.SOURCE_CLUSTER_ENDPOINT} --source-version ${params.engineVersion} --vpc-id ${env.SOURCE_VPC_ID} --stage ${params.stage} --region ${params.region}"
+            } else {
+                echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint <ENDPOINT> --source-version ${params.engineVersion} --vpc-id <VPC_ID> --stage ${params.stage} --region ${params.region}"
+            }
             echo "  ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}"
             
             throw e
