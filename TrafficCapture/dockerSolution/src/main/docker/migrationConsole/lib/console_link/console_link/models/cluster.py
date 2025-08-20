@@ -1,4 +1,4 @@
-from typing import Any, Dict, Generator, NamedTuple, Optional, Union
+from typing import Any, Dict, Generator, NamedTuple, Optional, TypeAlias
 from enum import Enum
 import json
 import logging
@@ -332,9 +332,12 @@ class SigV4Auth(AuthBase):
     service: str
 
 
+AuthType: TypeAlias = NoAuth | BasicAuth | BasicAuthArn | SigV4Auth
+
+
 class ClusterInfo(BaseModel):
     endpoint: str
     protocol: str
     enable_tls_verification: bool
-    auth: Union[NoAuth, BasicAuth, BasicAuthArn, SigV4Auth]
+    auth: AuthType
     version_override: Optional[str] = None

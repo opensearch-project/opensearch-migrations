@@ -98,139 +98,136 @@ export default function RemoteCluster({
   const capitalizedType = clusterType.charAt(0).toUpperCase() + clusterType.slice(1);
 
   return (
-    <>
-      <SpaceBetween size="l">
-        <FormField 
-          label={`${capitalizedType} Endpoint`} 
-          description={`Enter the endpoint URL for your ${clusterType} cluster`}
-        >
-          <Input 
-            placeholder={`https://${clusterType}-cluster-endpoint:9200`}
-            value={cluster?.endpoint || ""}
-            onChange={() => {}}
-            disabled
-          />
-        </FormField>
-
-        <FormField 
-          label={`${capitalizedType} Certification Validation`} 
-          description={`Select if publicly trusted certificates are required`}
-        >
-          <Checkbox
-            checked={!!cluster?.enable_tls_verification}
-            onChange={() => {}}
-            disabled
-          >
-            Certification validation enabled
-          </Checkbox>
-        </FormField>
-        
-        <FormField 
-          label="Authentication Type" 
-          description={`Select the authentication method for your ${clusterType} cluster`}
-        >
-          <RadioGroup
-            items={[
-              { value: "NO_AUTH", label: "No Authentication" },
-              { value: "BASIC_AUTH", label: "Basic Authentication" },
-              { value: "BASIC_AUTH_ARN", label: "Basic Authentication (ARN)" },
-              { value: "SIGV4", label: "AWS SigV4" }
-            ] satisfies { value: AuthType; label: string }[]}
-            value={selectedAuthType}
-            onChange={() => {}}
-          />
-        </FormField>
-        
-        {selectedAuthType === "BASIC_AUTH" && (
-          <SpaceBetween size="m">
-            <FormField label="Username" description="Enter the username for Basic Authentication">
-              <Input 
-                placeholder="Username"
-                value={(cluster?.auth as BasicAuth)?.username || ""}
-                onChange={() => {}}
-                disabled
-              />
-            </FormField>
-            
-            <FormField label="Password" description="Enter the password for Basic Authentication">
-              <Input 
-                placeholder="Password"
-                type="password"
-                value="********"
-                onChange={() => {}}
-                disabled
-              />
-            </FormField>
-          </SpaceBetween>
-        )}
-
-        {selectedAuthType === "BASIC_AUTH_ARN" && (
-          <SpaceBetween size="m">
-            <FormField label="Secret ARN" description="ARN of the AWS Secrets Manager secret containing username and password">
-              <Input 
-                placeholder="arn:aws:secretsmanager:region:account-id:secret:secret-name"
-                value={(cluster?.auth as BasicAuthArn)?.user_secret_arn || ""}
-                onChange={() => {}}
-                disabled
-              />
-            </FormField>
-          </SpaceBetween>
-        )}
-
-        {selectedAuthType === "SIGV4" && (
-          <SpaceBetween size="m">
-            <FormField label="Region" description="AWS Region for SigV4 signing">
-              <Input 
-                placeholder="us-east-1"
-                value={(cluster?.auth as SigV4Auth)?.region || ""}
-                onChange={() => {}}
-                disabled
-              />
-            </FormField>
-            
-            <FormField label="Service" description="AWS Service name for SigV4 signing">
-              <Input 
-                placeholder="es"
-                value={(cluster?.auth as SigV4Auth)?.service || ""}
-                onChange={() => {}}
-                disabled
-              />
-            </FormField>
-          </SpaceBetween>
-        )}
-
-        {!alwaysDisplayVersionOverride &&        
-        <FormField label="Override cluster version" description={`Allow overriding the version for ${clusterType} cluster, disabling automatic detection.`}>
-          <Checkbox
-            checked={displayVersionOverride}
-            onChange={({ detail }) => {
-              setDisplayVersionOverride(detail.checked);
-            }}
-            disabled
-          >
-            Override cluster version
-          </Checkbox>
-        </FormField>
-        }
-        
-        {(alwaysDisplayVersionOverride || displayVersionOverride) && (
-          <SpaceBetween size="m">
-                <FormField label="Cluster version" description={`The version for ${clusterType} cluster.`}>
-                  <Input 
-                    placeholder="OpenSearch 2.11.1"
-                    value={cluster?.version_override ?? ''}
-                    onChange={() => {}}
-                    disabled
-                  />
-                </FormField>
-          </SpaceBetween>
-        )}
-        <ClusterDebugControls 
-          onScenarioSelect={applyDebugScenario}
-          onReset={resetToApiData}
+    <SpaceBetween size="l">
+      <FormField 
+        label={`${capitalizedType} Endpoint`} 
+        description={`Enter the endpoint URL for your ${clusterType} cluster`}
+      >
+        <Input 
+          placeholder={`https://${clusterType}-cluster-endpoint:9200`}
+          value={cluster?.endpoint ?? ""}
+          onChange={() => {}}
+          disabled
         />
-      </SpaceBetween>
+      </FormField>
 
-    </>
+      <FormField 
+        label={`${capitalizedType} Certification Validation`} 
+        description={`Select if publicly trusted certificates are required`}
+      >
+        <Checkbox
+          checked={!!cluster?.enable_tls_verification}
+          onChange={() => {}}
+          disabled
+        >
+          Certification validation enabled
+        </Checkbox>
+      </FormField>
+      
+      <FormField 
+        label="Authentication Type" 
+        description={`Select the authentication method for your ${clusterType} cluster`}
+      >
+        <RadioGroup
+          items={[
+            { value: "NO_AUTH", label: "No Authentication" },
+            { value: "BASIC_AUTH", label: "Basic Authentication" },
+            { value: "BASIC_AUTH_ARN", label: "Basic Authentication (ARN)" },
+            { value: "SIGV4", label: "AWS SigV4" }
+          ] satisfies { value: AuthType; label: string }[]}
+          value={selectedAuthType}
+          onChange={() => {}}
+        />
+      </FormField>
+      
+      {selectedAuthType === "BASIC_AUTH" && (
+        <SpaceBetween size="m">
+          <FormField label="Username" description="Enter the username for Basic Authentication">
+            <Input 
+              placeholder="Username"
+              value={(cluster?.auth as BasicAuth)?.username ?? ""}
+              onChange={() => {}}
+              disabled
+            />
+          </FormField>
+          
+          <FormField label="Password" description="Enter the password for Basic Authentication">
+            <Input 
+              placeholder="Password"
+              type="password"
+              value="********"
+              onChange={() => {}}
+              disabled
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+
+      {selectedAuthType === "BASIC_AUTH_ARN" && (
+        <SpaceBetween size="m">
+          <FormField label="Secret ARN" description="ARN of the AWS Secrets Manager secret containing username and password">
+            <Input 
+              placeholder="arn:aws:secretsmanager:region:account-id:secret:secret-name"
+              value={(cluster?.auth as BasicAuthArn)?.user_secret_arn ?? ""}
+              onChange={() => {}}
+              disabled
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+
+      {selectedAuthType === "SIGV4" && (
+        <SpaceBetween size="m">
+          <FormField label="Region" description="AWS Region for SigV4 signing">
+            <Input 
+              placeholder="us-east-1"
+              value={(cluster?.auth as SigV4Auth)?.region ?? ""}
+              onChange={() => {}}
+              disabled
+            />
+          </FormField>
+          
+          <FormField label="Service" description="AWS Service name for SigV4 signing">
+            <Input 
+              placeholder="es"
+              value={(cluster?.auth as SigV4Auth)?.service ?? ""}
+              onChange={() => {}}
+              disabled
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+
+      {!alwaysDisplayVersionOverride &&        
+      <FormField label="Override cluster version" description={`Allow overriding the version for ${clusterType} cluster, disabling automatic detection.`}>
+        <Checkbox
+          checked={displayVersionOverride}
+          onChange={({ detail }) => {
+            setDisplayVersionOverride(detail.checked);
+          }}
+          disabled
+        >
+          Override cluster version
+        </Checkbox>
+      </FormField>
+      }
+      
+      {(alwaysDisplayVersionOverride || displayVersionOverride) && (
+        <SpaceBetween size="m">
+              <FormField label="Cluster version" description={`The version for ${clusterType} cluster.`}>
+                <Input 
+                  placeholder="OpenSearch 2.11.1"
+                  value={cluster?.version_override ?? ''}
+                  onChange={() => {}}
+                  disabled
+                />
+              </FormField>
+        </SpaceBetween>
+      )}
+      <ClusterDebugControls 
+        onScenarioSelect={applyDebugScenario}
+        onReset={resetToApiData}
+      />
+    </SpaceBetween>
   );
 }

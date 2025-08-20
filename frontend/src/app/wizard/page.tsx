@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Wizard from "@cloudscape-design/components/wizard";
@@ -12,10 +12,18 @@ import SnapshotStatusView from "@/components/session/SnapshotStatusView";
 import MetadataStatusView from "@/components/session/MetadataStatusView";
 
 export default function WizardPage() {
+  return (
+    <Suspense fallback={null}>
+      <WizardPageInner></WizardPageInner>
+    </Suspense>
+  );
+}
+
+function WizardPageInner() {
   const searchParams = useSearchParams();
   const [activeStepIndex, setActiveStepIndex] = useState(0);
 
-  const sessionName = searchParams?.get("sessionName") || "";
+  const sessionName = searchParams?.get("sessionName") ?? "";
 
   if (!sessionName) {
     // TODO: lets automatically create a session
