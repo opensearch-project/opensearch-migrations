@@ -281,43 +281,47 @@ def call(Map config = [:]) {
             // Stage 9: Combined Cleanup
             if (!params.skipCleanup && (currentBuild.result == null || currentBuild.result == 'SUCCESS')) {
                 stage('9. Combined Cleanup') {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        echo "Stage 9: Combined Cleanup - Cleaning up AWS resources"
+                    timeout(time: 1, unit: 'HOURS') {
+                        echo "Stage 9: Combined Cleanup - Using proven cleanup deployment script"
                         echo "Cleanup Mode: Success-only (preserves resources on failure for debugging)"
                         
-                        dir('test') {
-                            // Get the source endpoint and VPC ID from environment variables set in Stage 4
-                            def sourceEndpoint = env.SOURCE_CLUSTER_ENDPOINT
-                            def vpcId = env.SOURCE_VPC_ID
-                            
-                            // Cleanup migration infrastructure first (requires source endpoint, version, and VPC ID)
-                            def migrationCleanupCommand = "./awsMigrationInfraSetup.sh " +
-                                "--cleanup " +
-                                "--source-endpoint ${sourceEndpoint} " +
-                                "--source-version ${params.engineVersion} " +
-                                "--vpc-id ${vpcId} " +
-                                "--stage ${params.stage} " +
-                                "--region ${params.region}"
-                            
-                            // Cleanup source cluster
-                            def sourceCleanupCommand = "./awsSourceClusterSetup.sh " +
-                                "--cleanup " +
-                                "--cluster-version ${params.engineVersion} " +
-                                "--stage ${params.stage} " +
-                                "--region ${params.region}"
-                            
+                        // First: Use proven cleanup for migration infrastructure
+                        dir('test/cleanupDeployment') {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 1800, roleSessionName: 'jenkins-session') {
-                                    // Cleanup migration infrastructure first
-                                    sh migrationCleanupCommand
-                                    
-                                    // Then cleanup source cluster
-                                    sh sourceCleanupCommand
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh "pipenv install --deploy --ignore-pipfile"
+                                    sh "pipenv run python3 cleanup_deployment.py --stage ${params.stage}"
                                 }
                             }
                         }
                         
-                        echo "Combined cleanup completed successfully"
+                        // Second: Clean up source cluster (AWS Samples CDK) if migration cleanup didn't handle it
+                        dir('test') {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 1800, roleSessionName: 'jenkins-session') {
+                                    // Check if source cluster stacks still exist and clean them up
+                                    sh """
+                                        echo "Checking for remaining source cluster stacks..."
+                                        if aws cloudformation describe-stacks --stack-name "OpenSearchDomain-es7x-${params.stage}-${params.region}" --region ${params.region} >/dev/null 2>&1; then
+                                            echo "Source cluster stacks still exist, cleaning up using AWS Samples CDK..."
+                                            cd tmp/amazon-opensearch-service-sample-cdk
+                                            if [ -d "tmp/amazon-opensearch-service-sample-cdk" ]; then
+                                                echo "Using existing AWS Samples CDK directory for cleanup"
+                                                cdk destroy "*" --force
+                                            else
+                                                echo "AWS Samples CDK directory not found, using fallback cleanup"
+                                                cd ../..
+                                                ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}
+                                            fi
+                                        else
+                                            echo "Source cluster stacks already cleaned up by proven cleanup script"
+                                        fi
+                                    """
+                                }
+                            }
+                        }
+                        
+                        echo "Combined cleanup completed successfully using proven cleanup script"
                     }
                 }
             }
@@ -351,6 +355,11 @@ def call(Map config = [:]) {
             echo ""
             echo "Resources preserved for debugging"
             echo "Manual cleanup commands:"
+            echo "  cd test/cleanupDeployment"
+            echo "  pipenv install --deploy --ignore-pipfile"
+            echo "  pipenv run python3 cleanup_deployment.py --stage ${params.stage}"
+            echo ""
+            echo "Alternative manual cleanup (if needed):"
             if (env.SOURCE_CLUSTER_ENDPOINT && env.SOURCE_VPC_ID) {
                 echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint ${env.SOURCE_CLUSTER_ENDPOINT} --source-version ${params.engineVersion} --vpc-id ${env.SOURCE_VPC_ID} --stage ${params.stage} --region ${params.region}"
             } else {
