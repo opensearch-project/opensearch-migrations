@@ -105,7 +105,7 @@ class TestRunner:
         summary = TestSummary(**data.get("summary"))
         return TestReport(tests=tests, summary=summary)
 
-    def run_tests(self, source_version: str, target_version: str) -> bool:
+    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False) -> bool:
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
@@ -119,6 +119,8 @@ class TestRunner:
         ]
         if self.test_ids:
             command_list.append(f"--test_ids={','.join(self.test_ids)}")
+        if keep_workflows:
+            command_list.append("--keep_workflows")
         command_list.append("-s")
         self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
@@ -143,7 +145,7 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def run(self, skip_delete: bool = False) -> None:
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False) -> None:
         for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
@@ -154,7 +156,9 @@ class TestRunner:
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
-                tests_passed = self.run_tests(source_version=source_version, target_version=target_version)
+                tests_passed = self.run_tests(source_version=source_version,
+                                              target_version=target_version,
+                                              keep_workflows=keep_workflows)
 
                 if not tests_passed:
                     raise TestsFailed(f"Tests failed (or no tests executed) for migrations "
@@ -242,6 +246,11 @@ def parse_args() -> argparse.Namespace:
         help="Provide a unique ID for labeling test resources, or generate one by default"
     )
     parser.add_argument(
+        "--keep-workflows",
+        action="store_true",
+        help="If set, will not delete argo workflows created by integration tests"
+    )
+    parser.add_argument(
         "--test-ids",
         type=_parse_test_ids,
         default=[],
@@ -268,7 +277,7 @@ def main() -> None:
         return test_runner.cleanup_deployment()
     elif args.copy_logs_only:
         return test_runner.copy_logs()
-    test_runner.run(skip_delete=args.skip_delete)
+    test_runner.run(skip_delete=args.skip_delete, keep_workflows=args.keep_workflows)
 
 
 if __name__ == "__main__":

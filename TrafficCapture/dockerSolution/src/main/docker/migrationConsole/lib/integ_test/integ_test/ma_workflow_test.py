@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
-def setup_and_teardown(request, test_case: MATestBase):
+def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
     #-----Setup-----
     logger.info("Performing setup...")
 
@@ -22,7 +22,8 @@ def setup_and_teardown(request, test_case: MATestBase):
         if not phase_result.success:
             test_case.argo_service.stop_workflow(workflow_name=test_case.workflow_name)
             test_case.argo_service.wait_for_ending_phase(workflow_name=test_case.workflow_name)
-        #test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
+        if not keep_workflows:
+            test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
 
 
 def record_test(test_case: MATestBase, record_data) -> None:
@@ -44,6 +45,7 @@ def test_migration_assistant_workflow(record_data, test_case: MATestBase):
     test_case.workflow_setup_clusters()
     test_case.prepare_clusters()
     test_case.workflow_perform_migrations()
+    test_case.display_final_cluster_state()
     test_case.verify_clusters()
     test_case.workflow_finish()
     test_case.test_after()

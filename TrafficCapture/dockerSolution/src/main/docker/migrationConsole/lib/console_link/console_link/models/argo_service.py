@@ -89,7 +89,9 @@ class ArgoService:
             "workflow": workflow_name,
             "--namespace": self.namespace
         }
-        return self._run_kubectl_command(kubectl_args)
+        result = self._run_kubectl_command(kubectl_args)
+        logger.info(f"Argo workflow '{workflow_name}' has been deleted")
+        return result
 
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)

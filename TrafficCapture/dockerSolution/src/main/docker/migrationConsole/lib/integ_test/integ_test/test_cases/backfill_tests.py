@@ -32,8 +32,6 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
                          migrations_required=[MigrationType.BACKFILL, MigrationType.METADATA])
 
     def prepare_clusters(self):
-        self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
-        self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
         # Run OSB workloads against source cluster
         self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
 

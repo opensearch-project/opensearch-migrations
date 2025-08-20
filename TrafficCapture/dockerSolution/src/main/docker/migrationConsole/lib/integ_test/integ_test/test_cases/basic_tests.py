@@ -26,8 +26,6 @@ class Test0001SingleDocumentBackfill(MATestBase):
         self.target_cluster = None
 
     def prepare_clusters(self):
-        self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
-        self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
         # Create single document
         self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
                                                doc_id=self.doc_id, doc_type=self.doc_type)

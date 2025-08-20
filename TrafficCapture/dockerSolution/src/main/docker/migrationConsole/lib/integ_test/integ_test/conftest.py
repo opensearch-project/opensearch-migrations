@@ -33,6 +33,8 @@ def pytest_addoption(parser):
                      help="Specify test IDs like '0001,0003' to filter tests to execute")
     parser.addoption("--source_version", action="store", default=None)
     parser.addoption("--target_version", action="store", default=None)
+    parser.addoption("--keep_workflows", action="store_true", default=False,
+                     help="If set, will not delete Argo workflows created by tests")
     parser.addoption("--config_file_path", action="store", default="/config/migration_services.yaml",
                      help="Path to config file for console library")
     parser.addoption("--source_proxy_alb_endpoint", action="store", default=None,
@@ -142,3 +144,8 @@ def record_data(request):
 @pytest.fixture
 def unique_id(pytestconfig):
     return pytestconfig.getoption("unique_id")
+
+
+@pytest.fixture
+def keep_workflows(pytestconfig):
+    return pytestconfig.getoption("keep_workflows")

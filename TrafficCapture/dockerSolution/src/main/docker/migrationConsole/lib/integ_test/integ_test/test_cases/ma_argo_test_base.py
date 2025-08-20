@@ -7,6 +7,7 @@ from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
 
 from console_link.models.argo_service import ArgoService
+from console_link.middleware.clusters import cat_indices
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class MATestBase:
         self.target_version = ClusterVersion(version_str=target_version)
         self.argo_service = ArgoService()
         self.workflow_name = None
+        self.source_cluster = None
+        self.target_cluster = None
 
         supported_combo = False
         for (allowed_source, allowed_target) in allow_source_target_combinations:
@@ -103,6 +106,8 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=180)
+        self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
+        self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
 
     def prepare_clusters(self):
         pass
@@ -112,8 +117,14 @@ class MATestBase:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
         self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
-        # self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-        # self.argo_service.watch_workflow(workflow_name=self.workflow_name)
+
+    def display_final_cluster_state(self):
+        source_response = cat_indices(cluster=self.source_cluster).decode("utf-8")
+        target_response = cat_indices(cluster=self.target_cluster).decode("utf-8")
+        print("SOURCE CLUSTER")
+        print(source_response)
+        print("TARGET CLUSTER")
+        print(target_response)
 
     def verify_clusters(self):
         pass
@@ -122,8 +133,7 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-        self.argo_service.watch_workflow(workflow_name=self.workflow_name)
-        #self.argo_service.wait_for_ending_phase(workflow_name=self.workflow_name)
+        self.argo_service.wait_for_ending_phase(workflow_name=self.workflow_name)
 
     def test_after(self):
         status_result = self.argo_service.get_workflow_status(workflow_name=self.workflow_name)

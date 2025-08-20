@@ -63,8 +63,6 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         self.parameters["snapshot-and-migration-configs"] = snapshot_and_migration_configs_str
 
     def prepare_clusters(self):
-        self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
-        self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
         # Create two documents each with a different type mapping for the same index
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id1, doc_type=self.doc_type1,
@@ -147,8 +145,6 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         self.parameters["snapshot-and-migration-configs"] = snapshot_and_migration_configs_str
 
     def prepare_clusters(self):
-        self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
-        self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
         # Create two documents each with a different type mapping for the same index
         self.source_operations.create_and_retrieve_document(cluster=self.source_cluster, index_name=self.index_name,
                                                             doc_id=self.doc_id1, doc_type=self.doc_type1,
