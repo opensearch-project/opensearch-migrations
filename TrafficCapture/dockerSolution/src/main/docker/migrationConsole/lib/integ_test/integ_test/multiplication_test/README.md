@@ -42,13 +42,13 @@ Run the following commands **sequentially** from within the migration-console:
 # Navigate to test directory
 cd /root/lib/integ_test/
 
-# Phase 1: Clean up and prepare environment
+# Part 1: Clean up and prepare environment
 python -m integ_test.multiplication_test.CleanUpAndPrepare
 
-# Phase 2: Run RFS to multiply documents
+# Part 2: Run RFS to multiply documents
 python -m integ_test.multiplication_test.MultiplyDocuments
 
-# Phase 3: Create final snapshot
+# Part 3: Create final snapshot
 python -m integ_test.multiplication_test.CreateFinalSnapshot
 ```
 

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class CreateFinalSnapshot:
     """
-    Phase : Create Final Snapshot
+    Part : Create Final Snapshot
     
     - check_and_prepare_s3_bucket()
     - modify_temp_config_file("create")
@@ -126,7 +126,7 @@ class CreateFinalSnapshot:
 
     def run(self):
         """
-        Main method that performs the serving phase of the migration workflow.
+        Main method that performs the creation and storing final snapshot part of the migration workflow.
         
         Assumptions:
             - Clusters and console are connected successfully.
@@ -135,26 +135,26 @@ class CreateFinalSnapshot:
             - User has manually created the S3 Bucket for Final Snapshot in the same account and region.
             - User has manually created a IAM Role with S3 access for Final Snapshot.
         """
-        logger.info("=== Starting Large Snapshot Serving Phase ===")
+        logger.info("=== Starting Large Snapshot Creation Part ===")
         
         account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
         config_values = get_config_values(CONFIG_FILE_PATH)
         bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values)
 
-        logger.info("Phase 3, Step 1: Checking and preparing large S3 bucket and directory")
+        logger.info("Step 1: Checking and preparing large S3 bucket and directory")
         check_and_prepare_s3_bucket(
             bucket_info['large_snapshot_bucket_name'],
             bucket_info['large_s3_base_path'],
             TEST_REGION
         )
 
-        logger.info("Phase 3, Step 2: Creating temporary config file for console commands")
+        logger.info("Step 2: Creating temporary config file for console commands")
         modify_temp_config_file("create", CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH)
         
-        logger.info("Phase 3, Step 3: Taking large snapshot using console commands")
+        logger.info("Step 3: Taking large snapshot using console commands")
         large_snapshot_uri = self.take_large_snapshot_with_console()
 
-        logger.info("Phase 3, Step 4: Cleaning up repository and deleting temporary config file")
+        logger.info("Step 4: Cleaning up repository and deleting temporary config file")
         
         # Unregister the migrations-jenkins-repo using temp config
         logger.info("Unregistering migrations-jenkins-repo repository")
@@ -170,14 +170,14 @@ class CreateFinalSnapshot:
         # Delete the temporary config file
         modify_temp_config_file("delete", CONFIG_FILE_PATH, TEMP_CONFIG_FILE_PATH)
         
-        logger.info("Phase 3, Step 5: Displaying final results")
+        logger.info("Step 5: Displaying final results")
         final_count = INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR
         display_final_results(
             large_snapshot_uri, final_count, INGESTED_DOC_COUNT,
             INDEX_SHARD_COUNT, MULTIPLICATION_FACTOR
         )
         
-        logger.info("=== Large Snapshot Serving Phase Completed Successfully! ===")
+        logger.info("=== Large Snapshot Creation Part Completed Successfully! ===")
         logger.info(f"Successfully created large snapshot from {INGESTED_DOC_COUNT} documents in "
                     f"'{INDEX_NAME}' with {MULTIPLICATION_FACTOR}x multiplication "
                     f"(total: {final_count} documents)")

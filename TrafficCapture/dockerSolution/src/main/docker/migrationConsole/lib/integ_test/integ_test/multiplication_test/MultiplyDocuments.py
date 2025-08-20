@@ -90,7 +90,7 @@ class ProgressTracker:
 
 class MultiplyDocuments(unittest.TestCase):
     """
-    Phase : Multiply documents using RFS and a transformer
+    Part : Multiply documents using RFS and a transformer
     
     - console backfill scale
     - wait_for_backfill_completion_on_index()
@@ -123,7 +123,7 @@ class MultiplyDocuments(unittest.TestCase):
         # Initialize progress tracker
         progress_tracker = ProgressTracker(expected_count)
         
-        # Phase 1: Wait for expected document count
+        # Wait for expected document count
         logger.info(f"Migration Progress: 0/{expected_count} documents (0.0%) | Starting backfill monitoring...")
         
         while time.time() - start_time < timeout_seconds:
@@ -169,7 +169,7 @@ class MultiplyDocuments(unittest.TestCase):
             self.fail(f"Backfill timed out after {timeout_minutes} minutes. "
                       f"Final count: {final_count}/{expected_count}")
         
-        # Phase 2: Verify stability with enhanced logging
+        # Verify stability with enhanced logging
         stability_duration = STABILITY_CHECK_COUNT * STABILITY_CHECK_INTERVAL
         logger.info(f"Starting stability verification ({STABILITY_CHECK_COUNT} checks over "
                     f"{ProgressTracker.format_duration(stability_duration)})...")
@@ -194,16 +194,16 @@ class MultiplyDocuments(unittest.TestCase):
             - Clusters and console are connected successfully.
             - Source and target cluster config is exactly the same in `cdk.context.json`.
             - User has performed a CDK deployment.
-            - User to run `CleanUpAndPrepare.py` (Phase 1) before this phase.
+            - User to run `CleanUpAndPrepare.py` (Part 1) before this part.
         """
-        logger.info("=== Starting Document Multiplication Phase ===")
+        logger.info("=== Starting Document Multiplication Part ===")
         
         # Step 1: Start backfill with scaling
-        logger.info(f"Phase 2, Step 1: Starting backfill with {RFS_WORKER_COUNT} workers")
+        logger.info(f"Step 1: Starting backfill with {RFS_WORKER_COUNT} workers")
         run_console_command(["console", "backfill", "scale", str(RFS_WORKER_COUNT)])
         
         # Step 2: Wait for backfill completion
-        logger.info("Phase 2, Step 2: Waiting for backfill completion")
+        logger.info("Step 2: Waiting for backfill completion")
         expected_count = self.INGESTED_DOC_COUNT * MULTIPLICATION_FACTOR
         logger.info(f"Expecting {expected_count} documents after transformation "
                     f"({self.INGESTED_DOC_COUNT} ingested × {MULTIPLICATION_FACTOR} multiplication)")
@@ -215,23 +215,23 @@ class MultiplyDocuments(unittest.TestCase):
         )
         
         # Step 3: Stop backfill
-        logger.info("Phase 2, Step 3: Stopping backfill")
+        logger.info("Step 3: Stopping backfill")
         run_console_command(["console", "backfill", "stop"])
         
         # Step 4: Final verification
-        logger.info("Phase 2, Step 4: Final verification")
+        logger.info("Step 4: Final verification")
         final_count = get_target_document_count_for_index(INDEX_NAME)
         self.assertEqual(final_count, expected_count,
                          f"Final document count mismatch in {INDEX_NAME}: {final_count} != {expected_count}")
         
-        logger.info("=== Document Multiplication Phase Completed Successfully! ===")
+        logger.info("=== Document Multiplication Part Completed Successfully! ===")
         logger.info(f"Successfully migrated {self.INGESTED_DOC_COUNT} documents to '{INDEX_NAME}' "
                     f"with {MULTIPLICATION_FACTOR}x multiplication (total: {final_count} documents)")
 
     @classmethod
     def tearDownClass(cls):
         """Clean up after test completion"""
-        logger.info("Multiplication phase cleanup completed")
+        logger.info("Multiplication Test cleanup completed")
 
 
 if __name__ == "__main__":
