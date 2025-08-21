@@ -307,32 +307,32 @@ class NoTargetClusterDefinedError(Exception):
         super().__init__("Unable to continue without a target cluster specified")
 
 
+class AuthModelType(str, Enum):
+    no_auth = "no_auth"
+    basic_auth_arn = "basic_auth_arn"
+    sig_v4_auth = "sig_v4_auth"
+
+
 class AuthBase(BaseModel):
-    type: str
+    type: AuthModelType
 
 
 class NoAuth(AuthBase):
-    type: str = "no_auth"
-
-
-class BasicAuth(AuthBase):
-    type: str = "basic_auth"
-    username: str
-    password: str
+    type: AuthModelType = AuthModelType.no_auth
 
 
 class BasicAuthArn(AuthBase):
-    type: str = "basic_auth_arn"
+    type: AuthModelType = AuthModelType.basic_auth_arn
     user_secret_arn: str
 
 
 class SigV4Auth(AuthBase):
-    type: str = "sigv4_auth"
+    type: AuthModelType = AuthModelType.sig_v4_auth
     region: str
     service: str
 
 
-AuthType: TypeAlias = NoAuth | BasicAuth | BasicAuthArn | SigV4Auth
+AuthType: TypeAlias = NoAuth | BasicAuthArn | SigV4Auth
 
 
 class ClusterInfo(BaseModel):

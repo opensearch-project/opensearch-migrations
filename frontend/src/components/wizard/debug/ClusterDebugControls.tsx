@@ -17,7 +17,6 @@ export function ClusterDebugControls({ onScenarioSelect, onReset }: ClusterDebug
         <ButtonDropdown
           items={[
             { id: "noAuth", text: "No Authentication" },
-            { id: "basicAuth", text: "Basic Authentication" },
             { id: "basicAuthArn", text: "Basic Authentication ARN"},
             { id: "sigV4Auth", text: "SigV4 Authentication" },
             { id: "withVersionOverride", text: "With Version Override" },
