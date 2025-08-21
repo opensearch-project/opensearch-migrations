@@ -240,28 +240,44 @@ configure_source_cluster_security_groups() {
     
     echo "Found source cluster security group: $source_sg_id"
     
-    # Add inbound rule to source cluster security group to allow migration console access
-    echo "Adding security group rule to allow migration console access to source cluster..."
+    # Add inbound rule to source cluster security group using VPC CIDR (no cross-reference)
+    echo "Adding VPC CIDR-based security group rule to allow migration console access..."
     
-    # Check if rule already exists
+    # Get VPC CIDR block dynamically
+    local vpc_cidr=$(aws ec2 describe-vpcs \
+        --vpc-ids "$VPC_ID" \
+        --query 'Vpcs[0].CidrBlock' \
+        --output text \
+        --region "$REGION" 2>/dev/null)
+    
+    if [ -z "$vpc_cidr" ] || [ "$vpc_cidr" = "None" ]; then
+        echo "Warning: Could not retrieve VPC CIDR block for VPC: $VPC_ID"
+        echo "Skipping security group rule creation"
+        return 1
+    fi
+    
+    echo "Found VPC CIDR block: $vpc_cidr"
+    
+    # Check if CIDR-based rule already exists
     local existing_rule=$(aws ec2 describe-security-groups \
         --group-ids "$source_sg_id" \
-        --query "SecurityGroups[0].IpPermissions[?FromPort==\`443\` && ToPort==\`443\` && UserIdGroupPairs[?GroupId==\`${migration_sg_id}\`]]" \
+        --query "SecurityGroups[0].IpPermissions[?FromPort==\`443\` && ToPort==\`443\` && IpRanges[?CidrIp==\`${vpc_cidr}\`]]" \
         --output text \
         --region "$REGION" 2>/dev/null)
     
     if [ -n "$existing_rule" ] && [ "$existing_rule" != "None" ]; then
-        echo "Security group rule already exists, skipping creation"
+        echo "VPC CIDR-based security group rule already exists, skipping creation"
     else
-        # Add the security group rule
+        # Add the VPC CIDR-based security group rule (no cross-reference dependency)
         aws ec2 authorize-security-group-ingress \
             --group-id "$source_sg_id" \
             --protocol tcp \
             --port 443 \
-            --source-group "$migration_sg_id" \
+            --cidr "$vpc_cidr" \
             --region "$REGION" 2>/dev/null || echo "Warning: Failed to add security group rule (may already exist)"
         
-        echo "Security group rule added successfully"
+        echo "VPC CIDR-based security group rule added successfully"
+        echo "Rule allows HTTPS access from entire VPC ($vpc_cidr) instead of specific security group"
     fi
     
     # Store the security group IDs in SSM for future reference
@@ -273,7 +289,7 @@ configure_source_cluster_security_groups() {
         --region "$REGION" || echo "Warning: Failed to store configured source security group ID in SSM"
     
     echo "Security group configuration completed"
-    echo "Migration console ($migration_sg_id) can now access source cluster ($source_sg_id) on port 443"
+    echo "Migration console can now access source cluster via VPC CIDR-based rule (no cross-reference dependencies)"
 }
 
 # Verify migration console connectivity
@@ -319,6 +335,7 @@ cleanup_temp_files() {
     fi
 }
 
+
 # Cleanup deployed migration infrastructure
 cleanup_migration_infrastructure() {
     echo "Cleaning up migration infrastructure..."
@@ -329,6 +346,7 @@ cleanup_migration_infrastructure() {
     generate_migration_context
     
     # Destroy all migration stacks with proper context
+    # No security group dependency cleanup needed - using VPC CIDR instead of cross-references
     cdk destroy "*" \
         --c contextFile="$TMP_DIR_PATH/migrationContext.json" \
         --c contextId="default" \

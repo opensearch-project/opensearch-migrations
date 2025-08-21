@@ -23,27 +23,29 @@ TEMP_CONFIG_FILE_PATH = "/config/migration_large_snapshot.yaml"
 TRANSFORMATION_DIRECTORY = "/shared-logs-output/test-transformations"
 INGEST_DOC = {"title": "Large Snapshot Migration Test Document"}
 
+# lets gooooo
 
-def get_config_values(config_file_path=None):
+
+def get_config_values(CONFIG_FILE_PATH=None):
     """Extract all needed values from migration services configuration."""
-    if config_file_path is None:
-        config_file_path = "/config/migration_services.yaml"
+    if CONFIG_FILE_PATH is None:
+        CONFIG_FILE_PATH = "/config/migration_services.yaml"
     
     try:
-        with open(config_file_path, 'r') as f:
-            config = yaml.safe_load(f)
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            CONFIG = yaml.safe_load(f)
         
-        snapshot_config = config.get('snapshot', {})
-        s3_config = snapshot_config.get('s3', {})
+        SNAPSHOT_CONFIG = CONFIG.get('snapshot', {})
+        S3_CONFIG = SNAPSHOT_CONFIG.get('s3', {})
         
         return {
-            'snapshot_repo_name': snapshot_config.get('snapshot_repo_name', 'migration_assistant_repo'),
-            'repo_uri': s3_config.get('repo_uri', ''),
-            'role_arn': s3_config.get('role', ''),
-            'aws_region': s3_config.get('aws_region', 'us-west-2'),
+            'snapshot_repo_name': SNAPSHOT_CONFIG.get('snapshot_repo_name', 'migration_assistant_repo'),
+            'repo_uri': S3_CONFIG.get('repo_uri', ''),
+            'role_arn': S3_CONFIG.get('role', ''),
+            'aws_region': S3_CONFIG.get('aws_region', 'us-west-2'),
         }
     except FileNotFoundError:
-        raise ValueError(f"Config file not found: {config_file_path}")
+        raise ValueError(f"Config file not found: {CONFIG_FILE_PATH}")
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML config file: {e}")
 
@@ -60,32 +62,32 @@ def get_environment_values():
     }
 
 
-def build_bucket_names_and_paths(account_id, env_values, config_values):
+def build_bucket_names_and_paths(ACCOUNT_ID, ENV_VALUES, CONFIG_VALUES):
     """Build S3 bucket names and paths using account ID and configuration."""
-    stage = env_values['stage']
-    region = env_values['snapshot_region']
+    STAGE = ENV_VALUES['stage']
+    REGION = ENV_VALUES['snapshot_region']
     
     # Default RFS bucket pattern: migration-artifacts-{account_id}-{stage}-{region}
-    default_s3_bucket_uri = f"s3://migration-artifacts-{account_id}-{stage}-{region}/rfs-snapshot-repo/"
+    DEFAULT_S3_BUCKET_URI = f"s3://migration-artifacts-{ACCOUNT_ID}-{STAGE}-{REGION}/rfs-snapshot-repo/"
     
     # Large snapshot bucket pattern: migrations-jenkins-snapshot-{account_id}-{region}
-    large_snapshot_bucket_name = f"{env_values['large_snapshot_bucket_prefix']}{account_id}-{region}"
+    LARGE_SNAPSHOT_BUCKET_NAME = f"{ENV_VALUES['large_snapshot_bucket_prefix']}{ACCOUNT_ID}-{REGION}"
     
     # Large S3 directory path
-    large_s3_base_path = f"{env_values['large_s3_directory_prefix']}{env_values['cluster_version']}"
+    LARGE_S3_BASE_PATH = f"{ENV_VALUES['large_s3_directory_prefix']}{ENV_VALUES['cluster_version']}"
     
     # Large snapshot S3 URI
-    large_snapshot_uri = f"s3://{large_snapshot_bucket_name}/{large_s3_base_path}/"
+    LARGE_SNAPSHOT_URI = f"s3://{LARGE_SNAPSHOT_BUCKET_NAME}/{LARGE_S3_BASE_PATH}/"
     
     # Role ARN for large snapshot
-    large_snapshot_role_arn = f"arn:aws:iam::{account_id}:role/largesnapshotfinal"
+    LARGE_SNAPSHOT_ROLE_ARN = f"arn:aws:iam::{ACCOUNT_ID}:role/largesnapshotfinal"
     
     return {
-        'default_s3_bucket_uri': default_s3_bucket_uri,
-        'large_snapshot_bucket_name': large_snapshot_bucket_name,
-        'large_s3_base_path': large_s3_base_path,
-        'large_snapshot_uri': large_snapshot_uri,
-        'large_snapshot_role_arn': large_snapshot_role_arn,
+        'default_s3_bucket_uri': DEFAULT_S3_BUCKET_URI,
+        'large_snapshot_bucket_name': LARGE_SNAPSHOT_BUCKET_NAME,
+        'large_s3_base_path': LARGE_S3_BASE_PATH,
+        'large_snapshot_uri': LARGE_SNAPSHOT_URI,
+        'large_snapshot_role_arn': LARGE_SNAPSHOT_ROLE_ARN,
     }
 
 
