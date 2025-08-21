@@ -23,8 +23,6 @@ TEMP_CONFIG_FILE_PATH = "/config/migration_large_snapshot.yaml"
 TRANSFORMATION_DIRECTORY = "/shared-logs-output/test-transformations"
 INGEST_DOC = {"title": "Large Snapshot Migration Test Document"}
 
-# lets gooooo
-
 
 def get_config_values(CONFIG_FILE_PATH=None):
     """Extract all needed values from migration services configuration."""
@@ -56,13 +54,12 @@ def get_environment_values():
         'stage': os.getenv('STAGE', 'dev'),
         'large_snapshot_bucket_prefix': os.getenv('LARGE_SNAPSHOT_BUCKET_PREFIX', 'migrations-jenkins-snapshot-'),
         'large_s3_directory_prefix': os.getenv('LARGE_S3_DIRECTORY_PREFIX', 'large-snapshot-'),
-        'cluster_version': os.getenv('CLUSTER_VERSION', 'es7x'),
         'snapshot_region': os.getenv('SNAPSHOT_REGION', 'us-west-2'),
         'multiplication_factor': int(os.getenv('MULTIPLICATION_FACTOR', '10')),
     }
 
 
-def build_bucket_names_and_paths(ACCOUNT_ID, ENV_VALUES, CONFIG_VALUES):
+def build_bucket_names_and_paths(ACCOUNT_ID, ENV_VALUES, CONFIG_VALUES, CLUSTER_VERSION):
     """Build S3 bucket names and paths using account ID and configuration."""
     STAGE = ENV_VALUES['stage']
     REGION = ENV_VALUES['snapshot_region']
@@ -73,8 +70,8 @@ def build_bucket_names_and_paths(ACCOUNT_ID, ENV_VALUES, CONFIG_VALUES):
     # Large snapshot bucket pattern: migrations-jenkins-snapshot-{account_id}-{region}
     LARGE_SNAPSHOT_BUCKET_NAME = f"{ENV_VALUES['large_snapshot_bucket_prefix']}{ACCOUNT_ID}-{REGION}"
     
-    # Large S3 directory path
-    LARGE_S3_BASE_PATH = f"{ENV_VALUES['large_s3_directory_prefix']}{ENV_VALUES['cluster_version']}"
+    # Large S3 directory path using cluster version from config
+    LARGE_S3_BASE_PATH = f"{ENV_VALUES['large_s3_directory_prefix']}{CLUSTER_VERSION}"
     
     # Large snapshot S3 URI
     LARGE_SNAPSHOT_URI = f"s3://{LARGE_SNAPSHOT_BUCKET_NAME}/{LARGE_S3_BASE_PATH}/"
@@ -94,6 +91,73 @@ def build_bucket_names_and_paths(ACCOUNT_ID, ENV_VALUES, CONFIG_VALUES):
 def get_transformation_file_path():
     """Get the transformation file path."""
     return f"{TRANSFORMATION_DIRECTORY}/transformation.json"
+
+
+# =============================================================================
+# VERSION-SPECIFIC UTILITIES
+# =============================================================================
+
+def map_engine_version_to_cluster_version(engine_version):
+    """Map engine version (ES_5.6, OS_2.19, etc.) to cluster version (es5x, os2x, etc.)."""
+    if engine_version.startswith('ES_5'):
+        return 'es5x'
+    elif engine_version.startswith('ES_6'):
+        return 'es6x'
+    elif engine_version.startswith('ES_7'):
+        return 'es7x'
+    elif engine_version.startswith('OS_1'):
+        return 'os1x'
+    elif engine_version.startswith('OS_2'):
+        return 'os2x'
+    else:
+        logger.warning(f"Unknown engine version: {engine_version}, defaulting to es7x")
+        return 'es7x'
+
+
+def get_es_major_version_from_cluster_version(cluster_version):
+    """Extract major version from cluster version."""
+    if cluster_version == 'es5x':
+        return 5
+    elif cluster_version == 'es6x':
+        return 6
+    elif cluster_version == 'es7x':
+        return 7
+    elif cluster_version == 'os1x':
+        return 6  # OS 1.x behaves like ES 6.x for bulk API
+    elif cluster_version == 'os2x':
+        return 7  # OS 2.x behaves like ES 7.x for bulk API
+    else:
+        return 7  # Default to modern format
+
+
+def get_version_info_from_config(config_file_path=None):
+    """Get engine version, cluster version, and ES major version from config file."""
+    config_info = extract_config_info(config_file_path)
+    engine_version = config_info['engine_version']
+    cluster_version = map_engine_version_to_cluster_version(engine_version)
+    es_major_version = get_es_major_version_from_cluster_version(cluster_version)
+    
+    return {
+        'engine_version': engine_version,
+        'cluster_version': cluster_version,
+        'es_major_version': es_major_version
+    }
+
+
+def get_content_type_for_bulk(es_major_version):
+    """Get appropriate Content-Type header for bulk operations based on ES version."""
+    if es_major_version <= 5:
+        return "application/json"
+    else:
+        return "application/x-ndjson"
+
+
+def get_bulk_index_action(index_name, doc_id, es_major_version):
+    """Get bulk index action with appropriate format based on ES version."""
+    if es_major_version <= 6:
+        return {"index": {"_index": index_name, "_type": "_doc", "_id": doc_id}}
+    else:
+        return {"index": {"_index": index_name, "_id": doc_id}}
 
 
 # =============================================================================
@@ -123,8 +187,8 @@ def run_console_command(COMMAND_ARGS, TIMEOUT=COMMAND_TIMEOUT_SECONDS):
         raise TimeoutError(ERROR_MSG)
 
 
-def extract_account_id_from_config(config_file_path=None):
-    """Extract AWS account ID from migration services configuration file."""
+def extract_config_info(config_file_path=None):
+    """Extract AWS account ID and engine version from migration services configuration file."""
     if config_file_path is None:
         config_file_path = "/config/migration_services.yaml"
         
@@ -139,22 +203,43 @@ def extract_account_id_from_config(config_file_path=None):
             raise ValueError("No role ARN found in snapshot.s3.role")
         
         # Parse account ID from ARN format: arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME
+        account_id = None
         if ':' in role_arn:
             arn_parts = role_arn.split(':')
             if len(arn_parts) >= 5:
                 account_id = arn_parts[4]
-                if account_id and account_id.isdigit():
-                    logger.debug(f"Extracted account ID: {account_id}")
-                    return account_id
+                if not (account_id and account_id.isdigit()):
+                    account_id = None
         
-        raise ValueError(f"Could not extract account ID from role ARN: {role_arn}")
+        if not account_id:
+            raise ValueError(f"Could not extract account ID from role ARN: {role_arn}")
+        
+        # Extract engine version from source_cluster.version
+        engine_version = config.get('source_cluster', {}).get('version', '')
+        
+        if not engine_version:
+            raise ValueError("No engine version found in source_cluster.version")
+        
+        logger.debug(f"Extracted account ID: {account_id}")
+        logger.debug(f"Extracted engine version: {engine_version}")
+        
+        return {
+            'account_id': account_id,
+            'engine_version': engine_version
+        }
         
     except FileNotFoundError:
         raise ValueError(f"Config file not found: {config_file_path}")
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML config file: {e}")
     except Exception as e:
-        raise ValueError(f"Error extracting account ID from config: {e}")
+        raise ValueError(f"Error extracting config info: {e}")
+
+
+def extract_account_id_from_config(config_file_path=None):
+    """Extract AWS account ID from migration services configuration file (backward compatibility)."""
+    config_info = extract_config_info(config_file_path)
+    return config_info['account_id']
 
 
 # =============================================================================
@@ -193,7 +278,19 @@ def clear_clusters(stage, region):
     account_id = extract_account_id_from_config()
     cleanup_snapshots_and_repos(account_id, stage, region)
     
-    # Clear cluster indices
+    # Explicitly delete the specific index first
+    index_name = os.getenv('INDEX_NAME', 'basic_index')
+    logger.info(f"Explicitly deleting index: {index_name}")
+    try:
+        run_console_command([
+            "console", "clusters", "curl", "source_cluster",
+            "-XDELETE", f"/{index_name}"
+        ])
+        logger.info(f"Successfully deleted index: {index_name}")
+    except Exception as e:
+        logger.warning(f"Index {index_name} deletion failed (may not exist): {e}")
+    
+    # Clear remaining cluster indices
     run_console_command([
         "console", "clusters", "clear-indices", "--cluster", "source",
         "--acknowledge-risk"
@@ -237,7 +334,17 @@ def ingest_test_data(index_name, ingested_doc_count, ingest_doc):
     batch_size = calculate_optimal_batch_size(total_docs)
     num_batches = (total_docs + batch_size - 1) // batch_size
     
+    # Get version info from config file
+    version_info = get_version_info_from_config()
+    engine_version = version_info['engine_version']
+    cluster_version = version_info['cluster_version']
+    es_version = version_info['es_major_version']
+    content_type = get_content_type_for_bulk(es_version)
+    
     logger.info(f"Ingesting {total_docs} documents in {num_batches} batches of ~{batch_size} documents each")
+    logger.info(f"Detected from config: engine_version='{engine_version}' -> "
+                f"cluster_version='{cluster_version}' -> ES major version={es_version}")
+    logger.info(f"Using Content-Type: {content_type}")
     
     total_ingested = 0
     
@@ -253,7 +360,8 @@ def ingest_test_data(index_name, ingested_doc_count, ingest_doc):
             document = ingest_doc.copy()
             document["doc_number"] = str(doc_index)
             
-            index_action = {"index": {"_index": index_name, "_id": doc_id}}
+            # Use version-specific bulk index action format
+            index_action = get_bulk_index_action(index_name, doc_id, es_version)
             bulk_body_lines.append(json.dumps(index_action))
             bulk_body_lines.append(json.dumps(document))
         
@@ -266,7 +374,7 @@ def ingest_test_data(index_name, ingested_doc_count, ingest_doc):
             "console", "clusters", "curl", "source_cluster",
             "-XPOST", "/_bulk",
             "-d", bulk_body,
-            "-H", "Content-Type: application/x-ndjson"
+            "-H", f"Content-Type: {content_type}"
         ])
         
         total_ingested += batch_doc_count
@@ -414,13 +522,16 @@ def modify_temp_config_file(action, config_file_path, temp_config_file_path, **k
     if action == "create":
         logger.info("Creating temporary config file")
         
-        # Get account ID and environment values
-        account_id = extract_account_id_from_config(config_file_path)
+        # Get account ID, environment values, and version info
+        config_info = extract_config_info(config_file_path)
+        account_id = config_info['account_id']
         env_values = get_environment_values()
         config_values = get_config_values(config_file_path)
+        version_info = get_version_info_from_config(config_file_path)
+        cluster_version = version_info['cluster_version']
         
         # Build bucket names and paths
-        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values)
+        bucket_info = build_bucket_names_and_paths(account_id, env_values, config_values, cluster_version)
         
         # Read and modify config
         with open(config_file_path, 'r') as f:
@@ -476,3 +587,232 @@ def display_final_results(large_snapshot_uri, final_count, ingested_doc_count,
     logger.info(f"Successfully migrated {ingested_doc_count} → {final_count} documents")
     logger.info(f"Large snapshot available at: {large_snapshot_uri}")
     logger.info("Migration test completed successfully!")
+
+
+def download_s3_file_with_presign(s3_path, local_path, region):
+    """Download S3 file using presigned URL and curl to avoid AWS CLI bugs."""
+    try:
+        # Generate presigned URL
+        logger.info(f"Generating presigned URL for {s3_path}")
+        presign_result = run_console_command([
+            "aws", "s3", "presign", s3_path, "--region", region
+        ])
+        presigned_url = presign_result.stdout.strip()
+        
+        # Download with curl
+        logger.info(f"Downloading file with curl to {local_path}")
+        run_console_command([
+            "curl", "-f", "-s", "-o", local_path, presigned_url
+        ])
+        
+        # Verify download
+        if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            logger.info(f"Successfully downloaded {s3_path}")
+            return True
+        else:
+            logger.warning(f"Download failed: {local_path} not found or empty")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"Failed to download {s3_path}: {e}")
+        return False
+
+
+def update_snapshot_catalog(temp_config_path, bucket_info):
+    """Update snapshot catalog CSV with current snapshot metadata."""
+    logger.info("Collecting snapshot metadata for catalog")
+    
+    try:
+        # Read temp config values
+        with open(temp_config_path, 'r') as f:
+            temp_config = yaml.safe_load(f)
+        
+        snapshot_name = temp_config['snapshot']['snapshot_name']
+        repo_name = temp_config['snapshot']['snapshot_repo_name']
+        version = temp_config['source_cluster']['version']
+        region = temp_config['snapshot']['s3']['aws_region']
+        
+        # Get version info for cluster_version
+        version_info = get_version_info_from_config()
+        cluster_version = version_info['cluster_version']
+        
+        # Get snapshot creation timestamp from S3 file metadata
+        logger.info("Getting snapshot timestamp from S3")
+        created_at = "unknown"
+        try:
+            bucket_name = bucket_info['large_snapshot_bucket_name']
+            base_path = bucket_info['large_s3_base_path']
+            s3_result = run_console_command([
+                "aws", "s3", "ls", f"s3://{bucket_name}/{base_path}/",
+                "--region", region
+            ])
+            timestamps = []
+            for line in s3_result.stdout.strip().split('\n'):
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        date_part = parts[0]
+                        time_part = parts[1]
+                        timestamp = f"{date_part}T{time_part}Z"
+                        timestamps.append(timestamp)
+            created_at = max(timestamps) if timestamps else "unknown"
+        except Exception as e:
+            logger.warning(f"Could not get timestamp from S3: {e}")
+        
+        # Query snapshot metadata
+        logger.info("Querying snapshot metadata")
+        snapshot_result = run_console_command([
+            "console", "--config-file", temp_config_path,
+            "clusters", "curl", "source_cluster",
+            "-XGET", f"/_snapshot/{repo_name}/{snapshot_name}"
+        ])
+        snapshot_data = json.loads(snapshot_result.stdout)
+        
+        # Query index statistics
+        logger.info("Querying index statistics")
+        env_values = get_environment_values()
+        index_name = os.getenv('INDEX_NAME', 'basic_index')
+        filter_path = (f"indices.{index_name}.primaries.store.size_in_bytes%2C"
+                       f"indices.{index_name}.total.store.size_in_bytes")
+        index_result = run_console_command([
+            "console", "clusters", "curl", "source_cluster",
+            "-XGET", f"/{index_name}/_stats/store?filter_path={filter_path}"
+        ])
+        index_stats = json.loads(index_result.stdout)
+        
+        # Get snapshot size from S3
+        logger.info("Getting snapshot size from S3")
+        snapshot_size_s3 = 0
+        try:
+            bucket_name = bucket_info['large_snapshot_bucket_name']
+            base_path = bucket_info['large_s3_base_path']
+            s3_result = run_console_command([
+                "aws", "s3", "ls", f"s3://{bucket_name}/{base_path}/",
+                "--recursive", "--summarize", "--region", region
+            ])
+            for line in s3_result.stdout.split('\n'):
+                if 'Total Size:' in line:
+                    size_bytes = int(line.split()[-1])
+                    snapshot_size_s3 = round(size_bytes / (1024 * 1024), 2)
+                    break
+        except Exception as e:
+            logger.warning(f"Could not get size from S3: {e}")
+        
+        # Extract index statistics
+        primary_store_size = 0
+        total_store_size = 0
+        try:
+            if 'indices' in index_stats and index_name in index_stats['indices']:
+                index_data = index_stats['indices'][index_name]
+                if 'primaries' in index_data and 'store' in index_data['primaries']:
+                    primary_store_size = round(index_data['primaries']['store']['size_in_bytes'] / (1024 * 1024), 2)
+                if 'total' in index_data and 'store' in index_data['total']:
+                    total_store_size = round(index_data['total']['store']['size_in_bytes'] / (1024 * 1024), 2)
+        except Exception as e:
+            logger.warning(f"Could not extract index statistics: {e}")
+        
+        # Extract snapshot meta file
+        snapshot_meta_file = "unknown"
+        try:
+            if 'snapshots' in snapshot_data and len(snapshot_data['snapshots']) > 0:
+                snapshot_info = snapshot_data['snapshots'][0]
+                if 'uuid' in snapshot_info:
+                    snapshot_meta_file = f"snap-{snapshot_info['uuid']}"
+        except Exception as e:
+            logger.warning(f"Could not extract snapshot meta file: {e}")
+        
+        # Calculate derived values
+        ingested_doc_count = int(os.getenv('TOTAL_DOCUMENTS_TO_INGEST', '50'))
+        multiplication_factor = env_values['multiplication_factor']
+        index_shard_count = int(os.getenv('NUM_SHARDS', '10'))
+        doc_count = ingested_doc_count * multiplication_factor
+        doc_size = round(primary_store_size / doc_count, 2) if doc_count > 0 else 0
+        
+        # Build catalog entry
+        catalog_entry = {
+            'DIRECTORY': f"large-snapshot-{cluster_version}",
+            'VERSION': version,
+            'SNAPSHOT_NAME': snapshot_name,
+            'SNAPSHOT_META_FILE': snapshot_meta_file,
+            'CREATED_AT': created_at,
+            'INDEX_NAME_ON_SOURCE': index_name,
+            'SHARD_COUNT_ON_SOURCE': index_shard_count,
+            'DOC_COUNT_ON_SOURCE': doc_count,
+            'PRIMARY_STORE_SIZE_ON_SOURCE': primary_store_size,
+            'TOTAL_STORE_SIZE_ON_SOURCE': total_store_size,
+            'SNAPSHOT_SIZE_S3_MB': snapshot_size_s3,
+            'DOC_SIZE_ON_SOURCE': doc_size,
+            'REGION': region
+        }
+        
+        # Download existing catalog CSV
+        logger.info("Managing catalog CSV")
+        bucket_name = bucket_info['large_snapshot_bucket_name']
+        csv_path = f"s3://{bucket_name}/large-snapshot-catalog.csv"
+        temp_csv = "/tmp/catalog.csv"
+        temp_csv_updated = "/tmp/catalog_updated.csv"
+        
+        # Try to download existing catalog using presigned URL + curl
+        catalog_exists = False
+        try:
+            if download_s3_file_with_presign(csv_path, temp_csv, region):
+                catalog_exists = True
+                logger.info("Downloaded existing catalog using presigned URL")
+            else:
+                catalog_exists = False
+                logger.info("Failed to download catalog, will create new one")
+        except Exception as e:
+            catalog_exists = False
+            logger.info(f"Failed to download catalog: {e}")
+        
+        # Create or update catalog - always use our correct schema
+        updated_data_lines = []
+        
+        if catalog_exists:
+            # Read existing CSV
+            with open(temp_csv, 'r') as f:
+                lines = f.readlines()
+            
+            data_lines = lines[1:] if len(lines) > 1 else []
+            
+            # Parse existing entries and convert to our schema
+            for line in data_lines:
+                if line.strip() and not line.startswith(catalog_entry['DIRECTORY'] + ','):
+                    # Keep other entries, but we'll need to ensure they match our schema
+                    # For now, skip entries that don't match our directory to avoid corruption
+                    parts = line.strip().split(',')
+                    if len(parts) >= 1:  # At least has directory name
+                        # Only keep entries that aren't our current directory
+                        updated_data_lines.append(line)
+        
+        # Write updated CSV with our correct schema
+        with open(temp_csv_updated, 'w') as f:
+            # Always use our schema for headers
+            f.write(','.join(catalog_entry.keys()) + '\n')
+            
+            # Write existing entries (filtered)
+            f.writelines(updated_data_lines)
+            
+            # Add our new entry
+            new_line = ','.join([str(catalog_entry[col]) for col in catalog_entry.keys()]) + '\n'
+            f.write(new_line)
+        
+        # Upload updated catalog
+        run_console_command([
+            "aws", "s3", "cp", temp_csv_updated, csv_path, "--region", region
+        ])
+        
+        # Clean up temp files
+        for temp_file in [temp_csv, temp_csv_updated]:
+            try:
+                os.remove(temp_file)
+            except FileNotFoundError:
+                pass
+        
+        logger.info(f"Updated catalog with entry for {catalog_entry['DIRECTORY']}")
+        logger.info(f"Snapshot size from S3: {snapshot_size_s3}MB")
+        logger.info(f"Snapshot created at: {created_at}")
+        
+    except Exception as e:
+        logger.error(f"Failed to update snapshot catalog: {e}")
+        raise RuntimeError(f"Catalog update failed: {e}")

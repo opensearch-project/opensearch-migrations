@@ -12,6 +12,8 @@ from integ_test.multiplication_test.MultiplicationTestUtils import (
     get_environment_values,
     build_bucket_names_and_paths,
     get_config_values,
+    get_version_info_from_config,
+    update_snapshot_catalog,
     TEMP_CONFIG_FILE_PATH
 )
 
@@ -44,10 +46,12 @@ class CreateFinalSnapshot:
     def take_large_snapshot_with_console(self):
         """Take large snapshot using console commands with temp config"""
         
-        # Get account ID and bucket info for building S3 URI
+        # Get account ID, version info, and bucket info for building S3 URI
         account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
         config_values = get_config_values(CONFIG_FILE_PATH)
-        bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values)
+        version_info = get_version_info_from_config(CONFIG_FILE_PATH)
+        cluster_version = version_info['cluster_version']
+        bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values, cluster_version)
         
         # Step 1: Unregister existing repo (if exists) using temp config
         logger.info("Unregistering existing repository (if exists)")
@@ -139,7 +143,9 @@ class CreateFinalSnapshot:
         
         account_id = extract_account_id_from_config(CONFIG_FILE_PATH)
         config_values = get_config_values(CONFIG_FILE_PATH)
-        bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values)
+        version_info = get_version_info_from_config(CONFIG_FILE_PATH)
+        cluster_version = version_info['cluster_version']
+        bucket_info = build_bucket_names_and_paths(account_id, ENV_VALUES, config_values, cluster_version)
 
         logger.info("Step 1: Checking and preparing large S3 bucket and directory")
         check_and_prepare_s3_bucket(
@@ -153,6 +159,9 @@ class CreateFinalSnapshot:
         
         logger.info("Step 3: Taking large snapshot using console commands")
         large_snapshot_uri = self.take_large_snapshot_with_console()
+
+        logger.info("Step 3.5: Updating snapshot catalog")
+        update_snapshot_catalog(TEMP_CONFIG_FILE_PATH, bucket_info)
 
         logger.info("Step 4: Cleaning up repository and deleting temporary config file")
         
