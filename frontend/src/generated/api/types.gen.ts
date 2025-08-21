@@ -46,49 +46,61 @@ export type BackfillOverallStatus = {
 };
 
 /**
+ * BasicAuth
+ */
+export type BasicAuth = {
+  /**
+   * Type
+   */
+  type?: string;
+  /**
+   * Username
+   */
+  username: string;
+  /**
+   * Password
+   */
+  password: string;
+};
+
+/**
+ * BasicAuthArn
+ */
+export type BasicAuthArn = {
+  /**
+   * Type
+   */
+  type?: string;
+  /**
+   * User Secret Arn
+   */
+  user_secret_arn: string;
+};
+
+/**
  * ClusterInfo
  */
 export type ClusterInfo = {
   /**
-   * Type
+   * Endpoint
    */
-  type?: string | null;
-  /**
-   * Version
-   */
-  version?: string | null;
-  /**
-   * Uri
-   */
-  uri?: string | null;
+  endpoint: string;
   /**
    * Protocol
    */
-  protocol?: string | null;
+  protocol: string;
   /**
-   * Insecure
+   * Enable Tls Verification
    */
-  insecure?: boolean | null;
+  enable_tls_verification: boolean;
   /**
-   * Awsspecificauthentication
+   * Auth
    */
-  awsSpecificAuthentication?: boolean | null;
+  auth: NoAuth | BasicAuth | BasicAuthArn | SigV4Auth;
   /**
-   * Disablecompression
+   * Version Override
    */
-  disableCompression?: boolean | null;
-  /**
-   * Localrepository
-   */
-  localRepository?: string | null;
-};
-
-/**
- * ClustersInfo
- */
-export type ClustersInfo = {
-  source: ClusterInfo;
-  target: ClusterInfo;
+  version_override?: string | null;
 };
 
 /**
@@ -179,6 +191,52 @@ export type ItemsInfo = {
 };
 
 /**
+ * MetadataClusterInfo
+ */
+export type MetadataClusterInfo = {
+  /**
+   * Type
+   */
+  type?: string | null;
+  /**
+   * Version
+   */
+  version?: string | null;
+  /**
+   * Uri
+   */
+  uri?: string | null;
+  /**
+   * Protocol
+   */
+  protocol?: string | null;
+  /**
+   * Insecure
+   */
+  insecure?: boolean | null;
+  /**
+   * Awsspecificauthentication
+   */
+  awsSpecificAuthentication?: boolean | null;
+  /**
+   * Disablecompression
+   */
+  disableCompression?: boolean | null;
+  /**
+   * Localrepository
+   */
+  localRepository?: string | null;
+};
+
+/**
+ * MetadataClustersInfo
+ */
+export type MetadataClustersInfo = {
+  source: MetadataClusterInfo;
+  target: MetadataClusterInfo;
+};
+
+/**
  * MetadataMigrateRequest
  */
 export type MetadataMigrateRequest = {
@@ -219,7 +277,7 @@ export type MetadataStatus = {
    * Dryrun
    */
   dryRun?: boolean | null;
-  clusters?: ClustersInfo | null;
+  clusters?: MetadataClustersInfo | null;
   items?: ItemsInfo | null;
   transformations?: TransformationInfo | null;
   /**
@@ -238,6 +296,16 @@ export type MetadataStatus = {
    * Errormessage
    */
   errorMessage?: string | null;
+};
+
+/**
+ * NoAuth
+ */
+export type NoAuth = {
+  /**
+   * Type
+   */
+  type?: string;
 };
 
 /**
@@ -284,6 +352,24 @@ export type SessionDeleteResponse = {
    * Detail
    */
   detail: string;
+};
+
+/**
+ * SigV4Auth
+ */
+export type SigV4Auth = {
+  /**
+   * Type
+   */
+  type?: string;
+  /**
+   * Region
+   */
+  region: string;
+  /**
+   * Service
+   */
+  service: string;
 };
 
 /**
@@ -682,6 +768,68 @@ export type BackfillStatusResponses = {
 
 export type BackfillStatusResponse =
   BackfillStatusResponses[keyof BackfillStatusResponses];
+
+export type ClusterSourceData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/clusters/source";
+};
+
+export type ClusterSourceErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ClusterSourceError = ClusterSourceErrors[keyof ClusterSourceErrors];
+
+export type ClusterSourceResponses = {
+  /**
+   * Successful Response
+   */
+  200: ClusterInfo;
+};
+
+export type ClusterSourceResponse =
+  ClusterSourceResponses[keyof ClusterSourceResponses];
+
+export type ClusterTargetData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/clusters/target";
+};
+
+export type ClusterTargetErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ClusterTargetError = ClusterTargetErrors[keyof ClusterTargetErrors];
+
+export type ClusterTargetResponses = {
+  /**
+   * Successful Response
+   */
+  200: ClusterInfo;
+};
+
+export type ClusterTargetResponse =
+  ClusterTargetResponses[keyof ClusterTargetResponses];
 
 export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {});

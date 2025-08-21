@@ -1,8 +1,9 @@
-from typing import Any, Dict, Generator, NamedTuple, Optional
+from typing import Any, Dict, Generator, NamedTuple, Optional, TypeAlias
 from enum import Enum
 import json
 import logging
 import subprocess
+from pydantic import BaseModel
 
 import boto3
 from cerberus import Validator
@@ -304,3 +305,39 @@ class NoSourceClusterDefinedError(Exception):
 class NoTargetClusterDefinedError(Exception):
     def __init__(self):
         super().__init__("Unable to continue without a target cluster specified")
+
+
+class AuthBase(BaseModel):
+    type: str
+
+
+class NoAuth(AuthBase):
+    type: str = "no_auth"
+
+
+class BasicAuth(AuthBase):
+    type: str = "basic_auth"
+    username: str
+    password: str
+
+
+class BasicAuthArn(AuthBase):
+    type: str = "basic_auth_arn"
+    user_secret_arn: str
+
+
+class SigV4Auth(AuthBase):
+    type: str = "sigv4_auth"
+    region: str
+    service: str
+
+
+AuthType: TypeAlias = NoAuth | BasicAuth | BasicAuthArn | SigV4Auth
+
+
+class ClusterInfo(BaseModel):
+    endpoint: str
+    protocol: str
+    enable_tls_verification: bool
+    auth: AuthType
+    version_override: Optional[str] = None
