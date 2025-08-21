@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 sync_ecr_repo() {
   REPO_NAME="migrations-local-repo"
   ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text 2>/dev/null)

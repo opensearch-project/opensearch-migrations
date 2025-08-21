@@ -39,20 +39,37 @@ class K8sService:
             return None
 
     def wait_for_all_healthy_pods(self, timeout: int = 180) -> bool:
-        """Waits for all pods in the namespace to be in a ready state, fails after the specified timeout in seconds."""
+        """Waits for all pods in the namespace to be in a ready state,
+        ignoring completed pods, and fails after the specified timeout in seconds.
+        """
         logger.info("Waiting for pods to become ready...")
         start_time = time.time()
 
+        # Exclude Argo workflow pods by label (pods without the label only)
+        argo_exclude_selector = '!workflows.argoproj.io/workflow'
+
         while time.time() - start_time < timeout:
-            pods = self.k8s_client.list_namespaced_pod(self.namespace).items
-            unhealthy_pods = [pod.metadata.name for pod in pods if not self._is_pod_ready(pod)]
+            pods = self.k8s_client.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector=argo_exclude_selector
+            ).items
+
+            # Exclude pods that are in the "Succeeded" phase (Completed jobs)
+            unhealthy_pods = [
+                pod.metadata.name
+                for pod in pods
+                if pod.status.phase != "Succeeded" and not self._is_pod_ready(pod)
+            ]
             if not unhealthy_pods:
-                logger.info("All pods are healthy.")
+                logger.info("All non-workflow pods are healthy.")
                 return True
+            logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pods)}]")
             time.sleep(3)
 
-        raise TimeoutError(f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
-                           f"Unhealthy pods: {', '.join(unhealthy_pods)}")
+        raise TimeoutError(
+            f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
+            f"Unhealthy pods: {', '.join(unhealthy_pods)}"
+        )
 
     def _is_pod_ready(self, pod: V1Pod) -> bool:
         """Checks if a pod is in a Ready state."""
@@ -65,7 +82,7 @@ class K8sService:
         logger.debug("Retrieving the latest migration console pod...")
         pods = self.k8s_client.list_namespaced_pod(
             namespace=self.namespace,
-            label_selector=f"app={self.namespace}-migration-console",
+            label_selector="app=migration-console",
             field_selector="status.phase=Running",
             limit=1
         ).items
@@ -79,7 +96,8 @@ class K8sService:
     def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
         console_pod_id = self.get_migration_console_pod_id()
-        logger.info(f"Executing command in pod: {console_pod_id}")
+        printable_cmd = " ".join(command_list)
+        logger.info(f"Executing command [{printable_cmd}] in pod: {console_pod_id}")
 
         # Open a streaming connection
         resp = stream.stream(
@@ -105,6 +123,18 @@ class K8sService:
                 if resp.peek_stderr():
                     print(resp.read_stderr(), end="")
         return resp
+
+    def copy_log_files(self, destination: str):
+        console_pod_id = self.get_migration_console_pod_id()
+        command_list = [
+            "sh",
+            "-c",
+            f"rm -rf {destination} && mkdir -p {destination} && "
+            f"kubectl -n ma exec {console_pod_id} -- sh -c "
+            f"'cd /shared-logs-output && tar -cf - fluentbit-*' | "
+            f"tar -xf - -C {destination}"
+        ]
+        self.run_command(command=command_list, ignore_errors=True)
 
     def delete_all_pvcs(self) -> None:
         """Deletes all PersistentVolumeClaims (PVCs) in the namespace."""
@@ -149,11 +179,6 @@ class K8sService:
         if values_file:
             command.extend(["-f", values_file])
         return self.run_command(command)
-
-    def helm_dependency_update(self, script_path: str) -> CompletedProcess:
-        logger.info("Updating Helm dependencies")
-        command = [script_path]
-        return self.run_command(command, stdout=None, stderr=None)
 
     def helm_install(self, chart_path: str, release_name: str,
                      values_file: str = None) -> CompletedProcess | bool:
