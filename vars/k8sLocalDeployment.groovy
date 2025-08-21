@@ -1,11 +1,9 @@
 def call(Map config = [:]) {
-    ['jobName', 'sourceVersion', 'targetVersion', 'gitUrl', 'gitBranch'].each { key ->
+    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
         if (!config[key]) {
             throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
         }
     }
-    def gitDefaultUrl = config.gitUrl
-    def gitDefaultBranch = config.gitBranch
     def jobName = config.jobName
     def sourceVersion = config.sourceVersion
     def targetVersion = config.targetVersion
