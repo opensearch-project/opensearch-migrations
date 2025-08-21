@@ -104,7 +104,7 @@ public class LuceneReader {
         int segmentDocBase = readerAndBase.getDocBaseInParent();
 
         // Start at
-        int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
+        int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
