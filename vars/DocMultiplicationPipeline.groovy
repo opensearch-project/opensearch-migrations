@@ -290,19 +290,25 @@ def call(Map config = [:]) {
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
                                 
-                                // First: Clean up Migration Assistant infrastructure using CDK destroy
+                                // First: Clean up Migration Assistant infrastructure using context generation
                                 echo "Cleaning up Migration Assistant infrastructure using CDK destroy..."
-                                dir('deployment/cdk/opensearch-service-migration') {
+                                dir('test') {
                                     sh """
-                                        echo "Destroying Migration Assistant CDK stacks..."
+                                        echo "Destroying Migration Assistant CDK stacks with context..."
                                         echo "This will destroy in proper dependency order:"
                                         echo "  - MigrationConsole"
                                         echo "  - ReindexFromSnapshot" 
                                         echo "  - MigrationInfra"
                                         echo "  - NetworkInfra"
                                         
-                                        # Use CDK destroy with context (matches customer workflow)
-                                        cdk destroy "*" --c contextId=default --force --verbose
+                                        # Use the migration infrastructure script's cleanup function
+                                        # This generates context with actual values instead of placeholders
+                                        ./awsMigrationInfraSetup.sh --cleanup \\
+                                            --source-endpoint "${env.SOURCE_CLUSTER_ENDPOINT}" \\
+                                            --source-version "${params.engineVersion}" \\
+                                            --vpc-id "${env.SOURCE_VPC_ID}" \\
+                                            --stage "${params.stage}" \\
+                                            --region "${params.region}"
                                         
                                         if [ \$? -eq 0 ]; then
                                             echo "Migration Assistant infrastructure cleaned up successfully"
@@ -383,8 +389,8 @@ def call(Map config = [:]) {
             echo ""
             echo "CDK-Based Manual Cleanup Commands (Recommended):"
             echo "  # Clean up Migration Assistant infrastructure"
-            echo "  cd deployment/cdk/opensearch-service-migration"
-            echo "  cdk destroy '*' --c contextId=default --force"
+            echo "  cd test"
+            echo "  ./awsMigrationInfraSetup.sh --cleanup --source-endpoint <SOURCE_ENDPOINT> --source-version <SOURCE_VERSION> --vpc-id <VPC_ID> --stage ${params.stage} --region ${params.region}"
             echo ""
             echo "  # Clean up source cluster (optional - saves 20+ minutes on next run if kept)"
             echo "  cd test/tmp/amazon-opensearch-service-sample-cdk"
