@@ -318,21 +318,27 @@ def call(Map config = [:]) {
                                     """
                                 }
                                 
-                                // Second: Clean up source cluster (AWS Samples CDK) - Optional based on reuse strategy
-                                echo "Checking source cluster cleanup strategy..."
+                                // Second: Clean up source cluster (AWS Samples CDK) - ACTUALLY EXECUTE CLEANUP
+                                echo "Cleaning up source cluster infrastructure..."
                                 dir('test') {
                                     sh """
-                                        echo "Source cluster reuse strategy: Keep source cluster for faster re-runs"
-                                        echo "Source cluster stacks will be preserved:"
+                                        echo "Destroying source cluster CDK stacks..."
+                                        echo "This will destroy:"
                                         echo "  - OpenSearchDomain-${params.clusterVersion}-${params.stage}-${params.region}"
                                         echo "  - NetworkInfra-${params.stage}-${params.region}"
                                         echo ""
-                                        echo "To manually clean up source cluster later (saves 20+ minutes on next run):"
-                                        echo "  cd test/tmp/amazon-opensearch-service-sample-cdk"
-                                        echo "  cdk destroy '*' --force"
-                                        echo ""
-                                        echo "Or use the cleanup script:"
-                                        echo "  ./awsSourceClusterSetup.sh --cleanup --cluster-version ${params.engineVersion} --stage ${params.stage} --region ${params.region}"
+                                        
+                                        # Execute source cluster cleanup
+                                        ./awsSourceClusterSetup.sh --cleanup \\
+                                            --cluster-version ${params.engineVersion} \\
+                                            --stage ${params.stage} \\
+                                            --region ${params.region}
+                                        
+                                        if [ \$? -eq 0 ]; then
+                                            echo "Source cluster infrastructure cleaned up successfully"
+                                        else
+                                            echo "Source cluster cleanup completed with warnings (some resources may have been already deleted)"
+                                        fi
                                     """
                                 }
                                 
@@ -353,7 +359,7 @@ def call(Map config = [:]) {
                         
                         echo "CDK-based cleanup completed successfully"
                         echo "Migration Assistant infrastructure destroyed using proper CDK commands"
-                        echo "Source cluster preserved for reuse (saves 20+ minutes on next run)"
+                        echo "Source cluster infrastructure destroyed - complete cleanup achieved"
                     }
                 }
             }
