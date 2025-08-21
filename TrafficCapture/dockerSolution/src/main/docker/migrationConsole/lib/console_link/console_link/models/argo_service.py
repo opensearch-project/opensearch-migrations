@@ -69,8 +69,7 @@ class ArgoService:
         args = {
             "resume": workflow_name
         }
-        pod_name = f"argo-resume-workflow-{uuid.uuid4().hex[:6]}"
-        result = self._run_argo_command(pod_name=pod_name, argo_args=args)
+        result = self._run_argo_command(pod_action="resume-workflow", argo_args=args)
         logger.info(f"Argo workflow '{workflow_name}' has been resumed")
         return result
 
@@ -78,8 +77,7 @@ class ArgoService:
         args = {
             "stop": workflow_name
         }
-        pod_name = f"argo-stop-workflow-{uuid.uuid4().hex[:6]}"
-        result = self._run_argo_command(pod_name=pod_name, argo_args=args)
+        result = self._run_argo_command(pod_action="stop-workflow", argo_args=args)
         logger.info(f"Argo workflow '{workflow_name}' has been stopped")
         return result
 
@@ -166,8 +164,7 @@ class ArgoService:
             "logs": workflow_name,
             "--follow": FlagOnlyArgument
         }
-        pod_name = f"argo-watch-workflow-{uuid.uuid4().hex[:6]}"
-        return self._run_argo_command(pod_name=pod_name, argo_args=argo_args, print_output=stream_output,
+        return self._run_argo_command(pod_action="watch-workflow", argo_args=argo_args, print_output=stream_output,
                                       stream_output=stream_output)
 
     def get_source_cluster_from_workflow(self, workflow_name: str) -> Cluster:
@@ -176,8 +173,9 @@ class ArgoService:
     def get_target_cluster_from_workflow(self, workflow_name: str) -> Cluster:
         return self._get_cluster_config_from_workflow(workflow_name, "target")
 
-    def _run_argo_command(self, pod_name: str, argo_args: Dict, print_output: bool = False,
+    def _run_argo_command(self, pod_action: str, argo_args: Dict, print_output: bool = False,
                           stream_output: bool = False) -> CommandResult:
+        pod_name = f"argo-{pod_action}-{uuid.uuid4().hex[:6]}"
         command_args = {
             "run": pod_name,
             "--namespace": self.namespace,

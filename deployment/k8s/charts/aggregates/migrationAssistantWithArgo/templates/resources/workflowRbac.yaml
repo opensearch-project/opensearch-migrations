@@ -22,44 +22,24 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
-  # Core Kubernetes resources needed for Helm operations
+  # Add permissions for pods and pod logs (needed for Argo workflow execution)
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-
-  # Events for Helm status reporting
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
-
-  # RBAC resources that Helm charts might create
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-
-  # Network policies and ingress
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["networkpolicies", "ingresses"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-
-  # Policy resources
-  - apiGroups: ["policy"]
-    resources: ["poddisruptionbudgets"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-
-  # Autoscaling
-  - apiGroups: ["autoscaling"]
-    resources: ["horizontalpodautoscalers"]
+    resources: ["pods", "pods/log", "services", "secrets", "configmaps"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # For services
-  - apiGroups: [ "apiextensions.k8s.io" ]
-    resources: [ "customresourcedefinitions" ]
-    verbs: [ "create", "get", "list", "watch", "update", "patch", "delete" ]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Kafka resources permissions
   - apiGroups: ["kafka.strimzi.io"]
     resources: ["kafkas", "kafkatopics", "kafkanodepools"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Allow Argo workflow to perform Helm installs for source and target clusters
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
 ---
