@@ -1,11 +1,20 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.bulk.*;
+import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
+import org.opensearch.migrations.bulkload.common.operations.DeleteOperationMeta;
+import org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
+import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import lombok.AllArgsConstructor;
 
 /** 
@@ -16,43 +25,63 @@ import lombok.AllArgsConstructor;
  */
 @AllArgsConstructor
 public class RfsDocument {
+    private static final int MAX_STRING_LENGTH = 100 * 1024 * 1024; // ~100 MB
+    private static final ObjectMapper OBJECT_MAPPER;
+    static {
+        OBJECT_MAPPER = JsonMapper.builder().build();
+        OBJECT_MAPPER.getFactory()
+            .setStreamReadConstraints(StreamReadConstraints.builder()
+                .maxStringLength(MAX_STRING_LENGTH).build());
+    }
     // Originally set to the lucene index doc number, this number helps keeps track of progress over a work item
     public final int progressCheckpointNum;
 
     // The Elasticsearch/OpenSearch document to be reindexed
-    public final BulkDocSection document;
+    public final BulkOperationSpec document;
 
     public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
         // Check if this is a delete operation
-        if (doc.source != null && doc.source.equals("{\"_delete\":true}")) {
+        Map<String, Object> document = null;
+        if (doc.source != null) {
+            try {
+                document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to parse source doc: " + e.getMessage(), e);
+            }
+        }
+
+        if (doc.operation == RfsDocumentOperation.DELETE) {
             // Create a delete operation
-            return new RfsDocument(
-                doc.luceneDocNumber,
-                BulkDocSection.createDelete(
-                    doc.id,
-                    indexName,
-                    doc.type != null ? doc.type : "_doc",
-                    doc.routing
-                )
-            );
+            DeleteOperationMeta meta = DeleteOperationMeta.builder()
+                .id(doc.id)
+                .index(indexName)
+                .type(doc.type)
+                .routing(doc.routing)
+                .build();
+            DeleteOp deleteOp = DeleteOp.builder()
+                .operation(meta)
+                .document(document)
+                .build();
+            return new RfsDocument(doc.luceneDocNumber, deleteOp);
         } else {
             // Create a normal index operation
-            return new RfsDocument(
-                doc.luceneDocNumber,
-                new BulkDocSection(
-                    doc.id,
-                    indexName,
-                    doc.type,
-                    doc.source,
-                    doc.routing
-                )
-            );
+            IndexOperationMeta meta = IndexOperationMeta.builder()
+                .id(doc.id)
+                .index(indexName)
+                .type(doc.type)
+                .routing(doc.routing)
+                .build();
+            IndexOp indexOp = IndexOp.builder()
+                .operation(meta)
+                .document(document)
+                .build();
+            return new RfsDocument(doc.luceneDocNumber, indexOp);
         }
     }
 
     @SuppressWarnings("unchecked")
     public static List<RfsDocument> transform(IJsonTransformer transformer, List<RfsDocument> docs) {
-        var listOfDocMaps = docs.stream().map(doc -> doc.document.toMap())
+        var listOfDocMaps = docs.stream().map(doc -> OBJECT_MAPPER.convertValue(doc.document, Map.class))
                 .toList();
 
         // Use the first progressCheckpointNum in the batch to associate with all returned objects
@@ -66,7 +95,7 @@ public class RfsDocument {
             return transformedList.stream()
                 .map(item -> new RfsDocument(
                     progressCheckpointNum,
-                    BulkDocSection.fromMap(item)
+                    OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class)
                 ))
                 .collect(Collectors.toList());
         } else {

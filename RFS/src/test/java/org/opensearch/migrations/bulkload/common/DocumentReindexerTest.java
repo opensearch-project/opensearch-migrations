@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -323,16 +324,16 @@ class DocumentReindexerTest {
     }
 
     private RfsLuceneDocument createTestDocument(int id) {
-        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"value\"}", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"value\"}", null, RfsDocumentOperation.INDEX);
     }
 
     private RfsLuceneDocument createTestDocumentWithWhitespace(int id) {
-        return new RfsLuceneDocument(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null, RfsDocumentOperation.INDEX);
     }
 
     private RfsLuceneDocument createLargeTestDocument(int id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null, RfsDocumentOperation.INDEX);
     }
 
     /**
@@ -344,6 +345,6 @@ class DocumentReindexerTest {
      */
     private RfsLuceneDocument createTestDocumentWithType(int id, String type) {
         String source = "{\"field\":\"value\"}";
-        return new RfsLuceneDocument(id, String.valueOf(id), type, source, null);
+        return new RfsLuceneDocument(id, String.valueOf(id), type, source, null, RfsDocumentOperation.INDEX);
     }
 }

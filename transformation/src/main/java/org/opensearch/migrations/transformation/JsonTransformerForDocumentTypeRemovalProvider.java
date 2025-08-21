@@ -33,11 +33,8 @@ public class JsonTransformerForDocumentTypeRemovalProvider implements IJsonTrans
         @SuppressWarnings("unchecked")
         private Object transformMap(Object incomingJson) {
             var incomingMap = (Map<String, Object>) incomingJson;
-            if (incomingMap.containsKey("index")) {
-                ((Map<String, Object>) incomingMap.get("index")).remove("_type");
-            }
-            if (incomingMap.containsKey("delete")) {
-                ((Map<String, Object>) incomingMap.get("delete")).remove("_type");
+            if (incomingMap.containsKey("operation")) {
+                ((Map<String, Object>) incomingMap.get("operation")).remove("_type");
             }
             return incomingMap;
         }

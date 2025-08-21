@@ -2,14 +2,18 @@ package org.opensearch.migrations.data;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta;
 import org.opensearch.migrations.data.workloads.Workload;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -41,6 +45,7 @@ public class WorkloadGenerator {
         log.info("All documents completed");
     }
 
+    @SuppressWarnings("unchecked")
     private List<CompletableFuture<?>> generateDocs(String indexName, Workload workload, WorkloadOptions options) {
         // This happens inline to be sure the index exists before docs are indexed on it
         var indexRequestDoc = workload.createIndex(options.getIndex().indexSettings.deepCopy());
@@ -56,11 +61,19 @@ public class WorkloadGenerator {
                 var docId = docIdCounter.incrementAndGet();
                 var type = options.getDefaultDocType();
                 var routing = options.getDefaultDocRouting();
-                return new BulkDocSection(indexName + "_" + docId, indexName, type, doc.toString(), routing);
+                return (BulkOperationSpec) IndexOp.builder()
+                    .operation(IndexOperationMeta.builder()
+                        .index(indexName)
+                        .id(indexName + "_" + docId)
+                        .type(type)
+                        .routing(routing)
+                        .build())
+                    .document(new ObjectMapper().convertValue(doc, Map.class))
+                    .build();
             })
             .collect(Collectors.toList());
 
-        var bulkDocGroups = new ArrayList<List<BulkDocSection>>();
+        var bulkDocGroups = new ArrayList<List<BulkOperationSpec>>();
         for (int i = 0; i < allDocs.size(); i += options.getMaxBulkBatchSize()) {
             bulkDocGroups.add(allDocs.subList(i, Math.min(i + options.getMaxBulkBatchSize(), allDocs.size())));
         }

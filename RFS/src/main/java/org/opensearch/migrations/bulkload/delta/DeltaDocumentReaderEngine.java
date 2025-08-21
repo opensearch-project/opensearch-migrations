@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
+import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -86,13 +87,14 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             Flux<RfsLuceneDocument> deletionsAsDocuments = Flux.from(deltaResult.deletions)
                 .map(doc -> {
                     // Create a new RfsLuceneDocument that represents a delete operation
-                    // We'll mark it with a special field that indicates it's a delete
+                    // Preserve the original source content for potential use in transformations
                     return new RfsLuceneDocument(
                         doc.luceneDocNumber,
                         doc.id,
                         doc.type,
-                        "{\"_delete\":true}", // Special marker for delete operations
-                        doc.routing
+                        doc.source,  // Preserve actual source content
+                        doc.routing,
+                        RfsDocumentOperation.DELETE  // Mark as delete operation
                     );
                 });
             

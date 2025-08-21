@@ -428,11 +428,7 @@ function routeHttpRequest(source_document, context) {
 }
 
 function processBulkIndex(docBackfillPair, context) {
-    // Handle both index and delete operations
-    const operationType = docBackfillPair.index ? 'index' : (docBackfillPair.delete ? 'delete' : null);
-    if (!operationType) return docBackfillPair;
-
-    const parameters = docBackfillPair[operationType];
+    const parameters = docBackfillPair.get("operation");
     const sourceIndexName = parameters._index;
     const typeName = parameters._type ?? "_doc";
 
@@ -445,7 +441,7 @@ function processBulkIndex(docBackfillPair, context) {
 
     if (!targetIndex) return [];
 
-    docBackfillPair[operationType] = retargetCommandParameters(parameters, targetIndex);
+    docBackfillPair.set("operation", retargetCommandParameters(parameters, targetIndex));
     return docBackfillPair;
 }
 
@@ -466,11 +462,7 @@ function detectAndTransform(document, context) {
         return processMetadataRequest(document, context);
     } else if (document.has("method") && document.has("URI")) {
         return routeHttpRequest(document, context);
-    } else if (document.has("index") && document.has("source")) {
-        // Handle index operations with source
-        return processBulkIndex(document, context);
-    } else if (document.has("delete")) {
-        // Handle delete operations (no source)
+    } else if (document.has("schema") && document.get("schema") === "rfs-opensearch-bulk-v1") {
         return processBulkIndex(document, context);
     } else {
         return document;

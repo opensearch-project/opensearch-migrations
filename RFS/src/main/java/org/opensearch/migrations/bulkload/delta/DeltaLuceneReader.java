@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
@@ -25,7 +25,7 @@ import reactor.core.scheduler.Schedulers;
  * DeltaLuceneReader
  * <p>
  * Provides a delta-style backfill between a previous and current Lucene snapshot.
- * Emits both new documents and delete operations as {@link RfsLuceneDocument} or {@link BulkDocSection} via Reactor streams.
+ * Emits both new documents and delete operations as {@link RfsLuceneDocument} or {@link BulkOperationSpec} via Reactor streams.
  *
  * <h3>Functionality</h3>
  * - Builds segment → reader maps from both snapshots.

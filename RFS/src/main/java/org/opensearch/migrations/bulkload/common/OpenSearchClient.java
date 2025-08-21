@@ -10,7 +10,6 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
@@ -420,15 +419,24 @@ public abstract class OpenSearchClient {
         return head + "... [truncated] ..." + tail;
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec> docs,
                                               IRfsContexts.IRequestContext context)
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-        final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
+        // Create a map keyed by document ID for tracking failures
+        final var docsMap = new HashMap<String, org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>();
+        for (var doc : docs) {
+            String docId = extractDocId(doc);
+            docsMap.put(docId, doc);
+        }
+        
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
-            var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
+            var body = org.opensearch.migrations.bulkload.common.bulk.BulkNdjson.toBulkNdjson(
+                new java.util.ArrayList<>(docsMap.values()), 
+                objectMapper
+            );
             var additionalHeaders = new HashMap<String, List<String>>();
             if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
                 RestClient.addGzipRequestHeaders(additionalHeaders);
@@ -463,7 +471,10 @@ public abstract class OpenSearchClient {
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     docsMap::size,
-                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                    () -> org.opensearch.migrations.bulkload.common.bulk.BulkNdjson.toBulkNdjson(
+                        new java.util.ArrayList<>(docsMap.values()),
+                        objectMapper
+                    ),
                     error
                 );
             } else {
@@ -474,6 +485,18 @@ public abstract class OpenSearchClient {
                     .log();
             }
         });
+    }
+    
+    private String extractDocId(org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec doc) {
+        if (doc instanceof org.opensearch.migrations.bulkload.common.bulk.IndexOp) {
+            var indexOp = (org.opensearch.migrations.bulkload.common.bulk.IndexOp) doc;
+            return ((org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta) indexOp.getOperation()).getId();
+        } else if (doc instanceof org.opensearch.migrations.bulkload.common.bulk.DeleteOp) {
+            var deleteOp = (org.opensearch.migrations.bulkload.common.bulk.DeleteOp) doc;
+            return ((org.opensearch.migrations.bulkload.common.operations.DeleteOperationMeta) deleteOp.getOperation()).getId();
+        } else {
+            throw new IllegalArgumentException("Unknown operation type: " + doc.getClass());
+        }
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {

@@ -7,10 +7,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
@@ -68,7 +68,7 @@ public class LuceneReader {
         var sortedLeaves = originalLeaves.stream()
             .map(LuceneLeafReaderContext::reader)
             .sorted(SegmentNameSorter.INSTANCE)
-            .collect(Collectors.toList());
+            .toList();
 
         // Step 2: Build the list of ReaderAndBase objects with cumulative doc base
         var sortedReaderAndBase = new ArrayList<ReaderAndBase>();
@@ -89,8 +89,7 @@ public class LuceneReader {
         if (index < 0) {
             var insertionPoint = -(index + 1);
             // index = Last segment index with docBaseInParent < startDocId
-            index = insertionPoint - 1;
-            assert index >= 0;
+            index = Math.max(insertionPoint - 1, 0);
         }
 
         // Step 5: Return the sublist starting from the first valid segment
@@ -225,6 +224,6 @@ public class LuceneReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new RfsLuceneDocument(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing);
+        return new RfsLuceneDocument(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, RfsDocumentOperation.INDEX);
     }
 }
