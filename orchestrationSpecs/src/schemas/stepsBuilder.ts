@@ -68,7 +68,7 @@ export class StepsBuilder<
 > extends TemplateBodyBuilder<ContextualScope, "steps", InputParamsScope, StepsScope, OutputParamsScope,
     StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>>
 {
-    constructor(public contextualScope: ContextualScope,
+    constructor(contextualScope: ContextualScope,
                 inputsScope: InputParamsScope,
                 bodyScope: StepsScope,
                 protected readonly stepGroups: StepGroup[],
@@ -104,7 +104,11 @@ export class StepsBuilder<
         workflow: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>>
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) =>
+                ParamsWithLiteralsOrExpressions<z.infer<
+                    ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>
+                >>
+        >
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
@@ -118,27 +122,38 @@ export class StepsBuilder<
         }) as any;
     }
 
-    // addInternalSteps<
-    //     Name extends string,
-    //     TKey extends string & keyof ContextualScope["templates"],
-    //     TTemplate extends ContextualScope["templates"][TKey],
-    //     TInput extends TTemplate extends { input: infer I } ? I extends InputParametersRecord ? I : InputParametersRecord : InputParametersRecord,
-    //     TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {},
-    //     Task extends WorkflowTask<TInput, TOutput>
-    // >(
-    //     name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-    //     key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-    //     paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-    //         (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<ContextualScope["templates"][TKey]["inputs"]>>>>>
-    //
-    // ): StepsBuilder<
-    //     ContextualScope,
-    //     InputParamsScope,
-    //     ExtendScope<StepsScope, StepsGroup>,
-    //     OutputParamsScope
-    // > {
-    //     return
-    // }
+    addInternalStep<
+        Name extends string,
+        TKey extends Extract<keyof ContextualScope["templates"], string>,
+        TTemplate extends ContextualScope["templates"][TKey],
+        TInput extends TTemplate extends { input: infer I } ? I extends InputParametersRecord ? I : InputParametersRecord : InputParametersRecord,
+        TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {}
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
+        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) =>
+                ParamsWithLiteralsOrExpressions<
+                    z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>
+                >
+        >
+    ): UniqueNameConstraintOutsideDeclaration<
+        Name,
+        StepsScope,
+        StepsBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ExtendScope<
+                StepsScope,
+                { [K in Name]: StepWithOutputs<Name, TOutput> }
+            >,
+            OutputParamsScope
+        >
+    > {
+        return this.addStepGroup(groupBuilder => {
+            return groupBuilder.addInternalStep(name, templateKey, paramsFn) as any;
+        }) as any;
+    }
 
     addParameterOutput<T extends PlainObject, Name extends string>(name: Name, parameter: string, t: ZodType<T>, descriptionValue?: string):
         StepsBuilder<ContextualScope, InputParamsScope, StepsScope,
@@ -154,9 +169,15 @@ export class StepsBuilder<
         });
     }
 
-    addExpressionOutput<T extends PlainObject, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+    addExpressionOutput<T extends PlainObject, Name extends string>(
+        name: Name,
+        expression: string,
+        t: ZodType<T>,
+        descriptionValue?: string
+    ):
         StepsBuilder<ContextualScope, InputParamsScope, StepsScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>>
+    {
         return new StepsBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.stepGroups, {
             ...this.outputsScope,
             [name as string]: {
@@ -193,7 +214,11 @@ export class StepGroupBuilder<
         workflowIn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>>>
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) =>
+                ParamsWithLiteralsOrExpressions<
+                    z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>
+                >>
+        >
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, {
             [K in Name]: StepWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]>
@@ -213,27 +238,35 @@ export class StepGroupBuilder<
 
     addInternalStep<
         Name extends string,
-        TKey extends string & keyof ContextualScope["templates"],
+        TKey extends Extract<keyof ContextualScope["templates"], string>,
         TTemplate extends ContextualScope["templates"][TKey],
         TInput extends TTemplate extends { input: infer I } ? I extends InputParametersRecord ? I : InputParametersRecord : InputParametersRecord,
-        TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {},
-        Task extends WorkflowTask<TInput, TOutput>
+        TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {}
     >(
-        name: Name,
-        templateKey: UniqueNameConstraintAtDeclaration<TKey, StepsScope>,
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) => ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>>>
-    ): UniqueNameConstraintOutsideDeclaration<TKey, StepsScope,
-        StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, {
-            [K in Name]: StepWithOutputs<Name, TOutput>
-        }>>> {
-        const template = this.contextualScope.templates?.[templateKey];
+            (steps: StepsScopeToStepsWithOutputs<StepsScope>) =>
+                ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>>
+        >
+    ): UniqueNameConstraintOutsideDeclaration<
+        Name,
+        StepsScope,
+        StepGroupBuilder<
+            ContextualScope,
+            ExtendScope<
+                StepsScope,
+                { [K in Name]: StepWithOutputs<Name, TOutput> }
+            >
+        >
+    > {
+        const template = this.contextualScope.templates?.[templateKey as string];
         const outputs = (template && 'output' in template ? template.output : {}) as TOutput;
+
         const templateCall = this.callTemplate(
-            templateKey,
+            templateKey as string,
             (paramsFn as any)(this.buildStepsWithOutputs())
         );
-
 
         return this.addStepHelper(name, templateCall, outputs) as any;
     }

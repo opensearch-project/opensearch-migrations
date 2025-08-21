@@ -47,10 +47,9 @@ export const FullMigration = WorkflowBuilder.create({
                     migrations: []
                 }
             }))
-            .addStepGroup(gb=>gb
-                .addInternalStep("split", "pipelineSourceMigration", steps=> ({
+            .addInternalStep("split", "pipelineSourceMigration", steps=> ({
                     sourceMigrationConfig: b.inputs.sourceMigrationConfigs
-                }))
+                })
             )
             .addStep("cleanup", TargetLatchHelpers, "cleanup", steps => ({
                 prefix: steps.init.prefix,
