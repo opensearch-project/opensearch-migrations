@@ -87,13 +87,14 @@ def create_mock_cluster_workflow_data(cluster_type="source", config=None):
         }
     }
 
+
 # Workflow lifecycle tests
 @patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
 @patch('console_link.models.argo_service.ArgoService._create_workflow_yaml')
 @patch('console_link.models.argo_service.ArgoService._wait_for_workflow_exists')
 @patch('os.unlink')
-def test_start_workflow_success(mock_unlink, mock_wait, mock_create_yaml,
-                               mock_kubectl, argo_service, mock_completed_process):
+def test_start_workflow_success(mock_unlink, mock_wait, mock_create_yaml, mock_kubectl,
+                                argo_service, mock_completed_process):
     """Test successful workflow start."""
     # Setup
     mock_create_yaml.return_value = "/tmp/test-workflow.yaml"
@@ -450,7 +451,7 @@ def test_create_workflow_yaml_without_parameters(argo_service):
         mock_file.name = "/tmp/test-workflow.yaml"
         mock_temp_file.return_value.__enter__.return_value = mock_file
 
-        with patch('builtins.open', mock_open()) as mock_file_open:
+        with patch('builtins.open', mock_open()):
             result = argo_service._create_workflow_yaml("test-template")
 
             assert result == "/tmp/test-workflow.yaml"
@@ -481,7 +482,7 @@ def test_create_workflow_yaml_with_parameters(argo_service):
         mock_file.name = "/tmp/test-workflow.yaml"
         mock_temp_file.return_value.__enter__.return_value = mock_file
 
-        with patch('builtins.open', mock_open()) as mock_file_open:
+        with patch('builtins.open', mock_open()):
             result = argo_service._create_workflow_yaml("test-template", parameters)
 
             assert result == "/tmp/test-workflow.yaml"
