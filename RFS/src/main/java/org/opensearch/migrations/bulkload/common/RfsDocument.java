@@ -37,7 +37,7 @@ public class RfsDocument {
             try {
                 document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});
             } catch (IOException e) {
-                throw new RuntimeException("Failed to parse source doc: " + e.getMessage(), e);
+                throw new IllegalArgumentException("Failed to parse source doc: " + e.getMessage(), e);
             }
         }
 
