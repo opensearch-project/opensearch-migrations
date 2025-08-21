@@ -11,10 +11,8 @@ import org.opensearch.migrations.bulkload.common.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import lombok.AllArgsConstructor;
 
 /** 
@@ -25,14 +23,7 @@ import lombok.AllArgsConstructor;
  */
 @AllArgsConstructor
 public class RfsDocument {
-    private static final int MAX_STRING_LENGTH = 100 * 1024 * 1024; // ~100 MB
-    private static final ObjectMapper OBJECT_MAPPER;
-    static {
-        OBJECT_MAPPER = JsonMapper.builder().build();
-        OBJECT_MAPPER.getFactory()
-            .setStreamReadConstraints(StreamReadConstraints.builder()
-                .maxStringLength(MAX_STRING_LENGTH).build());
-    }
+    protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     // Originally set to the lucene index doc number, this number helps keeps track of progress over a work item
     public final int progressCheckpointNum;
 

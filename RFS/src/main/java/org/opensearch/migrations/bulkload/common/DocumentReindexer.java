@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -63,6 +62,9 @@ public class DocumentReindexer {
             }, "DocumentBulkAggregator-" + threadNum);
         });
         Scheduler scheduler = Schedulers.fromExecutor(executor);
+        if (indexName.startsWith("blog")) {
+            log.info("in blog");
+        }
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
@@ -136,11 +138,7 @@ public class DocumentReindexer {
             public boolean test(RfsDocument next) {
                 // Add one for newline between bulk sections
                 long nextSize;
-                try {
-                    nextSize = next.document.getSerializedLength(new com.fasterxml.jackson.databind.ObjectMapper()) + 1L;
-                } catch (IOException e) {
-                    throw new RuntimeException("Failed to get bulk operation length", e);
-                }
+                nextSize = next.document.getSerializedLength() + 1L;
                 currentSize += nextSize;
                 currentItemCount++;
 

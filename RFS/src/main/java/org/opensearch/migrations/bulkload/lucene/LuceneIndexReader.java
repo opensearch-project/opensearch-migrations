@@ -16,6 +16,7 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -104,29 +105,13 @@ public interface LuceneIndexReader {
         );
     }
 
+    @SneakyThrows
     default DeltaLuceneReader.DeltaResult readDeltaDocumentsWithDeletes(String previousSegmentsFileName, String segmentsFileName, int startDocIdx, BaseRootRfsContext rootContext) {
-        Consumer<LuceneDirectoryReader> uncheckedReaderClose = reader -> {
-            try {
-                reader.close();
-            } catch (IOException e) {
-                throw Lombok.sneakyThrow(e);
-            }
-        };
-
-        LuceneDirectoryReader previousReader = null;
-        LuceneDirectoryReader currentReader = null;
-        try {
-            previousReader = this.getReader(previousSegmentsFileName);
-            currentReader = this.getReader(segmentsFileName);
+        try (
+            var previousReader = this.getReader(previousSegmentsFileName);
+            var currentReader = this.getReader(segmentsFileName);
+        ) {
             return DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx, rootContext);
-        } catch (IOException e) {
-            if (previousReader != null) {
-                uncheckedReaderClose.accept(previousReader);
-            }
-            if (currentReader != null) {
-                uncheckedReaderClose.accept(currentReader);
-            }
-            throw Lombok.sneakyThrow(e);
         }
     }
 

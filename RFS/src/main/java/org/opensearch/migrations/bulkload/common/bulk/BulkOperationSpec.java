@@ -5,6 +5,7 @@ import java.io.OutputStream;
 import java.util.Map;
 import java.util.Objects;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.enums.SchemaVersion;
 import org.opensearch.migrations.bulkload.common.operations.BaseOperationMeta;
@@ -20,6 +21,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.experimental.SuperBuilder;
 
 @Data
@@ -38,6 +40,8 @@ import lombok.experimental.SuperBuilder;
     @JsonSubTypes.Type(value = DeleteOp.class, name = "delete")
 })
 public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
+    protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+
     @Builder.Default
     private SchemaVersion schema = SchemaVersion.RFS_OPENSEARCH_BULK_V1;
     private Map<String, Object> document;
@@ -53,12 +57,12 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     
     /**
      * Calculate the serialized length of this bulk operation in NDJSON format.
-     * @param mapper The ObjectMapper to use for serialization
      * @return The length in bytes of the serialized operation
      */
-    public long getSerializedLength(ObjectMapper mapper) throws IOException {
+    @SneakyThrows(IOException.class)
+    public long getSerializedLength() {
         try (var stream = new CountingOutputStream()) {
-            BulkNdjson.writeOperation(this, stream, mapper);
+            BulkNdjson.writeOperation(this, stream, OBJECT_MAPPER);
             return stream.getCount();
         }
     }

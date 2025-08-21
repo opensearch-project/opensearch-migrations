@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.common.enums.OperationType;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.SneakyThrows;
 
 /**
  * Utility class for converting bulk operations to NDJSON format.
@@ -35,10 +36,8 @@ public final class BulkNdjson {
             appendJsonLine(sb, actionLine, mapper);
             
             // 2) Optional source/payload line
-            if (op.getOperationType() == OperationType.INDEX) {
-                if (op.isIncludeDocument() && op.getDocument() != null) {
-                    appendJsonLine(sb, op.getDocument(), mapper);
-                }
+            if (op.getOperationType() == OperationType.INDEX && op.isIncludeDocument() && op.getDocument() != null) {
+                appendJsonLine(sb, op.getDocument(), mapper);
             }
             // DELETE operations don't have a source line
         }
@@ -52,8 +51,8 @@ public final class BulkNdjson {
      * @param mapper The ObjectMapper to use for serialization
      * @throws IOException If an I/O error occurs
      */
-    public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) 
-            throws IOException {
+    @SneakyThrows
+    public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
         // 1) Action line: {"<op>": { ...meta... }}
         var meta = mapper.convertValue(op.getOperation(), new TypeReference<Map<String, Object>>() {});
         Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), meta);
@@ -63,12 +62,10 @@ public final class BulkNdjson {
         out.write(NEWLINE.getBytes());
         
         // 2) Optional source line for index operations
-        if (op.getOperationType() == OperationType.INDEX) {
-            if (op.isIncludeDocument() && op.getDocument() != null) {
-                byte[] docBytes = mapper.writeValueAsBytes(op.getDocument());
-                out.write(docBytes);
-                out.write(NEWLINE.getBytes());
-            }
+        if (op.getOperationType() == OperationType.INDEX && op.isIncludeDocument() && op.getDocument() != null) {
+            byte[] docBytes = mapper.writeValueAsBytes(op.getDocument());
+            out.write(docBytes);
+            out.write(NEWLINE.getBytes());
         }
         // DELETE operations don't have a source line
     }
@@ -79,11 +76,8 @@ public final class BulkNdjson {
      * @param value The value to serialize
      * @param mapper The ObjectMapper to use for serialization
      */
+    @SneakyThrows
     private static void appendJsonLine(StringBuilder sb, Object value, ObjectMapper mapper) {
-        try {
-            sb.append(mapper.writeValueAsString(value)).append(NEWLINE);
-        } catch (Exception e) {
-            throw new RuntimeException("Serialization error", e);
-        }
+        sb.append(mapper.writeValueAsString(value)).append(NEWLINE);
     }
 }
