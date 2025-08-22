@@ -407,7 +407,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         Duration leaseDuration,
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
-    ) throws IOException {
+    ) throws IOException, InterruptedException {
         try (var ctx = contextSupplier.get()) {
             var startTime = Instant.now();
             var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());

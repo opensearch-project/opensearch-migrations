@@ -8,6 +8,7 @@ import java.util.TreeSet;
 
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
@@ -17,7 +18,6 @@ import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 
 import lombok.extern.slf4j.Slf4j;
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
@@ -81,10 +81,10 @@ public class DeltaLuceneReader {
      * Container class for delta results containing both additions and deletions
      */
     public static class DeltaResult {
-        public final Publisher<RfsLuceneDocument> additions;
-        public final Publisher<RfsLuceneDocument> deletions;
+        public final Flux<RfsLuceneDocument> additions;
+        public final Flux<RfsLuceneDocument> deletions;
         
-        public DeltaResult(Publisher<RfsLuceneDocument> additions, Publisher<RfsLuceneDocument> deletions) {
+        public DeltaResult(Flux<RfsLuceneDocument> additions, Flux<RfsLuceneDocument> deletions) {
             this.additions = additions;
             this.deletions = deletions;
         }
@@ -165,23 +165,25 @@ public class DeltaLuceneReader {
             var sharedSegmentReaderScheduler = Schedulers.boundedElastic();
 
             // Create additions stream
-            Publisher<RfsLuceneDocument> additionsStream = Flux.fromIterable(additions)
+            var additionsStream = Flux.fromIterable(additions)
                 .flatMapSequential( c ->
                     LuceneReader.readDocsFromSegment(c,
                         startDocId,
                         sharedSegmentReaderScheduler,
                         maxDocumentsToReadAtOnce,
-                        Path.of(c.getReader().getSegmentName()))
+                        Path.of(c.getReader().getSegmentName()),
+                        RfsDocumentOperation.INDEX)
                 ).subscribeOn(sharedSegmentReaderScheduler); // Scheduler to read documents on
 
             // Create deletions stream - these are documents that were removed between snapshots
-            Publisher<RfsLuceneDocument> deletionsStream = Flux.fromIterable(removes)
+            var deletionsStream = Flux.fromIterable(removes)
                 .flatMapSequential( c ->
                     LuceneReader.readDocsFromSegment(c,
                         startDocId,
                         sharedSegmentReaderScheduler,
                         maxDocumentsToReadAtOnce,
-                        Path.of(c.getReader().getSegmentName()))
+                        Path.of(c.getReader().getSegmentName()),
+                        RfsDocumentOperation.DELETE)
                 ).subscribeOn(sharedSegmentReaderScheduler);
 
             return new DeltaResult(additionsStream, deletionsStream);

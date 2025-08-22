@@ -1,83 +1,105 @@
 package org.opensearch.migrations.bulkload.common.bulk;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.List;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Map;
+import java.util.Objects;
 
-import org.opensearch.migrations.bulkload.common.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.Getter;
 import lombok.SneakyThrows;
+import lombok.experimental.UtilityClass;
 
 /**
  * Utility class for converting bulk operations to NDJSON format.
  */
+@UtilityClass
 public final class BulkNdjson {
-    private static final String NEWLINE = "\n";
-    
-    private BulkNdjson() {
-        // Utility class, no instantiation
+    private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final byte[] NEWLINE_BYTES = "\n".getBytes(StandardCharsets.UTF_8);
+
+    /**
+     * Write a single operation to an output stream in NDJSON format.
+     * @param op The operation to write
+     * @param out The output stream to write to
+     * @param mapper The ObjectMapper to use for serialization
+     */
+    @SneakyThrows
+    public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        // action line: {"<op>": {...meta...}}
+        Map<String, Object> meta = mapper.convertValue(op.getOperation(), new TypeReference<>() {});
+        Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), meta);
+
+        out.write(mapper.writeValueAsBytes(actionLine));
+        out.write(NEWLINE_BYTES);
+
+        // optional source/payload
+        if (op.isIncludeDocument() && op.getDocument() != null) {
+            out.write(mapper.writeValueAsBytes(op.getDocument()));
+            out.write(NEWLINE_BYTES);
+        }
     }
-    
+
+    /**
+     * Write a single operation to an output stream in NDJSON format.
+     * @param ops The operation to write
+     * @param out The output stream to write to
+     * @param mapper The ObjectMapper to use for serialization
+     */
+    public static void writeAll(Collection<? extends BulkOperationSpec> ops, OutputStream out, ObjectMapper mapper) {
+        for (BulkOperationSpec op : ops) writeOperation(op, out, mapper);
+    }
+
     /**
      * Convert a list of bulk operations to NDJSON string.
      * @param ops The list of operations to convert
      * @param mapper The ObjectMapper to use for serialization
      * @return The NDJSON string representation
      */
-    public static String toBulkNdjson(List<BulkOperationSpec> ops, ObjectMapper mapper) {
-        StringBuilder sb = new StringBuilder(ops.size() * 128);
-        for (BulkOperationSpec op : ops) {
-            // 1) Action line: {"<op>": { ...meta... }}
-            var meta = mapper.convertValue(op.getOperation(), new TypeReference<Map<String, Object>>() {});
-            Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), meta);
-            appendJsonLine(sb, actionLine, mapper);
-            
-            // 2) Optional source/payload line
-            if (op.getOperationType() == OperationType.INDEX && op.isIncludeDocument() && op.getDocument() != null) {
-                appendJsonLine(sb, op.getDocument(), mapper);
-            }
-            // DELETE operations don't have a source line
+    public static String toBulkNdjson(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
+        try (var baos = new ByteArrayOutputStream()) {
+            writeAll(ops, baos, mapper);
+            return baos.toString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
-        return sb.toString();
     }
-    
+
     /**
-     * Write a single operation to an output stream in NDJSON format.
-     * @param op The operation to write
-     * @param out The output stream to write to
-     * @param mapper The ObjectMapper to use for serialization
-     * @throws IOException If an I/O error occurs
+     * Calculate the serialized length of a bulk operation in NDJSON format.
+     * @return The length in bytes of the serialized operation
      */
-    @SneakyThrows
-    public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
-        // 1) Action line: {"<op>": { ...meta... }}
-        var meta = mapper.convertValue(op.getOperation(), new TypeReference<Map<String, Object>>() {});
-        Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), meta);
-        
-        byte[] actionBytes = mapper.writeValueAsBytes(actionLine);
-        out.write(actionBytes);
-        out.write(NEWLINE.getBytes());
-        
-        // 2) Optional source line for index operations
-        if (op.getOperationType() == OperationType.INDEX && op.isIncludeDocument() && op.getDocument() != null) {
-            byte[] docBytes = mapper.writeValueAsBytes(op.getDocument());
-            out.write(docBytes);
-            out.write(NEWLINE.getBytes());
+    @SneakyThrows(IOException.class)
+    public long getSerializedLength(BulkOperationSpec op) {
+        try (var stream = new CountingOutputStream()) {
+            BulkNdjson.writeOperation(op, stream, OBJECT_MAPPER);
+            return stream.getCount();
         }
-        // DELETE operations don't have a source line
     }
-    
+
     /**
-     * Append a JSON object as a line to the StringBuilder.
-     * @param sb The StringBuilder to append to
-     * @param value The value to serialize
-     * @param mapper The ObjectMapper to use for serialization
+     * Helper class for counting output stream bytes.
      */
-    @SneakyThrows
-    private static void appendJsonLine(StringBuilder sb, Object value, ObjectMapper mapper) {
-        sb.append(mapper.writeValueAsString(value)).append(NEWLINE);
+    @Getter
+    private static class CountingOutputStream extends OutputStream {
+        private long count = 0;
+
+        @Override
+        public void write(int b) {
+            count++;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) {
+            Objects.checkFromIndexSize(off, len, b.length);
+            count += len;
+        }
     }
 }

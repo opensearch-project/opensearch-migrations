@@ -1,12 +1,15 @@
-package org.opensearch.migrations.bulkload.common.metadata;
+package org.opensearch.migrations.bulkload.common.bulk.operations;
+
+import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
@@ -16,18 +19,10 @@ import lombok.extern.jackson.Jacksonized;
 @AllArgsConstructor
 @SuperBuilder
 @Jacksonized
+@EqualsAndHashCode(callSuper = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-@JsonPropertyOrder({"_id", "_index", "_type", "routing"})
-public class BaseMetadata {
-    @JsonProperty("_id")
-    private String id;
-    
-    @JsonProperty("_index")
-    private String index;
-
-    @JsonProperty("_type")
-    private String type;
-
-    private String routing;
+public final class DeleteOperationMeta extends BaseMetadata implements BaseOperationMeta {
+    @JsonUnwrapped
+    private VersionControlMetadata versioning;
 }

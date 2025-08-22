@@ -1,7 +1,5 @@
 package org.opensearch.migrations.bulkload.common;
 
-import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
-
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
@@ -27,6 +25,6 @@ public class RfsLuceneDocument {
     // The Elasticsearch/OpenSearch custom shard routing of the document
     public final String routing;
 
-    // The operation type for this document (INDEX or DELETE)
+    // The operation type for reindexing this document
     public final RfsDocumentOperation operation;
 }

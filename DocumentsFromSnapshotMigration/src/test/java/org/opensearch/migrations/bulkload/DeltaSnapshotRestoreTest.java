@@ -250,7 +250,6 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 targetClusterOperations.post("/_refresh", null);
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
-                    // docIdDeletedOnSecondSnapshot should be deleted once deletions are supported
                      Assertions.assertEquals(404, response.getKey(), "doc2 should be deleted on target");
                 }
                 {

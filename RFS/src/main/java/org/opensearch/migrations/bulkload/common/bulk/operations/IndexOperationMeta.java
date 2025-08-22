@@ -1,9 +1,9 @@
-package org.opensearch.migrations.bulkload.common.operations;
+package org.opensearch.migrations.bulkload.common.bulk.operations;
 
-import org.opensearch.migrations.bulkload.common.enums.IndexOpType;
-import org.opensearch.migrations.bulkload.common.metadata.BaseMetadata;
-import org.opensearch.migrations.bulkload.common.metadata.VersionControlMetadata;
-import org.opensearch.migrations.bulkload.common.metadata.WriteMetadata;
+import org.opensearch.migrations.bulkload.common.bulk.enums.IndexOpType;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.WriteMetadata;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -33,5 +33,5 @@ public final class IndexOperationMeta extends BaseMetadata implements BaseOperat
     private VersionControlMetadata versioning;
     
     @JsonProperty("op_type")
-    private IndexOpType opType; // optional override
+    private IndexOpType opType; // optional override included in bulk api schema
 }

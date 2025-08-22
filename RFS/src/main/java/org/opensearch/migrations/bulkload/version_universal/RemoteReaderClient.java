@@ -59,11 +59,11 @@ public class RemoteReaderClient extends OpenSearchClient {
     }
     
     private ObjectNode globalMetadataFromParts(@NonNull Map<String, ObjectNode> templatesDetails) {
-        var rootNode = objectMapper.createObjectNode();
+        var rootNode = OBJECT_MAPPER.createObjectNode();
     
         templatesDetails.forEach((name, json) -> {
             if (json != null && !json.isEmpty()) {
-                var inner = objectMapper.createObjectNode().set(name, json);
+                var inner = OBJECT_MAPPER.createObjectNode().set(name, json);
                 rootNode.set(name, inner);
             }
         });
@@ -94,11 +94,11 @@ public class RemoteReaderClient extends OpenSearchClient {
     }
 
     ObjectNode combineIndexDetails(List<ObjectNode> indexDetailsResponse) {
-        var combinedDetails = objectMapper.createObjectNode();
+        var combinedDetails = OBJECT_MAPPER.createObjectNode();
         indexDetailsResponse.stream().forEach(detailsResponse ->
             detailsResponse.properties().forEach(indexDetails -> {
                 var indexName = indexDetails.getKey();
-                combinedDetails.putIfAbsent(indexName, objectMapper.createObjectNode());
+                combinedDetails.putIfAbsent(indexName, OBJECT_MAPPER.createObjectNode());
                 var existingIndexDetails = (ObjectNode)combinedDetails.get(indexName);
                 indexDetails.getValue().properties().forEach(details ->
                     existingIndexDetails.set(details.getKey(), details.getValue()));
@@ -111,7 +111,7 @@ public class RemoteReaderClient extends OpenSearchClient {
             return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
         }
         try {
-            var tree = (ObjectNode) objectMapper.readTree(resp.body);
+            var tree = (ObjectNode) OBJECT_MAPPER.readTree(resp.body);
             return Mono.just(tree);
         } catch (Exception e) {
             return logAndReturnJsonError(e, resp);
@@ -124,7 +124,7 @@ public class RemoteReaderClient extends OpenSearchClient {
         }
     
         try {
-            var tree = (ObjectNode) objectMapper.readTree(resp.body);
+            var tree = (ObjectNode) OBJECT_MAPPER.readTree(resp.body);
 
             if (tree.size() == 1 && tree.properties().iterator().next().getValue().isArray()) {
                 return Mono.just(handleSingleItemArrayValueTree(tree));
@@ -137,7 +137,7 @@ public class RemoteReaderClient extends OpenSearchClient {
     }
     
     private ObjectNode handleSingleItemArrayValueTree(ObjectNode tree) {
-        var dearrayed = objectMapper.createObjectNode();
+        var dearrayed = OBJECT_MAPPER.createObjectNode();
         var fieldName = tree.fieldNames().next();
         var arrayOfItems = tree.get(fieldName);
     

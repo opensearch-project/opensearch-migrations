@@ -428,7 +428,7 @@ function routeHttpRequest(source_document, context) {
 }
 
 function processBulkIndex(docBackfillPair, context) {
-    const parameters = docBackfillPair.get("operation");
+    const parameters = docBackfillPair.operation;
     const sourceIndexName = parameters._index;
     const typeName = parameters._type ?? "_doc";
 
@@ -441,7 +441,7 @@ function processBulkIndex(docBackfillPair, context) {
 
     if (!targetIndex) return [];
 
-    docBackfillPair.set("operation", retargetCommandParameters(parameters, targetIndex));
+    docBackfillPair.operation = retargetCommandParameters(parameters, targetIndex);
     return docBackfillPair;
 }
 

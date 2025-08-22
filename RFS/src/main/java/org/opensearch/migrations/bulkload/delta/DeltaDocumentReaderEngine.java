@@ -11,7 +11,6 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
-import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -64,43 +63,19 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
     ) {
         ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
-        
-        if (deltaMode == DeltaMode.UPDATES_ONLY) {
-            // Original behavior - only additions
-            return reader.readDeltaDocuments(
-                previousShardMetadata.getSegmentFileName(),
-                shardMetadata.getSegmentFileName(),
-                startingDocId,
-                rootContext
-            );
-        } else if (deltaMode == DeltaMode.UPDATES_AND_DELETES) {
-            // New behavior - both additions and deletions
-            var deltaResult = reader.readDeltaDocumentsWithDeletes(
-                previousShardMetadata.getSegmentFileName(),
-                shardMetadata.getSegmentFileName(),
-                startingDocId,
-                rootContext
-            );
-            
-            // Convert deletions to delete documents and merge with additions
-            // We need to mark these documents as deletions so they can be processed correctly
-            Flux<RfsLuceneDocument> deletionsAsDocuments = Flux.from(deltaResult.deletions)
-                .map(doc -> {
-                    // Create a new RfsLuceneDocument that represents a delete operation
-                    // Preserve the original source content for potential use in transformations
-                    return new RfsLuceneDocument(
-                        doc.luceneDocNumber,
-                        doc.id,
-                        doc.type,
-                        doc.source,  // Preserve actual source content
-                        doc.routing,
-                        RfsDocumentOperation.DELETE  // Mark as delete operation
-                    );
-                });
-            
-            // Merge both streams - additions and deletions
+        var deltaResult = reader.readDeltaDocumentsWithDeletes(
+            previousShardMetadata.getSegmentFileName(),
+            shardMetadata.getSegmentFileName(),
+            startingDocId,
+            rootContext
+        );
+
+        if (DeltaMode.UPDATES_ONLY.equals(deltaMode)) {
+            return deltaResult.additions;
+        } else if (DeltaMode.UPDATES_AND_DELETES.equals(deltaMode)) {
+            // Using concat to perform deletions first then additions
             return Flux.concat(
-                deletionsAsDocuments,
+                deltaResult.deletions,
                 deltaResult.additions
             );
         } else {

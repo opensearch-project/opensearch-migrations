@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.common.enums;
+package org.opensearch.migrations.bulkload.common.bulk.enums;
 
 import java.util.Arrays;
 
@@ -9,20 +9,17 @@ import lombok.Getter;
 
 @AllArgsConstructor
 @Getter
-public enum OperationType {
-    INDEX("index"),
-    CREATE("create"),
-    UPDATE("update"),
-    DELETE("delete");
+public enum SchemaVersion {
+    RFS_OPENSEARCH_BULK_V1("rfs-opensearch-bulk-v1");
 
     @JsonValue
     private final String value;
 
     @JsonCreator
-    public static OperationType from(String v) {
+    public static SchemaVersion from(String v) {
         return Arrays.stream(values())
                 .filter(e -> e.value.equals(v))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Unknown operation type: " + v));
+                .orElseThrow(() -> new IllegalArgumentException("Unknown schema version: " + v));
     }
 }

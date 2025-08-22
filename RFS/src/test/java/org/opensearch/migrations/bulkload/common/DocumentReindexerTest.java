@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
-import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -173,7 +173,9 @@ class DocumentReindexerTest {
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(numDocs, capturedBulkRequests.size(),
             "All documents should be in a single bulk request after transformation");
-        // Verify that the documents contain the replaced source
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        assertTrue(BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper).contains(
+            mapper.writeValueAsString(replacedSourceDoc)));
     }
 
     @Test
@@ -200,7 +202,9 @@ class DocumentReindexerTest {
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
-        // Note: We can't directly get the serialized size without checking the actual implementation
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var actualBulkRequestSize = BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper).length();
+        assertTrue(actualBulkRequestSize > MAX_BYTES_PER_BULK_REQUEST, "Bulk request should be larger than max bulk size");
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
     }
 
@@ -229,8 +233,9 @@ class DocumentReindexerTest {
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
-        // Verify the operation
-    }
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var bulkNdjson = BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper);
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", bulkNdjson);    }
 
     @Test
     void reindex_shouldRespectMaxConcurrentRequests() {
@@ -310,7 +315,17 @@ class DocumentReindexerTest {
         assertEquals(3, capturedBulkRequests.size(), "Should contain 3 transformed documents");
 
         // Verify that the transformation was applied correctly
-        // The actual verification would depend on the BulkOperationSpec implementation
+        var transformedDoc1 = capturedBulkRequests.get(0);
+        var transformedDoc2 = capturedBulkRequests.get(1);
+        var transformedDoc3 = capturedBulkRequests.get(2);
+
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", BulkNdjson.toBulkNdjson(List.of(transformedDoc1), mapper),
+                "Document 1 should have _type removed");
+        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", BulkNdjson.toBulkNdjson(List.of(transformedDoc2), mapper),
+                "Document 2 should remain unchanged as _type is not defined");
+        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", BulkNdjson.toBulkNdjson(List.of(transformedDoc3), mapper),
+                "Document 3 should have _type removed");
     }
 
     private RfsLuceneDocument createTestDocument(int id) {

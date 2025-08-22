@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.common.operations;
+package org.opensearch.migrations.bulkload.common.bulk.operations;
 
 /**
  * Sealed interface for operation metadata.

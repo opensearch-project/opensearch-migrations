@@ -1,19 +1,18 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.bulk.*;
-import org.opensearch.migrations.bulkload.common.enums.RfsDocumentOperation;
-import org.opensearch.migrations.bulkload.common.operations.DeleteOperationMeta;
-import org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
+import lombok.SneakyThrows;
 
 /** 
  * This class represents a document within RFS during the Reindexing process.  It tracks:
@@ -30,19 +29,13 @@ public class RfsDocument {
     // The Elasticsearch/OpenSearch document to be reindexed
     public final BulkOperationSpec document;
 
+    @SneakyThrows
     public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
-        // Check if this is a delete operation
-        Map<String, Object> document = null;
-        if (doc.source != null) {
-            try {
-                document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});
-            } catch (IOException e) {
-                throw new IllegalArgumentException("Failed to parse source doc: " + e.getMessage(), e);
-            }
-        }
+        // TODO: We can get a performance improvement by keeping doc.source as a byte array until here
+        Map<String, Object> document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});;
 
-        if (doc.operation == RfsDocumentOperation.DELETE) {
-            // Create a delete operation
+        // TODO: Consider an inheritance model for builders that would allow us to consolidate this logic
+        if (RfsDocumentOperation.DELETE.equals(doc.operation)) {
             DeleteOperationMeta meta = DeleteOperationMeta.builder()
                 .id(doc.id)
                 .index(indexName)
@@ -54,8 +47,7 @@ public class RfsDocument {
                 .document(document)
                 .build();
             return new RfsDocument(doc.luceneDocNumber, deleteOp);
-        } else {
-            // Create a normal index operation
+        } else if (RfsDocumentOperation.INDEX.equals(doc.operation)) {
             IndexOperationMeta meta = IndexOperationMeta.builder()
                 .id(doc.id)
                 .index(indexName)
@@ -67,6 +59,8 @@ public class RfsDocument {
                 .document(document)
                 .build();
             return new RfsDocument(doc.luceneDocNumber, indexOp);
+        } else {
+            throw new UnsupportedOperationException("Unsupported RfsDocumentOperation for conversion: " + doc.operation);
         }
     }
 

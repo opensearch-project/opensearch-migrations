@@ -9,9 +9,11 @@ import java.util.Optional;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -232,10 +234,10 @@ class OpenSearchClientTest {
 
     private BulkOperationSpec createBulkDoc(String docId) {
         var bulkDoc = mock(IndexOp.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
-        var operation = mock(org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta.class);
+        var operation = mock(IndexOperationMeta.class);
         when(operation.getId()).thenReturn(docId);
         when(bulkDoc.getOperation()).thenReturn(operation);
-        when(bulkDoc.getOperationType()).thenReturn(org.opensearch.migrations.bulkload.common.enums.OperationType.INDEX);
+        when(bulkDoc.getOperationType()).thenReturn(OperationType.INDEX);
         when(bulkDoc.isIncludeDocument()).thenReturn(true);
         when(bulkDoc.getDocument()).thenReturn(java.util.Map.of("field", "value"));
         return bulkDoc;

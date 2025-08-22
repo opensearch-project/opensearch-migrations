@@ -1,4 +1,6 @@
-package org.opensearch.migrations.bulkload.common.metadata;
+package org.opensearch.migrations.bulkload.common.bulk.metadata;
+
+import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
@@ -16,7 +18,9 @@ import lombok.extern.jackson.Jacksonized;
 @Jacksonized
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public class WriteMetadata {
-    private String pipeline;
-    private Boolean requireAlias;
+public class VersionControlMetadata {
+    private Long ifPrimaryTerm;
+    private Long ifSeqNo;
+    private Long version;
+    private VersionType versionType;
 }

@@ -1,16 +1,15 @@
 package org.opensearch.migrations.bulkload.common.bulk;
 
-import org.opensearch.migrations.bulkload.common.enums.OperationType;
-import org.opensearch.migrations.bulkload.common.operations.BaseOperationMeta;
-import org.opensearch.migrations.bulkload.common.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
@@ -23,22 +22,21 @@ import lombok.extern.jackson.Jacksonized;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public final class IndexOp extends BulkOperationSpec {
-    @Builder.Default
-    @JsonProperty("operation_type")
-    private OperationType operationType = OperationType.INDEX;
+    public static final String OP_TYPE_VALUE = "index";
+    public static final OperationType OP_TYPE = OperationType.INDEX;
+
+    static {
+        assert OP_TYPE.getValue().equals(OP_TYPE_VALUE) : "Constant OP_TYPE must equal OP_TYPE.getValue()";
+    }
 
     @Builder.Default
-    private boolean includeDocument = true;
+    private final boolean includeDocument = true;
 
-    private IndexOperationMeta operation;
-    
     @Override
     public OperationType getOperationType() {
-        return operationType;
+        return OP_TYPE;
     }
-    
-    @Override
-    public BaseOperationMeta getOperation() {
-        return operation;
-    }
+
+    @Getter
+    private IndexOperationMeta operation;
 }

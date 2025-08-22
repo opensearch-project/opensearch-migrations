@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.common.enums;
+package org.opensearch.migrations.bulkload.common.bulk.enums;
 
 import java.util.Arrays;
 
@@ -9,18 +9,20 @@ import lombok.Getter;
 
 @AllArgsConstructor
 @Getter
-public enum IndexOpType {
-    INDEX("index"),
-    CREATE("create");
+public enum VersionType {
+    EXTERNAL("external"),
+    EXTERNAL_GTE("external_gte"),
+    FORCE("force"),
+    INTERNAL("internal");
 
     @JsonValue
     private final String value;
 
     @JsonCreator
-    public static IndexOpType from(String v) {
+    public static VersionType from(String v) {
         return Arrays.stream(values())
                 .filter(e -> e.value.equals(v))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Unknown index operation type: " + v));
+                .orElseThrow(() -> new IllegalArgumentException("Unknown version type: " + v));
     }
 }

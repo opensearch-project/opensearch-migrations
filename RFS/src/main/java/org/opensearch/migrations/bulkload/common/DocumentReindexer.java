@@ -9,7 +9,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -62,9 +62,6 @@ public class DocumentReindexer {
             }, "DocumentBulkAggregator-" + threadNum);
         });
         Scheduler scheduler = Schedulers.fromExecutor(executor);
-        if (indexName.startsWith("blog")) {
-            log.info("in blog");
-        }
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
             .buffer(Math.min(100, maxDocsPerBulkRequest)) // arbitrary
@@ -109,7 +106,7 @@ public class DocumentReindexer {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);
         log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.progressCheckpointNum).log();
 
-        List<BulkOperationSpec> bulkOperations = docsBatch.stream()
+        var bulkOperations = docsBatch.stream()
                 .map(rfsDocument -> rfsDocument.document)
                 .collect(Collectors.toList());
 
@@ -137,8 +134,7 @@ public class DocumentReindexer {
             @Override
             public boolean test(RfsDocument next) {
                 // Add one for newline between bulk sections
-                long nextSize;
-                nextSize = next.document.getSerializedLength() + 1L;
+                var nextSize = BulkNdjson.getSerializedLength(next.document) + 1L;
                 currentSize += nextSize;
                 currentItemCount++;
 

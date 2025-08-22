@@ -1,8 +1,8 @@
-package org.opensearch.migrations.bulkload.common.metadata;
-
-import org.opensearch.migrations.bulkload.common.enums.VersionType;
+package org.opensearch.migrations.bulkload.common.bulk.metadata;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import lombok.AllArgsConstructor;
@@ -18,9 +18,16 @@ import lombok.extern.jackson.Jacksonized;
 @Jacksonized
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public class VersionControlMetadata {
-    private Long ifPrimaryTerm;
-    private Long ifSeqNo;
-    private Long version;
-    private VersionType versionType;
+@JsonPropertyOrder({"_id", "_index", "_type", "routing"})
+public class BaseMetadata {
+    @JsonProperty("_id")
+    private String id;
+    
+    @JsonProperty("_index")
+    private String index;
+
+    @JsonProperty("_type")
+    private String type;
+
+    private String routing;
 }
