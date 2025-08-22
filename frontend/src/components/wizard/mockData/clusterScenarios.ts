@@ -7,18 +7,7 @@ export const CLUSTER_SCENARIOS: Record<string, ClusterInfo> = {
     protocol: 'https',
     enable_tls_verification: false,
     auth: {
-      type: 'NO_AUTH'
-    },
-    version_override: null
-  },
-  basicAuth: {
-    endpoint: 'https://example-cluster-basic-auth.com:9200',
-    protocol: 'https',
-    enable_tls_verification: true,
-    auth: {
-      type: 'BASIC_AUTH',
-      username: 'admin',
-      password: 'password123'
+      type: 'no_auth'
     },
     version_override: null
   },
@@ -27,7 +16,7 @@ export const CLUSTER_SCENARIOS: Record<string, ClusterInfo> = {
     protocol: 'https',
     enable_tls_verification: true,
     auth: {
-      type: 'SIGV4',
+      type: 'sig_v4_auth',
       region: 'us-east-1',
       service: 'es'
     },
@@ -38,7 +27,7 @@ export const CLUSTER_SCENARIOS: Record<string, ClusterInfo> = {
     protocol: 'https',
     enable_tls_verification: true,
     auth: {
-      type: 'BASIC_AUTH_ARN',
+      type: 'basic_auth_arn',
       user_secret_arn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:example-basic-auth-secret-abc123'
     },
     version_override: null
@@ -48,7 +37,7 @@ export const CLUSTER_SCENARIOS: Record<string, ClusterInfo> = {
     protocol: 'https',
     enable_tls_verification: true,
     auth: {
-      type: 'NO_AUTH'
+      type: 'no_auth'
     },
     version_override: 'OpenSearch 2.11.0'
   },
@@ -57,7 +46,7 @@ export const CLUSTER_SCENARIOS: Record<string, ClusterInfo> = {
     protocol: 'https',
     enable_tls_verification: false,
     auth: {
-      type: 'NO_AUTH'
+      type: 'no_auth'
     },
     version_override: null
   }

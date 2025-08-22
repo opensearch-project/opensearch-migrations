@@ -8,7 +8,7 @@ import Input from "@cloudscape-design/components/input";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
 import RadioGroup from "@cloudscape-design/components/radio-group";
-import { BasicAuth, ClusterInfo, SigV4Auth } from "@/generated/api";
+import { AuthModelType, ClusterInfo, SigV4Auth } from "@/generated/api";
 import { Alert, Checkbox, StatusIndicator } from "@cloudscape-design/components";
 
 // Define BasicAuthArn interface since it's not exported from the API
@@ -16,8 +16,6 @@ interface BasicAuthArn {
   type: string;
   user_secret_arn: string;
 }
-
-export type AuthType = "NO_AUTH" | "BASIC_AUTH" | "BASIC_AUTH_ARN" | "SIGV4";
 
 interface RemoteClusterProps {
   readonly clusterType: "source" | "target";
@@ -34,7 +32,7 @@ export default function RemoteCluster({
   error: apiError,
   alwaysDisplayVersionOverride = false
 }: RemoteClusterProps) {
-  const [selectedAuthType, setSelectedAuthType] = useState<AuthType | null>(null);
+  const [selectedAuthType, setSelectedAuthType] = useState<AuthModelType | null>(null);
   const [displayVersionOverride, setDisplayVersionOverride] = useState<boolean>(false);
   
   const [debugData, setDebugData] = useState<ClusterInfo | null>(null);
@@ -58,7 +56,7 @@ export default function RemoteCluster({
   // Update the selected auth type when the cluster data is loaded
   useEffect(() => {
     if (cluster?.auth?.type) {
-      setSelectedAuthType(cluster.auth.type.toUpperCase() as AuthType);
+      setSelectedAuthType(cluster.auth.type);
     }
     
     setDisplayVersionOverride(!!cluster?.version_override);
@@ -130,40 +128,16 @@ export default function RemoteCluster({
       >
         <RadioGroup
           items={[
-            { value: "NO_AUTH", label: "No Authentication" },
-            { value: "BASIC_AUTH", label: "Basic Authentication" },
-            { value: "BASIC_AUTH_ARN", label: "Basic Authentication (ARN)" },
-            { value: "SIGV4", label: "AWS SigV4" }
-          ] satisfies { value: AuthType; label: string }[]}
+            { value: "no_auth", label: "No Authentication" },
+            { value: "basic_auth_arn", label: "Basic Authentication" },
+            { value: "sig_v4_auth", label: "AWS SigV4" }
+          ] satisfies { value: AuthModelType; label: string }[]}
           value={selectedAuthType}
           onChange={() => {}}
         />
       </FormField>
       
-      {selectedAuthType === "BASIC_AUTH" && (
-        <SpaceBetween size="m">
-          <FormField label="Username" description="Enter the username for Basic Authentication">
-            <Input 
-              placeholder="Username"
-              value={(cluster?.auth as BasicAuth)?.username ?? ""}
-              onChange={() => {}}
-              disabled
-            />
-          </FormField>
-          
-          <FormField label="Password" description="Enter the password for Basic Authentication">
-            <Input 
-              placeholder="Password"
-              type="password"
-              value="********"
-              onChange={() => {}}
-              disabled
-            />
-          </FormField>
-        </SpaceBetween>
-      )}
-
-      {selectedAuthType === "BASIC_AUTH_ARN" && (
+      {selectedAuthType === "basic_auth_arn" && (
         <SpaceBetween size="m">
           <FormField label="Secret ARN" description="ARN of the AWS Secrets Manager secret containing username and password">
             <Input 
@@ -176,7 +150,7 @@ export default function RemoteCluster({
         </SpaceBetween>
       )}
 
-      {selectedAuthType === "SIGV4" && (
+      {selectedAuthType === "sig_v4_auth" && (
         <SpaceBetween size="m">
           <FormField label="Region" description="AWS Region for SigV4 signing">
             <Input 
