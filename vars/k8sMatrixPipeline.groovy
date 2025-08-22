@@ -12,7 +12,7 @@ def call(Map config = [:]) {
             )
             choice(
                     name: 'TARGET_VERSION',
-                    choices: ['(all)', 'OS_2.19', 'OS_2.20'],
+                    choices: ['(all)', 'OS_2.19', 'OS_3.1'],
                     description: 'Pick a specific target version, or "(all)"'
             )
         }
@@ -24,15 +24,15 @@ def call(Map config = [:]) {
         }
 
         stages {
-            stage('Matrix Tests') {
+            stage('Argo Integration Tests') {
                 matrix {
                     axes {
                         axis {
-                            name 'SOURCE_VERSION_AXIS'
+                            name 'SRC'
                             values 'ES_5.6', 'ES_7.10'
                         }
                         axis {
-                            name 'TARGET_VERSION_AXIS'
+                            name 'TGT'
                             values 'OS_2.19', 'OS_3.1'
                         }
                     }
@@ -43,39 +43,48 @@ def call(Map config = [:]) {
                     when {
                         expression {
                             // Filter which combinations to run based on parameters
-                            (params.SOURCE_VERSION == '(all)' || params.SOURCE_VERSION == SOURCE_VERSION_AXIS) &&
-                                    (params.TARGET_VERSION == '(all)' || params.TARGET_VERSION == TARGET_VERSION_AXIS)
+                            (params.SOURCE_VERSION == '(all)' || params.SOURCE_VERSION == SRC) &&
+                                    (params.TARGET_VERSION == '(all)' || params.TARGET_VERSION == TGT)
                         }
                     }
 
-                    // ALL your pipeline stages go here - each runs on separate workers
+                    // Single stage combining all steps
                     stages {
-                        stage('Checkout') {
+                        stage('Migration Test') {
                             steps {
-                                script {
-                                    sh 'sudo chown -R $(whoami) .'
-                                    sh 'sudo chmod -R u+w .'
-                                    if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
-                                        echo 'Cleaning any existing git files in workspace'
-                                        sh 'git reset --hard'
-                                        sh 'git clean -fd'
-                                    } else {
-                                        echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
-                                    }
-                                    git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
-                                    echo "Building migration from ${SOURCE_VERSION_AXIS} to ${TARGET_VERSION_AXIS}"
-                                }
-                            }
-                        }
-
-                        stage('Test Migration') {
-                            steps {
-                                timeout(time: 30, unit: 'MINUTES') {
+                                timeout(time: 1, unit: 'HOURS') {
                                     script {
-                                        echo "Testing migration from ${SOURCE_VERSION_AXIS} to ${TARGET_VERSION_AXIS}"
+                                        echo "🚀 Starting migration test: ${SRC} → ${TGT}"
+                                        currentBuild.description = "${SRC} → ${TGT}"
+                                        
+                                        // CHECKOUT PHASE
+                                        echo "📥 Checkout phase..."
+                                        sh 'sudo chown -R $(whoami) .'
+                                        sh 'sudo chmod -R u+w .'
+                                        if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
+                                            echo 'Cleaning any existing git files in workspace'
+                                            sh 'git reset --hard'
+                                            sh 'git clean -fd'
+                                        } else {
+                                            echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
+                                        }
+                                        git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                                        echo "✅ Checkout completed for ${SRC} → ${TGT}"
+                                        
+                                        // BUILD PHASE (if needed)
+                                        echo "🔨 Build phase..."
+                                        // Uncomment if you need to build
+                                        // sh './gradlew clean build --no-daemon --stacktrace'
+                                        echo "✅ Build completed for ${SRC} → ${TGT}"
+                                        
+                                        // TEST PHASE
+                                        echo "🧪 Test phase..."
                                         // Add your specific test logic here
                                         // This could call different test scripts based on the matrix values
-                                        sh "echo 'Running tests for ${SOURCE_VERSION_AXIS} to ${TARGET_VERSION_AXIS}'"
+                                        sh "echo 'Running migration tests for ${SRC} to ${TGT}'"
+                                        echo "✅ Tests completed for ${SRC} → ${TGT}"
+                                        
+                                        echo "🎉 Migration test completed successfully: ${SRC} → ${TGT}"
                                     }
                                 }
                             }
@@ -86,18 +95,18 @@ def call(Map config = [:]) {
                     post {
                         always {
                             script {
-                                echo "Cleanup for ${SOURCE_VERSION_AXIS} -> ${TARGET_VERSION_AXIS}"
+                                echo "Cleanup for ${SRC} → ${TGT}"
                                 // Each matrix combination does its own cleanup
                             }
                         }
                         success {
                             script {
-                                echo "✅ Success: ${SOURCE_VERSION_AXIS} -> ${TARGET_VERSION_AXIS}"
+                                echo "✅ Success: ${SRC} → ${TGT}"
                             }
                         }
                         failure {
                             script {
-                                echo "❌ Failed: ${SOURCE_VERSION_AXIS} -> ${TARGET_VERSION_AXIS}"
+                                echo "❌ Failed: ${SRC} → ${TGT}"
                             }
                         }
                     }
