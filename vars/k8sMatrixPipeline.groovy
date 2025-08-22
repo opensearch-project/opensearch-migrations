@@ -29,11 +29,11 @@ def call(Map config = [:]) {
                     axes {
                         axis {
                             name 'SOURCE_VERSION_AXIS'
-                            values 'ES_5.6'
+                            values 'ES_5.6', 'ES_7.10'
                         }
                         axis {
                             name 'TARGET_VERSION_AXIS'
-                            values 'OS_2.19'
+                            values 'OS_2.19', 'OS_3.1'
                         }
                     }
 
