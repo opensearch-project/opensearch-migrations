@@ -35,7 +35,9 @@ def example_session_with_clusters():
     target_cluster = MagicMock(spec=Cluster)
     target_cluster.endpoint = "https://target-cluster:9200"
     target_cluster.auth_type = AuthMethod.BASIC_AUTH
-    target_cluster.auth_details = {"username": "admin", "password": "admin"}
+    target_cluster.auth_details = {
+        "user_secret_arn": "arn:aws:secretsmanager:region:account:secret:name"
+    }
     target_cluster.allow_insecure = False
     target_cluster.version = "2.9.0"
     target_cluster.get_basic_auth_details.return_value = MagicMock(username="admin", password="admin")
@@ -58,7 +60,7 @@ def example_session_with_basic_auth_arn():
     source_cluster.auth_type = AuthMethod.BASIC_AUTH
     # Must match structure expected by convert_cluster_to_api_model function
     source_cluster.auth_details = {
-        "user_secret_arn": {"user_secret_arn": "arn:aws:secretsmanager:region:account:secret:name"}
+        "user_secret_arn": "arn:aws:secretsmanager:region:account:secret:name"
     }
     source_cluster.allow_insecure = False
     source_cluster.version = "2.7.0"
@@ -119,9 +121,8 @@ def test_get_target_cluster_basic_auth(mock_http_safe_find_session, example_sess
     assert data["protocol"] == "https"
     assert data["enable_tls_verification"] is True
     assert data["version_override"] == "2.9.0"
-    assert data["auth"]["type"] == "basic_auth"
-    assert data["auth"]["username"] == "admin"
-    assert data["auth"]["password"] == "admin"
+    assert data["auth"]["type"] == "basic_auth_arn"
+    assert data["auth"]["user_secret_arn"] == "arn:aws:secretsmanager:region:account:secret:name"
 
 
 def test_get_source_cluster_basic_auth_arn(mock_http_safe_find_session, example_session_with_basic_auth_arn):
@@ -151,7 +152,7 @@ def test_get_source_cluster_sigv4(mock_http_safe_find_session, example_session_w
     assert data["protocol"] == "https"
     assert data["enable_tls_verification"] is True
     assert data["version_override"] is None
-    assert data["auth"]["type"] == "sigv4_auth"
+    assert data["auth"]["type"] == "sig_v4_auth"
     assert data["auth"]["service"] == "es"
     assert data["auth"]["region"] == "us-west-2"
 

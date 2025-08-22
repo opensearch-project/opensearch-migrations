@@ -25,16 +25,16 @@ def convert_cluster_to_api_model(cluster: Cluster) -> ClusterInfo:
     
     if cluster.auth_type and cluster.auth_type == AuthMethod.BASIC_AUTH:
         if cluster.auth_details and "user_secret_arn" in cluster.auth_details:
-            auth = BasicAuthArn(type="basic_auth_arn", user_secret_arn=cluster.auth_details["user_secret_arn"])
+            auth = BasicAuthArn(user_secret_arn=cluster.auth_details["user_secret_arn"])
         else:
             logger.warning("Detected raw username/password authentication information,"
                            "returning as if no arn was available")
-            auth = BasicAuthArn(type="basic_auth_arn", user_secret_arn="")
-    elif cluster.auth_type and cluster.auth_type.name == AuthMethod.SIGV4:
+            auth = BasicAuthArn(user_secret_arn="")
+    elif cluster.auth_type and cluster.auth_type == AuthMethod.SIGV4:
         service_name, region_name = cluster._get_sigv4_details()
-        auth = SigV4Auth(type="sigv4_auth", region=region_name, service=service_name)
+        auth = SigV4Auth(region=region_name, service=service_name)
     else:
-        auth = NoAuth(type="no_auth")
+        auth = NoAuth()
     
     # Create and return the ClusterInfo model
     return ClusterInfo(
