@@ -2,13 +2,16 @@ package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.delta.DeltaLuceneReader;
 import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
@@ -64,9 +67,9 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
-    default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
+    default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName, int startDocIdx) {
         return Flux.using(
-            this::getReader,
+            () -> this.getReader(segmentsFileName),
             reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
                 try {
@@ -77,11 +80,31 @@ public interface LuceneIndexReader {
         });
     }
 
-    default Flux<RfsLuceneDocument> readDocuments() {
-        return readDocuments(0);
+    default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName) {
+        return readDocuments(segmentsFileName, 0);
     }
 
-    LuceneDirectoryReader getReader() throws IOException;
+
+    default Flux<RfsLuceneDocument> readDeltaDocuments(String previousSegmentsFileName, String segmentsFileName, int startDocIdx, BaseRootRfsContext rootContext) {
+        Consumer<LuceneDirectoryReader> uncheckedReaderClose = reader -> {
+            try {
+                reader.close();
+            } catch (IOException e) {
+                throw Lombok.sneakyThrow(e);
+            }
+        };
+
+        return Flux.using(
+            () -> this.getReader(previousSegmentsFileName),
+            previousReader -> Flux.using(
+                () -> this.getReader(segmentsFileName),
+                currentReader -> DeltaLuceneReader.readDocsByLeavesFromStartingPosition(previousReader, currentReader, startDocIdx, rootContext),
+                uncheckedReaderClose),
+            uncheckedReaderClose
+        );
+    }
+
+    LuceneDirectoryReader getReader(String segmentsFileName) throws IOException;
 
     @Slf4j
     @AllArgsConstructor

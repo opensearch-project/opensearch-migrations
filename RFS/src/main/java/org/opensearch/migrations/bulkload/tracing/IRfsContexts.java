@@ -9,6 +9,7 @@ public interface IRfsContexts {
 
         public static final String HTTP_REQUEST = "httpRequest";
         public static final String CHECK_THEN_PUT_REQUESTS = "checkThenPutRequest";
+        public static final String DELTA_STREAM_CALCULATION = "deltaStreamCalculation";
     }
 
     class MetricNames {
@@ -42,6 +43,16 @@ public interface IRfsContexts {
         IRequestContext createSnapshotContext();
 
         IRequestContext createGetSnapshotContext();
+    }
+
+    interface IDeltaStreamContext extends IScopedInstrumentationAttributes {
+        String ACTIVITY_NAME = ActivityNames.DELTA_STREAM_CALCULATION;
+
+        void recordSegmentsSeen(long count);
+
+        void recordDeltaAdditions(long count);
+
+        void recordDeltaDeletions(long count);
     }
 
 }

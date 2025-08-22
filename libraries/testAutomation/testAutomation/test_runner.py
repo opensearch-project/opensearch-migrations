@@ -8,15 +8,13 @@ import random
 import string
 import sys
 from tabulate import tabulate
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_8.x"]
-VALID_TARGET_VERSIONS = ["OS_2.x"]
-SOURCE_RELEASE_NAME = "source"
-TARGET_RELEASE_NAME = "target"
+VALID_SOURCE_VERSIONS = ["ES_5.6"]
+VALID_TARGET_VERSIONS = ["OS_2.19"]
 MA_RELEASE_NAME = "ma"
 
 
@@ -48,34 +46,15 @@ class TestsFailed(Exception):
     pass
 
 
-class TestClusterEnvironment:
-    def __init__(self, source_version: str,
-                 source_helm_values_path: str,
-                 source_chart_path: str,
-                 target_version: str,
-                 target_helm_values_path: str,
-                 target_chart_path: str) -> None:
-
-        self.source_version = source_version
-        self.source_helm_values_path = source_helm_values_path
-        self.source_chart_path = source_chart_path
-        self.target_version = target_version
-        self.target_helm_values_path = target_helm_values_path
-        self.target_chart_path = target_chart_path
-
-
 class TestRunner:
 
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
-                 ma_chart_values_path: str, helm_dependency_script_path: str,
-                 test_cluster_environments: [TestClusterEnvironment]) -> None:
+                 combinations: List[Tuple[str, str]]) -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
         self.ma_chart_path = ma_chart_path
-        self.ma_chart_values_path = ma_chart_values_path
-        self.helm_dependency_script_path = helm_dependency_script_path
-        self.test_cluster_environments = test_cluster_environments
+        self.combinations = combinations
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -126,15 +105,24 @@ class TestRunner:
         summary = TestSummary(**data.get("summary"))
         return TestReport(tests=tests, summary=summary)
 
-    def run_tests(self) -> bool:
+    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False) -> bool:
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
-        self.k8s_service.exec_migration_console_cmd(["pipenv",
-                                                     "run",
-                                                     "pytest",
-                                                     "/root/lib/integ_test/integ_test/ma_workflow_test.py",
-                                                     f"--unique_id={self.unique_id}",
-                                                     f"--test_ids={','.join(self.test_ids)}"])
+        command_list = [
+            "pipenv",
+            "run",
+            "pytest",
+            "/root/lib/integ_test/integ_test/ma_workflow_test.py",
+            f"--unique_id={self.unique_id}",
+            f"--source_version={source_version}",
+            f"--target_version={target_version}"
+        ]
+        if self.test_ids:
+            command_list.append(f"--test_ids={','.join(self.test_ids)}")
+        if keep_workflows:
+            command_list.append("--keep_workflows")
+        command_list.append("-s")
+        self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
         cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
@@ -150,43 +138,34 @@ class TestRunner:
         return True
 
     def cleanup_deployment(self) -> None:
-        self.k8s_service.helm_uninstall(release_name=SOURCE_RELEASE_NAME)
-        self.k8s_service.helm_uninstall(release_name=TARGET_RELEASE_NAME)
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         self.k8s_service.wait_for_all_healthy_pods()
         self.k8s_service.delete_all_pvcs()
 
-    def run(self, skip_delete: bool = False) -> None:
-        self.k8s_service.helm_dependency_update(script_path=self.helm_dependency_script_path)
-        for clusters in self.test_cluster_environments:
+    def copy_logs(self, destination: str = "./logs") -> None:
+        self.k8s_service.copy_log_files(destination=destination)
+
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False) -> None:
+        for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
-                            f"from {clusters.source_version} to {clusters.target_version}")
+                            f"from {source_version} to {target_version}")
 
-                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
-                                                     values_file=self.ma_chart_values_path):
+                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
-
-                if not self.k8s_service.helm_install(chart_path=clusters.source_chart_path,
-                                                     release_name=SOURCE_RELEASE_NAME,
-                                                     values_file=clusters.source_helm_values_path):
-                    raise HelmCommandFailed("Helm install of source cluster chart failed")
-
-                if not self.k8s_service.helm_install(chart_path=clusters.target_chart_path,
-                                                     release_name=TARGET_RELEASE_NAME,
-                                                     values_file=clusters.target_helm_values_path):
-                    raise HelmCommandFailed("Helm install of target cluster chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
-                tests_passed = self.run_tests()
+                tests_passed = self.run_tests(source_version=source_version,
+                                              target_version=target_version,
+                                              keep_workflows=keep_workflows)
 
                 if not tests_passed:
-                    raise TestsFailed(f"Tests failed (or no tests executed) for upgrade "
-                                      f"from {clusters.source_version} to {clusters.target_version}.")
+                    raise TestsFailed(f"Tests failed (or no tests executed) for migrations "
+                                      f"from {source_version} to {target_version}.")
                 else:
-                    logger.info(f"Tests passed successfully for upgrade "
-                                f"from {clusters.source_version} to {clusters.target_version}.")
+                    logger.info(f"Tests passed successfully for migrations "
+                                f"from {source_version} to {target_version}.")
             except HelmCommandFailed as helmError:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
             except TimeoutError as timeoutError:
@@ -242,7 +221,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target-version",
         choices=VALID_TARGET_VERSIONS,
-        default="OS_2.x",
+        default="OS_2.19",
         help=f"Target version to use. Must be one of: {', '.join(VALID_TARGET_VERSIONS)}"
     )
     parser.add_argument(
@@ -256,10 +235,20 @@ def parse_args() -> argparse.Namespace:
         help="If set, only perform deletion operations."
     )
     parser.add_argument(
+        "--copy-logs-only",
+        action="store_true",
+        help="If set, only copy found argo workflow logs to this local directory."
+    )
+    parser.add_argument(
         '--unique-id',
         type=str,
         default=_generate_unique_id(),
         help="Provide a unique ID for labeling test resources, or generate one by default"
+    )
+    parser.add_argument(
+        "--keep-workflows",
+        action="store_true",
+        help="If set, will not delete argo workflows created by integration tests"
     )
     parser.add_argument(
         "--test-ids",
@@ -274,40 +263,21 @@ def main() -> None:
     args = parse_args()
     k8s_service = K8sService()
     helm_k8s_base_path = "../../deployment/k8s"
-    helm_dependency_script_path = f"{helm_k8s_base_path}/update_deps.sh"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
-    ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistant"
-    elasticsearch_cluster_chart_path = f"{helm_charts_base_path}/components/elasticsearchCluster"
-    opensearch_cluster_chart_path = f"{helm_charts_base_path}/components/opensearchCluster"
+    ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
 
-    source_type, source_major, source_minor = parse_version_string(args.source_version)
-    source_chart = "elasticsearchCluster" if source_type == "es" else "opensearchCluster"
-    source_values = (f"{helm_charts_base_path}/components/{source_chart}/"
-                     f"environments/{source_type}-{source_major}-{source_minor}-single-node-cluster.yaml")
-    target_type, target_major, target_minor = parse_version_string(args.target_version)
-    target_chart = "elasticsearchCluster" if target_type == "es" else "opensearchCluster"
-    target_values = (f"{helm_charts_base_path}/components/{target_chart}/"
-                     f"environments/{target_type}-{target_major}-{target_minor}-single-node-cluster.yaml")
-    ma_chart_values_path = f"{source_type}-{source_major}-to-{target_type}-{target_major}-values.yaml"
-
-    test_cluster_env = TestClusterEnvironment(source_version=args.source_version,
-                                              source_helm_values_path=source_values,
-                                              source_chart_path=elasticsearch_cluster_chart_path,
-                                              target_version=args.target_version,
-                                              target_helm_values_path=target_values,
-                                              target_chart_path=opensearch_cluster_chart_path)
-
+    combinations = [(args.source_version, args.target_version)]
     test_runner = TestRunner(k8s_service=k8s_service,
                              unique_id=args.unique_id,
                              test_ids=args.test_ids,
                              ma_chart_path=ma_chart_path,
-                             ma_chart_values_path=ma_chart_values_path,
-                             helm_dependency_script_path=helm_dependency_script_path,
-                             test_cluster_environments=[test_cluster_env])
+                             combinations=combinations)
 
     if args.delete_only:
         return test_runner.cleanup_deployment()
-    test_runner.run(skip_delete=args.skip_delete)
+    elif args.copy_logs_only:
+        return test_runner.copy_logs()
+    test_runner.run(skip_delete=args.skip_delete, keep_workflows=args.keep_workflows)
 
 
 if __name__ == "__main__":
