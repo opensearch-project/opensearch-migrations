@@ -339,18 +339,11 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
 
     queries = generate_status_queries()
     values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
-    logger.info(f"Values: {values}")
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")
-    disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" + \
-                 " with the queries or the working state index"
-    # Check the various sums to make sure things add up correctly.
-    if values[incomplete_key] + values[completed_key] != values[total_key]:
-        logger.warning(f"Incomplete ({values[incomplete_key]}) and completed ({values[completed_key]}) shards do not "
-                       f"sum to the total ({values[total_key]}) shards." + disclaimer)
-    if values[unclaimed_key] + values[in_progress_key] != values[incomplete_key]:
-        logger.warning(f"Unclaimed ({values[unclaimed_key]}) and in progress ({values[in_progress_key]}) shards do not"
-                       f" sum to the incomplete ({values[incomplete_key]}) shards." + disclaimer)
+
+    import json
+    logger.error(f"query response {json.dumps(values)}")
 
     counts = ShardStatusCounts(
         total=values.get(total_key, 0) or 0,
@@ -424,11 +417,13 @@ def with_uniques(filter_query):
 
 def generate_status_queries():
     current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
+    total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}},
+                                                      {"exists": {"field": "successor_items"}}]}})
+    complete_query = with_uniques({"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                                            "must_not": [{"match": {"_id": "shard_setup"}},
+                                                         {"exists": {"field": "successor_items"}}]}})
     incomplete_query = with_uniques({"bool": {"must_not": [{"exists": {"field": "completedAt"}},
                                                            {"match": {"_id": "shard_setup"}}]}})
-    completed_query = with_uniques({"bool": {"must": [{"exists": {"field": "completedAt"}}],
-                                             "must_not": [{"match": {"_id": "shard_setup"}}]}})
-    total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}}]}})
     in_progress_query = with_uniques({"bool": {"must": [
         {"range": {"expiration": {"gte": current_epoch_seconds}}},
         {"bool": {"must_not": [{"exists": {"field": "completedAt"}},
@@ -441,7 +436,7 @@ def generate_status_queries():
     ]}})
     queries = {
         "total": total_query,
-        "completed": completed_query,
+        "completed": complete_query,
         "incomplete": incomplete_query,
         "in progress": in_progress_query,
         "unclaimed": unclaimed_query
