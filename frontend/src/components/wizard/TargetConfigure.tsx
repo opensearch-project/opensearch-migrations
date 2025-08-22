@@ -1,6 +1,6 @@
 "use client";
 
-import { useTargetCluster } from "../session/apiHooks";
+import { useTargetCluster } from "@/components/session/apiHooks";
 import RemoteCluster from "./RemoteCluster";
 
 interface TargetConfigureProps {

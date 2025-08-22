@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { StatusIndicatorProps } from '@cloudscape-design/components';
-import { StepState } from '@/generated/api/types.gen';
-import Spinner from '@cloudscape-design/components/spinner';
-import Box from '@cloudscape-design/components/box';
+import React from "react";
+import { StatusIndicatorProps } from "@cloudscape-design/components";
+import { StepState } from "@/generated/api/types.gen";
+import Spinner from "@cloudscape-design/components/spinner";
+import Box from "@cloudscape-design/components/box";
 
 /**
  * A field definition for a status item that can be used to generate both loading and data states.
@@ -23,7 +23,7 @@ function formatDuration(seconds: number): string {
 }
 
 export function mapStatus(state: StepState): StatusIndicatorProps.Type {
-  switch(state) {
+  switch (state) {
     case "Pending":
       return "pending";
     case "Running":
@@ -35,23 +35,28 @@ export function mapStatus(state: StepState): StatusIndicatorProps.Type {
   }
 }
 
-export function durationFromTimes(start: Date | undefined | null, end: Date | undefined | null) {
-  return start != null
-    && end != null
-    && formatDuration(((end.getTime() - start.getTime()))/1000);
+export function durationFromTimes(
+  start: Date | undefined | null,
+  end: Date | undefined | null,
+) {
+  return (
+    start != null &&
+    end != null &&
+    formatDuration((end.getTime() - start.getTime()) / 1000)
+  );
 }
 
 /**
  * Generates KeyValuePairs items for loading state based on field definitions.
  */
 export function generateLoadingItems(fields: StatusFieldDefinition[]) {
-  return fields.map(field => ({
+  return fields.map((field) => ({
     label: field.label,
     value: (
       <Box padding="xxs">
         <Spinner size="normal" />
       </Box>
-    )
+    ),
   }));
 }
 
@@ -59,8 +64,8 @@ export function generateLoadingItems(fields: StatusFieldDefinition[]) {
  * Generates KeyValuePairs items for data state.
  */
 export function generateDataItems(fields: StatusFieldDefinition[]) {
-  return fields.map(field => ({
+  return fields.map((field) => ({
     label: field.label,
-    value: field.value
+    value: field.value,
   }));
 }

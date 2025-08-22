@@ -1,12 +1,16 @@
-'use client';
+"use client";
 
-import React from 'react';
-import Header from '@cloudscape-design/components/header';
-import Container from '@cloudscape-design/components/container';
-import Alert from '@cloudscape-design/components/alert';
-import ExpandableSection from '@cloudscape-design/components/expandable-section';
-import { KeyValuePairs } from '@cloudscape-design/components';
-import { StatusFieldDefinition, generateLoadingItems, generateDataItems } from './statusUtils';
+import React from "react";
+import Header from "@cloudscape-design/components/header";
+import Container from "@cloudscape-design/components/container";
+import Alert from "@cloudscape-design/components/alert";
+import ExpandableSection from "@cloudscape-design/components/expandable-section";
+import { KeyValuePairs } from "@cloudscape-design/components";
+import {
+  StatusFieldDefinition,
+  generateLoadingItems,
+  generateDataItems,
+} from "./statusUtils";
 
 interface StatusContainerProps<T> {
   readonly title: string;
@@ -17,13 +21,13 @@ interface StatusContainerProps<T> {
   readonly columns?: number;
 }
 
-export default function StatusContainer<T>({ 
-  title, 
-  isLoading, 
+export default function StatusContainer<T>({
+  title,
+  isLoading,
   error,
   data,
   fields,
-  columns = 2
+  columns = 2,
 }: StatusContainerProps<T>) {
   const renderLoadingState = () => {
     return (
@@ -46,13 +50,17 @@ export default function StatusContainer<T>({
         <KeyValuePairs columns={columns} items={generateDataItems(fields)} />
       );
     }
-    
+
     return null;
   };
 
   return (
     <Container header={<Header variant="h2">{title}</Header>}>
-      {isLoading ? renderLoadingState() : error ? renderErrorState() : renderDataState()}
+      {isLoading
+        ? renderLoadingState()
+        : error
+          ? renderErrorState()
+          : renderDataState()}
     </Container>
   );
 }
