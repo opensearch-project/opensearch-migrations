@@ -332,6 +332,7 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
         raise DeepStatusNotYetAvailable
 
     total_key = "total"
+    completed_key = "completed"
     incomplete_key = "incomplete"
     unclaimed_key = "unclaimed"
     in_progress_key = "in progress"
@@ -341,9 +342,12 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
     if None in values.values():
         logger.warning(f"Failed to get values for some queries: {values}")
 
+    import json
+    logger.error(f"query response {json.dumps(values)}")
+
     counts = ShardStatusCounts(
         total=values.get(total_key, 0) or 0,
-        completed=(values.get(total_key, 0) or 0) - (values.get(incomplete_key, 0) or 0),
+        completed=values.get(completed_key, 0) or 0,
         incomplete=values.get(incomplete_key, 0) or 0,
         in_progress=values.get(in_progress_key, 0) or 0,
         unclaimed=values.get(unclaimed_key, 0) or 0,
@@ -413,7 +417,11 @@ def with_uniques(filter_query):
 
 def generate_status_queries():
     current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
-    total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}}]}})
+    total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}},
+                                                      {"exists": {"field": "successor_items"}}]}})
+    complete_query = with_uniques({"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                                            "must_not": [{"match": {"_id": "shard_setup"}},
+                                                         {"exists": {"field": "successor_items"}}]}})
     incomplete_query = with_uniques({"bool": {"must_not": [{"exists": {"field": "completedAt"}},
                                                            {"match": {"_id": "shard_setup"}}]}})
     in_progress_query = with_uniques({"bool": {"must": [
@@ -428,6 +436,7 @@ def generate_status_queries():
     ]}})
     queries = {
         "total": total_query,
+        "completed": complete_query,
         "incomplete": incomplete_query,
         "in progress": in_progress_query,
         "unclaimed": unclaimed_query
