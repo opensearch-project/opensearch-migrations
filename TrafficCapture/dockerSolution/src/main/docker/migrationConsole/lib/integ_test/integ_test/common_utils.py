@@ -1,5 +1,8 @@
+import base64
+import json
 import time
 import logging
+
 import requests
 from requests.exceptions import ConnectionError, SSLError
 from console_link.middleware.clusters import call_api, CallAPIResult
@@ -90,6 +93,13 @@ def wait_for_service_status(status_func, desired_status, max_attempts: int = 25,
             error_message = ""
             time.sleep(delay)
     raise ServiceStatusError(error_message)
+
+
+def convert_to_b64(data) -> str:
+    # Convert dict -> JSON string -> bytes
+    json_bytes = json.dumps(data, separators=(',', ':')).encode("utf-8")
+    # Base64 encode and return as UTF-8 string
+    return base64.b64encode(json_bytes).decode("utf-8")
 
 
 def check_ma_system_health():

@@ -18,6 +18,8 @@ spec:
             description: "Details of the snapshot to use (required)"
           - name: rfs-config
             description: "Reindex-from-snapshot config object"
+          - name: source-version
+            description: "The version of the source cluster used to create the snapshot (e.g. ES_7.10)"
           - name: session-name
             description: "Name of the unique session to disambiguate coordinating indices"
           - name: image-config
@@ -37,6 +39,8 @@ spec:
                   value: "{{=let a=fromJSON(inputs.parameters['target-config'])['basic_auth'];a==nil?'':a['username']}}"
                 - name: target-password
                   value: "{{=let a=fromJSON(inputs.parameters['target-config'])['basic_auth'];a==nil?'':a['password']}}"
+                - name: source-version
+                  value: "{{inputs.parameters.source-version}}"
                 - name: snapshot-name
                   value: "{{=fromJSON(inputs.parameters['snapshot-config'])['snapshot_name']}}"
                 - name: s3-repo-uri
@@ -65,6 +69,8 @@ spec:
             description: "Target host URL (required)"
           - name: snapshot-name
             description: "Name of the snapshot to use (required)"
+          - name: source-version
+            description: "The version of the source cluster used to create the snapshot (e.g. ES_7.10)"
 
           - name: s3-repo-uri
             description: "The name of the S3 bucket that is holding the snapshot"
@@ -126,6 +132,8 @@ spec:
                   value: "{{inputs.parameters.snapshot-name}}"
                 - name: session-name
                   value: "{{inputs.parameters.session-name}}"
+                - name: source-version
+                  value: "{{inputs.parameters.source-version}}"
                 - name: s3-repo-uri
                   value: "{{inputs.parameters.s3-repo-uri}}"
                 - name: s3-region
@@ -208,6 +216,7 @@ spec:
           - name: target-host
           - name: snapshot-name
           - name: session-name
+          - name: source-version
           - name: s3-repo-uri
           - name: s3-region
           - name: s3-endpoint
@@ -255,6 +264,8 @@ spec:
                       value: "{{inputs.parameters.snapshot-name}}"
                     - name: SESSION_NAME
                       value: "{{inputs.parameters.session-name}}"
+                    - name: SOURCE_VERSION
+                      value: "{{inputs.parameters.source-version}}"
                     - name: S3_REPO_URI
                       value: "{{inputs.parameters.s3-repo-uri}}"
                     - name: S3_REGION
@@ -302,6 +313,7 @@ spec:
                       ARGS="${ARGS}${INITIAL_LEASE_DURATION:+ --initialLeaseDuration $INITIAL_LEASE_DURATION}"
                       ARGS="${ARGS}${LUCENE_DIR:+ --luceneDir $LUCENE_DIR}"
                       ARGS="${ARGS}${SESSION_NAME:+ --sessionName $SESSION_NAME}"
+                      ARGS="${ARGS}${SOURCE_VERSION:+ --sourceVersion $SOURCE_VERSION}"
                       ARGS="${ARGS}${SNAPSHOT_LOCAL_DIR:+ --snapshotLocalDir $SNAPSHOT_LOCAL_DIR}"
                       ARGS="${ARGS}${SNAPSHOT_NAME:+ --snapshotName $SNAPSHOT_NAME}"
                       ARGS="${ARGS}${TARGET_HOST:+ --targetHost $TARGET_HOST}"
@@ -365,10 +377,10 @@ spec:
                     from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
                     from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
                     
-                    status = get_detailed_status_dict(Environment("/config/migration_services.yaml").target_cluster, 
+                    status = get_detailed_status_dict(Environment(config_file="/config/migration_services.yaml").target_cluster, 
                                                       "{{=inputs.parameters['session-name']}}")
                     print(status)
-                    all_finished = all_shards_finished_processing(Environment("/config/migration_services.yaml").target_cluster,
+                    all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
                                                                   "{{=inputs.parameters['session-name']}}")
                     sys.exit(0 if all_finished else 1)
                     '
