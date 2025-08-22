@@ -70,7 +70,7 @@ export default function MetadataStatusView({
           finished={metadataData?.finished}
         />
       ),
-    }
+    },
   ];
 
   return (

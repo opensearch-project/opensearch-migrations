@@ -294,7 +294,7 @@ class MetadataMigrateRequest(BaseModel):
     dryRun: bool = True
 
 
-class ClusterInfo(BaseModel):
+class MetadataClusterInfo(BaseModel):
     type: Optional[str] = None
     version: Optional[str] = None
     uri: Optional[str] = None
@@ -305,9 +305,9 @@ class ClusterInfo(BaseModel):
     localRepository: Optional[str] = None
 
 
-class ClustersInfo(BaseModel):
-    source: ClusterInfo
-    target: ClusterInfo
+class MetadataClustersInfo(BaseModel):
+    source: MetadataClusterInfo
+    target: MetadataClusterInfo
 
 
 class FailureInfo(BaseModel):
@@ -347,7 +347,7 @@ class MetadataStatus(BaseModel):
         json_schema_extra={"format": "date-time"}
     )
     dryRun: Optional[bool] = None
-    clusters: Optional[ClustersInfo] = None
+    clusters: Optional[MetadataClustersInfo] = None
     items: Optional[ItemsInfo] = None
     transformations: Optional[TransformationInfo] = None
     errors: Optional[List[str]] = None
@@ -448,7 +448,7 @@ def build_status_from_entry(entry: metadata_db.MetadataEntry) -> MetadataStatus:
         started=entry.started,
         finished=entry.finished,
         dryRun=entry.dry_run,
-        clusters=ClustersInfo(**entry.detailed_results.get("clusters", {}))
+        clusters=MetadataClustersInfo(**entry.detailed_results.get("clusters", {}))
         if "clusters" in entry.detailed_results else None,
         items=ItemsInfo(**entry.detailed_results.get("items", {}))
         if "items" in entry.detailed_results else None,

@@ -21,6 +21,22 @@ const sideNav = (
       // { type: 'divider'},
       {
         type: "section-group",
+        title: "Migration",
+        items: [
+          {
+            type: "link",
+            text: "Migration Wizard",
+            href: "/wizard?sessionName=default",
+          },
+          {
+            type: "link",
+            text: "Transformation Playground",
+            href: "/playground",
+          },
+        ],
+      },
+      {
+        type: "section-group",
         title: "Help",
         items: [
           {
