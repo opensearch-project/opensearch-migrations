@@ -61,7 +61,7 @@ function WizardPageInner() {
     {
       title: "Snapshot",
       description: "Create or select snapshot",
-      content: <Box>Placeholder</Box>,
+      content: <SnapshotCreate sessionName={sessionName} />,
     },
     {
       title: "Metadata",

@@ -23,6 +23,9 @@ import type {
   SnapshotStatusData,
   SnapshotStatusResponses,
   SnapshotStatusErrors,
+  SnapshotConfigData,
+  SnapshotConfigResponses,
+  SnapshotConfigErrors,
   MetadataMigrateData,
   MetadataMigrateResponses,
   MetadataMigrateErrors,
@@ -205,6 +208,22 @@ export const snapshotStatus = <ThrowOnError extends boolean = false>(
   >({
     responseTransformer: snapshotStatusResponseTransformer,
     url: "/sessions/{session_name}/snapshot/status",
+    ...options,
+  });
+};
+
+/**
+ * Get Snapshot Config
+ */
+export const snapshotConfig = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotConfigData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotConfigResponses,
+    SnapshotConfigErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/",
     ...options,
   });
 };

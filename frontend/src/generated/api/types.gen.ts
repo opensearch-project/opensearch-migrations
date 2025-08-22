@@ -290,6 +290,21 @@ export type NoAuth = {
 };
 
 /**
+ * S3SnapshotSource
+ */
+export type S3SnapshotSource = {
+  type?: SnapshotSourceType;
+  /**
+   * Uri
+   */
+  uri: string;
+  /**
+   * Region
+   */
+  region: string;
+};
+
+/**
  * Session
  */
 export type Session = {
@@ -349,6 +364,30 @@ export type SigV4Auth = {
    */
   service: string;
 };
+
+/**
+ * SnapshotConfig
+ */
+export type SnapshotConfig = {
+  /**
+   * Snapshot Name
+   */
+  snapshot_name: string;
+  /**
+   * Repository Name
+   */
+  repository_name: string;
+  /**
+   * Index Allow
+   */
+  index_allow: Array<string>;
+  source: S3SnapshotSource;
+};
+
+/**
+ * SnapshotSourceType
+ */
+export type SnapshotSourceType = "filesytem" | "s3";
 
 /**
  * SnapshotStatus
@@ -650,6 +689,38 @@ export type SnapshotStatusResponses = {
 
 export type SnapshotStatusResponse =
   SnapshotStatusResponses[keyof SnapshotStatusResponses];
+
+export type SnapshotConfigData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/";
+};
+
+export type SnapshotConfigErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotConfigError =
+  SnapshotConfigErrors[keyof SnapshotConfigErrors];
+
+export type SnapshotConfigResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotConfig;
+};
+
+export type SnapshotConfigResponse =
+  SnapshotConfigResponses[keyof SnapshotConfigResponses];
 
 export type MetadataMigrateData = {
   body: MetadataMigrateRequest;

@@ -1,10 +1,11 @@
+from enum import Enum
 import logging
 from abc import ABC, abstractmethod
 from cerberus import Validator
 from datetime import datetime
 from pydantic import BaseModel, Field, field_serializer
 from requests.exceptions import HTTPError
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, TypeAlias
 
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
 from console_link.models.command_result import CommandResult
@@ -545,3 +546,33 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
         # Re-raise other errors
         logger.error(f"Error deleting repository '{repository}': {e}")
         raise e
+
+
+class SnapshotSourceType(str, Enum):
+    filesystem = "filesytem"
+    s3 = "s3"
+
+
+class SnapshotSource(BaseModel):
+    type: SnapshotSourceType
+
+
+class FileSystemSnapshotSource(SnapshotSource):
+    type: SnapshotSourceType = SnapshotSourceType.filesystem
+    path: str
+
+
+class S3SnapshotSource(SnapshotSource):
+    type: SnapshotSourceType = SnapshotSourceType.s3
+    uri: str
+    region: str
+
+
+SnapshotType: TypeAlias = FileSystemSnapshotSource | S3SnapshotSource
+
+
+class SnapshotConfig(BaseModel):
+    snapshot_name: str
+    repository_name: str
+    index_allow: List[str]
+    source: S3SnapshotSource
