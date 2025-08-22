@@ -9,6 +9,7 @@ import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTempla
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {literal} from "@/schemas/expression";
+import {LoopWithParams, makeItemsLoop, makeParameterLoop, makeSequenceLoop} from "@/schemas/workflowTypes";
 
 export const FullMigration = WorkflowBuilder.create({
         k8sResourceName: "FullMigration",
@@ -17,7 +18,7 @@ export const FullMigration = WorkflowBuilder.create({
     })
     .addParams(CommonWorkflowParameters)
     .addTemplate("pipelineSourceMigration", t => t
-        .addRequiredInput("sourceMigrationConfig", z.array(SOURCE_MIGRATION_CONFIG))
+        .addRequiredInput("sourceMigrationConfig", SOURCE_MIGRATION_CONFIG)
         .addSteps(b => b
         )
     )
@@ -47,13 +48,17 @@ export const FullMigration = WorkflowBuilder.create({
                     migrations: []
                 }
             }))
-            .addInternalStep("split", "pipelineSourceMigration", steps=> ({
-                    sourceMigrationConfig: b.inputs.sourceMigrationConfigs
-                })
+            .addStepGroup(sg => sg
+                .addInternalStep("split", "pipelineSourceMigration", stepScope=> ({
+                        sourceMigrationConfig: stepScope.item
+                    }),
+                    makeParameterLoop(b.inputs.sourceMigrationConfigs)
+                    // makeSequenceLoop(3)
+                    // makeItemsLoop([1,2])
+                )
             )
-            .addStep("cleanup", TargetLatchHelpers, "cleanup", steps => ({
-                prefix: steps.init.prefix,
-                etcdUtilsImage: "",
+            .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
+                prefix: stepScope.steps.init.prefix,
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
             }))
         )

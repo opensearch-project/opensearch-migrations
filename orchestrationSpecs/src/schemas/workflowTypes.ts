@@ -1,9 +1,9 @@
 // Internal types for workflow schema implementation
-import {ZodType, ZodTypeAny} from "zod";
+import {ZodType, ZodTypeAny, z} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
-import {Expression, inputParam, stepOutput} from "@/schemas/expression";
-import {PlainObject} from "@/schemas/plainObject";
+import {Expression, FromParameterExpression, inputParam, stepOutput} from "@/schemas/expression";
+import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 
 declare global {
     // true: worse LSP, but squigglies under the name declaration
@@ -95,9 +95,57 @@ export type StepWithOutputs<
     outputTypes?: Outputs;
 };
 
-export type StepsScopeToStepsWithOutputs<StepsScope extends Record<string, StepWithOutputs<any, any>>> = {
-    [StepName in keyof StepsScope]: StepsScope[StepName] extends StepWithOutputs<
-        infer Name,
-        infer Outputs
-    > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
+type IfNever<T, Then, Else> = [T] extends [never] ? Then : Else;
+
+export type StepsScopeToStepsWithOutputs<
+    StepsScope extends Record<string, StepWithOutputs<any, any>>,
+    ItemsType extends PlainObject = never
+> = {
+    steps: {
+        [StepName in keyof StepsScope]:
+        StepsScope[StepName] extends StepWithOutputs<
+            infer Name,
+            infer Outputs
+        > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
+    }
+} & IfNever<ItemsType, {}, { item: AllowLiteralOrExpression<ItemsType> }>;
+
+export type LoopWithSequence = {
+    loopWith: "sequence",
+    count: number
 };
+
+export function makeSequenceLoop(count: number) {
+    return {
+        loopWith: "sequence",
+        "count": count
+    } as LoopWithSequence;
+}
+
+export type LoopWithItems<T extends PlainObject> = {
+    loopWith: "items",
+    items: T[]
+};
+
+export function makeItemsLoop<T extends PlainObject>(items: T[]) {
+    return {
+        loopWith: "items",
+        "items": items
+    } as LoopWithItems<T>;
+}
+
+export type LoopWithParams<T extends PlainObject> = {
+    loopWith: "params",
+    value: FromParameterExpression<T[]>
+}
+
+export function makeParameterLoop<T extends PlainObject>(param: FromParameterExpression<T[]>) {
+    return {
+        "loopWith": "params",
+        "value": param
+    } as LoopWithParams<T>;
+}
+
+export type LoopWithUnion<T extends PlainObject> = ( T extends number ? LoopWithSequence : never)
+    | LoopWithItems<T>
+    | LoopWithParams<T>;
