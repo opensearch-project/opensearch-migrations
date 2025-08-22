@@ -1,5 +1,5 @@
 def call(Map config = [:]) {
-    def childJobName = "k8sLocalDeployment"
+    def childJobName = "elasticsearch-5x-k8s-local-test"
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
