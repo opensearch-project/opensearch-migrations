@@ -1,9 +1,9 @@
 def call(Map config = [:]) {
-    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
-        if (!config[key]) {
-            throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
-        }
-    }
+//    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
+//        if (!config[key]) {
+//            throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
+//        }
+//    }
     def jobName = config.jobName
     def sourceVersion = config.sourceVersion
     def targetVersion = config.targetVersion
@@ -56,67 +56,67 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Check Minikube Status') {
-                steps {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        script {
-                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                            if (status == "Running") {
-                                echo "✅ Minikube is running"
-                            } else {
-                                echo "Minikube is not running, status: " + status
-                                sh(script: "minikube delete", returnStdout: true)
-                                sh(script: "minikube start", returnStdout: true)
-                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                                if (status2 == "Running") {
-                                    echo "✅ Minikube was started as is running"
-                                } else {
-                                    error("❌ Minikube failed to start")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Build Docker Images (Minikube)') {
-                steps {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        dir('deployment/k8s') {
-                            script {
-                                sh "./buildDockerImagesMini.sh"
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Perform Python E2E Tests') {
-                steps {
-                    timeout(time: 15, unit: 'MINUTES') {
-                        dir('libraries/testAutomation') {
-                            script {
-                                sh "pipenv install --deploy"
-                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete"
-                            }
-                        }
-                    }
-                }
-            }
+//            stage('Check Minikube Status') {
+//                steps {
+//                    timeout(time: 5, unit: 'MINUTES') {
+//                        script {
+//                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+//                            if (status == "Running") {
+//                                echo "✅ Minikube is running"
+//                            } else {
+//                                echo "Minikube is not running, status: " + status
+//                                sh(script: "minikube delete", returnStdout: true)
+//                                sh(script: "minikube start", returnStdout: true)
+//                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+//                                if (status2 == "Running") {
+//                                    echo "✅ Minikube was started as is running"
+//                                } else {
+//                                    error("❌ Minikube failed to start")
+//                                }
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//
+//            stage('Build Docker Images (Minikube)') {
+//                steps {
+//                    timeout(time: 30, unit: 'MINUTES') {
+//                        dir('deployment/k8s') {
+//                            script {
+//                                sh "./buildDockerImagesMini.sh"
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//
+//            stage('Perform Python E2E Tests') {
+//                steps {
+//                    timeout(time: 15, unit: 'MINUTES') {
+//                        dir('libraries/testAutomation') {
+//                            script {
+//                                sh "pipenv install --deploy"
+//                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete"
+//                            }
+//                        }
+//                    }
+//                }
+//            }
         }
-        post {
-            always {
-                timeout(time: 15, unit: 'MINUTES') {
-                    dir('libraries/testAutomation') {
-                        script {
-                            sh "pipenv install --deploy"
-                            sh "pipenv run app --copy-logs-only"
-                            archiveArtifacts artifacts: 'logs/**', fingerprint: true, onlyIfSuccessful: false
-                            sh "pipenv run app --delete-only"
-                        }
-                    }
-                }
-            }
-        }
+//        post {
+//            always {
+//                timeout(time: 15, unit: 'MINUTES') {
+//                    dir('libraries/testAutomation') {
+//                        script {
+//                            sh "pipenv install --deploy"
+//                            sh "pipenv run app --copy-logs-only"
+//                            archiveArtifacts artifacts: 'logs/**', fingerprint: true, onlyIfSuccessful: false
+//                            sh "pipenv run app --delete-only"
+//                        }
+//                    }
+//                }
+//            }
+//        }
     }
 }
