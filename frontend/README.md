@@ -2,6 +2,68 @@
 
 This is the frontend application for the OpenSearch Migrations project. It's built using Next.js and TypeScript, and integrated into the Gradle build system.
 
+## Initial Release
+
+To scope this project, we will be working on a subset of the many Migration Assistant scenarios - in this case by working with Snapshot, Metadata, and Backfill it provides a mix of asynchronous activity and synchronous work.  The complexity of the Metadata migration output is also a well suited challenge for this initial draft.  Once this scenario is available we can get this into customer's hands for feedback while iterating on additional scenarios.
+
+```mermaid
+flowchart TD
+    Start@{ shape: dbl-circ, label: "Start" }
+    subgraph Migration_Types
+        A1[Full Migration]
+        A2[[Backfill Only]]
+        A3[Capture and Replay Only]
+        A4[Bring Your Own Snapshot]
+    end
+    Start --> |Pick Workflow| Migration_Types
+    subgraph "Capture and Replay"
+        C1[Request Capture]
+        C2[Replay Captured Traffic]
+    end
+    subgraph "Snapshot-Based Migration"
+        S1[[Create Snapshot]]
+        S2[[Metadata Migration]]
+        S3[[Backfill<br/>Reindex from Snapshot]]
+    end
+    Stop@{ shape: dbl-circ, label: "Stop" }
+    subgraph Legend
+        L1@{ shape: rect, label: "Initial Implementation"}
+        L2@{ shape: rect, label: "Future Revisions"}
+    end
+
+    %% Full Migration Flow
+    A1 --> C1
+    C1 --> |Backfill before replay| S1
+    S1 --> S2
+    S2 --> S3
+    S3 --> C2
+    C2--> Stop
+
+    %% Bring Your Own Snapshot Flow
+    A2 --> S1
+    S3 --> Stop
+
+
+    %% Capture and Replay Only Flow
+    A3 --> C1
+    C1 --> |No backfill| C2
+    C2 --> Stop
+
+    %% Bring Your Own Snapshot Flow
+    A4 --> S2
+    S3 --> Stop
+
+   Stop ~~~ Legend
+
+    linkStyle 3,4,7,8 stroke:#3a3,stroke-width:3px
+    style A2 fill:#dfd,stroke:#3a3,stroke-width:3px
+    style S1 fill:#dfd,stroke:#3a3,stroke-width:3px
+    style S2 fill:#dfd,stroke:#3a3,stroke-width:3px
+    style S3 fill:#dfd,stroke:#3a3,stroke-width:3px
+    style L1 fill:#dfd,stroke:#3a3,stroke-width:3px
+
+```
+
 ## Development
 
 ### Prerequisites
