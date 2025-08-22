@@ -10,7 +10,7 @@ import yaml
 
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster, HttpMethod
-from console_link.models.backfill_rfs import generate_status_queries, get_detailed_status_obj, BackfillOverallStatus
+from console_link.models.backfill_rfs import get_detailed_status_obj, BackfillOverallStatus
 from tests.search_containers import SearchContainer, Version
 
 logging.basicConfig(level=logging.INFO)
@@ -290,5 +290,6 @@ def test_get_detailed_status_obj(env_with_cluster: Environment):
     assert status_obj.shard_total == computed_total, f"{status_obj}"
     assert status_obj.shard_complete == COMPLETED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"
     assert status_obj.shard_failed is None, f"{status_obj}"
-    assert status_obj.shard_in_progress == IN_PROGRESS_DOC_COUNT * SHARD_COUNT + IN_PROGRESS_SUCCESSOR_COUNT, f"{status_obj}"
+    assert status_obj.shard_in_progress == (IN_PROGRESS_DOC_COUNT * SHARD_COUNT +
+                                            IN_PROGRESS_SUCCESSOR_COUNT), f"{status_obj}"
     assert status_obj.shard_waiting == UNCLAIMED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"
