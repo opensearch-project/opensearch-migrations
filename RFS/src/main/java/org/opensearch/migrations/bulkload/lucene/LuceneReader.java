@@ -9,8 +9,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
+import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 
 import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;

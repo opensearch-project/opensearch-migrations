@@ -30,7 +30,7 @@ public final class IndexOp extends BulkOperationSpec {
     }
 
     @Builder.Default
-    private final boolean includeDocument = true;
+    private boolean includeDocument = true;
 
     @Override
     public OperationType getOperationType() {

@@ -32,7 +32,7 @@ public class RfsDocument {
     @SneakyThrows
     public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
         // TODO: We can get a performance improvement by keeping doc.source as a byte array until here
-        Map<String, Object> document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});;
+        Map<String, Object> document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});
 
         // TODO: Consider an inheritance model for builders that would allow us to consolidate this logic
         if (RfsDocumentOperation.DELETE.equals(doc.operation)) {

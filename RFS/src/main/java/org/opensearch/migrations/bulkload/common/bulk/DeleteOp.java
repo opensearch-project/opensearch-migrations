@@ -30,7 +30,7 @@ public final class DeleteOp extends BulkOperationSpec {
     }
 
     @Builder.Default
-    private final boolean includeDocument = false;
+    private boolean includeDocument = false;
 
     @Override
     public OperationType getOperationType() {

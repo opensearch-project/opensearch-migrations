@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
-import org.opensearch.migrations.bulkload.common.RfsDocumentOperation;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;

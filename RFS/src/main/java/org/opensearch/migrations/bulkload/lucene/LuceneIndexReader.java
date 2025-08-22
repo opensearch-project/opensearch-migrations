@@ -114,7 +114,7 @@ public interface LuceneIndexReader {
             var guardedDeletions  = streams.deletions.doFinally(onFinally);
 
             return new DeltaLuceneReader.DeltaResult(guardedAdditions, guardedDeletions);
-        } catch (Throwable t) {
+        } catch (Exception t) {
             closeBoth.run();
             throw t;
         }
