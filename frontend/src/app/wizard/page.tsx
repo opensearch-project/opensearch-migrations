@@ -10,6 +10,7 @@ import { Box } from "@cloudscape-design/components";
 import SessionOverviewView from "@/components/session/SessionOverviewView";
 import SnapshotStatusView from "@/components/session/SnapshotStatusView";
 import MetadataStatusView from "@/components/session/MetadataStatusView";
+import SnapshotCreate from "@/components/wizard/SnapshotCreate";
 
 export default function WizardPage() {
   return (
