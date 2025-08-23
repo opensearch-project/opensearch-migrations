@@ -53,16 +53,17 @@ def get_snapshot_status(session_name: str):
 
 
 def convert_from_snapshot(snapshot: Snapshot) -> SnapshotConfig:
-    if isinstance(snapshot, S3Snapshot):
+    logger.info(f"Checking snapshot object {snapshot}")
+    if isinstance(snapshot, FileSystemSnapshot):
+        source = FileSystemSnapshotSource(
+            type=SnapshotSourceType.filesystem,
+            path=snapshot.repo_path
+        )
+    elif isinstance(snapshot, S3Snapshot):
         source = S3SnapshotSource(
             type=SnapshotSourceType.s3,
             uri=snapshot.s3_repo_uri,
             region=snapshot.s3_region
-        )
-    elif isinstance(snapshot, FileSystemSnapshot):
-        source = FileSystemSnapshotSource(
-            type=SnapshotSourceType.filesystem,
-            path=snapshot.repo_path
         )
     else:
         raise ValueError(f"Unsupported snapshot type: {type(snapshot).__name__}")

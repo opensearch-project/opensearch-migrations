@@ -575,4 +575,4 @@ class SnapshotConfig(BaseModel):
     snapshot_name: str
     repository_name: str
     index_allow: List[str]
-    source: S3SnapshotSource
+    source: SnapshotType
