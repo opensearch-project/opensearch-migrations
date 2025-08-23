@@ -2,7 +2,7 @@ import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {Expression} from "@/schemas/expression";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
-import {NamedTask, StepGroup} from "@/schemas/stepsBuilder";
+import {NamedTask, StepGroup, StepTask} from "@/schemas/stepsBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
@@ -49,23 +49,24 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
 }
 
 function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
-    if (loopWith) {
-        if (loopWith.loopWith == "items") {
-            return { withItems: loopWith.items};
-        } else if (loopWith.loopWith == "sequence") {
-            return { withSequence: loopWith.count };
-        } else if (loopWith.loopWith == "params") {
-            return { withParams: loopWith.value };
-        }
+    if (loopWith.loopWith == "items") {
+        return { withItems: loopWith.items};
+    } else if (loopWith.loopWith == "sequence") {
+        return { withSequence: loopWith.count };
+    } else if (loopWith.loopWith == "params") {
+        return { withParams: toArgoExpression(loopWith.value) };
+    } else {
+        throw new Error(`Expected loopWith value; got ${loopWith}`);
     }
-    return {};
 }
 
-function formatStep(step: NamedTask) {
+function formatStep<T extends StepTask & { loopWith?: unknown }>(step: T) {
+    const {loopWith, ...rest} = step;
     return {
-
-        transformExpressionsDeep()
-    };
+        ...(loopWith !== undefined
+            ? renderWithLoop(loopWith as LoopWithUnion<any>)
+            : {}),
+        ...(transformExpressionsDeep(rest) as object) };
 }
 
 function formatBody(body: GenericScope) {
@@ -73,7 +74,11 @@ function formatBody(body: GenericScope) {
         if (body.steps == undefined) {
             return transformExpressionsDeep(body);
         } else {
-            return {steps: (body.steps as StepGroup[]).map(g => formatStep(g.steps))};
+            return {
+                steps: (body.steps as StepGroup[])
+                    .map(g => g
+                        .steps.map(s => formatStep(s)))
+            };
         }
     } else {
         return {};

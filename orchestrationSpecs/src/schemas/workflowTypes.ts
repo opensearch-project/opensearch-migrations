@@ -95,7 +95,7 @@ export type StepWithOutputs<
     outputTypes?: Outputs;
 };
 
-type IfNever<T, Then, Else> = [T] extends [never] ? Then : Else;
+export type IfNever<T, Then, Else> = [T] extends [never] ? Then : Else;
 
 export type StepsScopeToStepsWithOutputs<
     StepsScope extends Record<string, StepWithOutputs<any, any>>,

@@ -9,7 +9,7 @@ import {
     StepWithOutputs,
     ParamsWithLiteralsOrExpressions,
     WorkflowAndTemplatesScope,
-    StepsOutputsScope, TemplateSignaturesScope, TemplateSigEntry, LoopWithUnion
+    StepsOutputsScope, TemplateSignaturesScope, TemplateSigEntry, LoopWithUnion, IfNever
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
 import {stepOutput} from "@/schemas/expression";
@@ -33,23 +33,23 @@ export type TemplateDef<
 
 export type WorkflowTask<
     IN extends InputParametersRecord,
-    OUT extends OutputParametersRecord
+    OUT extends OutputParametersRecord,
+    LoopT extends PlainObject = never
 > = {
-    arguments?: { parameters?: Record<string, any>; } & ({
-        type: 'external';
+    arguments?: { parameters?: Record<string, any>; }
+} & ({
         templateRef: { key: string, value: TemplateDef<IN, OUT> };
     } | {
-        type: 'local';
         template: string;
     })
-}
+& IfNever<LoopT, {}, { withLoop: LoopT}> & {};
 
 export type NamedTask<
     IN extends InputParametersRecord = InputParametersRecord,
     OUT extends OutputParametersRecord = OutputParametersRecord,
+    LoopT extends PlainObject = never,
     Extra extends Record<string, any> = {}
-> = { name: string } & WorkflowTask<IN, OUT> & Extra;
-
+> = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
 
 export interface StepGroup {
     steps: StepTask[];
@@ -57,8 +57,9 @@ export interface StepGroup {
 
 export type StepTask<
     IN extends InputParametersRecord = InputParametersRecord,
-    OUT extends OutputParametersRecord = OutputParametersRecord
-> = NamedTask<IN, OUT>;
+    OUT extends OutputParametersRecord = OutputParametersRecord,
+    LoopT extends PlainObject = never
+> = NamedTask<IN, OUT, LoopT>;
 
 export class StepsBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -209,7 +210,7 @@ export class StepGroupBuilder<
         Name extends string,
         TWorkflow extends Workflow<any, any, any>,
         TKey extends Extract<keyof TWorkflow["templates"], string>,
-        LoopT extends PlainObject
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflowIn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
@@ -230,6 +231,7 @@ export class StepGroupBuilder<
         const templateKey = key as TKey;
         // Call callTemplate to get the template reference and arguments
         const templateCall = callExternalTemplate(
+            name as string,
             workflow,
             templateKey,
             (paramsFn as any)(this.buildStepsWithOutputs(loopWith))
@@ -244,7 +246,7 @@ export class StepGroupBuilder<
         TTemplate extends ContextualScope["templates"][TKey],
         TInput extends TTemplate extends { input: infer I } ? I extends InputParametersRecord ? I : InputParametersRecord : InputParametersRecord,
         TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {},
-        LoopT extends PlainObject
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
@@ -268,6 +270,7 @@ export class StepGroupBuilder<
         const outputs = (template && 'output' in template ? template.output : {}) as TOutput;
 
         const templateCall = this.callTemplate(
+            name,
             templateKey as string,
             (paramsFn as any)(this.buildStepsWithOutputs(loopWith)),
             loopWith
@@ -280,8 +283,9 @@ export class StepGroupBuilder<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        Task extends WorkflowTask<IN, OUT>
-    >(
+        Task extends StepTask<IN, OUT, LoopT>,
+        LoopT extends PlainObject = never
+>(
         name: UniqueNameConstraintAtDeclaration<TKey, StepsScope>,
         templateCall: Task,
         outputs: OUT
@@ -293,10 +297,7 @@ export class StepGroupBuilder<
         const nameStr = name as string;
 
         // Add to runtime structure
-        this.stepTasks.push({
-            name: nameStr,
-            ...templateCall
-        });
+        this.stepTasks.push(templateCall);
 
         // Create the new step definition with output types
         const stepDef: StepWithOutputs<TKey, OUT> = {
@@ -315,7 +316,7 @@ export class StepGroupBuilder<
         ) as any;
     }
 
-    private buildStepsWithOutputs<LoopT extends PlainObject>(loopWith?: LoopWithUnion<LoopT> ):
+    private buildStepsWithOutputs<LoopT extends PlainObject=never>(loopWith?: LoopWithUnion<LoopT> ):
         StepsScopeToStepsWithOutputs<StepsScope>
     {
         const steps: any = {};
@@ -339,21 +340,22 @@ export class StepGroupBuilder<
 
     callTemplate<
         TKey extends Extract<keyof TemplateSignaturesScope, string>,
-        LoopT extends PlainObject,
+        LoopT extends PlainObject=never,
     >(
+        name: string,
         templateKey: TKey,
         params: z.infer<ReturnType<typeof paramsToCallerSchema<TemplateSignaturesScope[TKey]["input"]>>>,
         loopWith?: LoopWithUnion<LoopT>
-    ): WorkflowTask<
+    ): StepTask<
         TemplateSignaturesScope[TKey]["input"],
         TemplateSignaturesScope[TKey]["output"] extends OutputParametersRecord ? TemplateSignaturesScope[TKey]["output"] : {}
     > {
         return {
-            type: "local",
+            "name": name,
             template: templateKey,
-            ...(loopWith ? { "loopWith": loopWith} : {}),
+            ...(loopWith ? { "loopWith": loopWith } : {}),
             arguments: { parameters: params }
-        } as any;
+        };
     }
 }
 
@@ -361,15 +363,16 @@ export function callExternalTemplate<
     WF extends Workflow<any, any, any>,
     TKey extends Extract<keyof WF["templates"], string>
 >(
+    name: string,
     wf: WF,
     templateKey: TKey,
     params: z.infer<ReturnType<typeof paramsToCallerSchema<WF["templates"][TKey]["inputs"]>>>
-): WorkflowTask<
+): StepTask<
     WF["templates"][TKey]["inputs"],
     WF["templates"][TKey]["outputs"] extends OutputParametersRecord ? WF["templates"][TKey]["outputs"] : {}
 > {
     return {
-        type: "external",
+        "name": name,
         templateRef: {
             name: templateKey,
             template: wf.metadata.k8sMetadata.name
