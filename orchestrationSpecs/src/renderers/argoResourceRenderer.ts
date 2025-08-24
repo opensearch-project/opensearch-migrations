@@ -1,11 +1,10 @@
-import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {Expression} from "@/schemas/expression";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
-import {NamedTask, StepGroup, StepTask} from "@/schemas/stepsBuilder";
+import {StepGroup, StepTask} from "@/schemas/stepsBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {BaseExpression} from "@/schemas/expression";
 
 export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["getFullScope"]>>(wf: WF) {
     return {
@@ -149,7 +148,7 @@ function assertPlainObject(v: unknown): asserts v is Record<string, unknown> {
 
 // Output type mapping: replace any Expression with toArgoExpression's return type, recurse through arrays/objects
 type ReplaceExpressions<T> =
-    T extends Expression<any> ? ReturnType<typeof toArgoExpression> :
+    T extends BaseExpression<any> ? ReturnType<typeof toArgoExpression> :
         T extends readonly (infer U)[] ? ReadonlyArray<ReplaceExpressions<U>> :
             T extends (infer U)[] ? Array<ReplaceExpressions<U>> :
                 T extends object ? { [K in keyof T]: ReplaceExpressions<T[K]> } :
@@ -161,7 +160,7 @@ type ReplaceExpressions<T> =
  */
 export function transformExpressionsDeep<T>(input: T): ReplaceExpressions<T> {
     function visit<U>(node: U): ReplaceExpressions<U> {
-        if (node instanceof Expression) {
+        if (node instanceof BaseExpression) {
             return toArgoExpression(node) as ReplaceExpressions<U>;
         }
 

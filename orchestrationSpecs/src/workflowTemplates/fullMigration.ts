@@ -28,6 +28,7 @@ export const FullMigration = WorkflowBuilder.create({
             "List of server configurations to direct migrated traffic toward")
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
             "List of server configurations to direct migrated traffic toward")
+        .addOptionalInput("doSecondWhenTest", s=>true)
         .addOptionalInput("imageParams",
             scope => literal(
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
@@ -48,13 +49,17 @@ export const FullMigration = WorkflowBuilder.create({
                     migrations: []
                 }
             }))
-            .addInternalStep("split", "pipelineSourceMigration", stepScope=> ({
-                    sourceMigrationConfig: stepScope.item
-                }),
-                makeParameterLoop(b.inputs.sourceMigrationConfigs)
-                // makeSequenceLoop(3)
-                // makeItemsLoop([1,2])
-            )
+                .addInternalStep("split", "pipelineSourceMigration", stepScope=> ({
+                        sourceMigrationConfig: stepScope.item
+                    }),
+                    makeParameterLoop(b.inputs.sourceMigrationConfigs)
+                )
+                .addInternalStep("split2", "pipelineSourceMigration", stepScope=> ({
+                        sourceMigrationConfig: stepScope.item
+                    }),
+                    makeParameterLoop(b.inputs.sourceMigrationConfigs), b.inputs.doSecondWhenTest
+                )
+
             .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
                 prefix: stepScope.steps.init.prefix,
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"

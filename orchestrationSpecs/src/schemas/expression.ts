@@ -3,18 +3,32 @@ import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
 import {PlainObject} from "@/schemas/plainObject";
 
 // Base Expression class
-export abstract class Expression<T extends PlainObject> {
+export abstract class BaseExpression<T extends PlainObject> {
     readonly _resultType!: T; // Phantom type for compile-time checking
-    constructor(public readonly kind: string) {}
+    constructor(public readonly kind: string, public readonly isSimple: boolean) {}
 }
 
-export class AsStringExpression<T extends PlainObject> extends Expression<string> {
-    constructor(public readonly source: Expression<T>) {
+export abstract class SimpleExpression<T extends PlainObject> extends BaseExpression<T>{
+    protected readonly __brand_simple!: void;  // <- brand
+    constructor(public readonly kind: string) {
+        super(kind, true);
+    }
+}
+
+export abstract class TemplateExpression<T extends PlainObject> extends BaseExpression<T>{
+    protected readonly __brand_complex!: void;  // <- brand
+    constructor(public readonly kind: string) {
+        super(kind, false);
+    }
+}
+
+export class AsStringExpression<T extends PlainObject> extends TemplateExpression<string> {
+    constructor(public readonly source: TemplateExpression<T>) {
         super('as_string');
     }
 }
 
-export class LiteralExpression<T extends PlainObject> extends Expression<T> {
+export class LiteralExpression<T extends PlainObject> extends SimpleExpression<T> {
     constructor(public readonly value: T) {
         super('literal');
     }
@@ -26,7 +40,7 @@ type ParameterSource =
     | { kind: 'step_output', stepName: string, parameterName: string }
     | { kind: 'task_output', taskName: string, parameterName: string };
 
-export class FromParameterExpression<T extends PlainObject> extends Expression<T> {
+export class FromParameterExpression<T extends PlainObject> extends SimpleExpression<T> {
     constructor(
         public readonly source: ParameterSource,
         public readonly paramDef?: InputParamDef<T, any> | OutputParamDef<T>
@@ -35,7 +49,7 @@ export class FromParameterExpression<T extends PlainObject> extends Expression<T
     }
 }
 
-export class FromConfigMapExpression<T extends PlainObject> extends Expression<T> {
+export class FromConfigMapExpression<T extends PlainObject> extends TemplateExpression<T> {
     constructor(
         public readonly configMapName: string,
         public readonly key: string
@@ -56,64 +70,64 @@ type PathValue<T, P extends string> = P extends keyof T
                 : never
             : never;
 
-export class PathExpression<TSource extends PlainObject, TResult extends PlainObject> extends Expression<TResult> {
+export class PathExpression<TSource extends PlainObject, TResult extends PlainObject> extends TemplateExpression<TResult> {
     constructor(
-        public readonly source: Expression<TSource>,
+        public readonly source: TemplateExpression<TSource>,
         public readonly path: string
     ) {
         super('path');
     }
 }
 
-export class ConcatExpression extends Expression<string> {
+export class ConcatExpression extends TemplateExpression<string> {
     constructor(
-        public readonly expressions: readonly Expression<string>[],
+        public readonly expressions: readonly TemplateExpression<string>[],
         public readonly separator?: string
     ) {
         super('concat');
     }
 }
 
-export class TernaryExpression<T extends PlainObject> extends Expression<T> {
+export class TernaryExpression<T extends PlainObject> extends SimpleExpression<T> {
     constructor(
-        public readonly condition: Expression<boolean>,
-        public readonly whenTrue: Expression<T>,
-        public readonly whenFalse: Expression<T>
+        public readonly condition: TemplateExpression<boolean>,
+        public readonly whenTrue: TemplateExpression<T>,
+        public readonly whenFalse: TemplateExpression<T>
     ) {
         super('ternary');
     }
 }
 
-export class ArithmeticExpression extends Expression<number> {
+export class ArithmeticExpression extends SimpleExpression<number> {
     constructor(
         public readonly operator: '+' | '-' | '*' | '/' | '%',
-        public readonly left: Expression<number>,
-        public readonly right: Expression<number>
+        public readonly left: TemplateExpression<number>,
+        public readonly right: TemplateExpression<number>
     ) {
         super('arithmetic');
     }
 }
 
-export class ComparisonExpression extends Expression<boolean> {
+export class ComparisonExpression extends SimpleExpression<boolean> {
     constructor(
         public readonly operator: '==' | '!=' | '<' | '>' | '<=' | '>=',
-        public readonly left: Expression<number | string>,
-        public readonly right: Expression<number | string>
+        public readonly left: TemplateExpression<number | string>,
+        public readonly right: TemplateExpression<number | string>
     ) {
         super('comparison');
     }
 }
 
-export class ArrayLengthExpression<T extends PlainObject> extends Expression<number> {
-    constructor(public readonly array: Expression<T[]>) {
+export class ArrayLengthExpression<T extends PlainObject> extends SimpleExpression<number> {
+    constructor(public readonly array: TemplateExpression<T[]>) {
         super('array_length');
     }
 }
 
-export class ArrayIndexExpression<T extends PlainObject> extends Expression<T> {
+export class ArrayIndexExpression<T extends PlainObject> extends SimpleExpression<T> {
     constructor(
-        public readonly array: Expression<T[]>,
-        public readonly index: Expression<number>
+        public readonly array: TemplateExpression<T[]>,
+        public readonly index: TemplateExpression<number>
     ) {
         super('array_index');
     }
@@ -124,7 +138,7 @@ export class ArrayIndexExpression<T extends PlainObject> extends Expression<T> {
 // =============================================================================
 
 // conversion
-export const asString = <T extends PlainObject>(expr: Expression<T>): Expression<string> =>
+export const asString = <T extends PlainObject>(expr: TemplateExpression<T>): TemplateExpression<string> =>
     new AsStringExpression(expr);
 
 // Literals
@@ -171,9 +185,9 @@ export const taskOutput = <T extends PlainObject>(
 // Helper to create parameter references from parameter maps
 export type ParamMap<T extends Record<string, InputParamDef<any, any> | OutputParamDef<any>>> = {
     [K in keyof T]: T[K] extends InputParamDef<infer U, any>
-        ? Expression<U>
+        ? TemplateExpression<U>
         : T[K] extends OutputParamDef<infer U>
-            ? Expression<U>
+            ? TemplateExpression<U>
             : never;
 };
 
@@ -225,49 +239,49 @@ export const configMap = <T extends PlainObject>(name: string, key: string) => n
 
 // Path access with type inference
 export const path = <TSource extends PlainObject, TPath extends string>(
-    source: Expression<TSource>,
+    source: TemplateExpression<TSource>,
     pathStr: TPath
 ) => new PathExpression<TSource, PathValue<TSource, TPath> & PlainObject>(source, pathStr);
 
-export const concat = (...expressions: Expression<string>[]) =>
+export const concat = (...expressions: TemplateExpression<string>[]) =>
     new ConcatExpression(expressions);
 
-export const concatWith = (separator: string, ...expressions: Expression<string>[]) =>
+export const concatWith = (separator: string, ...expressions: TemplateExpression<string>[]) =>
     new ConcatExpression(expressions, separator);
 
 export const ternary = <T extends PlainObject>(
-    condition: Expression<boolean>,
-    whenTrue: Expression<T>,
-    whenFalse: Expression<T>
+    condition: TemplateExpression<boolean>,
+    whenTrue: TemplateExpression<T>,
+    whenFalse: TemplateExpression<T>
 ) => new TernaryExpression(condition, whenTrue, whenFalse);
 
-export const add = (left: Expression<number>, right: Expression<number>) =>
+export const add = (left: TemplateExpression<number>, right: TemplateExpression<number>) =>
     new ArithmeticExpression('+', left, right);
 
-export const subtract = (left: Expression<number>, right: Expression<number>) =>
+export const subtract = (left: TemplateExpression<number>, right: TemplateExpression<number>) =>
     new ArithmeticExpression('-', left, right);
 
-export const multiply = (left: Expression<number>, right: Expression<number>) =>
+export const multiply = (left: TemplateExpression<number>, right: TemplateExpression<number>) =>
     new ArithmeticExpression('*', left, right);
 
-export const divide = (left: Expression<number>, right: Expression<number>) =>
+export const divide = (left: TemplateExpression<number>, right: TemplateExpression<number>) =>
     new ArithmeticExpression('/', left, right);
 
 export const equals = <T extends string | number>(
-    left: Expression<T>,
-    right: Expression<T>
-) => new ComparisonExpression('==', left as Expression<string | number>, right as Expression<string | number>);
+    left: TemplateExpression<T>,
+    right: TemplateExpression<T>
+) => new ComparisonExpression('==', left as TemplateExpression<string | number>, right as TemplateExpression<string | number>);
 
-export const lessThan = (left: Expression<number>, right: Expression<number>) =>
+export const lessThan = (left: TemplateExpression<number>, right: TemplateExpression<number>) =>
     new ComparisonExpression('<', left, right);
 
-export const greaterThan = (left: Expression<number>, right: Expression<number>) =>
+export const greaterThan = (left: TemplateExpression<number>, right: TemplateExpression<number>) =>
     new ComparisonExpression('>', left, right);
 
-export const length = <T extends PlainObject>(array: Expression<T[]>) =>
+export const length = <T extends PlainObject>(array: TemplateExpression<T[]>) =>
     new ArrayLengthExpression(array);
 
-export const index = <T extends PlainObject>(array: Expression<T[]>, idx: Expression<number>) =>
+export const index = <T extends PlainObject>(array: TemplateExpression<T[]>, idx: TemplateExpression<number>) =>
     new ArrayIndexExpression(array, idx);
 
 // =============================================================================

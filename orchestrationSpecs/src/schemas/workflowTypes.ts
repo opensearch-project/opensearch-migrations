@@ -2,7 +2,7 @@
 import {ZodType, ZodTypeAny, z} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
-import {Expression, FromParameterExpression, inputParam, stepOutput} from "@/schemas/expression";
+import {BaseExpression, FromParameterExpression, inputParam, stepOutput} from "@/schemas/expression";
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 
 declare global {
@@ -49,18 +49,18 @@ export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? 
 
 // Helper type to allow both literal values and expressions
 export type AllowLiteralOrExpression<T extends PlainObject> = T extends string
-    ? string | Expression<string>
+    ? string | BaseExpression<string>
     : T extends number
-        ? number | Expression<number>
+        ? number | BaseExpression<number>
         : T extends boolean
-            ? boolean | Expression<boolean>
+            ? boolean | BaseExpression<boolean>
             : T extends Array<infer U>
                 ? U extends PlainObject
-                    ? Array<AllowLiteralOrExpression<U>> | Expression<T>
+                    ? Array<AllowLiteralOrExpression<U>> | BaseExpression<T>
                     : never
                 : T extends object
-                    ? { [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : never } | Expression<T>
-                    : T | Expression<T>;
+                    ? { [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : never } | BaseExpression<T>
+                    : T | BaseExpression<T>;
 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {

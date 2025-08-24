@@ -12,7 +12,7 @@ import {
     StepsOutputsScope, TemplateSignaturesScope, TemplateSigEntry, LoopWithUnion, IfNever
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
-import {stepOutput} from "@/schemas/expression";
+import {BaseExpression, SimpleExpression, stepOutput} from "@/schemas/expression";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
@@ -111,7 +111,8 @@ export class StepsBuilder<
                     ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>
                 >>
         >,
-        loopWith?: LoopWithUnion<LoopT>
+        loopWith?: LoopWithUnion<LoopT>,
+        when?: SimpleExpression<boolean>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
@@ -121,7 +122,7 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder => {
-            return groupBuilder.addStep(name, workflow, key, paramsFn, loopWith) as any;
+            return groupBuilder.addStep(name, workflow, key, paramsFn, loopWith, when) as any;
         }) as any;
     }
 
@@ -141,7 +142,8 @@ export class StepsBuilder<
                     z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>
                 >
         >,
-        loopWith?: LoopWithUnion<LoopT>
+        loopWith?: LoopWithUnion<LoopT>,
+        when?: SimpleExpression<boolean>
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         StepsScope,
@@ -156,7 +158,7 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder => {
-            return groupBuilder.addInternalStep(name, templateKey, paramsFn, loopWith) as any;
+            return groupBuilder.addInternalStep(name, templateKey, paramsFn, loopWith, when) as any;
         }) as any;
     }
 
@@ -225,7 +227,8 @@ export class StepGroupBuilder<
                     z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>
                 >>
         >,
-        loopWith?: LoopWithUnion<LoopT>
+        loopWith?: LoopWithUnion<LoopT>,
+        when?: SimpleExpression<boolean>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, {
             [K in Name]: StepWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]>
@@ -241,7 +244,7 @@ export class StepGroupBuilder<
             (paramsFn as any)(this.buildStepsWithOutputs(loopWith))
         );
 
-        return this.addStepHelper(name, templateCall, workflow.templates[templateKey].outputs);
+        return this.addStepHelper(name, templateCall, workflow.templates[templateKey].outputs, when);
     }
 
     addInternalStep<
@@ -258,7 +261,8 @@ export class StepGroupBuilder<
             (steps: StepsScopeToStepsWithOutputs<StepsScope, LoopT>) =>
                 ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>>
         >,
-        loopWith?: LoopWithUnion<LoopT>
+        loopWith?: LoopWithUnion<LoopT>,
+        when?: SimpleExpression<boolean>
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         StepsScope,
@@ -280,7 +284,7 @@ export class StepGroupBuilder<
             loopWith
         );
 
-        return this.addStepHelper(name, templateCall, outputs) as any;
+        return this.addStepHelper(name, templateCall, outputs, when) as any;
     }
 
     private addStepHelper<
@@ -292,7 +296,8 @@ export class StepGroupBuilder<
 >(
         name: UniqueNameConstraintAtDeclaration<TKey, StepsScope>,
         templateCall: Task,
-        outputs: OUT
+        outputs: OUT,
+        when?: BaseExpression<boolean>
     ): UniqueNameConstraintOutsideDeclaration<TKey, StepsScope,
         StepGroupBuilder<ContextualScope, ExtendScope<StepsScope, {
             [K in TKey]: StepWithOutputs<TKey, OUT>
@@ -301,7 +306,10 @@ export class StepGroupBuilder<
         const nameStr = name as string;
 
         // Add to runtime structure
-        this.stepTasks.push(templateCall);
+        this.stepTasks.push({
+            ...templateCall,
+            ...(when !== undefined ? {"when": when} : {}),
+        });
 
         // Create the new step definition with output types
         const stepDef: StepWithOutputs<TKey, OUT> = {
