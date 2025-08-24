@@ -99,17 +99,19 @@ export class StepsBuilder<
     addStep<
         Name extends string,
         TWorkflow extends Workflow<any, any, any>,
-        TKey extends Extract<keyof TWorkflow["templates"], string>
+        TKey extends Extract<keyof TWorkflow["templates"], string>,
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflow: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) =>
+            (steps: StepsScopeToStepsWithOutputs<StepsScope, LoopT>) =>
                 ParamsWithLiteralsOrExpressions<z.infer<
                     ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>
                 >>
-        >
+        >,
+        loopWith?: LoopWithUnion<LoopT>
     ): UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
         StepsBuilder<
             ContextualScope,
@@ -119,7 +121,7 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder => {
-            return groupBuilder.addStep(name, workflow, key, paramsFn) as any;
+            return groupBuilder.addStep(name, workflow, key, paramsFn, loopWith) as any;
         }) as any;
     }
 
@@ -128,16 +130,18 @@ export class StepsBuilder<
         TKey extends Extract<keyof ContextualScope["templates"], string>,
         TTemplate extends ContextualScope["templates"][TKey],
         TInput extends TTemplate extends { input: infer I } ? I extends InputParametersRecord ? I : InputParametersRecord : InputParametersRecord,
-        TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {}
+        TOutput extends TTemplate extends { output: infer O } ? O extends OutputParametersRecord ? O : {} : {},
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope,
-            (steps: StepsScopeToStepsWithOutputs<StepsScope>) =>
+            (steps: StepsScopeToStepsWithOutputs<StepsScope, LoopT>) =>
                 ParamsWithLiteralsOrExpressions<
                     z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>
                 >
-        >
+        >,
+        loopWith?: LoopWithUnion<LoopT>
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         StepsScope,
@@ -152,7 +156,7 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder => {
-            return groupBuilder.addInternalStep(name, templateKey, paramsFn) as any;
+            return groupBuilder.addInternalStep(name, templateKey, paramsFn, loopWith) as any;
         }) as any;
     }
 
