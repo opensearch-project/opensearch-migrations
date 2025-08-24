@@ -16,6 +16,18 @@ from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
 logger = logging.getLogger(__name__)
 
+
+# Define the models first to avoid forward reference issues
+class SnapshotIndex(BaseModel):
+    name: str
+    document_count: int
+    size_bytes: int
+
+
+class SnapshotIndexes(BaseModel):
+    indexes: List[SnapshotIndex]
+
+
 SNAPSHOT_SCHEMA = {
     'snapshot': {
         'type': 'dict',
@@ -82,6 +94,29 @@ class Snapshot(ABC):
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
         """Delete a snapshot repository."""
         pass
+
+    def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
+        """
+        Fetch all indexes that will be included in the snapshot with accurate document count and size information.
+        
+        Args:
+            index_patterns: Optional list of index patterns to filter the indexes. If None, 
+                          all indexes in the cluster will be considered.
+        
+        Returns:
+            SnapshotIndexes containing information about all indexes that will be included in the snapshot.
+        
+        Raises:
+            NoSourceClusterDefinedError: If no source cluster is defined.
+        """
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        
+        try:
+            return get_cluster_indexes(self.source_cluster, index_patterns)
+        except Exception as e:
+            logger.error(f"Failed to get snapshot indexes: {str(e)}")
+            raise
 
     def _collect_universal_command_args(self) -> Dict:
         if not self.source_cluster:
@@ -477,14 +512,20 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str):
-    path = f"/_snapshot/{repository}/{snapshot_name}"
-    response = cluster.call_api(path, HttpMethod.DELETE)
-    logging.debug(f"Raw delete snapshot status response: {response.text}")
-    logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str) -> CommandResult:
+    try:
+        path = f"/_snapshot/{repository}/{snapshot_name}"
+        response = cluster.call_api(path, HttpMethod.DELETE)
+        logging.debug(f"Raw delete snapshot status response: {response.text}")
+        logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
+        return CommandResult(success=True,
+                             value=f"Deleted snapshot: {snapshot_name} from repository '{repository}'")
+    except Exception as e:
+        logger.error(f"Error deleting snapshot '{snapshot_name}' from repository '{repository}': {e}")
+        return CommandResult(success=False, value=f"Error deleting snapshot: {str(e)}")
 
 
-def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
+def delete_all_snapshots(cluster: Cluster, repository: str) -> CommandResult:
     logger.info(f"Clearing snapshots from repository '{repository}'")
     """
     Clears all snapshots from the specified repository.
@@ -503,7 +544,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
 
         if not snapshots:
             logger.info(f"No snapshots found in repository '{repository}'.")
-            return
+            return CommandResult(success=True, value=f"No snapshots found in repository '{repository}'.")
 
         # Delete each snapshot
         for snapshot in snapshots:
@@ -516,13 +557,15 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
-                return
-        # Re-raise other errors
+                return CommandResult(success=True, value=f"Repository '{repository}' does not exist")
+        # Return error result instead of raising
         logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
-        raise e
+        return CommandResult(success=False, value=f"Error clearing snapshots: {str(e)}")
+    
+    return CommandResult(success=True, value=f"All snapshots cleared from repository '{repository}'")
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
+def delete_snapshot_repo(cluster: Cluster, repository: str) -> CommandResult:
     logger.info(f"Deleting repository '{repository}'")
     """
     Delete repository. Should be empty before execution.
@@ -542,10 +585,12 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping delete.")
-                return
-        # Re-raise other errors
+                return CommandResult(success=True, value=f"Repository '{repository}' does not exist")
+        # Return error result instead of raising
         logger.error(f"Error deleting repository '{repository}': {e}")
-        raise e
+        return CommandResult(success=False, value=f"Error deleting repository: {str(e)}")
+    
+    return CommandResult(success=True, value=f"Repository '{repository}' deleted")
 
 
 class SnapshotSourceType(str, Enum):
@@ -576,3 +621,54 @@ class SnapshotConfig(BaseModel):
     repository_name: str
     index_allow: List[str]
     source: SnapshotType
+
+
+def get_cluster_indexes(cluster: Cluster, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
+    """
+    Query a cluster for all indexes that match the given patterns, with accurate document count and size information.
+    
+    Args:
+        cluster: The cluster to query.
+        index_patterns: Optional list of index patterns to include. If None, all indexes are included.
+    
+    Returns:
+        SnapshotIndexes containing information about all matching indexes.
+    """
+    if not cluster:
+        raise NoSourceClusterDefinedError()
+    
+    # Query the _cat/indices API which provides stats about indexes
+    path = "/_cat/indices"
+    params = {
+        "format": "json",
+        "bytes": "b",  # Get size in bytes
+        "h": "index,docs.count,store.size"  # Only return these fields
+    }
+    
+    if index_patterns:
+        # If patterns are specified, join them with commas
+        path = f"{path}/{','.join(index_patterns)}"
+    
+    try:
+        response = cluster.call_api(path, params=params)
+        indices_data = response.json()
+        
+        index_list = []
+        for index_data in indices_data:
+            try:
+                index_name = index_data["index"]
+                doc_count = int(index_data["docs.count"])
+                size_bytes = int(index_data["store.size"])
+                
+                index_list.append(SnapshotIndex(
+                    name=index_name,
+                    document_count=doc_count,
+                    size_bytes=size_bytes
+                ))
+            except (KeyError, ValueError) as e:
+                logger.warning(f"Skipping index with invalid data: {index_data}, error: {e}")
+        
+        return SnapshotIndexes(indexes=index_list)
+    except Exception as e:
+        logger.error(f"Failed to fetch index information: {e}")
+        raise

@@ -10,7 +10,7 @@ import { Box } from "@cloudscape-design/components";
 import SessionOverviewView from "@/components/session/SessionOverviewView";
 import SnapshotStatusView from "@/components/session/SnapshotStatusView";
 import MetadataStatusView from "@/components/session/MetadataStatusView";
-import SnapshotCreate from "@/components/wizard/SnapshotCreate";
+import SnapshotController from "@/components/wizard/SnapshotController";
 
 export default function WizardPage() {
   return (
@@ -62,7 +62,7 @@ function WizardPageInner() {
     {
       title: "Snapshot",
       description: "Create or select snapshot",
-      content: <SnapshotCreate sessionName={sessionName} />,
+      content: <SnapshotController sessionName={sessionName} />,
     },
     {
       title: "Metadata",

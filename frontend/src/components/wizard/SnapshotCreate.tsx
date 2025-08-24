@@ -1,20 +1,21 @@
 "use client";
 
 import { useSnapshotConfig } from "../session/apiHooks";
-import SnapshotForm from "./SnapshotForm";
+import SnapshotConfigView from "./SnapshotForm";
 
 interface SnapshotCreateProps {
   readonly sessionName: string;
 }
 
-export default function SnapshotCreate({ sessionName }: SnapshotCreateProps) {
+export default function SnapshotController({ sessionName }: SnapshotCreateProps) {
   const { isLoading, data: snapshotConfig, error } = useSnapshotConfig(sessionName);
 
   return (
-    <SnapshotForm
+    <SnapshotConfigView
       isLoading={isLoading}
       snapshotConfig={snapshotConfig}
       error={error}
     />
+    <SnapshotIndices></SnapshotIndices>
   );
 }

@@ -26,6 +26,9 @@ import type {
   SnapshotConfigData,
   SnapshotConfigResponses,
   SnapshotConfigErrors,
+  SnapshotIndexesData,
+  SnapshotIndexesResponses,
+  SnapshotIndexesErrors,
   MetadataMigrateData,
   MetadataMigrateResponses,
   MetadataMigrateErrors,
@@ -224,6 +227,22 @@ export const snapshotConfig = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/sessions/{session_name}/snapshot/",
+    ...options,
+  });
+};
+
+/**
+ * Get Snapshot Indexes
+ */
+export const snapshotIndexes = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotIndexesData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotIndexesResponses,
+    SnapshotIndexesErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/indexes",
     ...options,
   });
 };

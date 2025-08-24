@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import FormField from "@cloudscape-design/components/form-field";
-import Input from "@cloudscape-design/components/input";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
-import { SnapshotConfig } from "@/generated/api";
-import { Alert, StatusIndicator } from "@cloudscape-design/components";
-import RadioGroup from "@cloudscape-design/components/radio-group";
+import { FileSystemSnapshotSource, S3SnapshotSource, SnapshotConfig } from "@/generated/api";
+import { Alert, Header, KeyValuePairs, KeyValuePairsProps, StatusIndicator } from "@cloudscape-design/components";
+import Container from "@cloudscape-design/components/container";
 import { SnapshotDebugControls } from "../session/debug/SnapshotDebugControls";
 import { SNAPSHOT_CONFIG_SCENARIOS } from "../session/mockData/snapshotConfigScenarios";
 
@@ -17,7 +15,7 @@ interface SnapshotFormProps {
   readonly error: any;
 }
 
-export default function SnapshotForm({
+export default function SnapshotConfigView({
   isLoading: apiLoading,
   snapshotConfig: apiSnapshotData,
   error: apiError,
@@ -64,7 +62,7 @@ export default function SnapshotForm({
     );
   }
 
-  if (error) {
+  if (error || !snapshotConfig) {
     return (
       <Alert type="error" header="Failed to load snapshot configuration">
         {String((error as any)?.message ?? error)}
@@ -72,90 +70,33 @@ export default function SnapshotForm({
     );
   }
 
+  
+  const configItems: KeyValuePairsProps.Item[] = [
+    {label: "Snapshot Name", value: snapshotConfig.snapshot_name },
+    {label: "Repository Name", value: snapshotConfig.repository_name},
+    {label: "Storage Type", value: snapshotConfig.source.type === "s3" ? "Amazon S3" : "File System"},
+  ];
+
+  if (snapshotConfig.source.type === "s3") {
+    const source = snapshotConfig.source as S3SnapshotSource;
+    configItems.push({label: "S3 URI", value: source.uri});
+    configItems.push({label: "AWS Region", value: source.region});
+  }
+  if (snapshotConfig.source.type === "filesytem") {
+    const source = snapshotConfig.source as FileSystemSnapshotSource
+    configItems.push({label: "Path", value: source.path});
+  }
+  configItems.push({label: "Index Allowlist", value: snapshotConfig?.index_allow.length 
+                ? snapshotConfig.index_allow.join(", ") 
+                : <i>Default - All indexes</i>})
+
   return (
     <SpaceBetween size="l">
-      <FormField 
-        label="Snapshot Name" 
-        description="The name of the snapshot"
-      >
-        <Input 
-          placeholder="my-snapshot"
-          value={snapshotConfig?.snapshot_name ?? ""}
-          onChange={() => {}}
-          disabled
-        />
-      </FormField>
+      <Header variant="h2">
+        Snapshot Configuration
+      </Header>
 
-      <FormField 
-        label="Repository Name" 
-        description="The name of the repository where the snapshot will be stored"
-      >
-        <Input 
-          placeholder="my-snapshot-repository"
-          value={snapshotConfig?.repository_name ?? ""}
-          onChange={() => {}}
-          disabled
-        />
-      </FormField>
-      
-      <FormField 
-        label="Storage Type" 
-        description="Select the storage type for the snapshot"
-      >
-        <RadioGroup
-          items={[
-            { value: "s3", label: "Amazon S3" },
-            { value: "filesytem", label: "File System" }
-          ]}
-          value={snapshotConfig?.source.type ?? "s3"}
-          onChange={() => {}}
-        />
-      </FormField>
-      
-      {snapshotConfig?.source.type === "s3" && (
-        <SpaceBetween size="m">
-          <FormField label="S3 URI" description="S3 bucket URI where snapshots will be stored">
-            <Input 
-              placeholder="s3://my-bucket/path/to/repository"
-              value={snapshotConfig.source.uri ?? ""}
-              onChange={() => {}}
-              disabled
-            />
-          </FormField>
-          
-          <FormField label="AWS Region" description="AWS Region for the S3 bucket">
-            <Input 
-              placeholder="us-east-1"
-              value={snapshotConfig.source.region ?? ""}
-              onChange={() => {}}
-              disabled
-            />
-          </FormField>
-        </SpaceBetween>
-      )}
-
-      {snapshotConfig?.source.type === "filesytem" && (
-        <FormField label="Path" description="File system path where snapshots will be stored">
-          <Input 
-            placeholder="/path/to/snapshot/repository"
-            value={(snapshotConfig.source as any).path ?? ""}
-            onChange={() => {}}
-            disabled
-          />
-        </FormField>
-      )}
-
-      <FormField 
-        label="Index Allowlist" 
-        description="List of indexes to include in the snapshot (comma-separated)"
-      >
-        <Input 
-          placeholder="index1,index2,index3"
-          value={snapshotConfig?.index_allow.join(",") ?? ""}
-          onChange={() => {}}
-          disabled
-        />
-      </FormField>
+      <KeyValuePairs items={configItems} columns={2} />
       
       <SnapshotDebugControls 
         onScenarioSelect={applyDebugScenario}

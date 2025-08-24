@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { backfillStatus, clusterSource, clusterTarget, metadataStatus, sessionGet, snapshotConfig, snapshotStatus } from '@/generated/api/sdk.gen';
+import { backfillStatus, clusterSource, clusterTarget, metadataStatus, sessionGet, snapshotConfig, snapshotIndexes, snapshotStatus } from '@/generated/api/sdk.gen';
 
 function useFetchData<T>(
   fetchFn: (sessionName: string) => Promise<{response: {status: number}, data: T}>,
@@ -95,4 +95,15 @@ export function useBackfillStatus(sessionName: string) {
   };
 
   return useFetchData(fetchBackfill, sessionName, 'backfill status');
+}
+
+export function useSnapshotIndexes(sessionName: string, indexPattern?: string) {
+  const fetchSnapshotIndexes = async (name: string) => {
+    return await snapshotIndexes({ 
+      path: { session_name: name },
+      query: indexPattern ? { index_pattern: indexPattern } : undefined
+    });
+  };
+
+  return useFetchData(fetchSnapshotIndexes, sessionName, 'snapshot indexes');
 }

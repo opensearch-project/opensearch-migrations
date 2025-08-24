@@ -106,6 +106,17 @@ export type FailureInfo = {
 };
 
 /**
+ * FileSystemSnapshotSource
+ */
+export type FileSystemSnapshotSource = {
+  type?: SnapshotSourceType;
+  /**
+   * Path
+   */
+  path: string;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -381,7 +392,38 @@ export type SnapshotConfig = {
    * Index Allow
    */
   index_allow: Array<string>;
-  source: S3SnapshotSource;
+  /**
+   * Source
+   */
+  source: FileSystemSnapshotSource | S3SnapshotSource;
+};
+
+/**
+ * SnapshotIndex
+ */
+export type SnapshotIndex = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Document Count
+   */
+  document_count: number;
+  /**
+   * Size Bytes
+   */
+  size_bytes: number;
+};
+
+/**
+ * SnapshotIndexes
+ */
+export type SnapshotIndexes = {
+  /**
+   * Indexes
+   */
+  indexes: Array<SnapshotIndex>;
 };
 
 /**
@@ -721,6 +763,43 @@ export type SnapshotConfigResponses = {
 
 export type SnapshotConfigResponse =
   SnapshotConfigResponses[keyof SnapshotConfigResponses];
+
+export type SnapshotIndexesData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: {
+    /**
+     * Index Pattern
+     */
+    index_pattern?: string | null;
+  };
+  url: "/sessions/{session_name}/snapshot/indexes";
+};
+
+export type SnapshotIndexesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotIndexesError =
+  SnapshotIndexesErrors[keyof SnapshotIndexesErrors];
+
+export type SnapshotIndexesResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotIndexes;
+};
+
+export type SnapshotIndexesResponse =
+  SnapshotIndexesResponses[keyof SnapshotIndexesResponses];
 
 export type MetadataMigrateData = {
   body: MetadataMigrateRequest;

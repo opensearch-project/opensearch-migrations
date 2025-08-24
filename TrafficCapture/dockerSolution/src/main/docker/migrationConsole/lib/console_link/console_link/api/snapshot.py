@@ -1,12 +1,13 @@
 import logging
 from fastapi import APIRouter, HTTPException
+from typing import Optional
 
 from console_link.api.sessions import http_safe_find_session
 from console_link.models.factories import get_snapshot
 from console_link.models.snapshot import (
     Snapshot, SnapshotConfig, SnapshotNotStarted, SnapshotStatus, SnapshotStatusUnavailable,
     get_latest_snapshot_status_raw, S3Snapshot, FileSystemSnapshot, SnapshotSourceType,
-    S3SnapshotSource, FileSystemSnapshotSource
+    S3SnapshotSource, FileSystemSnapshotSource, SnapshotIndexes
 )
 from console_link.models.step_state import StepState
 
@@ -98,3 +99,30 @@ def get_snapshot_config(session_name: str):
     except Exception as e:
         logger.error(f"Unexpected error converting snapshot: {type(e).__name__} {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {type(e).__name__} {str(e)}")
+
+
+@snapshot_router.get("/indexes", response_model=SnapshotIndexes, operation_id="snapshotIndexes")
+def get_snapshot_indexes(session_name: str, index_pattern: Optional[str] = None):
+    session = http_safe_find_session(session_name)
+    env = session.env
+
+    if not env or not env.snapshot:
+        raise HTTPException(status_code=400,
+                            detail=f"No snapshot defined in the configuration: {env}")
+
+    snapshot_obj = get_snapshot(env.snapshot.config, env.source_cluster)
+    if not snapshot_obj.source_cluster:
+        raise HTTPException(status_code=400,
+                            detail=f"Source cluster was unable to be used to get snapshot indexes: {env}")
+    
+    try:
+        # Convert comma-separated string to list if provided
+        index_patterns = None
+        if index_pattern:
+            index_patterns = [pattern.strip() for pattern in index_pattern.split(',')]
+        
+        return snapshot_obj.get_snapshot_indexes(index_patterns)
+    except Exception as e:
+        logger.error(f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
+        raise HTTPException(status_code=500,
+                            detail=f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
