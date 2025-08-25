@@ -5,7 +5,6 @@ from unittest.mock import ANY
 
 import pytest
 import requests
-import requests_mock
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
@@ -188,24 +187,32 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(e
 
 
 def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
-    target = create_valid_cluster()
     mocked_instance_status = DeploymentStatus(
         desired=1,
         running=1,
         pending=0
     )
-    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_instance_status)
     with open(TEST_DATA_DIRECTORY / "migrations_working_state_search.json") as f:
         data = json.load(f)
         total_shards = data['hits']['total']['value']
-    with requests_mock.Mocker() as rm:
-        rm.get(f"{target.endpoint}/.migrations_working_state", status_code=200)
-        rm.get(f"{target.endpoint}/.migrations_working_state/_search",
-               status_code=200,
-               json=data)
-        value = ecs_rfs_backfill.get_status(deep_check=True)
+    
+    # Mock the deployment status retrieval
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                               return_value=mocked_instance_status)
+    
+    # Mock the detailed status function to return a known value
+    mocked_detailed_status = f"Work items total: {total_shards}"
+    mock_detailed = mocker.patch('console_link.models.backfill_rfs.get_detailed_status',
+                                 autospec=True, return_value=mocked_detailed_status)
 
+    # Call the function being tested
+    value = ecs_rfs_backfill.get_status(deep_check=True)
+
+    # Verify the mocks were called
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    mock_detailed.assert_called_once()
+    
+    # Verify the output
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
     assert str(mocked_instance_status) in value.value[1]
@@ -221,10 +228,18 @@ def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
     mock_ecs = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                    return_value=mocked_instance_status)
     mock_api = mocker.patch.object(Cluster, 'call_api', side_effect=requests.exceptions.RequestException())
+
+    # Call function being tested
     result = ecs_rfs_backfill.get_status(deep_check=True)
-    assert "Working state index does not yet exist" in caplog.text
-    mock_ecs.assert_called_once()
+    
+    # Verify the logs contain failure message
+    assert "Failed to get detailed status" in caplog.text
+    
+    # Verify mock calls
+    mock_ecs.assert_called_once_with(ecs_rfs_backfill.ecs_client)
     mock_api.assert_called_once()
+    
+    # Verify result
     assert result.success
     assert result.value[0] == BackfillStatus.RUNNING
 

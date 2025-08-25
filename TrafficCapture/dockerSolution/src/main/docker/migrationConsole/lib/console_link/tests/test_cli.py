@@ -625,9 +625,9 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
         pending=1
     )
     mocked_detailed_status = "Remaining shards: 43"
-    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
+    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                                 return_value=mocked_running_status)
-    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autspec=True,
+    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autospec=True,
                                              return_value=mocked_detailed_status)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),

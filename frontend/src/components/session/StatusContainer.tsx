@@ -17,13 +17,13 @@ interface StatusContainerProps<T> {
   readonly columns?: number;
 }
 
-export default function StatusContainer<T>({ 
-  title, 
-  isLoading, 
+export default function StatusContainer<T>({
+  title,
+  isLoading,
   error,
   data,
   fields,
-  columns = 2
+  columns = 2,
 }: StatusContainerProps<T>) {
   const renderLoadingState = () => {
     return (
@@ -46,13 +46,16 @@ export default function StatusContainer<T>({
         <KeyValuePairs columns={columns} items={generateDataItems(fields)} />
       );
     }
-    
     return null;
   };
 
   return (
     <Container header={<Header variant="h2">{title}</Header>}>
-      {isLoading ? renderLoadingState() : error ? renderErrorState() : renderDataState()}
+      {isLoading
+        ? renderLoadingState()
+        : data
+          ? renderDataState()
+          : renderErrorState()}
     </Container>
   );
 }
