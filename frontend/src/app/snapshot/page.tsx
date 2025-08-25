@@ -2,7 +2,9 @@
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import WorkflowWizard, { WorkflowWizardStep } from "@/components/common/WorkflowWizard";
+import WorkflowWizard, {
+  WorkflowWizardStep,
+} from "@/components/common/WorkflowWizard";
 import SourceConfigure from "@/components/connection/SourceConfigure";
 import TargetConfigure from "@/components/connection/TargetConfigure";
 import SnapshotCreator from "@/components/snapshot/SnapshotCreator";

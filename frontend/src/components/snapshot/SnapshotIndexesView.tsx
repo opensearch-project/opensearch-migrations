@@ -1,6 +1,6 @@
 'use client';
 
-import { SnapshotIndexes } from "@/generated/api/types.gen";
+import { SnapshotIndex, SnapshotIndexStatus, SnapshotStatus } from "@/generated/api/types.gen";
 import Box from "@cloudscape-design/components/box";
 import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
@@ -10,16 +10,18 @@ import SnapshotIndexesTable from "./SnapshotIndexesTable";
 
 interface SnapshotIndexesViewProps {
   isLoading: boolean;
-  snapshotIndexes: SnapshotIndexes | null;
-  error: string | null;
+  snapshotIndexes: SnapshotIndex[] | SnapshotIndexStatus[] | null | undefined;
+  error: Error | null;
+  snapshotStatus?: SnapshotStatus | null;
 }
 
 export default function SnapshotIndexesView({
   isLoading,
   snapshotIndexes,
-  error
+  error,
+  snapshotStatus,
 }: SnapshotIndexesViewProps) {
-  const hasData = snapshotIndexes && snapshotIndexes.indexes.length > 0;
+  const hasData = snapshotIndexes && snapshotIndexes.length > 0;
 
   return (
     <SpaceBetween size="l">
@@ -41,9 +43,10 @@ export default function SnapshotIndexesView({
         <>
           {hasData ? (
             <SnapshotIndexesTable 
-              indexes={snapshotIndexes.indexes} 
+              indexes={snapshotIndexes}
               maxHeight="300px"
               emptyText="There are no indexes on the source cluster."
+              snapshotStatus={snapshotStatus}
             />
           ) : (
             <Alert type="info" header="No indexes available">

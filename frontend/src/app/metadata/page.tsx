@@ -3,7 +3,9 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Box } from "@cloudscape-design/components";
-import WorkflowWizard, { WorkflowWizardStep } from "@/components/common/WorkflowWizard";
+import WorkflowWizard, {
+  WorkflowWizardStep,
+} from "@/components/common/WorkflowWizard";
 
 export default function WizardPage() {
   return (

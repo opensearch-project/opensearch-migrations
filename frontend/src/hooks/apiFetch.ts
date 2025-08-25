@@ -16,48 +16,122 @@ type SessionPromise<T> = (
   sessionName: string,
 ) => Promise<{ response: { status: number }; data: T }>;
 
+type UseFetchOptions = {
+  retries?: number; // how many extra tries (default 1)
+  retryStatuses?: number[]; // which statuses to retry (default [404, 500])
+  baseDelayMs?: number; // initial delay between retries
+  backoffFactor?: number; // exponential factor
+};
+
+function sleep(ms: number) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
 function useFetchData<T>(
   fetchFn: SessionPromise<T>,
   sessionName: string,
-  componentName: string = "component",
+  componentName = "component",
+  {
+    retries = 1,
+    retryStatuses = [404, 500],
+    baseDelayMs = 600,
+    backoffFactor = 2,
+  }: UseFetchOptions = {},
 ) {
   const [isLoading, setIsLoading] = useState(true);
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Use a ref to store the fetchFn to avoid dependency changes triggering re-fetches
+  // keep the latest fetchFn without retriggering the effect
   const fetchFnRef = useRef<SessionPromise<T>>(fetchFn);
+  useEffect(() => {
+    fetchFnRef.current = fetchFn;
+  }, [fetchFn]);
 
   useEffect(() => {
-    async function fetchData() {
+    let cancelled = false;
+
+    async function run() {
       if (!sessionName) {
         setError("No session name provided");
         setIsLoading(false);
         return;
       }
 
-      try {
-        const response = await fetchFnRef.current(sessionName);
-        if (response.response.status === 200) {
-          setData(response.data);
-        } else {
-          setError(
-            `API Error: ${response.response.status} - Failed to fetch ${componentName} data`,
+      setIsLoading(true);
+      setError(null);
+
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const resp = await fetchFnRef.current(sessionName);
+          const status = resp.response.status;
+
+          if (status === 200) {
+            if (!cancelled) {
+              setData(resp.data);
+              setIsLoading(false);
+            }
+            return;
+          }
+
+          const shouldRetry =
+            retryStatuses.includes(status) && attempt < retries;
+
+          if (!shouldRetry) {
+            if (!cancelled) {
+              setError(
+                `API Error: ${status} - Failed to fetch ${componentName} data`,
+              );
+              setIsLoading(false);
+            }
+            return;
+          }
+
+          // wait before next try (exponential backoff + a touch of jitter)
+          const delay = Math.round(
+            baseDelayMs * Math.pow(backoffFactor, attempt) +
+              Math.random() * 100,
           );
+
+          console.warn(
+            `[useFetchData] retrying ${componentName} after ${status} (attempt ${attempt + 1}/${retries}) in ${delay}ms`,
+          );
+          await sleep(delay);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (e: any) {
+          const isLast = attempt >= retries;
+          if (isLast) {
+            if (!cancelled) {
+              setError(`${e?.message ?? "Unknown error"}\n\n${e?.stack ?? ""}`);
+              setIsLoading(false);
+            }
+            return;
+          }
+          const delay = Math.round(
+            baseDelayMs * Math.pow(backoffFactor, attempt) +
+              Math.random() * 100,
+          );
+          console.warn(
+            `[useFetchData] retrying ${componentName} after network error (attempt ${attempt + 1}/${retries}) in ${delay}ms`,
+            e,
+          );
+          await sleep(delay);
         }
-      } catch (err) {
-        console.error(`Error fetching ${componentName} data:`, err);
-        setError(
-          `${err instanceof Error ? err.message : "Unknown error"}\n\n${err instanceof Error && err.stack ? err.stack : ""}`,
-        );
-      } finally {
-        setIsLoading(false);
       }
     }
 
-    fetchData();
-    // Only depend on sessionName to prevent continuous refetching
-  }, [sessionName, componentName]);
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    sessionName,
+    backoffFactor,
+    baseDelayMs,
+    componentName,
+    retries,
+    retryStatuses,
+  ]);
 
   return { isLoading, data, error };
 }

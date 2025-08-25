@@ -23,7 +23,7 @@ export default function SnapshotReview({ sessionName }: SnapshotReviewProps) {
       />
       <SnapshotIndexesView
         isLoading={isLoadingIndexes}
-        snapshotIndexes={snapshotIndexes ?? null}
+        snapshotIndexes={snapshotIndexes?.indexes ?? null}
         error={indexesError}
       />
     </SpaceBetween>
