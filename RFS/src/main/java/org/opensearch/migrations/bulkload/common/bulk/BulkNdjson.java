@@ -55,12 +55,9 @@ public final class BulkNdjson {
      */
     public static void writeAll(Collection<? extends BulkOperationSpec> ops,
                                 OutputStream out, ObjectMapper mapper) throws IOException {
-        Iterator<? extends BulkOperationSpec> it = ops.iterator();
-        while (it.hasNext()) {
-            writeOperation(it.next(), out, mapper);
-            if (it.hasNext()) {
-                out.write(NEWLINE_BYTES);
-            }
+        for (BulkOperationSpec op : ops) {
+            writeOperation(op, out, mapper);
+            out.write(NEWLINE_BYTES);
         }
     }
 

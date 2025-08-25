@@ -235,7 +235,7 @@ class DocumentReindexerTest {
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
         var mapper = ObjectMapperFactory.createDefaultMapper();
         var bulkNdjson = BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper);
-        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", bulkNdjson);    }
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", bulkNdjson);    }
 
     @Test
     void reindex_shouldRespectMaxConcurrentRequests() {
@@ -320,11 +320,11 @@ class DocumentReindexerTest {
         var transformedDoc3 = capturedBulkRequests.get(2);
 
         var mapper = ObjectMapperFactory.createDefaultMapper();
-        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", BulkNdjson.toBulkNdjson(List.of(transformedDoc1), mapper),
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", BulkNdjson.toBulkNdjson(List.of(transformedDoc1), mapper),
                 "Document 1 should have _type removed");
-        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", BulkNdjson.toBulkNdjson(List.of(transformedDoc2), mapper),
+        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", BulkNdjson.toBulkNdjson(List.of(transformedDoc2), mapper),
                 "Document 2 should remain unchanged as _type is not defined");
-        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", BulkNdjson.toBulkNdjson(List.of(transformedDoc3), mapper),
+        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", BulkNdjson.toBulkNdjson(List.of(transformedDoc3), mapper),
                 "Document 3 should have _type removed");
     }
 
