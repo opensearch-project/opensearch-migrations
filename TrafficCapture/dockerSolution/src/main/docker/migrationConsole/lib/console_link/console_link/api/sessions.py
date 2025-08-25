@@ -48,7 +48,7 @@ def create_session(session: SessionBase) -> Session:
         config_file_path = "/config/migration_services.yaml"
         env: Environment
         if os.path.exists(config_file_path):
-            env = Environment(config_file="/config/migration_services.yaml")
+            env = Environment(config_file=config_file_path)
         else:
             default_config: Dict = {}
             env = Environment(config=default_config)
