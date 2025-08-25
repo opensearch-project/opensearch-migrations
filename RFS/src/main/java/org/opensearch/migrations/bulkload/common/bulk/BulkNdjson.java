@@ -80,7 +80,7 @@ public final class BulkNdjson {
     public long getSerializedLength(BulkOperationSpec op) {
         try (var stream = new CountingOutputStream()) {
             BulkNdjson.writeOperation(op, stream, OBJECT_MAPPER);
-            return stream.getCount();
+            return stream.getBytesWritten();
         }
     }
 
@@ -89,17 +89,17 @@ public final class BulkNdjson {
      */
     @Getter
     private static class CountingOutputStream extends OutputStream {
-        private long count = 0;
+        private long bytesWritten = 0;
 
         @Override
         public void write(int b) {
-            count++;
+            bytesWritten++;
         }
 
         @Override
         public void write(byte[] b, int off, int len) {
             Objects.checkFromIndexSize(off, len, b.length);
-            count += len;
+            bytesWritten += len;
         }
     }
 }

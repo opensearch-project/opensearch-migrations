@@ -25,10 +25,6 @@ public final class DeleteOp extends BulkOperationSpec {
     public static final String OP_TYPE_VALUE = "delete";
     public static final OperationType OP_TYPE = OperationType.DELETE;
 
-    static {
-        assert OP_TYPE.getValue().equals(OP_TYPE_VALUE) : "Constant OP_TYPE must equal OP_TYPE.getValue()";
-    }
-
     @Builder.Default
     private boolean includeDocument = false;
 

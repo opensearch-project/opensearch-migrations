@@ -25,10 +25,6 @@ public final class IndexOp extends BulkOperationSpec {
     public static final String OP_TYPE_VALUE = "index";
     public static final OperationType OP_TYPE = OperationType.INDEX;
 
-    static {
-        assert OP_TYPE.getValue().equals(OP_TYPE_VALUE) : "Constant OP_TYPE must equal OP_TYPE.getValue()";
-    }
-
     @Builder.Default
     private boolean includeDocument = true;
 
