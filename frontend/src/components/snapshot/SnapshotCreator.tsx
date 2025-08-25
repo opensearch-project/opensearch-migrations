@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSnapshotCreate, useSnapshotDelete, useSnapshotIndexes } from "../../hooks/apiFetch";
 import { usePollingSnapshotStatus } from "@/hooks/apiPoll";
 import { Box, Button, SpaceBetween, Alert, Spinner }from "@cloudscape-design/components";
 import SnapshotStatusView from "./SnapshotStatusView";
-import SnapshotIndexesView from "./SnapshotIndexesView";
+import SnapshotIndexesTable from "./SnapshotIndexesTable";
+import { useSnapshotCreateAction, useSnapshotDeleteAction } from "@/hooks/apiAction";
 
 interface SnapshotControllerProps {
   readonly sessionName: string;
@@ -15,17 +15,21 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
   const [isPollingEnabled, setIsPollingEnabled] = useState(false);
   const [snapshotInProgress, setSnapshotInProgress] = useState(false);
 
-  const { 
-    isLoading: isCreating, 
-    data: createResponse, 
-    error: createError 
-  } = useSnapshotCreate(sessionName);
-  
-  const { 
-    isLoading: isDeleting, 
-    data: deleteResponse, 
-    error: deleteError 
-  } = useSnapshotDelete(sessionName);
+  const {
+    run: createSnapshot,
+    reset: resetCreate,
+    isLoading: isCreating,
+    data: createResponse,
+    error: createError,
+  } = useSnapshotCreateAction();
+
+  const {
+    run: removeSnapshot,
+    reset: resetDelete,
+    isLoading: isDeleting,
+    data: deleteResponse,
+    error: deleteError,
+  } = useSnapshotDeleteAction();
   
   const { 
     isLoading: isStatusLoading,
@@ -43,25 +47,17 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
   }, [snapshotStatus]);
 
   const takeSnapshot = async () => {
-    try {
-      setSnapshotInProgress(true);
-      setIsPollingEnabled(true);
-    } catch (error) {
-      console.error("Failed to take snapshot:", error);
-      setSnapshotInProgress(false);
-      setIsPollingEnabled(false);
-    }
+    resetCreate();
+    resetDelete();
+    setSnapshotInProgress(true);
+    await createSnapshot(sessionName);
   };
 
   const deleteSnapshot = async () => {
-    try {
-      setIsPollingEnabled(false);
-      setSnapshotInProgress(false);
-    } catch (error) {
-      console.error("Failed to delete snapshot:", error);
-    }
+    resetCreate();
+    resetDelete();
+    await removeSnapshot(sessionName);
   };
-
   const error = createError || deleteError || statusError;
   
   return (
@@ -91,7 +87,7 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
         </Button>
       </SpaceBetween>
       
-      {isPolling && (
+      {(
         <Box>
           <Spinner /> Polling for snapshot updates...
           {lastUpdated && (
@@ -102,13 +98,31 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
         </Box>
       )}
 
-      {/* Show indexes with status and selection capability */}
-      <SnapshotIndexesView 
-        isLoading={isStatusLoading} 
-        snapshotIndexes={snapshotStatus?.indexes}
-        error={statusError}
-        snapshotStatus={snapshotStatus}
-      />
+      {isStatusLoading && !snapshotStatus?.indexes && (
+        <Box padding="l">
+          <Spinner /> Loading indexes...
+        </Box>
+      )}
+
+      {statusError && (
+        <Alert type="error" header="Error loading indexes">
+          {String(statusError)}
+        </Alert>
+      )}
+
+      {snapshotStatus?.indexes && snapshotStatus.indexes.length > 0 ? (
+        <SnapshotIndexesTable 
+          indexes={snapshotStatus.indexes}
+          maxHeight="300px"
+          showFooter={true}
+          emptyText="No indexes were found in this snapshot."
+          snapshotStatus={snapshotStatus}
+        />
+      ) : !isStatusLoading && !statusError && (
+        <Alert type="info" header="No indexes available">
+          No indexes found in the snapshot.
+        </Alert>
+      )}
     </SpaceBetween>
   );
 }
