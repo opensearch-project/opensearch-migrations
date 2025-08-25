@@ -20,13 +20,19 @@ public class TypeMappingsSanitizationDocBackfillTest {
     @Test
     public void test() throws Exception {
         var testString = "{\n" +
-                "  \"index\": { \"_index\": \"performance\", \"_type\": \"network\", \"_id\": \"1\" },\n" +
-                "  \"source\": { \"field1\": \"value1\" }\n" +
-                "}";
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"performance\", \"_type\": \"network\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
+            "}";
 
         var expectedString = "{\n" +
-            "  \"index\": { \"_index\": \"performance_network\", \"_id\": \"1\" },\n" +
-            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"performance_network\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
             "}";
 
         try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null,
@@ -41,27 +47,33 @@ public class TypeMappingsSanitizationDocBackfillTest {
     @Test
     public void testWithTypeMapping() throws Exception {
         var testString = "{\n" +
-            "  \"index\": { \"_index\": \"test_e2e_0001_1234\", \"_type\": \"doc\", \"_id\": \"1\" },\n" +
-            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"test_e2e_0001_1234\", \"_type\": \"doc\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
             "}";
 
         var expectedString = "{\n" +
-            "  \"index\": { \"_index\": \"test_e2e_0001_1234_transformed\", \"_id\": \"1\" },\n" +
-            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"test_e2e_0001_1234_transformed\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
             "}";
 
         try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
             List.of(
-                    Map.of(
-                            "sourceIndexPattern","(test_e2e_0001_.*)",
-                            "sourceTypePattern", ".*",
-                            "targetIndexPattern", "$1_transformed"
-                    ),
-                    Map.of(
-                            "sourceIndexPattern","(.*)",
-                            "sourceTypePattern", "(.*)",
-                            "targetIndexPattern", "$1"
-                    )
+                Map.of(
+                    "sourceIndexPattern","(test_e2e_0001_.*)",
+                    "sourceTypePattern", ".*",
+                    "targetIndexPattern", "$1_transformed"
+                ),
+                Map.of(
+                    "sourceIndexPattern","(.*)",
+                    "sourceTypePattern", "(.*)",
+                    "targetIndexPattern", "$1"
+                )
             ),
             new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
             var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
@@ -74,27 +86,33 @@ public class TypeMappingsSanitizationDocBackfillTest {
     @Test
     public void testWithoutTypeMapping_hasCorrectDefault() throws Exception {
         var testString = "{\n" +
-            "  \"index\": { \"_index\": \"test_e2e_0001_1234\", \"_id\": \"1\" },\n" +
-            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"test_e2e_0001_1234\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
             "}";
 
         var expectedString = "{\n" +
-            "  \"index\": { \"_index\": \"test_e2e_0001_1234_transformed\", \"_id\": \"1\" },\n" +
-            "  \"source\": { \"field1\": \"value1\" }\n" +
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"test_e2e_0001_1234_transformed\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
             "}";
 
         try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
             List.of(
-                    Map.of(
-                            "sourceIndexPattern","(test_e2e_0001_.*)",
-                            "sourceTypePattern", ".*",
-                            "targetIndexPattern", "$1_transformed"
-                    ),
-                    Map.of(
-                            "sourceIndexPattern","(.*)",
-                            "sourceTypePattern", "(.*)",
-                            "targetIndexPattern", "$1"
-                    )
+                Map.of(
+                    "sourceIndexPattern","(test_e2e_0001_.*)",
+                    "sourceTypePattern", ".*",
+                    "targetIndexPattern", "$1_transformed"
+                ),
+                Map.of(
+                    "sourceIndexPattern","(.*)",
+                    "sourceTypePattern", "(.*)",
+                    "targetIndexPattern", "$1"
+                )
             ),
             new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
             var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
@@ -107,30 +125,33 @@ public class TypeMappingsSanitizationDocBackfillTest {
     @Test
     public void testAsBatch() throws Exception {
         var testDocString = "{\n" +
-                "  \"index\": { \"_index\": \"test_e2e_0001_1234\", \"_id\": \"1\" },\n" +
-                "  \"source\": { \"field1\": \"value1\" }\n" +
-                "}";
+            "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
+            "  \"operation_type\": \"index\",\n" +
+            "  \"operation\": { \"_index\": \"test_e2e_0001_1234\", \"_id\": \"1\" },\n" +
+            "  \"document\": { \"field1\": \"value1\" },\n" +
+            "  \"include_document\": true\n" +
+            "}";
         var testString = "[" +
-                (testDocString + ",").repeat(5)
-                + testDocString + "]";
+            (testDocString + ",").repeat(5)
+            + testDocString + "]";
 
         var expectedString =
-                testString.replaceAll("test_e2e_0001_1234", "test_e2e_0001_1234_transformed");
+            testString.replaceAll("test_e2e_0001_1234", "test_e2e_0001_1234_transformed");
 
         try (var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null,
-                List.of(
-                        Map.of(
-                                "sourceIndexPattern","(test_e2e_0001_.*)",
-                                "sourceTypePattern", ".*",
-                                "targetIndexPattern", "$1_transformed"
-                        ),
-                        Map.of(
-                                "sourceIndexPattern","(.*)",
-                                "sourceTypePattern", "(.*)",
-                                "targetIndexPattern", "$1"
-                        )
+            List.of(
+                Map.of(
+                    "sourceIndexPattern","(test_e2e_0001_.*)",
+                    "sourceTypePattern", ".*",
+                    "targetIndexPattern", "$1_transformed"
                 ),
-                new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
+                Map.of(
+                    "sourceIndexPattern","(.*)",
+                    "sourceTypePattern", "(.*)",
+                    "targetIndexPattern", "$1"
+                )
+            ),
+            new SourceProperties("ES", new SourceProperties.Version(6, 8)), null)) {
             var docObj = OBJECT_MAPPER.readValue(testString, List.class);
             var resultObj = indexTypeMappingRewriter.transformJson(docObj);
             printObject(resultObj);
