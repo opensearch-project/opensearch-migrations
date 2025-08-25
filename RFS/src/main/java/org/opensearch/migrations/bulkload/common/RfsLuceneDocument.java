@@ -24,4 +24,7 @@ public class RfsLuceneDocument {
 
     // The Elasticsearch/OpenSearch custom shard routing of the document
     public final String routing;
+
+    // The operation type for reindexing this document
+    public final RfsDocumentOperation operation;
 }

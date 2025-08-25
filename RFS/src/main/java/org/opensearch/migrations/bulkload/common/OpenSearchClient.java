@@ -14,6 +14,9 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -30,9 +33,7 @@ import reactor.util.retry.Retry;
 
 @Slf4j
 public abstract class OpenSearchClient {
-
-    protected static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
-
+    protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
     private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
     private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
@@ -108,7 +109,7 @@ public abstract class OpenSearchClient {
         String balanceIsEnabledSetting = "cluster.routing.allocation.awareness.balance";
 
         try {
-            settings = objectMapper.readValue(getResponse.body, ObjectNode.class);
+            settings = OBJECT_MAPPER.readValue(getResponse.body, ObjectNode.class);
         } catch (Exception e) {
             throw new OperationFailed("Could not parse settings values", getResponse);
         }
@@ -388,7 +389,7 @@ public abstract class OpenSearchClient {
             + "exception should have been thrown.");
         if (getResponse.statusCode == HttpURLConnection.HTTP_OK) {
             try {
-                return Optional.of(objectMapper.readValue(getResponse.body, ObjectNode.class));
+                return Optional.of(OBJECT_MAPPER.readValue(getResponse.body, ObjectNode.class));
             } catch (Exception e) {
                 String errorMessage = "Could not parse response for: _snapshot/" + repoName + "/" + snapshotName;
                 throw new OperationFailed(errorMessage, getResponse);
@@ -420,15 +421,16 @@ public abstract class OpenSearchClient {
         return head + "... [truncated] ..." + tail;
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
                                               IRfsContexts.IRequestContext context)
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-        final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
+        final var docsMap = docs.stream().collect(Collectors.toMap(o ->
+            ((BaseMetadata) o.getOperation()).getId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
-            var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
+            var body = BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER);
             var additionalHeaders = new HashMap<String, List<String>>();
             if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
                 RestClient.addGzipRequestHeaders(additionalHeaders);
@@ -463,7 +465,7 @@ public abstract class OpenSearchClient {
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     docsMap::size,
-                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                    () -> BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER),
                     error
                 );
             } else {

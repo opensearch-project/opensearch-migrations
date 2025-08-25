@@ -6,11 +6,11 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.version_9.DirectoryReader9;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
@@ -82,7 +82,7 @@ public class PerformanceVerificationTest {
         CountDownLatch pauseLatch = new CountDownLatch(1);
         OpenSearchClient mockClient = mock(OpenSearchClient.class);
         when(mockClient.sendBulkRequest(anyString(), anyList(), any())).thenAnswer(invocation -> {
-            List<BulkDocSection> docs = invocation.getArgument(1);
+            List<BulkOperationSpec> docs = invocation.getArgument(1);
             sentDocuments.addAndGet(docs.size());
             var response = new BulkResponse(200, "OK", null, null);
             var blockingScheduler = Schedulers.newSingle("TestWaiting");

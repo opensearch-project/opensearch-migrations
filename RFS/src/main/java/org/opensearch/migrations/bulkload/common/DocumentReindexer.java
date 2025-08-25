@@ -9,6 +9,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -105,11 +106,11 @@ public class DocumentReindexer {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);
         log.atInfo().setMessage("Last doc is: Source Index " + indexName + " Lucene Doc Number " + lastDoc.progressCheckpointNum).log();
 
-        List<BulkDocSection> bulkDocSections = docsBatch.stream()
+        var bulkOperations = docsBatch.stream()
                 .map(rfsDocument -> rfsDocument.document)
                 .collect(Collectors.toList());
 
-        return client.sendBulkRequest(indexName, bulkDocSections, context.createBulkRequest()) // Send the request
+        return client.sendBulkRequest(indexName, bulkOperations, context.createBulkRequest()) // Send the request
             .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
                 .addArgument(batchId)
                 .addArgument(docsBatch::size)
@@ -133,7 +134,7 @@ public class DocumentReindexer {
             @Override
             public boolean test(RfsDocument next) {
                 // Add one for newline between bulk sections
-                var nextSize = next.document.getSerializedLength() + 1L;
+                var nextSize = BulkNdjson.getSerializedLength(next.document) + 1L;
                 currentSize += nextSize;
                 currentItemCount++;
 

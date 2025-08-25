@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.IOException;
+
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
@@ -18,5 +20,5 @@ public interface DocumentReaderEngine {
         int shardNumber,
         int startingDocId,
         BaseRootRfsContext rootContext
-    );
+    ) throws IOException;
 }

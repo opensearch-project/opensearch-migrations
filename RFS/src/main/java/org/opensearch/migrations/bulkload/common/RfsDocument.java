@@ -4,9 +4,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.bulk.*;
+import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
+import lombok.SneakyThrows;
 
 /** 
  * This class represents a document within RFS during the Reindexing process.  It tracks:
@@ -16,28 +22,51 @@ import lombok.AllArgsConstructor;
  */
 @AllArgsConstructor
 public class RfsDocument {
+    protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     // Originally set to the lucene index doc number, this number helps keeps track of progress over a work item
     public final int progressCheckpointNum;
 
     // The Elasticsearch/OpenSearch document to be reindexed
-    public final BulkDocSection document;
+    public final BulkOperationSpec document;
 
+    @SneakyThrows
     public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
-        return new RfsDocument(
-            doc.luceneDocNumber,
-            new BulkDocSection(
-                doc.id,
-                indexName,
-                doc.type,
-                doc.source,
-                doc.routing
-            )
-        );
+        // TODO: We can get a performance improvement by keeping doc.source as a byte array until here
+        Map<String, Object> document = OBJECT_MAPPER.readValue(doc.source, new TypeReference<>() {});
+
+        // TODO: Consider an inheritance model for builders that would allow us to consolidate this logic
+        if (RfsDocumentOperation.DELETE.equals(doc.operation)) {
+            DeleteOperationMeta meta = DeleteOperationMeta.builder()
+                .id(doc.id)
+                .index(indexName)
+                .type(doc.type)
+                .routing(doc.routing)
+                .build();
+            DeleteOp deleteOp = DeleteOp.builder()
+                .operation(meta)
+                .document(document)
+                .build();
+            return new RfsDocument(doc.luceneDocNumber, deleteOp);
+        } else if (RfsDocumentOperation.INDEX.equals(doc.operation)) {
+            IndexOperationMeta meta = IndexOperationMeta.builder()
+                .id(doc.id)
+                .index(indexName)
+                .type(doc.type)
+                .routing(doc.routing)
+                .build();
+            IndexOp indexOp = IndexOp.builder()
+                .operation(meta)
+                .document(document)
+                .build();
+            return new RfsDocument(doc.luceneDocNumber, indexOp);
+        } else {
+            throw new UnsupportedOperationException("Unsupported RfsDocumentOperation for conversion: " + doc.operation);
+        }
     }
 
     @SuppressWarnings("unchecked")
     public static List<RfsDocument> transform(IJsonTransformer transformer, List<RfsDocument> docs) {
-        var listOfDocMaps = docs.stream().map(doc -> doc.document.toMap())
+        var listOfDocMaps = docs.stream().map(doc -> OBJECT_MAPPER.convertValue(doc.document, Map.class))
                 .toList();
 
         // Use the first progressCheckpointNum in the batch to associate with all returned objects
@@ -51,7 +80,7 @@ public class RfsDocument {
             return transformedList.stream()
                 .map(item -> new RfsDocument(
                     progressCheckpointNum,
-                    BulkDocSection.fromMap(item)
+                    OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class)
                 ))
                 .collect(Collectors.toList());
         } else {
