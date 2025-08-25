@@ -6,6 +6,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 
@@ -38,12 +39,11 @@ public final class BulkNdjson {
         Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), meta);
 
         out.write(mapper.writeValueAsBytes(actionLine));
-        out.write(NEWLINE_BYTES);
 
         // optional source/payload
         if (op.isIncludeDocument() && op.getDocument() != null) {
-            out.write(mapper.writeValueAsBytes(op.getDocument()));
             out.write(NEWLINE_BYTES);
+            out.write(mapper.writeValueAsBytes(op.getDocument()));
         }
     }
 
@@ -53,8 +53,15 @@ public final class BulkNdjson {
      * @param out The output stream to write to
      * @param mapper The ObjectMapper to use for serialization
      */
-    public static void writeAll(Collection<? extends BulkOperationSpec> ops, OutputStream out, ObjectMapper mapper) {
-        for (BulkOperationSpec op : ops) writeOperation(op, out, mapper);
+    public static void writeAll(Collection<? extends BulkOperationSpec> ops,
+                                OutputStream out, ObjectMapper mapper) throws IOException {
+        Iterator<? extends BulkOperationSpec> it = ops.iterator();
+        while (it.hasNext()) {
+            writeOperation(it.next(), out, mapper);
+            if (it.hasNext()) {
+                out.write(NEWLINE_BYTES);
+            }
+        }
     }
 
     /**
