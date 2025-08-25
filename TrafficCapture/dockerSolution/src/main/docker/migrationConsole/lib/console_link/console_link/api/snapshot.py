@@ -7,7 +7,7 @@ from console_link.models.factories import get_snapshot
 from console_link.models.snapshot import (
     Snapshot, SnapshotConfig, SnapshotNotStarted, SnapshotStatus, SnapshotStatusUnavailable,
     get_latest_snapshot_status_raw, S3Snapshot, FileSystemSnapshot, SnapshotSourceType,
-    S3SnapshotSource, FileSystemSnapshotSource, SnapshotIndexes
+    S3SnapshotSource, FileSystemSnapshotSource, SnapshotIndexes, SnapshotIndexStatus, SnapshotIndexState
 )
 from console_link.models.step_state import StepState
 
@@ -45,20 +45,8 @@ def get_snapshot_status(session_name: str):
                                                        snapshot_obj.snapshot_repo_name,
                                                        True)
         
-        # Create the status object
-        status_obj = SnapshotStatus.from_snapshot_info(latest_status.details)
-        
-        # Get the index information
-        try:
-            # Only fetch index details if snapshot is running or completed
-            if status_obj.status in [StepState.RUNNING, StepState.COMPLETED]:
-                index_info = snapshot_obj.get_snapshot_indexes()
-                status_obj.indexes = index_info.indexes
-        except Exception as e:
-            # Log but don't fail if we can't get index info
-            logger.warning(f"Failed to fetch index information for snapshot status: {e}")
-        
-        return status_obj
+        # Create the status object - index statuses are now handled within the from_snapshot_info method
+        return SnapshotStatus.from_snapshot_info(latest_status.details)
     except SnapshotNotStarted:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0, eta_ms=None)
     except SnapshotStatusUnavailable:

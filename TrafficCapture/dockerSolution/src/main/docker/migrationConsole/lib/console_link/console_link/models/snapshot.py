@@ -20,9 +20,19 @@ logger = logging.getLogger(__name__)
 # Define the models first to avoid forward reference issues
 class SnapshotIndex(BaseModel):
     name: str
-    document_count: int
+    document_count: Optional[int]
     size_bytes: int
     shard_count: int = 0
+
+
+class SnapshotIndexState(str, Enum):
+    not_started = "not_started"
+    in_progress = "in_progress"
+    completed = "completed"
+
+
+class SnapshotIndexStatus(SnapshotIndex):
+    status: SnapshotIndexState
 
 
 class SnapshotIndexes(BaseModel):
@@ -330,8 +340,8 @@ class SnapshotStatus(BaseModel):
     shard_total: Optional[int] = None
     shard_complete: Optional[int] = None
     shard_failed: Optional[int] = None
-    # Added field for index details
-    indexes: Optional[List[SnapshotIndex]] = None
+    # Index details with their state
+    indexes: Optional[List[SnapshotIndexStatus]] = None
     model_config = {
         'from_attributes': True,
     }
@@ -400,6 +410,42 @@ class SnapshotStatus(BaseModel):
             percentage = 100.0
             eta_ms = 0.0
 
+        # 7) Extract index status information
+        indexes = []
+        indices = snapshot_info.get("indices", {})
+        if indices:
+            for index_name, index_info in indices.items():
+                # Extract basic index info
+                shards_info = index_info.get("shards", 0)
+                # Ensure shard_count is an integer, not a dictionary
+                if isinstance(shards_info, dict):
+                    # If it's a dictionary of shard data, just use the count of keys
+                    shard_count = len(shards_info)
+                else:
+                    shard_count = shards_info
+                doc_count = index_info.get("docs", 0)
+                size_bytes = index_info.get("size_in_bytes", 0)
+                
+                # Determine index status
+                index_state = index_info.get("state", "")
+                if index_state == "SUCCESS" or state == StepState.COMPLETED:
+                    index_status = SnapshotIndexState.completed
+                elif index_state in ["IN_PROGRESS", "STARTED"]:
+                    index_status = SnapshotIndexState.in_progress
+                else:
+                    index_status = SnapshotIndexState.not_started
+                
+                # Create and add SnapshotIndexStatus
+                indexes.append(
+                    SnapshotIndexStatus(
+                        name=index_name,
+                        document_count=doc_count,
+                        size_bytes=size_bytes,
+                        shard_count=shard_count,
+                        status=index_status
+                    )
+                )
+
         return cls(
             status=state,
             percentage_completed=percentage,
@@ -411,7 +457,8 @@ class SnapshotStatus(BaseModel):
             data_throughput_bytes_avg_sec=throughput_bytes,
             shard_total=total_shards,
             shard_complete=completed_shards,
-            shard_failed=failed_shards
+            shard_failed=failed_shards,
+            indexes=indexes
         )
 
 

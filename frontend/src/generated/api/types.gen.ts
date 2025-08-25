@@ -409,12 +409,21 @@ export type SnapshotIndex = {
   /**
    * Document Count
    */
-  document_count: number;
+  document_count: number | null;
   /**
    * Size Bytes
    */
   size_bytes: number;
+  /**
+   * Shard Count
+   */
+  shard_count?: number;
 };
+
+/**
+ * SnapshotIndexState
+ */
+export type SnapshotIndexState = "not_started" | "in_progress" | "completed";
 
 /**
  * SnapshotIndexes
@@ -481,7 +490,7 @@ export type SnapshotStatus = {
   /**
    * Indexes
    */
-  indexes?: Array<SnapshotIndex> | null;
+  indexes?: Array<SnapshotIndexState> | null;
 };
 
 /**

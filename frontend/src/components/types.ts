@@ -20,4 +20,28 @@ export interface SnapshotIndex {
    * The size of the index in bytes
    */
   size_bytes: number;
+  
+  /**
+   * The number of shards in the index
+   */
+  shard_count: number;
+}
+
+/**
+ * Enum representing the possible states of a snapshot index
+ */
+export enum SnapshotIndexState {
+  NOT_STARTED = "not_started",
+  IN_PROGRESS = "in_progress",
+  COMPLETED = "completed"
+}
+
+/**
+ * Represents a single index in a snapshot with status information
+ */
+export interface SnapshotIndexStatus extends SnapshotIndex {
+  /**
+   * The status of the index in the snapshot
+   */
+  status: SnapshotIndexState;
 }

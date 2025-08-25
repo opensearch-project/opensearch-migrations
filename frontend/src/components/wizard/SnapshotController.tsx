@@ -1,20 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { SnapshotIndex } from "@/generated/api/types.gen";
 import { createSnapshot, usePollingSnapshotStatus, useSnapshotConfig, useSnapshotIndexes } from "../session/apiHooks";
+import { formatBytes } from "@/utils/sizeLimits";
 import SnapshotConfigView from "./SnapshotForm";
 import SnapshotIndexesView from "./SnapshotIndexesView";
-import { useCollection } from "@cloudscape-design/collection-hooks";
-import { formatBytes } from "@/utils/sizeLimits";
+import SnapshotIndexesTable from "./SnapshotIndexesTable";
 import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
 import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
-import Table, { TableProps } from "@cloudscape-design/components/table";
 import Alert from "@cloudscape-design/components/alert";
-import TextFilter from "@cloudscape-design/components/text-filter";
 
 interface SnapshotControllerProps {
   readonly sessionName: string;
@@ -39,28 +36,6 @@ export default function SnapshotController({ sessionName }: SnapshotControllerPr
   
   // Extract indexes from status data, ensure it's always an array
   const indexes = snapshotStatusData?.indexes || [];
-  
-  // Move useCollection to component top level to follow React's Rules of Hooks
-  const indexCollection = useCollection<SnapshotIndex>(indexes, {
-    filtering: {
-      empty: (
-        <Box textAlign="center" color="inherit">
-          <b>No indexes</b>
-          <Box padding={{ bottom: "s" }} variant="p" color="inherit">
-            No indexes were found in this snapshot.
-          </Box>
-        </Box>
-      ),
-      noMatch: <Box>No indexes with filter criteria.</Box>
-    },
-    sorting: {
-      defaultState: {
-        sortingColumn: {
-          sortingField: "name"
-        }
-      } 
-    }
-  });
 
   const handleCreateSnapshot = async () => {
     setIsCreatingSnapshot(true);
@@ -83,27 +58,6 @@ export default function SnapshotController({ sessionName }: SnapshotControllerPr
     }
   };
 
-  // Define table column definitions for snapshot indexes
-  const columnDefinitions: TableProps.ColumnDefinition<SnapshotIndex>[] = [
-    {
-      id: 'name', 
-      header: 'Index name', 
-      cell: (item) => item.name, 
-      sortingField: "name"
-    },
-    {
-      id: 'documents',
-      header: 'Documents',
-      cell: (item) => item.document_count.toLocaleString(),
-      sortingField: "document_count"
-    },
-    {
-      id: 'size',
-      header: 'Size',
-      cell: (item) => formatBytes(item.size_bytes),
-      sortingField: "size_bytes"
-    }
-  ];
 
   const renderSnapshotStatus = () => {
     if (!isPolling && !snapshotStatusData) return null;
@@ -174,35 +128,11 @@ export default function SnapshotController({ sessionName }: SnapshotControllerPr
           {indexes.length > 0 && (
             <SpaceBetween size="m">
               <Header variant="h3">Indexes</Header>
-              <div style={{ height: '300px', overflow: 'auto' }}>
-                <Table<SnapshotIndex>
-                  {...indexCollection.collectionProps}
-                  columnDefinitions={columnDefinitions}
-                  items={indexCollection.items}
-                  empty={
-                    <Box textAlign="center" color="inherit">
-                      <b>No indexes</b>
-                      <Box padding={{ bottom: "s" }} variant="p" color="inherit">
-                        No indexes were found in this snapshot.
-                      </Box>
-                    </Box>
-                  }
-                  filter={
-                    <TextFilter
-                      {...indexCollection.filterProps}
-                      filteringPlaceholder="Find an index"
-                    />
-                  }
-                  footer={
-                    <Box textAlign="right">
-                      <b>Total:</b> {indexes.reduce((sum: number, index: SnapshotIndex) => sum + index.document_count, 0).toLocaleString()} documents, 
-                      {' '}{formatBytes(indexes.reduce((sum: number, index: SnapshotIndex) => sum + index.size_bytes, 0))}
-                    </Box>
-                  }
-                  variant="borderless"
-                  stickyHeader
-                />
-              </div>
+              <SnapshotIndexesTable 
+                indexes={indexes}
+                maxHeight="300px"
+                emptyText="No indexes were found in this snapshot."
+              />
             </SpaceBetween>
           )}
         </SpaceBetween>
