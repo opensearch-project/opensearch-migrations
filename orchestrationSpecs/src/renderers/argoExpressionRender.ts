@@ -9,7 +9,7 @@ import {
     FromParameterExpression,
     LiteralExpression,
     PathExpression, BaseExpression,
-    TernaryExpression
+    TernaryExpression, ExpressionType, AnyExpression
 } from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
 
@@ -105,23 +105,28 @@ export function isConfigMapExpression<T extends PlainObject>(expr: BaseExpressio
     return expr.kind === 'configmap';
 }
 
-export function isPathExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is PathExpression<any, T> {
+export function isPathExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is PathExpression<any> {
     return expr.kind === 'path';
 }
 
-export function isConcatExpression(expr: BaseExpression<any>): expr is ConcatExpression {
+export function isConcatExpression(expr: BaseExpression<any>): expr is ConcatExpression<any> {
     return expr.kind === 'concat';
 }
 
-export function isTernaryExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is TernaryExpression<T> {
+export function isTernaryExpression<
+    T extends AnyExpression<boolean>, 
+    L extends AnyExpression<OutT>, 
+    R extends AnyExpression<OutT>,
+    OutT extends PlainObject,
+    C extends ExpressionType>(expr: BaseExpression<any>): expr is TernaryExpression<any, any, any, any> {
     return expr.kind === 'ternary';
 }
 
-export function isArithmeticExpression(expr: BaseExpression<any>): expr is ArithmeticExpression {
+export function isArithmeticExpression(expr: BaseExpression<any>): expr is ArithmeticExpression<any, any> {
     return expr.kind === 'arithmetic';
 }
 
-export function isComparisonExpression(expr: BaseExpression<any>): expr is ComparisonExpression {
+export function isComparisonExpression(expr: BaseExpression<any>): expr is ComparisonExpression<any, any> {
     return expr.kind === 'comparison';
 }
 
@@ -129,6 +134,6 @@ export function isArrayLengthExpression(expr: BaseExpression<any>): expr is Arra
     return expr.kind === 'array_length';
 }
 
-export function isArrayIndexExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is ArrayIndexExpression<T> {
+export function isArrayIndexExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is ArrayIndexExpression<any, any, T, any> {
     return expr.kind === 'array_index';
 }

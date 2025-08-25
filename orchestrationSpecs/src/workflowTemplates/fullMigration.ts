@@ -8,8 +8,13 @@ import {
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {literal} from "@/schemas/expression";
+import {BaseExpression, ComparisonExpression, concat, equals, literal} from "@/schemas/expression";
 import {LoopWithParams, makeItemsLoop, makeParameterLoop, makeSequenceLoop} from "@/schemas/workflowTypes";
+
+const leftE: BaseExpression<string, "govaluate"> = literal("a");
+const rightE: BaseExpression<string,  "govaluate"> = literal("a");
+const cE: BaseExpression<boolean, "govaluate"> = new ComparisonExpression("==", leftE, rightE);
+const eE: BaseExpression<boolean, "govaluate"> = equals(leftE, rightE);
 
 export const FullMigration = WorkflowBuilder.create({
         k8sResourceName: "FullMigration",
@@ -29,6 +34,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
             "List of server configurations to direct migrated traffic toward")
         .addOptionalInput("doSecondWhenTest", s=>true)
+        .addOptionalInput("simpleString", s=>"hello")
         .addOptionalInput("imageParams",
             scope => literal(
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
@@ -57,7 +63,9 @@ export const FullMigration = WorkflowBuilder.create({
                 .addInternalStep("split2", "pipelineSourceMigration", stepScope=> ({
                         sourceMigrationConfig: stepScope.item
                     }),
-                    makeParameterLoop(b.inputs.sourceMigrationConfigs), b.inputs.doSecondWhenTest
+                    makeParameterLoop(b.inputs.sourceMigrationConfigs),
+                    equals(literal("hello"), b.inputs.simpleString)
+                    //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
                 )
 
             .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({

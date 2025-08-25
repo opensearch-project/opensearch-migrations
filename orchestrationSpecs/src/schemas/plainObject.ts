@@ -7,7 +7,7 @@ export type WidenPrimitive<T> =
         T extends number ? number :
             T extends boolean ? boolean :
                 T extends null ? null :
-                    never;
+                    T;
 
 export type DeepWiden<T> =
     T extends readonly (infer U)[] ? Array<DeepWiden<U>> :
