@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.delta;
 
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.TreeSet;
@@ -11,14 +12,18 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReaderEngine;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
+import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
 import lombok.AllArgsConstructor;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
+@Slf4j
 @AllArgsConstructor
 public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
     private final BiFunction<String, Integer, ShardMetadata> previousShardMetadataFactory;
@@ -53,6 +58,20 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         );
     }
 
+    @SneakyThrows
+    private static void closeReaders(LuceneDirectoryReader first, LuceneDirectoryReader second) {
+        try {
+            if (first != null) {
+                first.close();
+            }
+        }
+        finally {
+            if (second != null) {
+                second.close();
+            }
+        }
+    }
+
     @Override
     public Flux<RfsLuceneDocument> readDocuments(
         LuceneIndexReader reader,
@@ -60,26 +79,44 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         int shardNumber,
         int startingDocId,
         BaseRootRfsContext rootContext
-    ) {
+    ) throws IOException {
         ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
-        var deltaResult = reader.readDeltaDocumentsWithDeletes(
-            previousShardMetadata.getSegmentFileName(),
-            shardMetadata.getSegmentFileName(),
-            startingDocId,
-            rootContext
-        );
+        LuceneDirectoryReader previousReader = null;
+        LuceneDirectoryReader currentReader = null;
+        try {
+            previousReader = reader.getReader(previousShardMetadata.getSegmentFileName());
+            currentReader  = reader.getReader(shardMetadata.getSegmentFileName());
 
-        if (DeltaMode.UPDATES_ONLY.equals(deltaMode)) {
-            return deltaResult.additions;
-        } else if (DeltaMode.UPDATES_AND_DELETES.equals(deltaMode)) {
-            // Using concat to perform deletions first then additions
-            return Flux.concat(
-                deltaResult.deletions,
-                deltaResult.additions
-            );
-        } else {
-            throw new UnsupportedOperationException("Unsupported delta mode given " + deltaMode);
+            var deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
+                previousReader, currentReader, startingDocId, rootContext);
+
+            LuceneDirectoryReader finalPreviousReader = previousReader;
+            LuceneDirectoryReader finalCurrentReader = currentReader;
+            Runnable cleanup = () -> closeReaders(finalPreviousReader, finalCurrentReader);
+
+            if (DeltaMode.UPDATES_ONLY.equals(deltaMode)) {
+                return deltaResult.additions
+                    .doFinally(s -> cleanup.run());
+            } else if (DeltaMode.UPDATES_AND_DELETES.equals(deltaMode)) {
+                // Using concat to perform deletions first then additions
+                return Flux.concat(
+                    deltaResult.deletions,
+                    deltaResult.additions
+                ).doFinally(s -> cleanup.run());
+            } else if (DeltaMode.DELETES_ONLY.equals(deltaMode)) {
+                return deltaResult.deletions
+                    .doFinally(s -> cleanup.run());
+            } else {
+                throw new UnsupportedOperationException("Unsupported delta mode given " + deltaMode);
+            }
+        } catch (Exception e) {
+            log.atError()
+                .setMessage("Exception during delta readDocuments")
+                .setCause(e)
+                .log();
+            closeReaders(previousReader, currentReader);
+            throw e;
         }
     }
 }

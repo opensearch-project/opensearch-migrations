@@ -2,25 +2,19 @@ package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
-import org.opensearch.migrations.bulkload.delta.DeltaLuceneReader;
 import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
-import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.SignalType;
 
 public interface LuceneIndexReader {
     /**
@@ -85,39 +79,6 @@ public interface LuceneIndexReader {
 
     default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName) {
         return readDocuments(segmentsFileName, 0);
-    }
-
-
-    @SneakyThrows
-    // TODO: Consider updating interface to take in readers to delegate reader lifecycle upwards for both readDeltaDocumentsWithDeletes and readDocuments
-    default DeltaLuceneReader.DeltaResult readDeltaDocumentsWithDeletes(
-        String previousSegmentsFileName,
-        String segmentsFileName,
-        int startDocIdx,
-        BaseRootRfsContext rootContext) {
-        var previousReader = this.getReader(previousSegmentsFileName);
-        // TODO: Ensure we close previousReader if exception when opening currentReader
-        var currentReader  = this.getReader(segmentsFileName);
-        Runnable closeBoth = () -> {
-            try { previousReader.close(); } catch (IOException e) { throw Lombok.sneakyThrow(e); }
-            try { currentReader.close(); } catch (IOException e) { throw Lombok.sneakyThrow(e); }
-        };
-        try {
-            var streams = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
-                previousReader, currentReader, startDocIdx, rootContext);
-
-            // Close readers only after BOTH Fluxes (additions + deletes) have terminated
-            var remaining = new AtomicInteger(2);
-            Consumer<SignalType> onFinally = st -> { if (remaining.decrementAndGet() == 0) closeBoth.run(); };
-
-            var guardedAdditions  = streams.additions.doFinally(onFinally);
-            var guardedDeletions  = streams.deletions.doFinally(onFinally);
-
-            return new DeltaLuceneReader.DeltaResult(guardedAdditions, guardedDeletions);
-        } catch (Exception t) {
-            closeBoth.run();
-            throw t;
-        }
     }
 
     LuceneDirectoryReader getReader(String segmentsFileName) throws IOException;
