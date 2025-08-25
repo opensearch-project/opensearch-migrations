@@ -16,7 +16,7 @@ export type WorkflowAndTemplatesScope<TemplateSignatures extends TemplateSignatu
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type GenericScope = Record<string, any>;
 //export type DagScope = Record<string, DagTask>;
-export type StepsOutputsScope = Record<string, StepWithOutputs<any, any>>;
+export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
 export type TemplateSignaturesScope = Record<string, TemplateSigEntry<{ inputs: InputParametersRecord; outputs?: OutputParametersRecord }>>;
 
 export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
@@ -87,28 +87,28 @@ export type WorkflowInputsToExpressions<ContextualScope extends { workflowParame
             : {}
         : {};
 
-export type StepWithOutputs<
-    StepName extends string,
+export type TasksWithOutputs<
+    TaskName extends string,
     Outputs extends OutputParametersRecord
 > = {
-    name: StepName;
+    name: TaskName;
     outputTypes?: Outputs;
 };
 
 export type IfNever<T, Then, Else> = [T] extends [never] ? Then : Else;
 
-export type StepsScopeToStepsWithOutputs<
-    StepsScope extends Record<string, StepWithOutputs<any, any>>,
-    ItemsType extends PlainObject = never
+export type TasksScopeToTasksWithOutputs<
+    TasksScope extends Record<string, TasksWithOutputs<any, any>>,
+    LoopItemsType extends PlainObject = never
 > = {
-    steps: {
-        [StepName in keyof StepsScope]:
-        StepsScope[StepName] extends StepWithOutputs<
+    tasks: {
+        [StepName in keyof TasksScope]:
+        TasksScope[StepName] extends TasksWithOutputs<
             infer Name,
             infer Outputs
         > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
     }
-} & IfNever<ItemsType, {}, { item: AllowLiteralOrExpression<ItemsType> }>;
+} & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
 
 export type LoopWithSequence = {
     loopWith: "sequence",
