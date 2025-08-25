@@ -39,11 +39,26 @@ def get_snapshot_status(session_name: str):
                             detail=f"Source cluster was unable to be use to get snapshot status: {env}")
 
     try:
+        # Get the snapshot status details
         latest_status = get_latest_snapshot_status_raw(snapshot_obj.source_cluster,
                                                        snapshot_obj.snapshot_name,
                                                        snapshot_obj.snapshot_repo_name,
                                                        True)
-        return SnapshotStatus.from_snapshot_info(latest_status.details)
+        
+        # Create the status object
+        status_obj = SnapshotStatus.from_snapshot_info(latest_status.details)
+        
+        # Get the index information
+        try:
+            # Only fetch index details if snapshot is running or completed
+            if status_obj.status in [StepState.RUNNING, StepState.COMPLETED]:
+                index_info = snapshot_obj.get_snapshot_indexes()
+                status_obj.indexes = index_info.indexes
+        except Exception as e:
+            # Log but don't fail if we can't get index info
+            logger.warning(f"Failed to fetch index information for snapshot status: {e}")
+        
+        return status_obj
     except SnapshotNotStarted:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0, eta_ms=None)
     except SnapshotStatusUnavailable:

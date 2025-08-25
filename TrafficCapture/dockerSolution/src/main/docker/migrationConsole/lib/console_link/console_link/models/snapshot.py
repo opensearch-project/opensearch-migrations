@@ -22,6 +22,7 @@ class SnapshotIndex(BaseModel):
     name: str
     document_count: int
     size_bytes: int
+    shard_count: int = 0
 
 
 class SnapshotIndexes(BaseModel):
@@ -329,6 +330,8 @@ class SnapshotStatus(BaseModel):
     shard_total: Optional[int] = None
     shard_complete: Optional[int] = None
     shard_failed: Optional[int] = None
+    # Added field for index details
+    indexes: Optional[List[SnapshotIndex]] = None
     model_config = {
         'from_attributes': True,
     }
@@ -625,50 +628,105 @@ class SnapshotConfig(BaseModel):
 
 def get_cluster_indexes(cluster: Cluster, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
     """
-    Query a cluster for all indexes that match the given patterns, with accurate document count and size information.
-    
-    Args:
-        cluster: The cluster to query.
-        index_patterns: Optional list of index patterns to include. If None, all indexes are included.
-    
-    Returns:
-        SnapshotIndexes containing information about all matching indexes.
+    Programmatic, more reliable index sizing:
+    - Uses /_stats/docs,store (primary bytes & doc counts)
+    - Includes hidden/closed indices if patterns match
+    - Optionally resolves data streams to backing indices
     """
     if not cluster:
         raise NoSourceClusterDefinedError()
-    
-    # Query the _cat/indices API which provides stats about indexes
-    path = "/_cat/indices"
-    params = {
-        "format": "json",
-        "bytes": "b",  # Get size in bytes
-        "h": "index,docs.count,store.size"  # Only return these fields
-    }
-    
-    if index_patterns:
-        # If patterns are specified, join them with commas
-        path = f"{path}/{','.join(index_patterns)}"
-    
+
     try:
-        response = cluster.call_api(path, params=params)
-        indices_data = response.json()
+        # If patterns were provided, resolve them to concrete indices (incl. hidden/closed)
+        # This avoids surprises with data streams & wildcards.
+        targets = None
+        if index_patterns:
+            # Resolve via _resolve/index to capture indices + backing indices of data streams.
+            resolve = cluster.call_api(
+                "/_resolve/index",
+                params={
+                    "name": ",".join(index_patterns),
+                    "expand_wildcards": "all",
+                },
+            ).json()
+            concrete = [i["name"] for i in resolve.get("indices", [])]
+            # Include backing indices for any matched data streams
+            for ds in resolve.get("data_streams", []):
+                backing_indices = ds.get("backing_indices", [])
+                backing_index_names = [bi["name"] for bi in backing_indices]
+                concrete.extend(backing_index_names)
+            # Deduplicate while preserving order
+            seen = set()
+            # Filter out duplicates while preserving order
+            unique_indices = []
+            for x in concrete:
+                # If not already seen, add to unique indices
+                if x not in seen:
+                    seen.add(x)
+                    unique_indices.append(x)
+            targets = ",".join(unique_indices) if unique_indices else None
+
+        # First get regular stats for document count and size
+        path = f"/{targets}/_stats" if targets else "/_stats"
+        params = {
+            "level": "indices",
+            "filter_path": (
+                "indices.*.primaries.docs.count,"
+                "indices.*.primaries.docs.deleted,"
+                "indices.*.primaries.store.size_in_bytes"
+            ),
+            "expand_wildcards": "all",
+            "metric": "docs,store",
+        }
+
+        stats = cluster.call_api(path, params=params).json()
+        indices = stats.get("indices", {}) or {}
         
-        index_list = []
-        for index_data in indices_data:
+        # Now get shard counts from _settings endpoint
+        settings_path = f"/{targets}/_settings" if targets else "/_settings"
+        settings_params = {
+            "filter_path": "*.settings.index.number_of_shards",
+            "expand_wildcards": "all",
+        }
+        
+        settings_response = cluster.call_api(settings_path, params=settings_params).json()
+
+        # Create a mapping of index name to shard count
+        shard_count_map = {}
+        for index_name, index_data in settings_response.items():
+            # The settings path might include the index name as a prefix
+            clean_name = index_name.split(".")[-1]
             try:
-                index_name = index_data["index"]
-                doc_count = int(index_data["docs.count"])
-                size_bytes = int(index_data["store.size"])
+                num_shards = int(index_data.get("settings", {}).get("index", {}).get("number_of_shards", 0))
+                shard_count_map[clean_name] = num_shards
+            except (ValueError, AttributeError):
+                # In case of parsing issues, default to 0
+                shard_count_map[clean_name] = 0
                 
-                index_list.append(SnapshotIndex(
-                    name=index_name,
-                    document_count=doc_count,
-                    size_bytes=size_bytes
-                ))
-            except (KeyError, ValueError) as e:
-                logger.warning(f"Skipping index with invalid data: {index_data}, error: {e}")
-        
+        index_list: List[SnapshotIndex] = []
+        for name, body in indices.items():
+            prim = body.get("primaries", {})
+            docs = prim.get("docs", {})
+            store = prim.get("store", {})
+
+            # Live docs (excludes deletions). Add docs.get("deleted") if you want to expose it.
+            doc_count = int(docs.get("count", 0) or 0)
+            size_bytes = int(store.get("size_in_bytes", 0) or 0)
+            
+            # Get shard count from our mapping
+            shard_count = shard_count_map.get(name, 0)
+
+            index_list.append(SnapshotIndex(
+                name=name,
+                document_count=doc_count,
+                size_bytes=size_bytes,
+                shard_count=shard_count,
+            ))
+
+        # Optional: stable order
+        index_list.sort(key=lambda x: x.name)
         return SnapshotIndexes(indexes=index_list)
+
     except Exception as e:
-        logger.error(f"Failed to fetch index information: {e}")
+        logger.error(f"Failed to fetch index information via _stats: {e}")
         raise

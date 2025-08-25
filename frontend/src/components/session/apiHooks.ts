@@ -107,3 +107,97 @@ export function useSnapshotIndexes(sessionName: string, indexPattern?: string) {
 
   return useFetchData(fetchSnapshotIndexes, sessionName, 'snapshot indexes');
 }
+
+// Function to create a snapshot
+export async function createSnapshot(sessionName: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Using the client.post() directly since we need to implement a custom endpoint
+    const response = await fetch(`/api/sessions/${sessionName}/snapshot/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create snapshot: ${response.status} - ${errorText}`);
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Error creating snapshot:', err);
+    return { 
+      success: false, 
+      error: err instanceof Error ? err.message : 'Unknown error occurred while creating snapshot' 
+    };
+  }
+}
+
+// Hook to periodically poll snapshot status
+export function usePollingSnapshotStatus(sessionName: string, isPollingEnabled = false, interval = 5000) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(isPollingEnabled);
+
+  useEffect(() => {
+    setIsPolling(isPollingEnabled);
+  }, [isPollingEnabled]);
+
+  useEffect(() => {
+    let timerId: NodeJS.Timeout | null = null;
+
+    const fetchData = async () => {
+      if (!sessionName) {
+        setError('No session name provided');
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        const response = await snapshotStatus({ path: { session_name: sessionName } });
+        if (response.response.status === 200 && response.data) {
+          setData(response.data);
+          
+          // If snapshot is completed or failed, stop polling
+          if (response.data.status === 'Completed' || response.data.status === 'Failed') {
+            setIsPolling(false);
+          }
+        } else {
+          setError(`API Error: ${response.response.status} - Failed to fetch snapshot status`);
+          setIsPolling(false);
+        }
+      } catch (err) {
+        console.error('Error fetching snapshot status:', err);
+        setError(`${err instanceof Error ? err.message : 'Unknown error'}`);
+        setIsPolling(false);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Fetch immediately on mount or when sessionName changes
+    fetchData();
+
+    // Set up polling if enabled
+    if (isPolling) {
+      timerId = setInterval(fetchData, interval);
+    }
+
+    // Clean up timer
+    return () => {
+      if (timerId) {
+        clearInterval(timerId);
+      }
+    };
+  }, [sessionName, isPolling, interval]);
+
+  // Function to start polling
+  const startPolling = () => setIsPolling(true);
+  
+  // Function to stop polling
+  const stopPolling = () => setIsPolling(false);
+
+  return { isLoading, data, error, isPolling, startPolling, stopPolling };
+}

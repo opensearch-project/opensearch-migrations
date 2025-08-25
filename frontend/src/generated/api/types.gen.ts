@@ -478,6 +478,10 @@ export type SnapshotStatus = {
    * Shard Failed
    */
   shard_failed?: number | null;
+  /**
+   * Indexes
+   */
+  indexes?: Array<SnapshotIndex> | null;
 };
 
 /**
