@@ -20,7 +20,6 @@ export default function SnapshotIndexesTable({
   showFooter = true,
   emptyText = "No indexes were found in this snapshot."
 }: SnapshotIndexesTableProps) {
-  // Define table column definitions for snapshot indexes
   const columnDefinitions: TableProps.ColumnDefinition<SnapshotIndex>[] = [
     {
       id: 'name', 
@@ -48,7 +47,6 @@ export default function SnapshotIndexesTable({
     }
   ];
   
-  // Setup collection hooks for sorting and filtering
   const indexCollection = useCollection(indexes, {
     filtering: {
       empty: (

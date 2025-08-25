@@ -2,31 +2,32 @@
 
 import { Button, ButtonDropdown } from "@cloudscape-design/components";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
-import { METADATA_SCENARIOS } from "@/components/session/mockData/metadataScenarios";
+import DebugCommands from "@/components/debug/DebugCommands";
+import { BACKFILL_SCENARIOS } from "@/components/backfill/mockData/backfillScenarios";
 
-interface MetadataDebugControlsProps {
-  readonly onScenarioSelect: (scenario: keyof typeof METADATA_SCENARIOS) => void;
+interface BackfillDebugControlsProps {
+  readonly onScenarioSelect: (scenario: keyof typeof BACKFILL_SCENARIOS) => void;
   readonly onReset: () => void;
 }
 
-export function MetadataDebugControls({
+export function BackfillDebugControls({
   onScenarioSelect,
   onReset,
-}: MetadataDebugControlsProps) {
+}: BackfillDebugControlsProps) {
   return (
     <DebugCommands>
       <SpaceBetween size="xs" direction="horizontal">
         <ButtonDropdown
           items={[
             { id: "notStarted", text: "Not Started" },
-            { id: "inProgress", text: "In Progress" },
-            { id: "completedEmpty", text: "Completed (Empty)" },
-            { id: "completedWithData", text: "Completed (With Data)" },
+            { id: "inProgress", text: "In Progress (45%)" },
+            { id: "nearCompletion", text: "Near Completion (95%)" },
+            { id: "completed", text: "Completed (Success)" },
+            { id: "completedWithFailures", text: "Completed (With Failures)" },
             { id: "failed", text: "Failed" },
           ]}
           onItemClick={({ detail }) =>
-            onScenarioSelect(detail.id as keyof typeof METADATA_SCENARIOS)
+            onScenarioSelect(detail.id as keyof typeof BACKFILL_SCENARIOS)
           }
         >
           Simulate Scenario

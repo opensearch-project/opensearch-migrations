@@ -1,29 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { createSnapshot, usePollingSnapshotStatus, useSnapshotConfig, useSnapshotIndexes } from "../session/apiHooks";
+import { useCreateSnapshot, useSnapshotDelete } from "../../hooks/apiFetch";
 import { formatBytes } from "@/utils/sizeLimits";
-import SnapshotConfigView from "./SnapshotForm";
-import SnapshotIndexesView from "./SnapshotIndexesView";
 import SnapshotIndexesTable from "./SnapshotIndexesTable";
-import Box from "@cloudscape-design/components/box";
-import Button from "@cloudscape-design/components/button";
-import Header from "@cloudscape-design/components/header";
-import SpaceBetween from "@cloudscape-design/components/space-between";
-import StatusIndicator from "@cloudscape-design/components/status-indicator";
-import Alert from "@cloudscape-design/components/alert";
+import { Box, Button, Header, SpaceBetween, StatusIndicator, Alert }from "@cloudscape-design/components";
 
 interface SnapshotControllerProps {
   readonly sessionName: string;
 }
 
-export default function SnapshotController({ sessionName }: SnapshotControllerProps) {
+export default function SnapshotCreator({ sessionName }: SnapshotControllerProps) {
   const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
   const [createSnapshotError, setCreateSnapshotError] = useState<string | null>(null);
   
-  const { isLoading: isLoadingConfig, data: snapshotConfig, error: configError } = useSnapshotConfig(sessionName);
-  const { isLoading: isLoadingIndexes, data: snapshotIndexes, error: indexesError } = useSnapshotIndexes(sessionName);
-
   // Poll status when creating a snapshot
   const {
     isLoading: isLoadingStatus,
@@ -144,18 +134,6 @@ export default function SnapshotController({ sessionName }: SnapshotControllerPr
   
   return (
     <SpaceBetween size="l">
-      <SnapshotConfigView
-        isLoading={isLoadingConfig}
-        snapshotConfig={snapshotConfig}
-        error={configError}
-      />
-      <SnapshotIndexesView
-        isLoading={isLoadingIndexes}
-        snapshotIndexes={snapshotIndexes || null}
-        error={indexesError}
-      />
-      
-      {/* Create Snapshot Button */}
       <SpaceBetween size="m">
         <Button
           variant="primary"

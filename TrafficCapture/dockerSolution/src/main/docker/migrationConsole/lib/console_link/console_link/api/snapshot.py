@@ -1,13 +1,14 @@
 import logging
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from typing import Optional
 
 from console_link.api.sessions import http_safe_find_session
 from console_link.models.factories import get_snapshot
 from console_link.models.snapshot import (
-    Snapshot, SnapshotConfig, SnapshotNotStarted, SnapshotStatus, SnapshotStatusUnavailable,
-    get_latest_snapshot_status_raw, S3Snapshot, FileSystemSnapshot, SnapshotSourceType,
-    S3SnapshotSource, FileSystemSnapshotSource, SnapshotIndexes, SnapshotIndexStatus, SnapshotIndexState
+    FailedToCreateSnapshot, FailedToDeleteSnapshot, Snapshot, SnapshotConfig, SnapshotNotStarted, SnapshotStatus,
+    SnapshotStatusUnavailable, get_latest_snapshot_status_raw, S3Snapshot, FileSystemSnapshot, SnapshotSourceType,
+    S3SnapshotSource, FileSystemSnapshotSource, SnapshotIndexes,
 )
 from console_link.models.step_state import StepState
 
@@ -20,27 +21,37 @@ snapshot_router = APIRouter(
 )
 
 
-# Snapshot status endpoint
-@snapshot_router.get("/status", response_model=SnapshotStatus, operation_id="snapshotStatus")
-def get_snapshot_status(session_name: str):
+class SnapshotCreateResponse(BaseModel):
+    detail: str
+
+
+class SnapshotDeleteResponse(BaseModel):
+    detail: str
+
+
+def _get_snapshot_from_session(session_name):
     session = http_safe_find_session(session_name)
     env = session.env
 
     if not env or not env.snapshot:
         raise HTTPException(status_code=400,
                             detail=f"No snapshot defined in the configuration: {env}")
-    if not env.source_cluster:
-        raise HTTPException(status_code=400,
-                            detail=f"No source cluster defined in the configuration: {env}")
 
     snapshot_obj = get_snapshot(env.snapshot.config, env.source_cluster)
     if not snapshot_obj.source_cluster:
         raise HTTPException(status_code=400,
-                            detail=f"Source cluster was unable to be use to get snapshot status: {env}")
+                            detail=f"Source cluster was unable to be used to get snapshot indexes: {env}")
+                            
+    return snapshot_obj
 
+
+# Snapshot status endpoint
+@snapshot_router.get("/status", response_model=SnapshotStatus, operation_id="snapshotStatus")
+def get_snapshot_status(session_name: str):
+    snapshot_obj = _get_snapshot_from_session(session_name)
     try:
         # Get the snapshot status details
-        latest_status = get_latest_snapshot_status_raw(snapshot_obj.source_cluster,
+        latest_status = get_latest_snapshot_status_raw(snapshot_obj.source_cluster,  # type: ignore
                                                        snapshot_obj.snapshot_name,
                                                        snapshot_obj.snapshot_repo_name,
                                                        True)
@@ -82,18 +93,7 @@ def convert_from_snapshot(snapshot: Snapshot) -> SnapshotConfig:
 
 @snapshot_router.get("/", response_model=SnapshotConfig, operation_id="snapshotConfig")
 def get_snapshot_config(session_name: str):
-    session = http_safe_find_session(session_name)
-    env = session.env
-
-    if not env or not env.snapshot:
-        raise HTTPException(status_code=400,
-                            detail=f"No snapshot defined in the configuration: {env}")
-
-    snapshot_obj = get_snapshot(env.snapshot.config, env.source_cluster)
-    if not snapshot_obj.source_cluster:
-        raise HTTPException(status_code=400,
-                            detail=f"Source cluster was unable to be use to get snapshot status: {env}")
-    
+    snapshot_obj = _get_snapshot_from_session(session_name)
     try:
         return convert_from_snapshot(snapshot_obj)
     except ValueError as e:
@@ -106,17 +106,7 @@ def get_snapshot_config(session_name: str):
 
 @snapshot_router.get("/indexes", response_model=SnapshotIndexes, operation_id="snapshotIndexes")
 def get_snapshot_indexes(session_name: str, index_pattern: Optional[str] = None):
-    session = http_safe_find_session(session_name)
-    env = session.env
-
-    if not env or not env.snapshot:
-        raise HTTPException(status_code=400,
-                            detail=f"No snapshot defined in the configuration: {env}")
-
-    snapshot_obj = get_snapshot(env.snapshot.config, env.source_cluster)
-    if not snapshot_obj.source_cluster:
-        raise HTTPException(status_code=400,
-                            detail=f"Source cluster was unable to be used to get snapshot indexes: {env}")
+    snapshot_obj = _get_snapshot_from_session(session_name)
     
     try:
         # Convert comma-separated string to list if provided
@@ -125,6 +115,32 @@ def get_snapshot_indexes(session_name: str, index_pattern: Optional[str] = None)
             index_patterns = [pattern.strip() for pattern in index_pattern.split(',')]
         
         return snapshot_obj.get_snapshot_indexes(index_patterns)
+    except Exception as e:
+        logger.error(f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
+        raise HTTPException(status_code=500,
+                            detail=f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
+
+
+@snapshot_router.post("/create", response_model=SnapshotCreateResponse, operation_id="snapshotCreate")
+def snapshot_create(session_name: str):
+    snapshot_obj = _get_snapshot_from_session(session_name)
+    try:
+        return SnapshotCreateResponse(detail=snapshot_obj.create())
+    except FailedToCreateSnapshot as ftcs:
+        raise HTTPException(status_code=400, detail=f"Failed to create snapshot {str(ftcs)}")
+    except Exception as e:
+        logger.error(f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
+        raise HTTPException(status_code=500,
+                            detail=f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
+
+
+@snapshot_router.post("/delete", response_model=SnapshotDeleteResponse, operation_id="snapshotDelete")
+def snapshot_delete(session_name: str):
+    snapshot_obj = _get_snapshot_from_session(session_name)
+    try:
+        return SnapshotDeleteResponse(detail=snapshot_obj.delete())
+    except FailedToDeleteSnapshot as ftds:
+        raise HTTPException(status_code=400, detail=f"Failed to delete snapshot {str(ftds)}")
     except Exception as e:
         logger.error(f"Failed to get snapshot indexes: {type(e).__name__} {str(e)}")
         raise HTTPException(status_code=500,

@@ -29,6 +29,12 @@ import type {
   SnapshotIndexesData,
   SnapshotIndexesResponses,
   SnapshotIndexesErrors,
+  SnapshotCreateData,
+  SnapshotCreateResponses,
+  SnapshotCreateErrors,
+  SnapshotDeleteData,
+  SnapshotDeleteResponses,
+  SnapshotDeleteErrors,
   MetadataMigrateData,
   MetadataMigrateResponses,
   MetadataMigrateErrors,
@@ -243,6 +249,38 @@ export const snapshotIndexes = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/sessions/{session_name}/snapshot/indexes",
+    ...options,
+  });
+};
+
+/**
+ * Snapshot Create
+ */
+export const snapshotCreate = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotCreateData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    SnapshotCreateResponses,
+    SnapshotCreateErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/create",
+    ...options,
+  });
+};
+
+/**
+ * Snapshot Delete
+ */
+export const snapshotDelete = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotDeleteData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    SnapshotDeleteResponses,
+    SnapshotDeleteErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/delete",
     ...options,
   });
 };

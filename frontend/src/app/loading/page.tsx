@@ -10,14 +10,14 @@ import {
   Container,
   ExpandableSection,
   Header,
-  Link,
   SpaceBetween,
   Spinner,
 } from "@cloudscape-design/components";
 import { systemHealth } from "@/generated/api";
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
 import { withTimeLimit } from "@/utils/async";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
+import DebugCommands from "@/components/debug/DebugCommands";
+import Image from "next/image";
 
 const DEFAULT_POLLING_INTERVAL_MS = 5000;
 
@@ -81,9 +81,7 @@ export default function LoadingPage() {
         header={
           <Header
             variant="h2"
-            description={
-                <Box>Steps to migrate your cluster.</Box>
-            }
+            description={<Box>Steps to migrate your cluster.</Box>}
           >
             Migration Overview
           </Header>
@@ -112,24 +110,20 @@ export default function LoadingPage() {
             <Box fontSize="heading-s" fontWeight="bold">
               <span>Step 3: Execute backfill</span>
             </Box>
-            <Box variant="p">
-              Reindex data into the target cluster.
-            </Box>
+            <Box variant="p">Reindex data into the target cluster.</Box>
           </SpaceBetween>
         </ColumnLayout>
 
         <Box textAlign="center">
-        <Button
+          <Button
             variant="primary"
             onClick={startMigration}
             disabled={!isReady}
             data-testid="overview-start-migration"
-            
           >
             Start migration data
-        </Button>
+          </Button>
         </Box>
-
       </Container>
 
       <Container
@@ -168,10 +162,15 @@ export default function LoadingPage() {
             )}
           </Alert>
 
-
           <Box variant="p" textAlign="center">
-            <img src="/robot-dog-162x114.svg" style={{'alignContent': "center"}}/><br/>
-            Welcome to your OpenSearch Migration Assistant. Please wait while setup is in progress.
+            <Image
+              src="/robot-dog-162x114.svg"
+              alt=""
+              style={{ alignContent: "center" }}
+            />
+            <br />
+            Welcome to your OpenSearch Migration Assistant. Please wait while
+            setup is in progress.
           </Box>
         </SpaceBetween>
       </Container>

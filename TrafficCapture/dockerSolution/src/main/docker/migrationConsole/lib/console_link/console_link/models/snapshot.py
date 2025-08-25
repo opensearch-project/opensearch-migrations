@@ -1,3 +1,4 @@
+from asyncio import streams
 from enum import Enum
 import logging
 from abc import ABC, abstractmethod
@@ -82,7 +83,7 @@ class Snapshot(ABC):
         self.otel_endpoint = config.get("otel_endpoint", None)
 
     @abstractmethod
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> str:
         """Create a snapshot."""
         pass
 
@@ -92,17 +93,17 @@ class Snapshot(ABC):
         pass
 
     @abstractmethod
-    def delete(self, *args, **kwargs) -> CommandResult:
+    def delete(self, *args, **kwargs) -> str:
         """Delete a snapshot."""
         pass
 
     @abstractmethod
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
         """Delete all snapshots in the snapshot repository."""
         pass
 
     @abstractmethod
-    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
         """Delete a snapshot repository."""
         pass
 
@@ -174,7 +175,7 @@ class S3Snapshot(Snapshot):
         self.s3_region = config['s3']['aws_region']
         self.s3_endpoint = config['s3'].get('endpoint')
 
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
@@ -205,11 +206,12 @@ class S3Snapshot(Snapshot):
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
-            return CommandResult(success=True,
-                                 value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return f"Snapshot {self.config['snapshot_name']} creation initiated successfully"
         except CommandRunnerError as e:
             logger.debug(f"Failed to create snapshot: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+            ex = FailedToCreateSnapshot()
+            ex.add_note(f"Failure from {str(e)}")
+            raise ex
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -217,19 +219,19 @@ class S3Snapshot(Snapshot):
 
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
-    def delete(self, *args, **kwargs) -> CommandResult:
+    def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
-    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
@@ -241,7 +243,7 @@ class FileSystemSnapshot(Snapshot):
         super().__init__(config, source_cluster)
         self.repo_path = config['fs']['repo_path']
 
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
@@ -262,11 +264,12 @@ class FileSystemSnapshot(Snapshot):
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
-            return CommandResult(success=True,
-                                 value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return f"Snapshot {self.config['snapshot_name']} creation initiated successfully"
         except CommandRunnerError as e:
             logger.debug(f"Failed to create snapshot: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+            ex = FailedToCreateSnapshot()
+            ex.add_note(f"Failure from {str(e)}")
+            raise ex
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -274,19 +277,19 @@ class FileSystemSnapshot(Snapshot):
 
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
-    def delete(self, *args, **kwargs) -> CommandResult:
+    def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
-    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
@@ -562,20 +565,21 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str) -> CommandResult:
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str) -> str:
     try:
         path = f"/_snapshot/{repository}/{snapshot_name}"
         response = cluster.call_api(path, HttpMethod.DELETE)
         logging.debug(f"Raw delete snapshot status response: {response.text}")
         logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
-        return CommandResult(success=True,
-                             value=f"Deleted snapshot: {snapshot_name} from repository '{repository}'")
+        return f"Deleted snapshot: {snapshot_name} from repository '{repository}'"
     except Exception as e:
         logger.error(f"Error deleting snapshot '{snapshot_name}' from repository '{repository}': {e}")
-        return CommandResult(success=False, value=f"Error deleting snapshot: {str(e)}")
+        ex = FailedToDeleteSnapshot()
+        ex.add_note(f"Cause {str(e)}")
+        raise ex
 
 
-def delete_all_snapshots(cluster: Cluster, repository: str) -> CommandResult:
+def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
     logger.info(f"Clearing snapshots from repository '{repository}'")
     """
     Clears all snapshots from the specified repository.
@@ -594,7 +598,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> CommandResult:
 
         if not snapshots:
             logger.info(f"No snapshots found in repository '{repository}'.")
-            return CommandResult(success=True, value=f"No snapshots found in repository '{repository}'.")
+            return f"No snapshots found in repository '{repository}'."
 
         # Delete each snapshot
         for snapshot in snapshots:
@@ -607,15 +611,17 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> CommandResult:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
-                return CommandResult(success=True, value=f"Repository '{repository}' does not exist")
+                return f"Repository '{repository}' does not exist"
         # Return error result instead of raising
-        logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
-        return CommandResult(success=False, value=f"Error clearing snapshots: {str(e)}")
+        logger.debug(f"Error clearing snapshots from repository '{repository}': {e}")
+        ex = FailedToDeleteSnapshot()
+        ex.add_note(f"Cause {str(e)}")
+        raise ex
     
-    return CommandResult(success=True, value=f"All snapshots cleared from repository '{repository}'")
+    return f"All snapshots cleared from repository '{repository}'"
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str) -> CommandResult:
+def delete_snapshot_repo(cluster: Cluster, repository: str) -> str:
     logger.info(f"Deleting repository '{repository}'")
     """
     Delete repository. Should be empty before execution.
@@ -635,12 +641,13 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> CommandResult:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping delete.")
-                return CommandResult(success=True, value=f"Repository '{repository}' does not exist")
-        # Return error result instead of raising
-        logger.error(f"Error deleting repository '{repository}': {e}")
-        return CommandResult(success=False, value=f"Error deleting repository: {str(e)}")
+                return f"Repository '{repository}' does not exist"
+        logger.debug(f"Error deleting repository '{repository}': {e}")
+        ex = FailedToDeleteSnapshotRepo()
+        ex.add_note(f"Cause {str(e)}")
+        raise ex
     
-    return CommandResult(success=True, value=f"Repository '{repository}' deleted")
+    return f"Repository '{repository}' deleted"
 
 
 class SnapshotSourceType(str, Enum):
@@ -777,3 +784,15 @@ def get_cluster_indexes(cluster: Cluster, index_patterns: Optional[List[str]] = 
     except Exception as e:
         logger.error(f"Failed to fetch index information via _stats: {e}")
         raise
+
+
+class FailedToCreateSnapshot(Exception):
+    pass
+
+
+class FailedToDeleteSnapshot(Exception):
+    pass
+
+
+class FailedToDeleteSnapshotRepo(Exception):
+    pass

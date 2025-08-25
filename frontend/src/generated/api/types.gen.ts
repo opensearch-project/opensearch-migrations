@@ -399,6 +399,26 @@ export type SnapshotConfig = {
 };
 
 /**
+ * SnapshotCreateResponse
+ */
+export type SnapshotCreateResponse = {
+  /**
+   * Detail
+   */
+  detail: string;
+};
+
+/**
+ * SnapshotDeleteResponse
+ */
+export type SnapshotDeleteResponse = {
+  /**
+   * Detail
+   */
+  detail: string;
+};
+
+/**
  * SnapshotIndex
  */
 export type SnapshotIndex = {
@@ -424,6 +444,29 @@ export type SnapshotIndex = {
  * SnapshotIndexState
  */
 export type SnapshotIndexState = "not_started" | "in_progress" | "completed";
+
+/**
+ * SnapshotIndexStatus
+ */
+export type SnapshotIndexStatus = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Document Count
+   */
+  document_count: number | null;
+  /**
+   * Size Bytes
+   */
+  size_bytes: number;
+  /**
+   * Shard Count
+   */
+  shard_count?: number;
+  status: SnapshotIndexState;
+};
 
 /**
  * SnapshotIndexes
@@ -490,7 +533,7 @@ export type SnapshotStatus = {
   /**
    * Indexes
    */
-  indexes?: Array<SnapshotIndexState> | null;
+  indexes?: Array<SnapshotIndexStatus> | null;
 };
 
 /**
@@ -813,6 +856,70 @@ export type SnapshotIndexesResponses = {
 
 export type SnapshotIndexesResponse =
   SnapshotIndexesResponses[keyof SnapshotIndexesResponses];
+
+export type SnapshotCreateData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/create";
+};
+
+export type SnapshotCreateErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotCreateError =
+  SnapshotCreateErrors[keyof SnapshotCreateErrors];
+
+export type SnapshotCreateResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotCreateResponse;
+};
+
+export type SnapshotCreateResponse2 =
+  SnapshotCreateResponses[keyof SnapshotCreateResponses];
+
+export type SnapshotDeleteData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/snapshot/delete";
+};
+
+export type SnapshotDeleteErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SnapshotDeleteError =
+  SnapshotDeleteErrors[keyof SnapshotDeleteErrors];
+
+export type SnapshotDeleteResponses = {
+  /**
+   * Successful Response
+   */
+  200: SnapshotDeleteResponse;
+};
+
+export type SnapshotDeleteResponse2 =
+  SnapshotDeleteResponses[keyof SnapshotDeleteResponses];
 
 export type MetadataMigrateData = {
   body: MetadataMigrateRequest;

@@ -5,9 +5,8 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import Box from "@cloudscape-design/components/box";
 import { FileSystemSnapshotSource, S3SnapshotSource, SnapshotConfig } from "@/generated/api";
 import { Alert, Header, KeyValuePairs, KeyValuePairsProps, StatusIndicator } from "@cloudscape-design/components";
-import Container from "@cloudscape-design/components/container";
-import { SnapshotDebugControls } from "../session/debug/SnapshotDebugControls";
-import { SNAPSHOT_CONFIG_SCENARIOS } from "../session/mockData/snapshotConfigScenarios";
+import { SnapshotDebugControls } from "@/components/snapshot/debug/SnapshotDebugControls";
+import { SNAPSHOT_CONFIG_SCENARIOS } from "./mockData/snapshotConfigScenarios";
 
 interface SnapshotFormProps {
   readonly isLoading: boolean;
