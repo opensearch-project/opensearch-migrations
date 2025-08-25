@@ -1,15 +1,17 @@
 import json
 import os
 import pathlib
-from unittest.mock import ANY
+from unittest.mock import ANY, MagicMock
+from datetime import datetime, timezone
 
 import pytest
 import requests
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.step_state import StepState
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
-                                              WorkingIndexDoesntExist)
+                                              WorkingIndexDoesntExist, compute_dervived_values)
 from console_link.models.ecs_service import ECSService
 from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
 from console_link.models.utils import DeploymentStatus
@@ -324,3 +326,62 @@ def test_docker_backfill_not_implemented_commands():
 
     with pytest.raises(NotImplementedError):
         docker_rfs_backfill.scale(units=3)
+
+
+class TestComputeDerivedValues:
+    
+    def setup_method(self):
+        # Create a mock for the target_cluster
+        self.mock_cluster = MagicMock()
+        self.mock_cluster.call_api.return_value.json.return_value = {
+            "aggregations": {"max_completed": {"value": 1000000000}}
+        }
+        
+        # Test index name
+        self.test_index = ".migrations_working_state"
+    
+    def test_zero_indices(self):
+        """Test compute_dervived_values when there are 0 indices to migrate."""
+        # When total=0, it should report as COMPLETED
+        total = 0
+        completed = 0
+        started_epoch = None
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch
+        )
+        
+        assert status == StepState.COMPLETED
+        assert percentage_completed == 100.0
+        assert eta_ms is None
+        assert finished_iso is not None  # Should have a timestamp for completion
+    
+    def test_all_completed(self):
+        """Test compute_dervived_values when all indices are completed."""
+        total = 10
+        completed = 10
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch
+        )
+        
+        assert status == StepState.COMPLETED
+        assert percentage_completed == 100.0
+        assert eta_ms is None
+        assert finished_iso is not None
+    
+    def test_partially_completed(self):
+        """Test compute_dervived_values when some indices are still in progress."""
+        total = 10
+        completed = 5
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch
+        )
+        
+        assert status == StepState.RUNNING
+        assert percentage_completed == 50.0
+        assert eta_ms is not None  # Should have an ETA
+        assert finished_iso is None  # Not completed yet

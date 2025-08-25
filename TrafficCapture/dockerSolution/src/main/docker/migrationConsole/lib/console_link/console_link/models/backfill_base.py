@@ -96,7 +96,6 @@ class BackfillOverallStatus(BaseModel):
     )
     shard_total: Optional[int] = None
     shard_complete: Optional[int] = None
-    shard_failed: Optional[int] = None
     shard_in_progress: Optional[int] = None
     shard_waiting: Optional[int] = None
 

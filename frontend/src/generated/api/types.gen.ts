@@ -37,10 +37,6 @@ export type BackfillOverallStatus = {
    */
   shard_complete?: number | null;
   /**
-   * Shard Failed
-   */
-  shard_failed?: number | null;
-  /**
    * Shard In Progress
    */
   shard_in_progress?: number | null;
@@ -393,10 +389,6 @@ export type SnapshotStatus = {
    * Shard Complete
    */
   shard_complete?: number | null;
-  /**
-   * Shard Failed
-   */
-  shard_failed?: number | null;
 };
 
 /**

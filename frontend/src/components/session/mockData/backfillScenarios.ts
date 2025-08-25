@@ -11,7 +11,6 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     finished: undefined,
     shard_total: undefined,
     shard_complete: undefined,
-    shard_failed: undefined,
     shard_in_progress: undefined,
     shard_waiting: undefined,
   },
@@ -23,7 +22,6 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     finished: undefined,
     shard_total: 100,
     shard_complete: 45,
-    shard_failed: 2,
     shard_in_progress: 8,
     shard_waiting: 45,
   },
@@ -35,7 +33,6 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     finished: undefined,
     shard_total: 200,
     shard_complete: 190,
-    shard_failed: 1,
     shard_in_progress: 5,
     shard_waiting: 4,
   },
@@ -47,7 +44,6 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     finished: new Date(Date.now() - 300000), // 5 minutes ago
     shard_total: 150,
     shard_complete: 150,
-    shard_failed: 0,
     shard_in_progress: 0,
     shard_waiting: 0,
   },
@@ -59,7 +55,6 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     finished: new Date(Date.now() - 180000), // 3 minutes ago
     shard_total: 75,
     shard_complete: 70,
-    shard_failed: 5,
     shard_in_progress: 0,
     shard_waiting: 0,
   },
@@ -71,7 +66,6 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     finished: new Date(Date.now() - 900000), // 15 minutes ago
     shard_total: 50,
     shard_complete: 12,
-    shard_failed: 38,
     shard_in_progress: 0,
     shard_waiting: 0,
   },

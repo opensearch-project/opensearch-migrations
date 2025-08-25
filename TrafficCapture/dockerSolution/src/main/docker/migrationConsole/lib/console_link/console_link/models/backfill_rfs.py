@@ -378,7 +378,8 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
 
 
 def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch):
-    if total > 0 and completed >= total:
+    # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
+    if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
         finished_iso = (
             datetime.fromtimestamp(max_completed_epoch, tz=timezone.utc).isoformat()
