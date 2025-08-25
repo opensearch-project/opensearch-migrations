@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, APIRouter
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from console_link.api.custom_openapi import OpenApiWithNullables
 from console_link.api.system import system_router
@@ -7,6 +7,7 @@ from console_link.api.backfill import backfill_router
 from console_link.api.sessions import session_router
 from console_link.api.snapshot import snapshot_router
 from console_link.api.metadata import metadata_router
+from console_link.api.clusters import clusters_router
 
 app = FastAPI(
     title="Migration Assistant API",
@@ -42,6 +43,7 @@ def add_to_session_router(router: APIRouter):
 add_to_session_router(snapshot_router)
 add_to_session_router(metadata_router)
 add_to_session_router(backfill_router)
+add_to_session_router(clusters_router)
 
 app.include_router(system_router)
 app.include_router(session_router)

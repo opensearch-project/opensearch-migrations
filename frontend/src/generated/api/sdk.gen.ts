@@ -32,6 +32,12 @@ import type {
   BackfillStatusData,
   BackfillStatusResponses,
   BackfillStatusErrors,
+  ClusterSourceData,
+  ClusterSourceResponses,
+  ClusterSourceErrors,
+  ClusterTargetData,
+  ClusterTargetResponses,
+  ClusterTargetErrors,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
 import {
@@ -257,6 +263,38 @@ export const backfillStatus = <ThrowOnError extends boolean = false>(
   >({
     responseTransformer: backfillStatusResponseTransformer,
     url: "/sessions/{session_name}/backfill/status",
+    ...options,
+  });
+};
+
+/**
+ * Get Source Cluster
+ */
+export const clusterSource = <ThrowOnError extends boolean = false>(
+  options: Options<ClusterSourceData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    ClusterSourceResponses,
+    ClusterSourceErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/clusters/source",
+    ...options,
+  });
+};
+
+/**
+ * Get Target Cluster
+ */
+export const clusterTarget = <ThrowOnError extends boolean = false>(
+  options: Options<ClusterTargetData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    ClusterTargetResponses,
+    ClusterTargetErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/clusters/target",
     ...options,
   });
 };
