@@ -63,14 +63,46 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
     ) {
         ShardMetadata previousShardMetadata = previousShardMetadataFactory.apply(indexName, shardNumber);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexName, shardNumber);
-        if (deltaMode != DeltaMode.UPDATES_ONLY) {
+        
+        if (deltaMode == DeltaMode.UPDATES_ONLY) {
+            // Original behavior - only additions
+            return reader.readDeltaDocuments(
+                previousShardMetadata.getSegmentFileName(),
+                shardMetadata.getSegmentFileName(),
+                startingDocId,
+                rootContext
+            );
+        } else if (deltaMode == DeltaMode.UPDATES_AND_DELETES) {
+            // New behavior - both additions and deletions
+            var deltaResult = reader.readDeltaDocumentsWithDeletes(
+                previousShardMetadata.getSegmentFileName(),
+                shardMetadata.getSegmentFileName(),
+                startingDocId,
+                rootContext
+            );
+            
+            // Convert deletions to delete documents and merge with additions
+            // We need to mark these documents as deletions so they can be processed correctly
+            Flux<RfsLuceneDocument> deletionsAsDocuments = Flux.from(deltaResult.deletions)
+                .map(doc -> {
+                    // Create a new RfsLuceneDocument that represents a delete operation
+                    // We'll mark it with a special field that indicates it's a delete
+                    return new RfsLuceneDocument(
+                        doc.luceneDocNumber,
+                        doc.id,
+                        doc.type,
+                        "{\"_delete\":true}", // Special marker for delete operations
+                        doc.routing
+                    );
+                });
+            
+            // Merge both streams - additions and deletions
+            return Flux.concat(
+                deletionsAsDocuments,
+                deltaResult.additions
+            );
+        } else {
             throw new UnsupportedOperationException("Unsupported delta mode given " + deltaMode);
         }
-        return reader.readDeltaDocuments(
-            previousShardMetadata.getSegmentFileName(),
-            shardMetadata.getSegmentFileName(),
-            startingDocId,
-            rootContext
-        );
     }
 }

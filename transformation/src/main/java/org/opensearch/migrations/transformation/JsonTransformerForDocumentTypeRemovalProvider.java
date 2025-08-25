@@ -36,6 +36,9 @@ public class JsonTransformerForDocumentTypeRemovalProvider implements IJsonTrans
             if (incomingMap.containsKey("index")) {
                 ((Map<String, Object>) incomingMap.get("index")).remove("_type");
             }
+            if (incomingMap.containsKey("delete")) {
+                ((Map<String, Object>) incomingMap.get("delete")).remove("_type");
+            }
             return incomingMap;
         }
     }

@@ -251,8 +251,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
                     // docIdDeletedOnSecondSnapshot should be deleted once deletions are supported
-                    // Assertions.assertEquals(404, doc2Response.getKey(), "doc2 should be deleted on target");
-                    Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should not be found on target");
+                     Assertions.assertEquals(404, response.getKey(), "doc2 should be deleted on target");
                 }
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnlyOnSecond);
@@ -266,15 +265,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 // After first run (snapshot1 -> snapshot2): 3 segments, 1 addition, 1 deletion
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
-            
 
             // Run second time reversing base and current snapshot
             targetClusterOperations.delete("/.migrations_working_state");
-            // Simulate delete that should have occurred in prior RFS but is currently not supported
-            {
-                var response = targetClusterOperations.delete("/" + indexName + "/_doc/" + docIdDeletedOnSecondSnapshot);
-                Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should be manually deleted");
-            }
             {
                 final var testDocMigrationContext = DocumentMigrationTestContext.factory()
                     .withTracking(false, true, false);
@@ -305,9 +298,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 }
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnlyOnSecond);
-                    // docIdDeletedOnSecondSnapshot should be deleted once deletions are supported
-                    // Assertions.assertEquals(404, doc2Response.getKey(), "doc2 should not exist");
-                    Assertions.assertEquals(200, response.getKey(), docIdOnlyOnSecond + " is created because deletes are not supported");
+                     Assertions.assertEquals(404, response.getKey(), "doc2 should not exist");
                 }
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);

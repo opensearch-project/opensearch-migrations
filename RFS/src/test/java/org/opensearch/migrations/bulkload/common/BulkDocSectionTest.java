@@ -21,16 +21,25 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BulkDocSectionTest {
+    // Note: _type is excluded from index metadata when it's "_doc" for OpenSearch compatibility
     static final Map<String, Object> METADATA_1 = Map.of(
             "_id", "test-id",
-            "_index", "test-index",
-            "_type", "_doc");
+            "_index", "test-index");
 
     static final Map<String, Object> METADATA_2 = Map.of(
             "_id", "test-id",
             "_index", "test-index",
-            "_type", "_doc",
             "routing", "routing1");
+
+    // Note: _type is excluded from delete metadata when it's "_doc" for OpenSearch compatibility
+    static final Map<String, Object> DELETE_METADATA_1 = Map.of(
+            "_id", "delete-id",
+            "_index", "delete-index");
+
+    static final Map<String, Object> DELETE_METADATA_2 = Map.of(
+            "_id", "delete-id",
+            "_index", "delete-index",
+            "routing", "routing2");
 
     static final Map<String, Object> SOURCE_DOC_1 = Map.of("field", "value");
 
@@ -40,11 +49,19 @@ class BulkDocSectionTest {
     static final BulkDocSection BULK_DOC_SECTION_2 = new BulkDocSection("test-id", "test-index", "_doc",
             "{\"field\":\"value\"}", "routing1");
 
-    static final String BULK_DOC_SECTION_1_STRING = "{\"index\":{\"_id\":\"test-id\",\"_type\":\"_doc\",\"_index\":\"test-index\"}}\n"
+    static final BulkDocSection BULK_DELETE_SECTION_1 = BulkDocSection.createDelete("delete-id", "delete-index", "_doc");
+
+    static final BulkDocSection BULK_DELETE_SECTION_2 = BulkDocSection.createDelete("delete-id", "delete-index", "_doc", "routing2");
+
+    static final String BULK_DOC_SECTION_1_STRING = "{\"index\":{\"_id\":\"test-id\",\"_index\":\"test-index\"}}\n"
             + "{\"field\":\"value\"}";
 
-    static final String BULK_DOC_SECTION_2_STRING = "{\"index\":{\"_id\":\"test-id\",\"_type\":\"_doc\",\"_index\":\"test-index\",\"routing\":\"routing1\"}}\n"
+    static final String BULK_DOC_SECTION_2_STRING = "{\"index\":{\"_id\":\"test-id\",\"_index\":\"test-index\",\"routing\":\"routing1\"}}\n"
             + "{\"field\":\"value\"}";
+
+    static final String BULK_DELETE_SECTION_1_STRING = "{\"delete\":{\"_id\":\"delete-id\",\"_index\":\"delete-index\"}}";
+
+    static final String BULK_DELETE_SECTION_2_STRING = "{\"delete\":{\"_id\":\"delete-id\",\"_index\":\"delete-index\",\"routing\":\"routing2\"}}";
 
     static Stream<Arguments> provideFromMapArgs() {
         return Stream.of(
@@ -52,22 +69,38 @@ class BulkDocSectionTest {
                 Arguments.of(METADATA_2, SOURCE_DOC_1));
     }
 
+    static Stream<Arguments> provideDeleteFromMapArgs() {
+        return Stream.of(
+                Arguments.of(DELETE_METADATA_1),
+                Arguments.of(DELETE_METADATA_2));
+    }
+
     static Stream<BulkDocSection> provideSerializedLengthArgs() {
         return Stream.of(
                 BULK_DOC_SECTION_1,
-                BULK_DOC_SECTION_2);
+                BULK_DOC_SECTION_2,
+                BULK_DELETE_SECTION_1,
+                BULK_DELETE_SECTION_2);
     }
 
     static Stream<Arguments> provideBulkIndexStringArgs() {
         return Stream.of(
                 Arguments.of(BULK_DOC_SECTION_1, BULK_DOC_SECTION_1_STRING),
-                Arguments.of(BULK_DOC_SECTION_2, BULK_DOC_SECTION_2_STRING));
+                Arguments.of(BULK_DOC_SECTION_2, BULK_DOC_SECTION_2_STRING),
+                Arguments.of(BULK_DELETE_SECTION_1, BULK_DELETE_SECTION_1_STRING),
+                Arguments.of(BULK_DELETE_SECTION_2, BULK_DELETE_SECTION_2_STRING));
     }
 
     static Stream<Arguments> provideToMapArgs() {
         return Stream.of(
                 Arguments.of(BULK_DOC_SECTION_1, METADATA_1, SOURCE_DOC_1),
                 Arguments.of(BULK_DOC_SECTION_2, METADATA_2, SOURCE_DOC_1));
+    }
+
+    static Stream<Arguments> provideDeleteToMapArgs() {
+        return Stream.of(
+                Arguments.of(BULK_DELETE_SECTION_1, DELETE_METADATA_1),
+                Arguments.of(BULK_DELETE_SECTION_2, DELETE_METADATA_2));
     }
 
     @Test
@@ -81,12 +114,34 @@ class BulkDocSectionTest {
         String bulkRequestBody = BulkDocSection.convertToBulkRequestBody(bulkSections);
 
         String expectedRequestBody = "{"
-                + "\"index\":{\"_id\":\"id1\",\"_type\":\"_doc\",\"_index\":\"index1\"}}\n"
+                + "\"index\":{\"_id\":\"id1\",\"_index\":\"index1\"}}\n"
                 + "{\"field\":\"value1\"}\n"
-                + "{\"index\":{\"_id\":\"id2\",\"_type\":\"_doc\",\"_index\":\"index2\"}}\n"
+                + "{\"index\":{\"_id\":\"id2\",\"_index\":\"index2\"}}\n"
                 + "{\"field\":\"value2\"}\n"
-                + "{\"index\":{\"_id\":\"id3\",\"_type\":\"_doc\",\"_index\":\"index3\",\"routing\":\"routing1\"}}\n"
+                + "{\"index\":{\"_id\":\"id3\",\"_index\":\"index3\",\"routing\":\"routing1\"}}\n"
                 + "{\"field\":\"value3\"}\n";
+
+        assertEquals(expectedRequestBody, bulkRequestBody);
+    }
+
+    @Test
+    void testConvertToBulkRequestBodyWithDeletes() {
+        BulkDocSection indexSection = new BulkDocSection("id1", "index1", "_doc", "{\"field\":\"value1\"}");
+        BulkDocSection deleteSection1 = BulkDocSection.createDelete("id2", "index2", "_doc");
+        BulkDocSection deleteSection2 = BulkDocSection.createDelete("id3", "index3", "_doc", "routing1");
+        BulkDocSection indexSection2 = new BulkDocSection("id4", "index4", "_doc", "{\"field\":\"value4\"}");
+
+        Collection<BulkDocSection> bulkSections = Arrays.asList(indexSection, deleteSection1, deleteSection2, indexSection2);
+
+        String bulkRequestBody = BulkDocSection.convertToBulkRequestBody(bulkSections);
+
+        String expectedRequestBody = "{"
+                + "\"index\":{\"_id\":\"id1\",\"_index\":\"index1\"}}\n"
+                + "{\"field\":\"value1\"}\n"
+                + "{\"delete\":{\"_id\":\"id2\",\"_index\":\"index2\"}}\n"
+                + "{\"delete\":{\"_id\":\"id3\",\"_index\":\"index3\",\"routing\":\"routing1\"}}\n"
+                + "{\"index\":{\"_id\":\"id4\",\"_index\":\"index4\"}}\n"
+                + "{\"field\":\"value4\"}\n";
 
         assertEquals(expectedRequestBody, bulkRequestBody);
     }
@@ -106,6 +161,20 @@ class BulkDocSectionTest {
         assertEquals(sourceDoc, bulkDocSection.toMap().get("source"));
     }
 
+    @ParameterizedTest
+    @MethodSource("provideDeleteFromMapArgs")
+    void testDeleteFromMap(Map<String, Object> metadata) {
+        Map<String, Object> deleteMap = new HashMap<>();
+        deleteMap.put("delete", metadata);
+
+        BulkDocSection bulkDocSection = BulkDocSection.fromMap(deleteMap);
+
+        assertNotNull(bulkDocSection);
+        assertEquals("delete-id", bulkDocSection.getDocId());
+        assertEquals(metadata, bulkDocSection.toMap().get("delete"));
+        // Delete operations should not have a source
+        assertTrue(!bulkDocSection.toMap().containsKey("source"));
+    }
 
     @ParameterizedTest
     @MethodSource("provideSerializedLengthArgs")
@@ -129,6 +198,39 @@ class BulkDocSectionTest {
         assertNotNull(map);
         assertEquals(metaData, map.get("index"));
         assertEquals(source, map.get("source"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideDeleteToMapArgs")
+    void testDeleteToMap(BulkDocSection bulkDocSection, Map<String, Object> metaData) {
+        Map<String, Object> map = bulkDocSection.toMap();
+
+        assertNotNull(map);
+        assertEquals(metaData, map.get("delete"));
+        // Delete operations should not have a source
+        assertTrue(!map.containsKey("source"));
+    }
+
+    @Test
+    void testCreateDeleteWithoutRouting() {
+        BulkDocSection deleteSection = BulkDocSection.createDelete("test-id", "test-index", "_doc");
+        
+        assertNotNull(deleteSection);
+        assertEquals("test-id", deleteSection.getDocId());
+        
+        String asString = deleteSection.asBulkIndexString();
+        assertEquals("{\"delete\":{\"_id\":\"test-id\",\"_index\":\"test-index\"}}", asString);
+    }
+
+    @Test
+    void testCreateDeleteWithRouting() {
+        BulkDocSection deleteSection = BulkDocSection.createDelete("test-id", "test-index", "_doc", "routing1");
+        
+        assertNotNull(deleteSection);
+        assertEquals("test-id", deleteSection.getDocId());
+        
+        String asString = deleteSection.asBulkIndexString();
+        assertEquals("{\"delete\":{\"_id\":\"test-id\",\"_index\":\"test-index\",\"routing\":\"routing1\"}}", asString);
     }
 
     @Test
@@ -159,9 +261,9 @@ class BulkDocSectionTest {
         assertNotNull(asString);
         assertTrue(asString.contains(id));
         assertTrue(asString.contains(indexName));
-        assertTrue(asString.contains(type));
+        // Note: _type is not included when it's "_doc" for modern OpenSearch compatibility
         assertTrue(asString.contains(docBody));
-        assertEquals(docBody.length() + 81, asString.length()); // add length of index command
+        assertEquals(docBody.length() + 68, asString.length()); // add length of index command (without _type)
 
         // Test toMap
         var map = bulkDocSection.toMap();
@@ -178,7 +280,8 @@ class BulkDocSectionTest {
         var indexCommand = (Map<String, Object>) convertedToMap.get("index");
         assertEquals(id, fromMapSection.getDocId());
         assertEquals(indexName, indexCommand.get("_index"));
-        assertEquals(type, indexCommand.get("_type"));
+        // _type is not included in the output when it's "_doc"
+        assertEquals(null, indexCommand.get("_type"));
         assertEquals(id, indexCommand.get("_id"));
         assertEquals(docBody, writer.writeValueAsString(convertedToMap.get("source")));
     }
