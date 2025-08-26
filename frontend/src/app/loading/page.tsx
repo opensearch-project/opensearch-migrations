@@ -79,10 +79,7 @@ export default function LoadingPage() {
 
       <Container
         header={
-          <Header
-            variant="h2"
-            description="Steps to migrate your cluster."
-          >
+          <Header variant="h2" description="Steps to migrate your cluster.">
             Migration Overview
           </Header>
         }
