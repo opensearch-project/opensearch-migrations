@@ -465,7 +465,7 @@ def generate_status_queries():
 
 
 def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
-    d = get_detailed_status_obj(target_cluster, session_name)
+    d = get_detailed_status_obj(target_cluster, session_name=session_name)
     return d.shard_total == d.shard_complete and d.shard_in_progress == 0 and d.shard_waiting == 0
 
 
