@@ -24,9 +24,9 @@ function SnapshotPageInner() {
   if (!sessionName) {
     return (
       <Alert type="error" header={`Unable to find an associated session`}>
-        Please create a session or adjust the sessionName parameter in the url. 
+        Please create a session or adjust the sessionName parameter in the url.
       </Alert>
-    )
+    );
   }
 
   const steps: WorkflowWizardStep[] = [
