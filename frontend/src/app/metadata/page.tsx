@@ -2,36 +2,30 @@
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Box } from "@cloudscape-design/components";
+import { Alert, Box } from "@cloudscape-design/components";
 import WorkflowWizard, {
   WorkflowWizardStep,
 } from "@/components/common/WorkflowWizard";
 
-export default function WizardPage() {
+export default function MetadataPage() {
   return (
     <Suspense fallback={null}>
-      <WizardPageInner></WizardPageInner>
+      <MetadataPageInner></MetadataPageInner>
     </Suspense>
   );
 }
 
-function WizardPageInner() {
+function MetadataPageInner() {
   const searchParams = useSearchParams();
   const sessionName = searchParams?.get("sessionName") ?? "";
 
   if (!sessionName) {
-    // TODO: lets automatically create a session
-    console.warn("No sessionName provided");
+    return (
+      <Alert type="error" header={`Unable to find an associated session`}>
+        Please create a session or adjust the sessionName parameter in the url. 
+      </Alert>
+    )
   }
-
-  const handleSubmit = () => {
-    console.log("Wizard submitted with sessionName:", sessionName);
-  };
-
-  const handleCancel = () => {
-    // TODO: Modal confirmation, are you sure you want to leave?
-    console.log("Wizard canceled");
-  };
 
   const steps: WorkflowWizardStep[] = [
     {
@@ -50,9 +44,7 @@ function WizardPageInner() {
     <WorkflowWizard
       steps={steps}
       sessionName={sessionName}
-      onCancel={handleCancel}
-      onSubmit={handleSubmit}
-      submitButtonText="Complete"
+      submitButtonText="Complete Metadata Migration"
     />
   );
 }

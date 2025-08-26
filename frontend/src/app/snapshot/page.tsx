@@ -7,8 +7,7 @@ import WorkflowWizard, {
 } from "@/components/common/WorkflowWizard";
 import SourceConfigure from "@/components/connection/SourceConfigure";
 import TargetConfigure from "@/components/connection/TargetConfigure";
-import SnapshotCreator from "@/components/snapshot/SnapshotCreator";
-import SnapshotReview from "@/components/snapshot/SnapshotReview";
+import { Alert, Box } from "@cloudscape-design/components";
 
 export default function SnapshotPage() {
   return (
@@ -23,18 +22,12 @@ function SnapshotPageInner() {
   const sessionName = searchParams?.get("sessionName") ?? "";
 
   if (!sessionName) {
-    // TODO: lets automatically create a session
-    console.warn("No sessionName provided");
+    return (
+      <Alert type="error" header={`Unable to find an associated session`}>
+        Please create a session or adjust the sessionName parameter in the url. 
+      </Alert>
+    )
   }
-
-  const handleSubmit = () => {
-    console.log("Wizard submitted with sessionName:", sessionName);
-  };
-
-  const handleCancel = () => {
-    // TODO: Modal confirmation, are you sure you want to leave?
-    console.log("Wizard canceled");
-  };
 
   const steps: WorkflowWizardStep[] = [
     {
@@ -50,12 +43,12 @@ function SnapshotPageInner() {
     {
       title: "Snapshot Review",
       description: "Review snapshot details",
-      content: <SnapshotReview sessionName={sessionName} />,
+      content: <Box>Placeholder</Box>,
     },
     {
       title: "Snapshot Creation",
       description: "Create or select snapshot",
-      content: <SnapshotCreator sessionName={sessionName} />,
+      content: <Box>Placeholder</Box>,
     },
   ];
 
@@ -63,9 +56,7 @@ function SnapshotPageInner() {
     <WorkflowWizard
       steps={steps}
       sessionName={sessionName}
-      onCancel={handleCancel}
-      onSubmit={handleSubmit}
-      submitButtonText="Complete migration"
+      submitButtonText="Complete Snapshot Creation"
     />
   );
 }

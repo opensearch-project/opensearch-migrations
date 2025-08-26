@@ -1,69 +1,50 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Box, Wizard } from "@cloudscape-design/components";
+import { Alert, Box } from "@cloudscape-design/components";
+import WorkflowWizard, {
+  WorkflowWizardStep,
+} from "@/components/common/WorkflowWizard";
 
-export default function WizardPage() {
+export default function BackfillPage() {
   return (
     <Suspense fallback={null}>
-      <WizardPageInner></WizardPageInner>
+      <BackfillPageInner></BackfillPageInner>
     </Suspense>
   );
 }
 
-function WizardPageInner() {
+function BackfillPageInner() {
   const searchParams = useSearchParams();
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-
   const sessionName = searchParams?.get("sessionName") ?? "";
 
-  const handleNavigate = ({
-    detail,
-  }: {
-    detail: { requestedStepIndex: number };
-  }) => {
-    setActiveStepIndex(detail.requestedStepIndex);
-  };
+  if (!sessionName) {
+    return (
+      <Alert type="error" header={`Unable to find an associated session`}>
+        Please create a session or adjust the sessionName parameter in the url. 
+      </Alert>
+    )
+  }
 
-  const handleSubmit = () => {
-    console.log("Wizard submitted with sessionName:", sessionName);
-  };
-
-  const handleCancel = () => {
-    // TODO: Modal confirmation, are you sure you want to leave?
-    console.log("Wizard canceled");
-  };
-
-  const steps = [
+  const steps: WorkflowWizardStep[] = [
     {
-      title: "Backfill configuration",
-      description: "Create or select snapshot",
+      title: "Review Backfill Setup",
+      description: "Review the configuration before starting the backfill",
       content: <Box>Placeholder</Box>,
     },
     {
-      title: "Backfill migration",
-      description: "Create or select snapshot",
+      title: "Backfill Execution",
+      description: "Trigger the backfill and monitor its progress",
       content: <Box>Placeholder</Box>,
     },
   ];
 
   return (
-    <Wizard
+    <WorkflowWizard
       steps={steps}
-      i18nStrings={{
-        stepNumberLabel: (stepNumber) => `Step ${stepNumber}`,
-        collapsedStepsLabel: (stepNumber, stepsCount) =>
-          `Step ${stepNumber} of ${stepsCount}`,
-        cancelButton: "Cancel",
-        previousButton: "Previous",
-        nextButton: "Next",
-        submitButton: "Complete migration",
-      }}
-      onCancel={handleCancel}
-      onNavigate={handleNavigate}
-      onSubmit={handleSubmit}
-      activeStepIndex={activeStepIndex}
+      sessionName={sessionName}
+      submitButtonText="Complete Backfill"
     />
   );
 }
