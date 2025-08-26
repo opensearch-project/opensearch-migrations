@@ -25,6 +25,7 @@ export function BackfillDebugControls({
             { id: "completed", text: "Completed (Success)" },
             { id: "completedWithFailures", text: "Completed (With Failures)" },
             { id: "failed", text: "Failed" },
+            { id: "pending", text: "Pending"}
           ]}
           onItemClick={({ detail }) =>
             onScenarioSelect(detail.id as keyof typeof BACKFILL_SCENARIOS)

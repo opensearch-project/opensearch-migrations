@@ -54,7 +54,7 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     started: new Date(Date.now() - 5400000), // 1.5 hours ago
     finished: new Date(Date.now() - 180000), // 3 minutes ago
     shard_total: 75,
-    shard_complete: 70,
+    shard_complete: 75,
     shard_in_progress: 0,
     shard_waiting: 0,
   },
@@ -68,5 +68,16 @@ export const BACKFILL_SCENARIOS: Record<string, BackfillOverallStatus> = {
     shard_complete: 12,
     shard_in_progress: 0,
     shard_waiting: 0,
+  },
+  pausedNearCompletion: {
+    status: "Paused",
+    percentage_completed: 95,
+    eta_ms: null,
+    started: new Date(Date.now() - 3600000), // 1 hour ago
+    finished: undefined,
+    shard_total: 200,
+    shard_complete: 190,
+    shard_in_progress: 0,
+    shard_waiting: 10,
   },
 };
