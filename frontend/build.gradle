@@ -89,6 +89,7 @@ tasks.register('checkGeneratedFilesTracked', Exec) {
             echo "Error: Unstaged or untracked files under frontend/src/generated/:"
             [ -n "$changed" ] && echo "$changed"
             [ -n "$untracked" ] && echo "$untracked"
+            echo "Please run ./gradlew frontend:generateBackendClient and commit the updated files"
             exit 1
         else
             echo "OK: No unstaged or untracked files under frontend/src/generated/"
