@@ -1,16 +1,14 @@
 import {
     InputParametersRecord,
-    OutputParamDef,
     OutputParametersRecord
 } from "@/schemas/parameterSchemas";
 import {
-    ExtendScope,
     TasksOutputsScope,
     WorkflowAndTemplatesScope,
 } from "@/schemas/workflowTypes";
-import { z, ZodType } from "zod";
-import { PlainObject } from "@/schemas/plainObject";
-import {NamedTask, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
+
+import {NamedTask, ParamsFromContextFn, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
+import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 
 class DagFactory<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -38,81 +36,35 @@ class DagFactory<
 
 export class DagBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
-    InputParamsScope  extends InputParametersRecord,
+    InputParamsScope extends InputParametersRecord,
     TasksScope extends TasksOutputsScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TaskBuilder<
-    ContextualScope,
-    TasksScope,
-    DagBuilder<ContextualScope, InputParamsScope, TasksScope, OutputParamsScope>,
-    DagFactory<ContextualScope, InputParamsScope, OutputParamsScope>
-> {
+> extends TemplateBodyBuilder<ContextualScope, "dag", InputParamsScope, TasksScope, OutputParamsScope, any> {
+    private readonly taskBuilder: TaskBuilder<ContextualScope, TasksScope, any, any>;
+    private addExternalTask!: OmitThisParameter<
+        TaskBuilder<ContextualScope, TasksScope, any, any>["addExternalTask"]
+    >;
+    private addInternalTask: OmitThisParameter<
+        TaskBuilder<ContextualScope, TasksScope, any, any>["addInternalTask"]
+    >;
+
     constructor(
-        public readonly contextualScope: ContextualScope,
-        public readonly inputsScope: InputParamsScope,
-        public readonly tasksScope: TasksScope,
-        public readonly bodyScope: NamedTask[],
-        public readonly outputsScope: OutputParamsScope
+        contextualScope: ContextualScope,
+        inputs: InputParamsScope,
+        bodyScope: TasksScope,
+        orderedTasks: NamedTask[],
+        outputs: OutputParamsScope
     ) {
-        super(contextualScope, tasksScope, bodyScope,
-            new DagFactory<ContextualScope, InputParamsScope, OutputParamsScope>(inputsScope, outputsScope));
+        super("dag" as const, contextualScope, inputs, bodyScope, outputs);
+        this.taskBuilder =
+            new TaskBuilder(contextualScope, bodyScope, orderedTasks, new DagFactory(inputs, outputs));
+
+        this.addExternalTask = this.taskBuilder.addExternalTask.bind(this.taskBuilder);
+        this.addInternalTask = this.taskBuilder.addInternalTask.bind(this.taskBuilder);
     }
 
-    addParameterOutput<T extends PlainObject, Name extends string>(
-        name: Name,
-        parameter: string,
-        t: ZodType<T>,
-        descriptionValue?: string
-    ):
-        DagBuilder<
-            ContextualScope,
-            InputParamsScope,
-            TasksScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
-        > {
-        return new DagBuilder(
-            this.contextualScope,
-            this.inputsScope,
-            this.tasksScope,
-            this.bodyScope,
-            {
-                ...this.outputsScope,
-                [name as string]: {
-                    type: t,
-                    fromWhere: "parameter" as const,
-                    parameter,
-                    description: descriptionValue
-                }
-            }
-        );
-    }
 
-    addExpressionOutput<T extends PlainObject, Name extends string>(
-        name: Name,
-        expression: string,
-        t: ZodType<T>,
-        descriptionValue?: string
-    ):
-        DagBuilder<
-            ContextualScope,
-            InputParamsScope,
-            TasksScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
-        > {
-        return new DagBuilder(
-            this.contextualScope,
-            this.inputsScope,
-            this.tasksScope,
-            this.bodyScope,
-            {
-                ...this.outputsScope,
-                [name as string]: {
-                    type: t,
-                    fromWhere: "expression" as const,
-                    expression,
-                    description: descriptionValue
-                }
-            }
-        );
+    getTasks() {
+        return this.taskBuilder.getTasks();
     }
 }

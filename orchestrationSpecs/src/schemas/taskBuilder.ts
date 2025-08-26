@@ -53,6 +53,15 @@ export type NamedTask<
     Extra extends Record<string, any> = {}
 > = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
 
+export type ParamsFromContextFn<S extends TasksOutputsScope,
+    TWorkflow extends Workflow<any, any, any>,
+    TKey extends Extract<keyof TWorkflow["templates"], string>,
+    LoopT extends PlainObject = never
+> = (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
+    ParamsWithLiteralsOrExpressions<
+        z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
+    >;
+
 /**
  * Base builder:
  *  - C: contextual scope
@@ -60,16 +69,16 @@ export type NamedTask<
  *  - Self: the *concrete* subclass type (CRTP)
  *  - Factory: a factory that can rebind `Self` to a new `S`
  */
-export abstract class TaskBuilder<
+export class TaskBuilder<
     C extends WorkflowAndTemplatesScope,
     S extends TasksOutputsScope,
     Self,
     Factory extends TaskBuilderFactory<C, Self>
 > {
-    protected constructor(
+    constructor(
         protected readonly contextualScope: C,
         protected readonly tasksScope: S,
-        protected readonly bodyScope: NamedTask[],
+        protected readonly orderedTaskList: NamedTask[],
         protected readonly factory: Factory
     ) {}
 
@@ -87,12 +96,7 @@ export abstract class TaskBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         workflowIn: UniqueNameConstraintOutsideDeclaration<Name, S, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
-        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S,
-            (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<
-                    z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
-                >
-        >,
+        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S, ParamsFromContextFn<S, TWorkflow, TKey, LoopT>>,
         loopWith?: LoopWithUnion<LoopT>,
         when?: SimpleExpression<boolean>
     ): UniqueNameConstraintOutsideDeclaration<
@@ -170,7 +174,7 @@ export abstract class TaskBuilder<
         const nameStr = name as string;
 
         // runtime tasks list
-        this.bodyScope.push(this.onTaskPushed(templateCall, when));
+        this.orderedTaskList.push(this.onTaskPushed(templateCall, when));
 
         // type-level output description
         const taskDef: TasksWithOutputs<TKey, OUT> = {
@@ -184,7 +188,7 @@ export abstract class TaskBuilder<
         } as ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>;
 
         // factory returns the SAME subclass type, rebound to nextScope
-        return this.factory.create(this.contextualScope, nextScope, this.bodyScope);
+        return this.factory.create(this.contextualScope, nextScope, this.orderedTaskList);
     }
 
     protected buildTasksWithOutputs<LoopT extends PlainObject = never>(
@@ -206,7 +210,7 @@ export abstract class TaskBuilder<
     }
 
     public getTasks() {
-        return { scope: this.tasksScope, taskList: this.bodyScope };
+        return { scope: this.tasksScope, taskList: this.orderedTaskList };
     }
 
     protected callTemplate<

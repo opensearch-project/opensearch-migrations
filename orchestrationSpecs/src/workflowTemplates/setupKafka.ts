@@ -14,4 +14,4 @@ export const SetupKafka = WorkflowBuilder.create({
         .addOptionalInput("useKraft", s=>true)
         .addDag(b=>b)
     )
-);
+    .getFullScope();

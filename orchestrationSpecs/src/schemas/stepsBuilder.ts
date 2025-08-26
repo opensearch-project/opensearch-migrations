@@ -218,47 +218,19 @@ export class StepsBuilder<
         ) as any;
     }
 
-    addParameterOutput<T extends PlainObject, Name extends string>(
-        name: Name,
-        parameter: string,
-        t: ZodType<T>,
-        descriptionValue?: string
-    ):
-        StepsBuilder<
-            ContextualScope,
-            InputParamsScope,
-            StepsScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
-        > {
-        return new StepsBuilder(
-            this.contextualScope,
-            this.inputsScope,
-            this.bodyScope,
-            this.stepGroups,
-            {
-                ...this.outputsScope,
-                [name as string]: {
-                    type: t,
-                    fromWhere: "parameter" as const,
-                    parameter,
-                    description: descriptionValue
-                }
-            }
-        );
-    }
-
     addExpressionOutput<T extends PlainObject, Name extends string>(
-        name: Name,
-        expression: string,
-        t: ZodType<T>,
+        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
+        expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, BaseExpression<T>>,
+        t: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, ZodType<T>>,
         descriptionValue?: string
     ):
-        StepsBuilder<
-            ContextualScope,
-            InputParamsScope,
-            StepsScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
-        > {
+        UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
+            StepsBuilder<
+                ContextualScope,
+                InputParamsScope,
+                StepsScope,
+                ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>>>
+    {
         return new StepsBuilder(
             this.contextualScope,
             this.inputsScope,
@@ -273,7 +245,7 @@ export class StepsBuilder<
                     description: descriptionValue
                 }
             }
-        );
+        ) as any;
     }
 
     getBody(): { body: { steps: StepGroup[] } } {
