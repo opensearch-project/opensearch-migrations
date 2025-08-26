@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
+import { clusterSource, clusterTarget, metadataStatus, sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
 
 function useFetchData<T>(
   fetchFn: (sessionName: string) => Promise<{response: {status: number}, data: T}>,
@@ -43,6 +43,20 @@ function useFetchData<T>(
   return { isLoading, data, error };
 }
 
+export function useSourceCluster(sessionName: string) {
+  const fetchSourceCluster = async (name: string) => {
+    return await clusterSource({ path: {session_name: name } });
+  }
+  return useFetchData(fetchSourceCluster, sessionName, 'source cluster');
+}
+
+export function useTargetCluster(sessionName: string) {
+  const fetchTargetCluster = async (name: string) => {
+    return await clusterTarget({ path: {session_name: name } });
+  }
+  return useFetchData(fetchTargetCluster, sessionName, 'target cluster');
+}
+
 export function useSessionOverview(sessionName: string) {
   const fetchSession = async (name: string) => {
     return await sessionGet({ path: { session_name: name } });
@@ -57,4 +71,12 @@ export function useSnapshotStatus(sessionName: string) {
   };
 
   return useFetchData(fetchSnapshot, sessionName, 'snapshot status');
+}
+
+export function useMetadataStatus(sessionName: string) {
+  const fetchMetadata = async (name: string) => {
+    return await metadataStatus({ path: {session_name: name } });
+  };
+
+  return useFetchData(fetchMetadata, sessionName, 'metadata status');
 }

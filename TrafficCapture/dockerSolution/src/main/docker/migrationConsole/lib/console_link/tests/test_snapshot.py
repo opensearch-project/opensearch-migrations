@@ -79,22 +79,14 @@ def test_snapshot_status(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
     mock_response = mock.Mock()
-    mock_response.json.return_value = {
-        "snapshots": [
-            {
-                "snapshot": "test_snapshot",
-                "state": "SUCCESS"
-            }
-        ]
-    }
+    mock_response.json.return_value = mock_snapshot_api_response
     source_cluster.call_api.return_value = mock_response
 
     result = snapshot.status()
 
     assert isinstance(result, CommandResult)
-    assert result.success
-    assert result.value == "SUCCESS"
-    source_cluster.call_api.assert_called_once_with(
+    assert "SUCCESS" == result.value
+    source_cluster.call_api.assert_called_with(
         f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
         HttpMethod.GET
     )

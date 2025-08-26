@@ -9,7 +9,7 @@ import { DateDisplay, TextDisplay } from './statusComponents';
 export default function SessionOverviewView({ sessionName }: Readonly<SessionStatusProps>) {
   const { isLoading, data: sessionData, error } = useSessionOverview(sessionName);
 
-  const fields: StatusFieldDefinition<typeof sessionData>[] = [
+  const fields: StatusFieldDefinition[] = [
     { 
       label: 'Session',
       value: <TextDisplay text={sessionData?.name} />

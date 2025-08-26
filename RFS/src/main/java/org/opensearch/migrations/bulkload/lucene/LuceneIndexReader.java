@@ -64,9 +64,9 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
-    default Flux<RfsLuceneDocument> readDocuments(int startDocIdx) {
+    default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName, int startDocIdx) {
         return Flux.using(
-            this::getReader,
+            () -> this.getReader(segmentsFileName),
             reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
                 try {
@@ -77,11 +77,11 @@ public interface LuceneIndexReader {
         });
     }
 
-    default Flux<RfsLuceneDocument> readDocuments() {
-        return readDocuments(0);
+    default Flux<RfsLuceneDocument> readDocuments(String segmentsFileName) {
+        return readDocuments(segmentsFileName, 0);
     }
 
-    LuceneDirectoryReader getReader() throws IOException;
+    LuceneDirectoryReader getReader(String segmentsFileName) throws IOException;
 
     @Slf4j
     @AllArgsConstructor

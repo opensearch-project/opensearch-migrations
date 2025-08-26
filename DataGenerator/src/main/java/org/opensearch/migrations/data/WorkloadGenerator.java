@@ -6,12 +6,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.data.workloads.Workload;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 
 @Slf4j
 @AllArgsConstructor
@@ -32,7 +36,7 @@ public class WorkloadGenerator {
                 .stream()
                 .map(indexName -> generateDocs(indexName, workloadInstance, options))
                 .flatMap(List::stream)
-                .collect(Collectors.toList());
+                .toList();
             allDocs.addAll(docs);
         }
 
@@ -41,7 +45,7 @@ public class WorkloadGenerator {
         log.info("All documents completed");
     }
 
-    private List<CompletableFuture<?>> generateDocs(String indexName, Workload workload, WorkloadOptions options) {
+    private List<CompletableFuture<OpenSearchClient.BulkResponse>> generateDocs(String indexName, Workload workload, WorkloadOptions options) {
         // This happens inline to be sure the index exists before docs are indexed on it
         var indexRequestDoc = workload.createIndex(options.getIndex().indexSettings.deepCopy());
         log.atInfo().setMessage("Creating index {} with {}").addArgument(indexName).addArgument(indexRequestDoc).log();
@@ -56,16 +60,20 @@ public class WorkloadGenerator {
                 var docId = docIdCounter.incrementAndGet();
                 var type = options.getDefaultDocType();
                 var routing = options.getDefaultDocRouting();
-                return new BulkDocSection(indexName + "_" + docId, indexName, type, doc.toString(), routing);
+                return IndexOp.builder()
+                    .operation(IndexOperationMeta.builder()
+                        .index(indexName)
+                        .id(indexName + "_" + docId)
+                        .type(type)
+                        .routing(routing)
+                        .build())
+                    .document(new ObjectMapper().convertValue(doc, new TypeReference<>() {}))
+                    .build();
             })
             .collect(Collectors.toList());
 
-        var bulkDocGroups = new ArrayList<List<BulkDocSection>>();
-        for (int i = 0; i < allDocs.size(); i += options.getMaxBulkBatchSize()) {
-            bulkDocGroups.add(allDocs.subList(i, Math.min(i + options.getMaxBulkBatchSize(), allDocs.size())));
-        }
-
-        return bulkDocGroups.stream()
+        return Flux.fromIterable(allDocs)
+            .buffer(options.getMaxBulkBatchSize())
             .map(docs -> {
                 var sendFuture = client.sendBulkRequest(indexName, docs, null).toFuture();
                 if (options.isRefreshAfterEachWrite()) {
@@ -76,6 +84,7 @@ public class WorkloadGenerator {
                 }
                 return sendFuture;
             })
-            .collect(Collectors.toList());
+            .collectList()
+            .block();
     }
 }
