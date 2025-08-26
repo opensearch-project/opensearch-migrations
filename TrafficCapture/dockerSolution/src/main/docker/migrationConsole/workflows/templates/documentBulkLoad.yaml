@@ -378,7 +378,7 @@ spec:
                     from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
                     
                     status = get_detailed_status_obj(Environment(config_file="/config/migration_services.yaml").target_cluster,
-                                                     True
+                                                     True,
                                                      "{{=inputs.parameters['session-name']}}")
                     print(status)
                     all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
