@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import Dict, Optional, Tuple
 
 from console_link.models.schema_tools import contains_one_of
-from console_link.models.step_state import StepState
+from console_link.models.step_state import StepStateWithPause
 from console_link.models.command_result import CommandResult
 
 from cerberus import Validator
@@ -81,7 +81,7 @@ class Backfill(ABC):
 
 
 class BackfillOverallStatus(BaseModel):
-    status: StepState
+    status: StepStateWithPause
     percentage_completed: float
     eta_ms: Optional[float] = None
     started: Optional[datetime] = Field(

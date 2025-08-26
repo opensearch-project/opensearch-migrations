@@ -9,7 +9,7 @@ import requests
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
-from console_link.models.step_state import StepState
+from console_link.models.step_state import StepStateWithPause
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
                                               WorkingIndexDoesntExist, compute_dervived_values)
 from console_link.models.ecs_service import ECSService
@@ -346,12 +346,13 @@ class TestComputeDerivedValues:
         total = 0
         completed = 0
         started_epoch = None
+        active_workers = False
         
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
-            self.mock_cluster, self.test_index, total, completed, started_epoch
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
         
-        assert status == StepState.COMPLETED
+        assert status == StepStateWithPause.COMPLETED
         assert percentage_completed == 100.0
         assert eta_ms is None
         assert finished_iso is not None  # Should have a timestamp for completion
@@ -361,12 +362,13 @@ class TestComputeDerivedValues:
         total = 10
         completed = 10
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        active_workers = False
         
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
-            self.mock_cluster, self.test_index, total, completed, started_epoch
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
         
-        assert status == StepState.COMPLETED
+        assert status == StepStateWithPause.COMPLETED
         assert percentage_completed == 100.0
         assert eta_ms is None
         assert finished_iso is not None
@@ -376,12 +378,29 @@ class TestComputeDerivedValues:
         total = 10
         completed = 5
         started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        active_workers = True
         
         finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
-            self.mock_cluster, self.test_index, total, completed, started_epoch
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
         )
         
-        assert status == StepState.RUNNING
+        assert status == StepStateWithPause.RUNNING
         assert percentage_completed == 50.0
         assert eta_ms is not None  # Should have an ETA
+        assert finished_iso is None  # Not completed yet
+    
+    def test_partially_completed_paused(self):
+        """Test compute_dervived_values when some indices are completed but workers are paused."""
+        total = 10
+        completed = 5
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        active_workers = False
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
+        )
+        
+        assert status == StepStateWithPause.PAUSED
+        assert percentage_completed == 50.0
+        assert eta_ms is None  # No ETA when paused
         assert finished_iso is None  # Not completed yet

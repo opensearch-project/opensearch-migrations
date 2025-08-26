@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 import requests
 
-from console_link.models.step_state import StepState
+from console_link.models.step_state import StepStateWithPause
 from console_link.models.backfill_base import Backfill, BackfillOverallStatus, BackfillStatus, DeepStatusNotYetAvailable
 from console_link.models.client_options import ClientOptions
 from console_link.models.cluster import Cluster, HttpMethod
@@ -181,7 +181,11 @@ class K8sRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
     
     def build_backfill_status(self) -> BackfillOverallStatus:
-        return get_detailed_status_obj(target_cluster=self.target_cluster)
+        deploymentStatus = self.kubectl_runner.retrieve_deployment_status()
+        active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
+        if deploymentStatus is not None:
+            active_workers = deploymentStatus.desired != 0
+        return get_detailed_status_obj(self.target_cluster, active_workers)
 
 
 class ECSRFSBackfill(RFSBackfill):
@@ -243,11 +247,18 @@ class ECSRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
     
     def build_backfill_status(self) -> BackfillOverallStatus:
-        return get_detailed_status_obj(target_cluster=self.target_cluster)
+        deploymentStatus = self.ecs_client.get_instance_statuses()
+        active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
+        if deploymentStatus is not None:
+            active_workers = deploymentStatus.desired != 0
+
+        return get_detailed_status_obj(self.target_cluster, active_workers)
 
 
 def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Optional[str]:
-    values = get_detailed_status_obj(target_cluster, session_name)
+    values = get_detailed_status_obj(target_cluster,
+                                     True,  # Assume active workers
+                                     session_name)
     return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
 
 
@@ -321,7 +332,9 @@ class ShardStatusCounts:
     unclaimed: int = 0
 
 
-def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillOverallStatus:
+def get_detailed_status_obj(target_cluster,
+                            active_workers: bool = True,
+                            session_name: str = "") -> BackfillOverallStatus:
     # Check whether the working state index exists. If not, we can't run queries.
     index_to_check = ".migrations_working_state" + ("_" + session_name if session_name else "")
     logger.info("Checking status for index: " + index_to_check)
@@ -362,7 +375,8 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
                                                                                  index_to_check,
                                                                                  counts.total,
                                                                                  counts.completed,
-                                                                                 started_epoch)
+                                                                                 started_epoch,
+                                                                                 active_workers)
 
     return BackfillOverallStatus(
         status=status,
@@ -377,7 +391,7 @@ def get_detailed_status_obj(target_cluster, session_name: str = "") -> BackfillO
     )
 
 
-def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch):
+def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
     # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
@@ -388,12 +402,16 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
         )
         percentage_completed = 100.0
         eta_ms = None
-        status = StepState.COMPLETED
+        status = StepStateWithPause.COMPLETED
     else:
         finished_iso = None
         percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
-        eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed)
-        status = StepState.RUNNING
+        if active_workers:
+            eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed)
+            status = StepStateWithPause.RUNNING
+        else:
+            eta_ms = None
+            status = StepStateWithPause.PAUSED
     return finished_iso, percentage_completed, eta_ms, status
 
 
@@ -448,7 +466,7 @@ def generate_status_queries():
 
 def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
     d = get_detailed_status_obj(target_cluster, session_name)
-    return d['total'] == d['completed'] and d['incomplete'] == 0 and d['in progress'] == 0 and d['unclaimed'] == 0
+    return d.shard_total == d.shard_complete and d.shard_in_progress == 0 and d.shard_waiting == 0
 
 
 def perform_archive(target_cluster: Cluster,
