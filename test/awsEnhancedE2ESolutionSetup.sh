@@ -10,7 +10,7 @@ script_abs_path=$(readlink -f "$0")
 TEST_DIR_PATH=$(dirname "$script_abs_path")
 ROOT_REPO_PATH=$(dirname "$TEST_DIR_PATH")
 TMP_DIR_PATH="$TEST_DIR_PATH/tmp"
-EC2_SOURCE_CDK_PATH="$ROOT_REPO_PATH/test/opensearch-cluster-cdk"
+EC2_SOURCE_CDK_PATH="$ROOT_REPO_PATH/test/amazon-opensearch-service-sample-cdk"
 MIGRATION_CDK_PATH="$ROOT_REPO_PATH/deployment/cdk/opensearch-service-migration"
 
 # Enhanced functions for target cluster deployment
@@ -22,22 +22,28 @@ deploy_target_cluster() {
     echo "Deploying target OpenSearch 2.19 cluster..."
     
     # Clone or update AWS Solutions CDK if needed
-    if [ ! -d "opensearch-cluster-cdk" ]; then
-        git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
+    if [ ! -d "$EC2_SOURCE_CDK_PATH" ]; then
+        echo "Cloning AWS Solutions CDK to $EC2_SOURCE_CDK_PATH"
+        git clone https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git "$EC2_SOURCE_CDK_PATH"
     else
-        echo "Repo already exists, updating..."
-        cd opensearch-cluster-cdk && git pull && cd ..
+        echo "Repo already exists at $EC2_SOURCE_CDK_PATH, updating..."
+        cd "$EC2_SOURCE_CDK_PATH" && git pull && cd "$TEST_DIR_PATH"
     fi
     
-    cd opensearch-cluster-cdk && git checkout migration-es && git pull
+    cd "$EC2_SOURCE_CDK_PATH"
     npm install
     
-    # Deploy target cluster
-    echo "Deploying target cluster with context: $target_context_file, ID: $target_context_id"
-    cdk deploy "*" --c contextFile="$target_context_file" --c contextId="$target_context_id" --require-approval never
+    # Copy context file to CDK directory (AWS Samples CDK expects cdk.context.json)
+    echo "Copying target context to CDK directory as cdk.context.json"
+    cp "$target_context_file" "./cdk.context.json"
+    
+    # Deploy target cluster using AWS Samples CDK approach
+    echo "Deploying target cluster with context file: cdk.context.json"
+    cdk deploy "*" --require-approval never --concurrency 3
     
     if [ $? -ne 0 ]; then
         echo "Error: deploy target cluster failed, exiting."
+        cd "$TEST_DIR_PATH"
         exit 1
     fi
     
@@ -56,13 +62,18 @@ deploy_migration_assistant() {
     ./buildDockerImages.sh
     if [ $? -ne 0 ]; then
         echo "Error: building docker images failed, exiting."
+        cd "$TEST_DIR_PATH"
         exit 1
     fi
     
     npm install
+    
+    # Migration context file is already absolute path
+    echo "Deploying Migration Assistant with context: $migration_context_file, ID: $migration_context_id"
     cdk deploy "*" --c contextFile="$migration_context_file" --c contextId="$migration_context_id" --require-approval never --concurrency 3
     if [ $? -ne 0 ]; then
         echo "Error: deploying migration stacks failed, exiting."
+        cd "$TEST_DIR_PATH"
         exit 1
     fi
     
@@ -303,9 +314,19 @@ if [ "$DEPLOY_TARGET_ONLY" = true ] || [ "$DEPLOY_BOTH" = true ]; then
     
     # Prepare target context file with stage substitution
     TARGET_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedTargetContext.json"
-    cp "$TARGET_CONTEXT_FILE" "$TARGET_GEN_CONTEXT_FILE"
+    
+    # Handle both relative and absolute paths for the source context file
+    if [[ "$TARGET_CONTEXT_FILE" = /* ]]; then
+        # Already absolute path
+        cp "$TARGET_CONTEXT_FILE" "$TARGET_GEN_CONTEXT_FILE"
+    else
+        # Relative path, make it absolute from TEST_DIR_PATH
+        cp "$TEST_DIR_PATH/$TARGET_CONTEXT_FILE" "$TARGET_GEN_CONTEXT_FILE"
+    fi
+    
     sed -i -e "s/<STAGE>/$STAGE/g" "$TARGET_GEN_CONTEXT_FILE"
     
+    # Pass the generated context file (already absolute path)
     deploy_target_cluster "$TARGET_GEN_CONTEXT_FILE" "$TARGET_CONTEXT_ID" "$STAGE"
     
     # Extract target cluster information for migration context
@@ -328,7 +349,16 @@ if [ "$DEPLOY_MIGRATION_ONLY" = true ] || [ "$DEPLOY_BOTH" = true ]; then
     
     # Prepare migration context file with substitutions
     MIGRATION_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedMigrationContext.json"
-    cp "$MIGRATION_CONTEXT_FILE" "$MIGRATION_GEN_CONTEXT_FILE"
+    
+    # Handle both relative and absolute paths for the source migration context file
+    if [[ "$MIGRATION_CONTEXT_FILE" = /* ]]; then
+        # Already absolute path
+        cp "$MIGRATION_CONTEXT_FILE" "$MIGRATION_GEN_CONTEXT_FILE"
+    else
+        # Relative path, make it absolute from TEST_DIR_PATH
+        cp "$TEST_DIR_PATH/$MIGRATION_CONTEXT_FILE" "$MIGRATION_GEN_CONTEXT_FILE"
+    fi
+    
     sed -i -e "s/<STAGE>/$STAGE/g" "$MIGRATION_GEN_CONTEXT_FILE"
     
     # If we have target cluster info from previous deployment, use it
@@ -337,6 +367,7 @@ if [ "$DEPLOY_MIGRATION_ONLY" = true ] || [ "$DEPLOY_BOTH" = true ]; then
         sed -i -e "s|<TARGET_CLUSTER_ENDPOINT>|https://$TARGET_ENDPOINT:443|g" "$MIGRATION_GEN_CONTEXT_FILE"
     fi
     
+    # Pass the generated context file (already absolute path)
     deploy_migration_assistant "$MIGRATION_GEN_CONTEXT_FILE" "$MIGRATION_CONTEXT_ID" "$STAGE"
 fi
 
