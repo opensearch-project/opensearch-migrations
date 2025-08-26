@@ -38,7 +38,7 @@ export default function WorkflowWizard({
 
   // Update URL when activeStepIndex changes
   useEffect(() => {
-    const current = new URLSearchParams(Array.from(searchParams?.entries() || []));
+    const current = new URLSearchParams(Array.from(searchParams?.entries() ?? []));
     current.set("step", activeStepIndex.toString());
     
     // If we have a sessionName, keep it in the URL
@@ -94,7 +94,7 @@ export default function WorkflowWizard({
   return (
     <Wizard
       steps={enhancedSteps}
-      i18nStrings={i18nStrings || defaultI18nStrings}
+      i18nStrings={i18nStrings ?? defaultI18nStrings}
       onCancel={handleCancel}
       onNavigate={handleNavigate}
       onSubmit={handleSubmit}

@@ -1,10 +1,10 @@
 "use client";
 
-import { Box, Button, SpaceBetween } from "@cloudscape-design/components";
+import { Box, SpaceBetween } from "@cloudscape-design/components";
 
 export interface WizardStepIndicatorProps {
-  stepIndex: number;
-  totalSteps: number;
+  readonly stepIndex: number;
+  readonly totalSteps: number;
 }
 
 export default function WizardStepIndicator({ 

@@ -1,4 +1,5 @@
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import os
 from typing import Dict, Optional
@@ -6,7 +7,8 @@ from typing import Dict, Optional
 
 import requests
 
-from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.step_state import StepStateWithPause
+from console_link.models.backfill_base import Backfill, BackfillOverallStatus, BackfillStatus, DeepStatusNotYetAvailable
 from console_link.models.client_options import ClientOptions
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.schema_tools import contains_one_of
@@ -106,6 +108,9 @@ class DockerRFSBackfill(RFSBackfill):
     
     def archive(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
+
+    def build_backfill_status(self, *args) -> BackfillStatus:
+        raise NotImplementedError()
     
 
 class RfsWorkersInProgress(Exception):
@@ -174,6 +179,13 @@ class K8sRFSBackfill(RFSBackfill):
         if deployment_status.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_str))
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
+    
+    def build_backfill_status(self) -> BackfillOverallStatus:
+        deployment_status = self.kubectl_runner.retrieve_deployment_status()
+        active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
+        if deployment_status is not None:
+            active_workers = deployment_status.desired != 0
+        return get_detailed_status_obj(self.target_cluster, active_workers)
 
 
 class ECSRFSBackfill(RFSBackfill):
@@ -233,69 +245,228 @@ class ECSRFSBackfill(RFSBackfill):
         elif instance_statuses.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
+    
+    def build_backfill_status(self) -> BackfillOverallStatus:
+        deployment_status = self.ecs_client.get_instance_statuses()
+        active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
+        if deployment_status is not None:
+            active_workers = deployment_status.desired != 0
+
+        return get_detailed_status_obj(self.target_cluster, active_workers)
 
 
 def get_detailed_status(target_cluster: Cluster, session_name: str = "") -> Optional[str]:
-    values = get_detailed_status_dict(target_cluster, session_name)
-    return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
+    values = get_detailed_status_obj(target_cluster,
+                                     True,  # Assume active workers
+                                     session_name)
+    return "\n".join([f"Backfill {key}: {value}" for key, value in values.__dict__.items() if value is not None])
 
 
-def get_detailed_status_dict(target_cluster: Cluster, session_name: str = "") -> Optional[Dict]:
+def _get_shard_setup_started_epoch(cluster, index_name: str) -> Optional[int]:
+    """
+    Try to read the special shard_setup doc and take its completedAt (epoch seconds) as 'started'.
+    Returns None if not present.
+    """
+    try:
+        resp = cluster.call_api(f"/{index_name}/_doc/shard_setup")
+        body = resp.json()
+        src = body.get("_source") or {}
+        started_epoch = src.get("completedAt")
+        if isinstance(started_epoch, (int, float)) and started_epoch > 0:
+            return int(started_epoch)
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"shard_setup doc not available: {e}")
+    except Exception as e:
+        logger.debug(f"Failed to parse shard_setup doc: {e}")
+    return None
+
+
+def _get_max_completed_epoch(cluster, index_name: str) -> Optional[int]:
+    """
+    Return the maximum completedAt (epoch seconds) across all docs.
+    Only used once we've confirmed everything is completed.
+    """
+    body = {
+        "size": 0,
+        "aggs": {"max_completed": {"max": {"field": "completedAt"}}},
+        "query": {"exists": {"field": "completedAt"}},
+    }
+    try:
+        resp = cluster.call_api(
+            f"/{index_name}/_search",
+            data=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+        aggs = resp.json().get("aggregations", {})
+        val = aggs.get("max_completed", {}).get("value")
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"max completedAt aggregation failed: {e}")
+    except Exception as e:
+        logger.debug(f"Failed to parse max completedAt aggregation: {e}")
+    return None
+
+
+def _estimate_eta_ms_from_shards(started_epoch: Optional[int], pct: float) -> Optional[float]:
+    """
+    Simple ETA based on shard completion rate:
+      remaining_time ~= elapsed * ((100 - pct) / pct)
+    """
+    if not started_epoch:
+        return None
+    if pct <= 0.0 or pct >= 100.0:
+        return None
+    now = datetime.now(timezone.utc).timestamp()
+    elapsed_sec = max(now - started_epoch, 0.001)
+    remaining_factor = (100.0 - pct) / pct
+    return elapsed_sec * remaining_factor * 1000.0
+
+
+@dataclass
+class ShardStatusCounts:
+    total: int = 0
+    completed: int = 0
+    incomplete: int = 0
+    in_progress: int = 0
+    unclaimed: int = 0
+
+
+def get_detailed_status_obj(target_cluster,
+                            active_workers: bool = True,
+                            session_name: str = "") -> BackfillOverallStatus:
     # Check whether the working state index exists. If not, we can't run queries.
     index_to_check = ".migrations_working_state" + ("_" + session_name if session_name else "")
     logger.info("Checking status for index: " + index_to_check)
     try:
         target_cluster.call_api("/" + index_to_check)
-    except requests.exceptions.RequestException:
-        logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
-        return None
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"Working state index does not yet exist, deep status checks can't be performed. {e}")
+        raise DeepStatusNotYetAvailable
 
-    current_epoch_seconds = int(datetime.now().timestamp())
-    incomplete_query = {"query": {
-        "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}
-    }}
-    completed_query = {"query": {
-        "bool": {"must": [{"exists": {"field": "completedAt"}}]}
-    }}
-    total_query = {"query": {"match_all": {}}}
-    in_progress_query = {"query": {
-        "bool": {"must": [
-            {"range": {"expiration": {"gte": current_epoch_seconds}}},
-            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-        ]}
-    }}
-    unclaimed_query = {"query": {
-        "bool": {"must": [
-            {"range": {"expiration": {"lt": current_epoch_seconds}}},
-            {"bool": {"must_not": [{"exists": {"field": "completedAt"}}]}}
-        ]}
-    }}
+    total_key = "total"
+    completed_key = "completed"
+    incomplete_key = "incomplete"
+    unclaimed_key = "unclaimed"
+    in_progress_key = "in progress"
+
+    queries = generate_status_queries()
+    values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
+    if None in values.values():
+        logger.warning(f"Failed to get values for some queries: {values}")
+
+    import json
+    logger.error(f"query response {json.dumps(values)}")
+
+    counts = ShardStatusCounts(
+        total=values.get(total_key, 0) or 0,
+        completed=values.get(completed_key, 0) or 0,
+        incomplete=values.get(incomplete_key, 0) or 0,
+        in_progress=values.get(in_progress_key, 0) or 0,
+        unclaimed=values.get(unclaimed_key, 0) or 0,
+    )
+
+    # started: read shard_setup.completedAt if available
+    started_epoch = _get_shard_setup_started_epoch(target_cluster, index_to_check)
+    started_iso = datetime.fromtimestamp(started_epoch, tz=timezone.utc).isoformat() if started_epoch else None
+
+    # finished: only if everything is done, take max completedAt
+    finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(target_cluster,
+                                                                                 index_to_check,
+                                                                                 counts.total,
+                                                                                 counts.completed,
+                                                                                 started_epoch,
+                                                                                 active_workers)
+
+    return BackfillOverallStatus(
+        status=status,
+        percentage_completed=percentage_completed,
+        eta_ms=eta_ms,
+        started=started_iso,
+        finished=finished_iso,
+        shard_total=counts.total,
+        shard_complete=counts.completed,
+        shard_in_progress=counts.in_progress,
+        shard_waiting=counts.unclaimed,
+    )
+
+
+def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool):
+    # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
+    if total == 0 or (total > 0 and completed >= total):
+        max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
+        finished_iso = (
+            datetime.fromtimestamp(max_completed_epoch, tz=timezone.utc).isoformat()
+            if max_completed_epoch
+            else datetime.now(timezone.utc).isoformat()
+        )
+        percentage_completed = 100.0
+        eta_ms = None
+        status = StepStateWithPause.COMPLETED
+    else:
+        finished_iso = None
+        percentage_completed = (completed / total * 100.0) if total > 0 else 0.0
+        if active_workers:
+            eta_ms = _estimate_eta_ms_from_shards(started_epoch, percentage_completed)
+            status = StepStateWithPause.RUNNING
+        else:
+            eta_ms = None
+            status = StepStateWithPause.PAUSED
+    return finished_iso, percentage_completed, eta_ms, status
+
+
+EXTRACT_UNIQUE_INDEX_SHARD_SCRIPT = (
+    "def id = doc['_id'].value;"
+    "int a = id.indexOf('__');"
+    "int b = id.indexOf('__', a + 2);"
+    "if (a > -1 && b > -1) { return id.substring(0, a) + '__' + id.substring(a + 2, b); }"
+)
+
+
+def with_uniques(filter_query):
+    return {
+        "size": 0,
+        "query": filter_query,
+        "aggs": {
+            "unique_pair_count": {"cardinality": {"script": {"lang": "painless", "source":
+                                                             EXTRACT_UNIQUE_INDEX_SHARD_SCRIPT}}}
+        },
+    }
+
+
+def generate_status_queries():
+    current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
+    total_query = with_uniques({"bool": {"must_not": [{"match": {"_id": "shard_setup"}},
+                                                      {"exists": {"field": "successor_items"}}]}})
+    complete_query = with_uniques({"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                                            "must_not": [{"match": {"_id": "shard_setup"}},
+                                                         {"exists": {"field": "successor_items"}}]}})
+    incomplete_query = with_uniques({"bool": {"must_not": [{"exists": {"field": "completedAt"}},
+                                                           {"match": {"_id": "shard_setup"}}]}})
+    in_progress_query = with_uniques({"bool": {"must": [
+        {"range": {"expiration": {"gte": current_epoch_seconds}}},
+        {"bool": {"must_not": [{"exists": {"field": "completedAt"}},
+                               {"match": {"_id": "shard_setup"}}]}}
+    ]}})
+    unclaimed_query = with_uniques({"bool": {"must": [
+        {"range": {"expiration": {"lt": current_epoch_seconds}}},
+        {"bool": {"must_not": [{"exists": {"field": "completedAt"}},
+                               {"match": {"_id": "shard_setup"}}]}}
+    ]}})
     queries = {
         "total": total_query,
-        "completed": completed_query,
+        "completed": complete_query,
         "incomplete": incomplete_query,
         "in progress": in_progress_query,
         "unclaimed": unclaimed_query
     }
-    values = {key: parse_query_response(queries[key], target_cluster, index_to_check, key) for key in queries.keys()}
-    logger.info(f"Values: {values}")
-    if None in values.values():
-        logger.warning(f"Failed to get values for some queries: {values}")
-    disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" + \
-                 " with the queries or the working state index"
-    # Check the various sums to make sure things add up correctly.
-    if values["incomplete"] + values["completed"] != values["total"]:
-        logger.warning(f"Incomplete ({values['incomplete']}) and completed ({values['completed']}) shards do not "
-                       f"sum to the total ({values['total']}) shards." + disclaimer)
-    if values["unclaimed"] + values["in progress"] != values["incomplete"]:
-        logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
-                       f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
-    return values
+    
+    return queries
 
 
 def all_shards_finished_processing(target_cluster: Cluster, session_name: str = "") -> bool:
-    d = get_detailed_status_dict(target_cluster, session_name)
-    return d['total'] == d['completed'] and d['incomplete'] == 0 and d['in progress'] == 0 and d['unclaimed'] == 0
+    d = get_detailed_status_obj(target_cluster, session_name=session_name)
+    return d.shard_total == d.shard_complete and d.shard_in_progress == 0 and d.shard_waiting == 0
 
 
 def perform_archive(target_cluster: Cluster,
@@ -367,7 +538,8 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
 
 def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: str) -> Optional[int]:
     try:
-        response = cluster.call_api("/" + index_name + "/_search", data=json.dumps(query),
+        logger.debug(f"Creating request: /{index_name}/_search; {query}")
+        response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
                                     headers={'Content-Type': 'application/json'})
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")

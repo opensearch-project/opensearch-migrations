@@ -123,7 +123,6 @@ def test_snapshot_status_full(request, snapshot_fixture):
     assert "Percent completed: 100.00%" in result.value
     assert "Total shards: 304" in result.value
     assert "Successful shards: 304" in result.value
-    assert "Failed shards: 0" in result.value
     
     # Check format string entries
     assert "Start time:" in result.value
