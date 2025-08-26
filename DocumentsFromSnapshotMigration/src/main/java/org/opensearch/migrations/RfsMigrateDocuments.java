@@ -244,7 +244,7 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--experimental-delta-mode" },
             converter = DeltaModeConverter.class,
-            description = "Experimental delta snapshot migration mode (UPDATES_ONLY). Requires --base-snapshot-name",
+            description = "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
             hidden = true
         )
         public DeltaMode experimentalDeltaMode = null;
