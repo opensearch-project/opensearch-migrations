@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, UTC
-import os
 from fastapi import HTTPException, Body, APIRouter
 from pydantic import BaseModel, ValidationError
 from typing import Dict, List
@@ -45,19 +44,11 @@ def single_session(session_name: str) -> Session | None:
 def create_session(session: SessionBase) -> Session:
     try:
         now = datetime.now(UTC)
-        config_file_path = "/config/migration_services.yaml"
-        env: Environment
-        if os.path.exists(config_file_path):
-            env = Environment(config_file=config_file_path)
-        else:
-            default_config: Dict = {}
-            env = Environment(config=default_config)
-
         session = Session(
             name=session.name,
             created=now,
             updated=now,
-            env=env
+            env=Environment(config_file="/config/migration_services.yaml")
         )
         session_db.create_session(session)
     except session_db.SessionNameContainsInvalidCharacters:
@@ -88,9 +79,8 @@ def update_session(session_name: str, data: Dict = Body(...)) -> Session:
                 continue
                 
             # Allow updating any other field
-            if key:
+            if hasattr(session_dict, key):
                 session_dict[key] = value
-        logger.info(f"Creating session from {session_dict}")
         updated_session = Session.model_validate(session_dict)
         session_db.update_session(updated_session)
     except ValidationError as e:

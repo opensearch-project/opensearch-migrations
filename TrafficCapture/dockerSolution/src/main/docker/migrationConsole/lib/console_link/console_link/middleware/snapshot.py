@@ -8,10 +8,9 @@ logger = logging.getLogger(__name__)
 def create(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     logger.info(f"Creating snapshot with {args=} and {kwargs=}")
     try:
-        result = snapshot.create(*args, **kwargs)
-        return CommandResult(success=True, value=result)
+        return snapshot.create(*args, **kwargs)
     except Exception as e:
-        logger.debug(f"Failure running create snapshot: {e}")
+        logger.error(f"Failure running create snapshot: {e}")
         return CommandResult(success=False, value=f"Failure running create snapshot: {e}")
 
 
@@ -25,7 +24,7 @@ def delete(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     try:
         return CommandResult(success=True, value=snapshot.delete(*args, **kwargs))
     except Exception as e:
-        logger.debug(f"Failure running delete snapshot: {e}")
+        logger.error(f"Failure running delete snapshot: {e}")
         return CommandResult(success=False, value=f"Failure running delete snapshot: {e}")
 
 
@@ -34,5 +33,5 @@ def delete_snapshot_repo(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     try:
         return CommandResult(success=True, value=snapshot.delete_snapshot_repo(*args, **kwargs))
     except Exception as e:
-        logger.debug(f"Failure running delete snapshot repo: {e}")
+        logger.error(f"Failure running delete snapshot repo: {e}")
         return CommandResult(success=False, value=f"Failure running delete snapshot repo: {e}")

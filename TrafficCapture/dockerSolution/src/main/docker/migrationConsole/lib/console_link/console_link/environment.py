@@ -56,7 +56,7 @@ class Environment:
             with open(config_file) as f:
                 self.config = yaml.safe_load(f)
                 logger.info(f"Loaded config file: {self.config}")
-        elif isinstance(config, Dict):
+        elif config:
             self.config = config
             logger.info(f"Using provided config: {self.config}")
         else:
