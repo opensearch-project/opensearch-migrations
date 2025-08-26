@@ -1,8 +1,11 @@
-from enum import Enum
-from typing import Dict, Tuple
 from abc import ABC, abstractmethod
+from datetime import datetime
+from enum import Enum
+from pydantic import BaseModel, Field, field_validator, field_serializer
+from typing import Dict, Optional, Tuple
 
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.step_state import StepStateWithPause
 from console_link.models.command_result import CommandResult
 
 from cerberus import Validator
@@ -69,5 +72,46 @@ class Backfill(ABC):
         Should fail if there are currently running operations."""
         pass
 
+    @abstractmethod
+    def build_backfill_status(self) -> BackfillStatus:
+        pass
+
     def describe(self) -> Dict:
         return self.config
+
+
+class BackfillOverallStatus(BaseModel):
+    status: StepStateWithPause
+    percentage_completed: float
+    eta_ms: Optional[float] = None
+    started: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    finished: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
+    )
+    shard_total: Optional[int] = None
+    shard_complete: Optional[int] = None
+    shard_in_progress: Optional[int] = None
+    shard_waiting: Optional[int] = None
+
+    @field_serializer('started', 'finished')
+    def serialize_datetime(self, dt: Optional[datetime]) -> str | None:
+        if dt:
+            return dt.isoformat()
+        return None
+
+    @field_validator('started', 'finished', mode='before')
+    @classmethod
+    def parse_datetime(cls, v):
+        if isinstance(v, str):
+            return datetime.fromisoformat(v)
+        return v
+
+
+class DeepStatusNotYetAvailable(Exception):
+    pass

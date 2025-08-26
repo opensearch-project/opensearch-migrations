@@ -7,6 +7,7 @@ import SessionOverviewView from "@/components/session/SessionOverviewView";
 import SnapshotStatusView from "@/components/session/SnapshotStatusView";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import MetadataStatusView from "@/components/session/MetadataStatusView";
+import BackfillStatusView from "@/components/session/BackfillStatusView";
 
 export default function ViewSessionPage() {
   return (
@@ -28,6 +29,7 @@ function ViewSessionPageInner() {
           <SessionOverviewView sessionName={sessionName} />
           <SnapshotStatusView sessionName={sessionName} />
           <MetadataStatusView sessionName={sessionName} />
+          <BackfillStatusView sessionName={sessionName} />
         </SpaceBetween>
       )}
     </SpaceBetween>
