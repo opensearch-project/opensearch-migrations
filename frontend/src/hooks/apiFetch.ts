@@ -12,14 +12,14 @@ import {
   snapshotDelete,
 } from "@/generated/api/sdk.gen";
 
-type SessionPromise<T> = (
+export type SessionPromise<T> = (
   sessionName: string,
 ) => Promise<{ response: { status: number }; data: T }>;
 
 function useFetchData<T>(
   fetchFn: SessionPromise<T>,
   sessionName: string,
-  componentName: string = 'component'
+  componentName: string = "component",
 ) {
   const [isLoading, setIsLoading] = useState(true);
   const [data, setData] = useState<T | null>(null);
@@ -29,21 +29,23 @@ function useFetchData<T>(
   useEffect(() => {
     async function fetchData() {
       if (!sessionName) {
-        setError('No session name provided');
+        setError("No session name provided");
         setIsLoading(false);
         return;
       }
-      
+
       try {
         const response = await fetchFnRef.current(sessionName);
         if (response.response.status === 200) {
           setData(response.data);
         } else {
-          setError(`API Error: ${response.response.status} - Failed to fetch ${componentName} data`);
+          setError(
+            `API Error: ${response.response.status} - Failed to fetch ${componentName} data`,
+          );
         }
       } catch (err) {
         console.error(`Error fetching ${componentName} data:`, err);
-        setError(`${err instanceof Error ? err.message : 'Unknown error'}`);
+        setError(`${err instanceof Error ? err.message : "Unknown error"}`);
       } finally {
         setIsLoading(false);
       }

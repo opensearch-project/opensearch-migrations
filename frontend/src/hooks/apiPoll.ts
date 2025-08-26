@@ -15,7 +15,7 @@ export type UsePollingOptions<T> = {
 export type UsePollingResult<T> = {
   isLoading: boolean;
   data: T | null;
-  error: Error | null;
+  error: string | null;
   isPolling: boolean;
   startPolling: () => void;
   stopPolling: () => void;
@@ -36,7 +36,7 @@ function usePolling<T>(
 ): UsePollingResult<T> {
   const [isLoading, setIsLoading] = useState(true);
   const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<Error | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState<boolean>(enabled);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
@@ -66,7 +66,7 @@ function usePolling<T>(
       if (stopWhen?.(result)) setIsPolling(false);
     } catch (e) {
       if (!mountedRef.current) return;
-      setError(e instanceof Error ? e : new Error(String(e)));
+      setError(String(e));
       if (stopOnError) setIsPolling(false);
     } finally {
       if (mountedRef.current) setIsLoading(false);

@@ -11,7 +11,7 @@ import SnapshotIndexesTable from "./SnapshotIndexesTable";
 interface SnapshotIndexesViewProps {
   isLoading: boolean;
   snapshotIndexes: SnapshotIndex[] | SnapshotIndexStatus[] | null | undefined;
-  error: Error | null;
+  error: string | null;
   snapshotStatus?: SnapshotStatus | null;
 }
 
@@ -35,7 +35,7 @@ export default function SnapshotIndexesView({
 
       {error && (
         <Alert type="error" header="Error loading indexes">
-          {String(error)}
+          {error}
         </Alert>
       )}
 

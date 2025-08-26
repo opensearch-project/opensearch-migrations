@@ -9,7 +9,7 @@ export type AuthModelType = "no_auth" | "basic_auth_arn" | "sig_v4_auth";
  * BackfillOverallStatus
  */
 export type BackfillOverallStatus = {
-  status: StepState;
+  status: StepStateWithPause;
   /**
    * Percentage Completed
    */
@@ -36,10 +36,6 @@ export type BackfillOverallStatus = {
    * Shard Complete
    */
   shard_complete?: number | null;
-  /**
-   * Shard Failed
-   */
-  shard_failed?: number | null;
   /**
    * Shard In Progress
    */
@@ -527,10 +523,6 @@ export type SnapshotStatus = {
    */
   shard_complete?: number | null;
   /**
-   * Shard Failed
-   */
-  shard_failed?: number | null;
-  /**
    * Indexes
    */
   indexes?: Array<SnapshotIndexStatus> | null;
@@ -540,6 +532,16 @@ export type SnapshotStatus = {
  * StepState
  */
 export type StepState = "Pending" | "Running" | "Completed" | "Failed";
+
+/**
+ * StepStateWithPause
+ */
+export type StepStateWithPause =
+  | "Pending"
+  | "Running"
+  | "Paused"
+  | "Completed"
+  | "Failed";
 
 /**
  * TransformationInfo

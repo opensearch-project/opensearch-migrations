@@ -289,7 +289,6 @@ def test_get_detailed_status_obj(env_with_cluster: Environment):
                       IN_PROGRESS_SUCCESSOR_COUNT)
     assert status_obj.shard_total == computed_total, f"{status_obj}"
     assert status_obj.shard_complete == COMPLETED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"
-    assert status_obj.shard_failed is None, f"{status_obj}"
     assert status_obj.shard_in_progress == (IN_PROGRESS_DOC_COUNT * SHARD_COUNT +
                                             IN_PROGRESS_SUCCESSOR_COUNT), f"{status_obj}"
     assert status_obj.shard_waiting == UNCLAIMED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"

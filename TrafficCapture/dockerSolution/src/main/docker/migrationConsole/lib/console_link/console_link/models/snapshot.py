@@ -184,6 +184,8 @@ class S3Snapshot(Snapshot):
             "--s3-repo-uri": self.s3_repo_uri,
             "--s3-region": self.s3_region,
         }
+        if self.s3_endpoint:
+            s3_command_args["--s3-endpoint"] = self.s3_endpoint
 
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)
@@ -342,8 +344,6 @@ class SnapshotStatus(BaseModel):
     data_throughput_bytes_avg_sec: Optional[float] = None
     shard_total: Optional[int] = None
     shard_complete: Optional[int] = None
-    shard_failed: Optional[int] = None
-    # Index details with their state
     indexes: Optional[List[SnapshotIndexStatus]] = None
     model_config = {
         'from_attributes': True,
@@ -460,7 +460,6 @@ class SnapshotStatus(BaseModel):
             data_throughput_bytes_avg_sec=throughput_bytes,
             shard_total=total_shards,
             shard_complete=completed_shards,
-            shard_failed=failed_shards,
             indexes=indexes
         )
 
@@ -553,7 +552,6 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
             f"Throughput: {throughput_mb:.3f} MiB/sec\n"
             f"Total shards: {snapshot_status.shard_total}\n"
             f"Successful shards: {snapshot_status.shard_complete}\n"
-            f"Failed shards: {snapshot_status.shard_failed}\n"
         )
         
         return CommandResult(success=True, value=message)

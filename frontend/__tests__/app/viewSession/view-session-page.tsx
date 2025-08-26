@@ -66,7 +66,6 @@ describe("ViewSessionPage", () => {
           finished: "2023-01-01T01:00:00Z",
           shard_total: 10,
           shard_complete: 10,
-          shard_failed: 0,
           shard_in_progress: 0,
           shard_waiting: 0,
         });
