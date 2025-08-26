@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.delta;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.TreeSet;
@@ -19,7 +20,6 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 
 import lombok.AllArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -58,19 +58,6 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
         );
     }
 
-    @SneakyThrows
-    private static void closeReaders(LuceneDirectoryReader first, LuceneDirectoryReader second) {
-        try {
-            if (first != null) {
-                first.close();
-            }
-        }
-        finally {
-            if (second != null) {
-                second.close();
-            }
-        }
-    }
 
     @Override
     public Flux<RfsLuceneDocument> readDocuments(
@@ -91,32 +78,43 @@ public class DeltaDocumentReaderEngine implements DocumentReaderEngine {
             var deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                 previousReader, currentReader, startingDocId, rootContext);
 
-            LuceneDirectoryReader finalPreviousReader = previousReader;
-            LuceneDirectoryReader finalCurrentReader = currentReader;
-            Runnable cleanup = () -> closeReaders(finalPreviousReader, finalCurrentReader);
-
-            if (DeltaMode.UPDATES_ONLY.equals(deltaMode)) {
-                return deltaResult.additions
-                    .doFinally(s -> cleanup.run());
-            } else if (DeltaMode.UPDATES_AND_DELETES.equals(deltaMode)) {
-                // Using concat to perform deletions first then additions
-                return Flux.concat(
-                    deltaResult.deletions,
-                    deltaResult.additions
-                ).doFinally(s -> cleanup.run());
-            } else if (DeltaMode.DELETES_ONLY.equals(deltaMode)) {
-                return deltaResult.deletions
-                    .doFinally(s -> cleanup.run());
-            } else {
-                throw new UnsupportedOperationException("Unsupported delta mode given " + deltaMode);
-            }
+            Runnable cleanup = getCleanup(indexName, previousReader, currentReader);
+            return (switch (deltaMode) {
+                case UPDATES_ONLY -> deltaResult.additions;
+                case UPDATES_AND_DELETES ->
+                    // Using concat to perform deletions first then additions
+                    Flux.concat(
+                        deltaResult.deletions,
+                        deltaResult.additions
+                    );
+                case DELETES_ONLY -> deltaResult.deletions;
+            }).doFinally(s -> cleanup.run());
         } catch (Exception e) {
             log.atError()
                 .setMessage("Exception during delta readDocuments")
                 .setCause(e)
                 .log();
-            closeReaders(previousReader, currentReader);
+            getCleanup(indexName, previousReader, currentReader).run();
             throw e;
         }
+    }
+
+    private static Runnable getCleanup(String indexName, LuceneDirectoryReader previousReader, LuceneDirectoryReader currentReader) {
+        return () -> {
+            try {
+                if (previousReader != null) {
+                    previousReader.close();
+                }
+                if (currentReader != null) {
+                    currentReader.close();
+                }
+            } catch (IOException e) {
+                log.atError()
+                    .setMessage("Unable to close reader for index [" + indexName + "]")
+                    .setCause(e)
+                    .log();
+                throw new UncheckedIOException(e);
+            }
+        };
     }
 }
