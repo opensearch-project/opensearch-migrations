@@ -1,10 +1,11 @@
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
-import {StepGroup, StepTask} from "@/schemas/stepsBuilder";
+import {StepGroup} from "@/schemas/stepsBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {BaseExpression} from "@/schemas/expression";
+import {NamedTask} from "@/schemas/taskBuilder";
 
 export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["getFullScope"]>>(wf: WF) {
     return {
@@ -59,7 +60,7 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     }
 }
 
-function formatStep<T extends StepTask & { loopWith?: unknown }>(step: T) {
+function formatStep<T extends NamedTask & { loopWith?: unknown }>(step: T) {
     const {loopWith, ...rest} = step;
     return {
         ...(loopWith !== undefined

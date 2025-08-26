@@ -69,7 +69,7 @@ export const FullMigration = WorkflowBuilder.create({
                 )
 
             .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
-                prefix: stepScope.steps.init.prefix,
+                prefix: stepScope.tasks.init.prefix,
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
             }))
         )

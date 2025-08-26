@@ -23,9 +23,9 @@ import {
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
 import {StepsBuilder} from "@/schemas/stepsBuilder";
-import {DagBuilder} from "@/schemas/dagBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {PlainObject} from "@/schemas/plainObject";
+import {DagBuilder} from "@/schemas/dagBuilder";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -189,7 +189,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new DagBuilder(c, i, {}, {})))
+            ((c, i) => new DagBuilder(c,this.inputScope,{},[],{})))
         (this.contextualScope, this.inputScope));
     }
 
