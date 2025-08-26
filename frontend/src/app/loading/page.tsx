@@ -81,7 +81,7 @@ export default function LoadingPage() {
         header={
           <Header
             variant="h2"
-            description={<Box>Steps to migrate your cluster.</Box>}
+            description="Steps to migrate your cluster."
           >
             Migration Overview
           </Header>
@@ -162,15 +162,19 @@ export default function LoadingPage() {
             )}
           </Alert>
 
-          <Box variant="p" textAlign="center">
+          <Box textAlign="center">
             <Image
               src="/robot-dog-162x114.svg"
+              width={162}
+              height={114}
               alt=""
               style={{ alignContent: "center" }}
             />
             <br />
-            Welcome to your OpenSearch Migration Assistant. Please wait while
-            setup is in progress.
+            <Box variant="p">
+              Welcome to your OpenSearch Migration Assistant. Please wait while
+              setup is in progress.
+            </Box>
           </Box>
         </SpaceBetween>
       </Container>
