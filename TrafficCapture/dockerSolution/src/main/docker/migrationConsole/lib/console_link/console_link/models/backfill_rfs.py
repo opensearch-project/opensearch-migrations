@@ -181,10 +181,10 @@ class K8sRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
     
     def build_backfill_status(self) -> BackfillOverallStatus:
-        deploymentStatus = self.kubectl_runner.retrieve_deployment_status()
+        deployment_status = self.kubectl_runner.retrieve_deployment_status()
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
-        if deploymentStatus is not None:
-            active_workers = deploymentStatus.desired != 0
+        if deployment_status is not None:
+            active_workers = deployment_status.desired != 0
         return get_detailed_status_obj(self.target_cluster, active_workers)
 
 
@@ -247,10 +247,10 @@ class ECSRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
     
     def build_backfill_status(self) -> BackfillOverallStatus:
-        deploymentStatus = self.ecs_client.get_instance_statuses()
+        deployment_status = self.ecs_client.get_instance_statuses()
         active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
-        if deploymentStatus is not None:
-            active_workers = deploymentStatus.desired != 0
+        if deployment_status is not None:
+            active_workers = deployment_status.desired != 0
 
         return get_detailed_status_obj(self.target_cluster, active_workers)
 
