@@ -5,11 +5,7 @@ import {
   clusterTarget,
   metadataStatus,
   sessionGet,
-  snapshotConfig,
-  snapshotIndexes,
   snapshotStatus,
-  snapshotCreate,
-  snapshotDelete,
 } from "@/generated/api/sdk.gen";
 
 export type SessionPromise<T> = (
@@ -85,18 +81,6 @@ export function useSnapshotStatus(sessionName: string) {
   return useFetchData(fetchSnapshot, sessionName, "snapshot status");
 }
 
-export function useSnapshotConfig(sessionName: string) {
-  const fetchSnapshotConfig = async (name: string) => {
-    return await snapshotConfig({ path: { session_name: name } });
-  };
-
-  return useFetchData(
-    fetchSnapshotConfig,
-    sessionName,
-    "snapshot configuration",
-  );
-}
-
 export function useMetadataStatus(sessionName: string) {
   const fetchMetadata = async (name: string) => {
     return await metadataStatus({ path: { session_name: name } });
@@ -111,29 +95,4 @@ export function useBackfillStatus(sessionName: string) {
   };
 
   return useFetchData(fetchBackfill, sessionName, "backfill status");
-}
-
-export function useSnapshotIndexes(sessionName: string, indexPattern?: string) {
-  const fetchSnapshotIndexes = async (name: string) => {
-    return await snapshotIndexes({
-      path: { session_name: name },
-      query: indexPattern ? { index_pattern: indexPattern } : undefined,
-    });
-  };
-
-  return useFetchData(fetchSnapshotIndexes, sessionName, "snapshot indexes");
-}
-
-export function useSnapshotCreate(sessionName: string) {
-  const fetchSnapshotCreate = async (name: string) => {
-    return await snapshotCreate({ path: { session_name: name } });
-  };
-  return useFetchData(fetchSnapshotCreate, sessionName, "snapshot create");
-}
-
-export function useSnapshotDelete(sessionName: string) {
-  const fetchSnapshotDelete = async (name: string) => {
-    return await snapshotDelete({ path: { session_name: name } });
-  };
-  return useFetchData(fetchSnapshotDelete, sessionName, "snapshot create");
 }

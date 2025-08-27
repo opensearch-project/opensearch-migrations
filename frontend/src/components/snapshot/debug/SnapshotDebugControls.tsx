@@ -1,33 +1,32 @@
-import React from 'react';
-import SpaceBetween from "@cloudscape-design/components/space-between";
-import { Button, ButtonDropdown } from "@cloudscape-design/components";
-import { SNAPSHOT_CONFIG_SCENARIOS } from '../mockData/snapshotConfigScenarios';
+'use client';
+
+import { Button, ButtonDropdown } from '@cloudscape-design/components';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import { SNAPSHOT_SCENARIOS } from '@/components/snapshot/mockData/snapshotScenarios';
 import DebugCommands from '@/components/debug/DebugCommands';
 
 interface SnapshotDebugControlsProps {
-  readonly onScenarioSelect: (scenario: keyof typeof SNAPSHOT_CONFIG_SCENARIOS) => void;
+  readonly onScenarioSelect: (scenario: keyof typeof SNAPSHOT_SCENARIOS) => void;
   readonly onReset: () => void;
 }
 
 export function SnapshotDebugControls({ onScenarioSelect, onReset }: SnapshotDebugControlsProps) {
   return (
     <DebugCommands>
-      <SpaceBetween size="s" direction="horizontal">
+      <SpaceBetween size="xs" direction="horizontal">
         <ButtonDropdown
           items={[
-            { id: "s3Config", text: "S3 Config" },
-            { id: "fsConfig", text: "File System Config" },
-            { id: "emptyConfig", text: "Empty Config" },
+            { id: "notStarted", text: "Not Started" },
+            { id: "inProgress", text: "In Progress (2hr ETA)" },
+            { id: "almostDone", text: "Almost Done (99%)" },
+            { id: "completed", text: "Completed" },
+            { id: "failed", text: "Failed" },
           ]}
-          onItemClick={({ detail }) =>
-            onScenarioSelect(detail.id as keyof typeof SNAPSHOT_CONFIG_SCENARIOS)
-          }
+          onItemClick={({ detail }) => onScenarioSelect(detail.id as keyof typeof SNAPSHOT_SCENARIOS)}
         >
           Simulate Scenario
         </ButtonDropdown>
-        <Button onClick={onReset}>
-          Reset to API Data
-        </Button>
+        <Button onClick={onReset}>Reset to API Data</Button>
       </SpaceBetween>
     </DebugCommands>
   );
