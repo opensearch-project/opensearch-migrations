@@ -2,8 +2,8 @@
 
 import { Button, ButtonDropdown } from "@cloudscape-design/components";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
-import { BACKFILL_SCENARIOS } from "@/components/session/mockData/backfillScenarios";
+import DebugCommands from "@/components/debug/DebugCommands";
+import { BACKFILL_SCENARIOS } from "@/components/backfill/mockData/backfillScenarios";
 
 interface BackfillDebugControlsProps {
   readonly onScenarioSelect: (scenario: keyof typeof BACKFILL_SCENARIOS) => void;

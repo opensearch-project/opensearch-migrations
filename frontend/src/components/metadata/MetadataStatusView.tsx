@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SessionStatusProps } from "./types";
-import { StatusFieldDefinition } from "./statusUtils";
-import { useMetadataStatus } from "./apiHooks";
-import StatusContainer from "./StatusContainer";
+import { SessionStatusProps } from "../session/types";
+import { StatusFieldDefinition } from "../session/statusUtils";
+import { useMetadataStatus } from "../../hooks/apiFetch";
+import StatusContainer from "../session/StatusContainer";
 import {
   StatusDisplay,
   DateDisplay,
   DurationDisplay,
-} from "./statusComponents";
+} from "../session/statusComponents";
 import { METADATA_SCENARIOS } from "./mockData/metadataScenarios";
 import { MetadataDebugControls } from "./debug/MetadataDebugControls";
 import { MetadataStatus } from "@/generated/api";

@@ -1,5 +1,7 @@
 "use client";
 
+import "@cloudscape-design/global-styles/index.css";
+
 import {
   AppLayout,
   ContentLayout,

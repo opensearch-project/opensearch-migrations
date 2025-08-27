@@ -4,10 +4,10 @@ import React, { Suspense } from "react";
 import { Header, Spinner } from "@cloudscape-design/components";
 import { useSearchParams } from "next/navigation";
 import SessionOverviewView from "@/components/session/SessionOverviewView";
-import SnapshotStatusView from "@/components/session/SnapshotStatusView";
+import SnapshotStatusView from "@/components/snapshot/SnapshotStatusView";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import MetadataStatusView from "@/components/session/MetadataStatusView";
-import BackfillStatusView from "@/components/session/BackfillStatusView";
+import MetadataStatusView from "@/components/metadata/MetadataStatusView";
+import BackfillStatusView from "@/components/backfill/BackfillStatusView";
 
 export default function ViewSessionPage() {
   return (
