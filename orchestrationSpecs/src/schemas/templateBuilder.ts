@@ -24,8 +24,9 @@ import {
 } from "./scopeConstraints";
 import {StepsBuilder} from "@/schemas/stepsBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
-import {PlainObject} from "@/schemas/plainObject";
+import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 import {DagBuilder} from "@/schemas/dagBuilder";
+import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -72,13 +73,13 @@ export class TemplateBuilder<
                 workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
                 inputParameters: InputParamsToExpressions<InputParamsScope>,
                 rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
-            }) => AllowLiteralOrExpression<T>>,
+            }) => AllowLiteralOrExpression<DeepWiden<T>>>,
         description?: string
     ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
             ContextualScope,
             BodyScope,
-            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<DeepWiden<T>, false> }>,
             OutputParamsScope
         >>>
     {
@@ -190,6 +191,20 @@ export class TemplateBuilder<
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new DagBuilder(c,this.inputScope,{},[],{})))
+        (this.contextualScope, this.inputScope));
+    }
+
+    addResourceTask<
+        FirstBuilder extends K8sResourceBuilder<ContextualScope, InputParamsScope, any, any>,
+        FinalBuilder extends K8sResourceBuilder<ContextualScope, InputParamsScope, any, any>
+    >(
+        builderFn: ScopeIsEmptyConstraint<BodyScope,
+            (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+        factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+    ): FinalBuilder {
+        const fn = builderFn as (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
+        return fn((factory ??
+            ((c, i) => new K8sResourceBuilder(c, i, {}, {})))
         (this.contextualScope, this.inputScope));
     }
 

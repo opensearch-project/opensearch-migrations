@@ -73,11 +73,14 @@ export function paramsToCallerSchema<T extends InputParametersRecord>(
     return z.object(shape) as any;
 }
 
-export function templateInputParametersAsExpressions<WP extends Record<string, any>>(params: WP) {
+export function templateInputParametersAsExpressions<WP extends InputParametersRecord>(params: WP) {
     const result: any = {};
     const workflowParams = params || {};
     Object.keys(params).forEach(key => {
-        result[key] = inputParam(key, workflowParams[key]);
+        const paramDef = workflowParams[key];
+        if (paramDef && paramDef.type) {
+            result[key] = inputParam(key, paramDef);
+        }
     });
     return result;
 }
