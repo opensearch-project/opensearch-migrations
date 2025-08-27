@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: create-cluster-
+spec:
+  workflowTemplateRef:
+    name: cluster-templates
+  entrypoint: elasticsearch-7-10-single-node
+  arguments:
+    parameters:
+      - name: cluster-name
+        value: "source-elasticsearch-7-10-test-cluster"
+      - name: namespace
+        value: "ma"
