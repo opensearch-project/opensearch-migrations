@@ -18,7 +18,7 @@ full_indices = {
 
 
 class Test0006OpenSearchBenchmarkBackfill(MATestBase):
-    def __init__(self, source_version: str, target_version: str, unique_id: str):
+    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV2_X),
             (ElasticsearchV8_X, OpensearchV2_X),
@@ -28,6 +28,7 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
                          target_version=target_version,
                          unique_id=unique_id,
                          description=description,
+                         reuse_clusters=reuse_clusters,
                          allow_source_target_combinations=allow_combinations,
                          migrations_required=[MigrationType.BACKFILL, MigrationType.METADATA])
 

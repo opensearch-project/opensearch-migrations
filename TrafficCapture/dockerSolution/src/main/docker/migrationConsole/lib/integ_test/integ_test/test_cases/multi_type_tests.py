@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class Test0004MultiTypeUnionMigration(MATestBase):
-    def __init__(self, source_version: str, target_version: str, unique_id: str):
+    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
@@ -18,6 +18,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                          target_version=target_version,
                          unique_id=unique_id,
                          description=description,
+                         reuse_clusters=reuse_clusters,
                          allow_source_target_combinations=allow_combinations)
         self.index_name = f"test_0004_{self.unique_id}"
         self.doc_id1 = "test_0004_1"
@@ -37,7 +38,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
             'published_date': '2025-03-11T14:00:00Z'
         }
 
-    def prepare_workflow_parameters(self):
+    def prepare_workflow_snapshot_and_migration_config(self):
         union_transform = self.source_operations.get_type_mapping_union_transformation(
             multi_type_index_name=self.index_name,
             doc_type_1=self.doc_type1,
@@ -56,11 +57,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                 }]
             }]
         }]
-        snapshot_and_migration_configs_str = json.dumps(
-            snapshot_and_migration_configs,
-            separators=(',', ':')
-        )
-        self.parameters["snapshot-and-migration-configs"] = snapshot_and_migration_configs_str
+        self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
 
     def prepare_clusters(self):
         # Create two documents each with a different type mapping for the same index
@@ -86,7 +83,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
 
 
 class Test0005MultiTypeSplitMigration(MATestBase):
-    def __init__(self, source_version: str, target_version: str, unique_id: str):
+    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
@@ -96,6 +93,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                          target_version=target_version,
                          unique_id=unique_id,
                          description=description,
+                         reuse_clusters=reuse_clusters,
                          allow_source_target_combinations=allow_combinations)
         self.index_name = f"test_0005_{self.unique_id}"
         self.split_index_name1 = f"test_0005_split_1_{self.unique_id}"
@@ -117,7 +115,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
             'published_date': '2025-03-11T14:00:00Z'
         }
 
-    def prepare_workflow_parameters(self):
+    def prepare_workflow_snapshot_and_migration_config(self):
         split_transform = self.source_operations.get_type_mapping_split_transformation(
             multi_type_index_name=self.index_name,
             doc_type_1=self.doc_type1,
@@ -138,11 +136,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                 }]
             }]
         }]
-        snapshot_and_migration_configs_str = json.dumps(
-            snapshot_and_migration_configs,
-            separators=(',', ':')
-        )
-        self.parameters["snapshot-and-migration-configs"] = snapshot_and_migration_configs_str
+        self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
 
     def prepare_clusters(self):
         # Create two documents each with a different type mapping for the same index

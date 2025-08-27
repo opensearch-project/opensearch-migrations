@@ -469,15 +469,16 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
                 - name: etcd-utils-pull-policy
                   value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
-        - - name: run-replayer-for-target
-            template: run-replayer-for-target
-            when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
-            arguments:
-              parameters:
-                - name: target-config
-                  value: "{{inputs.parameters.target-config}}"
-                - name: image-config
-                  value: "{{inputs.parameters.image-config}}"
+        # Enable once Replay support has been added
+        # - - name: run-replayer-for-target
+        #     template: run-replayer-for-target
+        #     when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
+        #     arguments:
+        #       parameters:
+        #         - name: target-config
+        #           value: "{{inputs.parameters.target-config}}"
+        #         - name: image-config
+        #           value: "{{inputs.parameters.image-config}}"
 
     # This is where we'd start running live-replay
     - name: run-replayer-for-target

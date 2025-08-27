@@ -13,7 +13,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: alpine/helm:latest
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -86,6 +86,10 @@ spec:
               "version": "ES_5.6"
             }
             EOF
+
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace {{inputs.parameters.namespace}}
             
             echo "Elasticsearch 5.6.16 cluster"
             echo "Cluster config:"
@@ -103,7 +107,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: alpine/helm:latest
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
@@ -164,6 +168,10 @@ spec:
               }
             }
             EOF
+
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace {{inputs.parameters.namespace}}
             
             echo "OpenSearch 2.19.1 cluster created successfully"
             echo "Cluster config:"

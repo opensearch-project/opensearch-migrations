@@ -40,10 +40,17 @@ def test_migration_assistant_workflow(record_data, test_case: MATestBase):
     #breakpoint()
 
     test_case.test_before()
+    test_case.import_existing_clusters()
+    test_case.prepare_workflow_snapshot_and_migration_config()
     test_case.prepare_workflow_parameters()
+    # For imported clusters, we should load test data before the workflow starts as we will not
+    # set up clusters and suspend
+    if test_case.imported_clusters:
+        test_case.prepare_clusters()
     test_case.workflow_start()
     test_case.workflow_setup_clusters()
-    test_case.prepare_clusters()
+    if not test_case.imported_clusters:
+        test_case.prepare_clusters()
     test_case.workflow_perform_migrations()
     test_case.display_final_cluster_state()
     test_case.verify_clusters()

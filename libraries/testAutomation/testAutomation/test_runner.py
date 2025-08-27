@@ -5,6 +5,7 @@ import datetime
 from k8s_service import K8sService, HelmCommandFailed
 import logging
 import random
+import re
 import string
 import sys
 from tabulate import tabulate
@@ -105,7 +106,8 @@ class TestRunner:
         summary = TestSummary(**data.get("summary"))
         return TestReport(tests=tests, summary=summary)
 
-    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False) -> bool:
+    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
+                  reuse_clusters: bool = False) -> bool:
         """Runs pytest tests."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
@@ -121,6 +123,8 @@ class TestRunner:
             command_list.append(f"--test_ids={','.join(self.test_ids)}")
         if keep_workflows:
             command_list.append("--keep_workflows")
+        if reuse_clusters:
+            command_list.append("--reuse_clusters")
         command_list.append("-s")
         self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
@@ -137,7 +141,17 @@ class TestRunner:
             return False
         return True
 
+    def cleanup_clusters(self) -> None:
+        pattern = re.compile(r"^(source|target)-(opensearch|elasticsearch)")
+        for install in self.k8s_service.get_helm_installations():
+            if pattern.match(install):
+                self.k8s_service.helm_uninstall(release_name=install)
+        for configmap in self.k8s_service.get_configmaps():
+            if pattern.match(configmap) and configmap.endswith("migration-config"):
+                self.k8s_service.delete_configmap(configmap_name=configmap)
+
     def cleanup_deployment(self) -> None:
+        self.cleanup_clusters()
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         self.k8s_service.wait_for_all_healthy_pods()
         self.k8s_service.delete_all_pvcs()
@@ -145,20 +159,24 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def run(self, skip_delete: bool = False, keep_workflows: bool = False) -> None:
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
+            reuse_clusters: bool = False) -> None:
         for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
-                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME):
+                chart_values = {"developerModeEnabled": "true"} if developer_mode else None
+                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
+                                                     values=chart_values):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
                 tests_passed = self.run_tests(source_version=source_version,
                                               target_version=target_version,
-                                              keep_workflows=keep_workflows)
+                                              keep_workflows=keep_workflows,
+                                              reuse_clusters=reuse_clusters)
 
                 if not tests_passed:
                     raise TestsFailed(f"Tests failed (or no tests executed) for migrations "
@@ -235,9 +253,14 @@ def parse_args() -> argparse.Namespace:
         help="If set, only perform deletion operations."
     )
     parser.add_argument(
+        "--delete-clusters-only",
+        action="store_true",
+        help="If set, only perform cluster deletion operations."
+    )
+    parser.add_argument(
         "--copy-logs-only",
         action="store_true",
-        help="If set, only copy found argo workflow logs to this local directory."
+        help="If set, only copy found argo workflow logs to the current directory."
     )
     parser.add_argument(
         '--unique-id',
@@ -249,6 +272,25 @@ def parse_args() -> argparse.Namespace:
         "--keep-workflows",
         action="store_true",
         help="If set, will not delete argo workflows created by integration tests"
+    )
+    parser.add_argument(
+        "--developer-mode",
+        action="store_true",
+        help="If set, will enable the developer mode flag for the Migration Assistant helm chart"
+    )
+    parser.add_argument(
+        "--reuse-clusters",
+        action="store_true",
+        help="If set, the integration tests will reuse existing clusters that match the naming pattern "
+             "e.g. 'target-opensearch-2-19-*'. If a cluster does not exist the integration test will create it and "
+             "leave it running once the test completes for other tests to use. The cleanup operation for this library "
+             "will remove all source and target clusters that match this pattern as well."
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="An aggregate flag to apply developer settings for "
+             "testing [--skip-delete, --reuse-clusters, --keep-workflows, --developer-mode]"
     )
     parser.add_argument(
         "--test-ids",
@@ -275,9 +317,23 @@ def main() -> None:
 
     if args.delete_only:
         return test_runner.cleanup_deployment()
-    elif args.copy_logs_only:
+    if args.delete_clusters_only:
+        return test_runner.cleanup_clusters()
+    if args.copy_logs_only:
         return test_runner.copy_logs()
-    test_runner.run(skip_delete=args.skip_delete, keep_workflows=args.keep_workflows)
+    skip_delete = args.skip_delete
+    keep_workflows = args.keep_workflows
+    developer_mode = args.developer_mode
+    reuse_clusters = args.reuse_clusters
+    if args.dev:
+        skip_delete = True
+        keep_workflows = True
+        developer_mode = True
+        reuse_clusters = True
+    test_runner.run(skip_delete=skip_delete,
+                    keep_workflows=keep_workflows,
+                    developer_mode=developer_mode,
+                    reuse_clusters=reuse_clusters)
 
 
 if __name__ == "__main__":
