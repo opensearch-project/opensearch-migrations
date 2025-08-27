@@ -1,4 +1,3 @@
-import json
 import logging
 from ..common_utils import convert_to_b64
 from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X

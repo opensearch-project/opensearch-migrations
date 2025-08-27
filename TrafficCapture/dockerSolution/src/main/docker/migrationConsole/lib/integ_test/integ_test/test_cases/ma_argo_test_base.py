@@ -2,7 +2,6 @@ from enum import Enum
 import logging
 import json
 
-from ..common_utils import check_ma_system_health
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
 
@@ -27,7 +26,7 @@ class MATestBase:
                  reuse_clusters=False, migrations_required=None, allow_source_target_combinations=None):
         self.allow_source_target_combinations = allow_source_target_combinations or []
         self.description = description
-        self.reuse_clusters=reuse_clusters
+        self.reuse_clusters = reuse_clusters
         self.migrations_required = migrations_required if migrations_required else [MigrationType.METADATA,
                                                                                     MigrationType.BACKFILL]
         self.source_version = ClusterVersion(version_str=source_version)
@@ -93,7 +92,6 @@ class MATestBase:
                 clear_indices(target_cluster)
                 self.target_operations.clear_index_templates(cluster=target_cluster)
 
-
     def prepare_workflow_snapshot_and_migration_config(self):
         snapshot_and_migration_configs = [{
             "migrations": [{
@@ -150,7 +148,6 @@ class MATestBase:
         else:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
-
 
     def display_final_cluster_state(self):
         source_response = cat_indices(cluster=self.source_cluster).decode("utf-8")
