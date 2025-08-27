@@ -11,12 +11,12 @@ export interface WorkflowWizardStep {
 }
 
 export interface WorkflowWizardProps {
-  steps: WorkflowWizardStep[];
-  sessionName: string;
-  i18nStrings?: WizardProps.I18nStrings;
-  onSubmit?: () => void;
-  onCancel?: () => void;
-  submitButtonText?: string;
+  readonly steps: WorkflowWizardStep[];
+  readonly sessionName: string;
+  readonly i18nStrings?: WizardProps.I18nStrings;
+  readonly onSubmit?: () => void;
+  readonly onCancel?: () => void;
+  readonly submitButtonText?: string;
 }
 
 export default function WorkflowWizard({
