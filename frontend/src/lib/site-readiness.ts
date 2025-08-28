@@ -3,8 +3,13 @@
 const CACHE_KEY = "siteReady";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+const isBrowserUnavailable = () => {
+  const undefStr = "undefined";
+  return undefStr === typeof window || undefStr === typeof window.localStorage;
+};
+
 export function getSiteReadiness(): boolean {
-  if (typeof localStorage == undefined) {
+  if (isBrowserUnavailable()) {
     return false;
   }
   const cached = localStorage.getItem(CACHE_KEY);
@@ -15,8 +20,8 @@ export function getSiteReadiness(): boolean {
 }
 
 export function setSiteReadiness(value: boolean) {
-  if (typeof localStorage == undefined) {
-    return;
+  if (isBrowserUnavailable()) {
+    return false;
   }
   localStorage.setItem(
     CACHE_KEY,

@@ -117,7 +117,7 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
         <SnapshotIndexesTable
           indexes={indexes}
           maxHeight="300px"
-          showFooter={true}
+          showTotalsFooter={true}
           emptyText="No indexes were found in this snapshot."
           snapshotStatus={snapshotStatus}
         />

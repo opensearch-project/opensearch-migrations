@@ -8,34 +8,29 @@ import Box from "@cloudscape-design/components/box";
 import Table, { TableProps } from "@cloudscape-design/components/table";
 import TextFilter from "@cloudscape-design/components/text-filter";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 interface SnapshotIndexesTableProps {
-  indexes: SnapshotIndex[] | SnapshotIndexStatus[];
-  maxHeight?: string;
-  showFooter?: boolean;
-  emptyText?: string;
-  snapshotStatus?: SnapshotStatus | null;
+  readonly indexes: SnapshotIndex[] | SnapshotIndexStatus[];
+  readonly maxHeight?: string;
+  readonly showTotalsFooter?: boolean;
+  readonly emptyText?: string;
+  readonly snapshotStatus?: SnapshotStatus | null;
 }
 
 export default function SnapshotIndexesTable({ 
   indexes,
   maxHeight = '300px',
-  showFooter = true,
-  emptyText = "No indexes were found in this snapshot.",
+  showTotalsFooter: showFooter = true,
+  emptyText = "No indexes were found.",
   snapshotStatus = null,
 }: SnapshotIndexesTableProps) {
-  // Track selected items
-  const [selectedItems, setSelectedItems] = useState<SnapshotIndex[] | SnapshotIndexStatus[]>([]);
-  
-  // Get status for a specific index from the snapshot status
   const getIndexStatus = (indexName: string) => {
     if (!snapshotStatus || !snapshotStatus.indexes) return null;
     
     const matchingIndex = snapshotStatus.indexes.find(idx => idx.name === indexName);
     return matchingIndex ? matchingIndex.status : null;
   };
-  // Render status indicator based on the index status
   const renderStatus = (indexName: string) => {
     const status = getIndexStatus(indexName);
     
@@ -63,13 +58,13 @@ export default function SnapshotIndexesTable({
     {
       id: 'documents',
       header: 'Documents',
-      cell: (item) => item.document_count?.toLocaleString() ?? '0',
+      cell: (item) => item.document_count?.toLocaleString() ?? '-',
       sortingField: "document_count"
     },
     {
       id: 'size',
       header: 'Size',
-      cell: (item) => formatBytes(item.size_bytes),
+      cell: (item) => formatBytes(item.size_bytes) ?? '-',
       sortingField: "size_bytes"
     },
     {
@@ -80,7 +75,6 @@ export default function SnapshotIndexesTable({
     }
   ];
   
-  // Add status column if snapshotStatus is provided
   if (snapshotStatus && snapshotStatus.indexes) {
     columnDefinitions.push({
       id: 'status',

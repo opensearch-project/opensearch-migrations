@@ -53,7 +53,7 @@ export function usePolling<T>(
     setIsPolling(enabled);
   }, [enabled]);
 
-  const run = useCallback(async () => {
+  const issueRequest = useCallback(async () => {
     if (runningRef.current) return; // prevent overlap (incl. refresh)
     runningRef.current = true;
     try {
@@ -81,7 +81,7 @@ export function usePolling<T>(
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const loop = async () => {
-      await run();
+      await issueRequest();
       if (!cancelled) {
         timeoutId = setTimeout(loop, interval);
       }
@@ -94,13 +94,11 @@ export function usePolling<T>(
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [isPolling, interval, run]);
+  }, [isPolling, interval, issueRequest]);
 
   const startPolling = useCallback(() => setIsPolling(true), []);
   const stopPolling = useCallback(() => setIsPolling(false), []);
-  const refresh = useCallback(() => {
-    void run();
-  }, [run]);
+  const refresh = useCallback(() => issueRequest(), [issueRequest]);
 
   return {
     isLoading,
