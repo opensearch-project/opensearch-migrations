@@ -19,22 +19,54 @@ public class TransformerMapper {
         MetadataTransformerParams metadataTransformerParams,
         boolean allowLooseMatches
     ) {
+        log.atInfo()
+            .setMessage("=== TRANSFORMER SELECTION DEBUG ===")
+            .log();
+        log.atInfo()
+            .setMessage("Source version: {} (flavor: {}, major: {}, minor: {})")
+            .addArgument(sourceVersion)
+            .addArgument(sourceVersion.getFlavor())
+            .addArgument(sourceVersion.getMajor())
+            .addArgument(sourceVersion.getMinor())
+            .log();
+        log.atInfo()
+            .setMessage("Target version: {} (flavor: {}, major: {}, minor: {})")
+            .addArgument(targetVersion)
+            .addArgument(targetVersion.getFlavor())
+            .addArgument(targetVersion.getMajor())
+            .addArgument(targetVersion.getMinor())
+            .log();
+        log.atInfo()
+            .setMessage("Allow loose matches: {}")
+            .addArgument(allowLooseMatches)
+            .log();
+        
         Transformer transformer;
         if (allowLooseMatches) {
             log.atInfo()
-                .setMessage("Allowing loose version matching, attempting to find matching transformer from {} to {}")
+                .setMessage("Using loose version matching to find transformer from {} to {}")
                 .addArgument(sourceVersion)
                 .addArgument(targetVersion)
                 .log();
 
             transformer = looseTransformerMapping(awarenessAttributes, metadataTransformerParams);
         } else {
+            log.atInfo()
+                .setMessage("Using strict version matching to find transformer from {} to {}")
+                .addArgument(sourceVersion)
+                .addArgument(targetVersion)
+                .log();
             transformer = strictTransformerMapping(awarenessAttributes, metadataTransformerParams);
         }
 
         log.atInfo()
-            .setMessage("Version-mapped transformer class selected: {}")
-            .addArgument(transformer.getClass().getSimpleName()).log();
+            .setMessage("=== SELECTED TRANSFORMER: {} ===")
+            .addArgument(transformer.getClass().getSimpleName())
+            .log();
+        log.atInfo()
+            .setMessage("Transformer details: {}")
+            .addArgument(transformer.toString())
+            .log();
 
         return transformer;
     }
