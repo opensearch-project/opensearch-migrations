@@ -8,7 +8,7 @@ import uuid
 import logging
 from typing import List
 
-from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, MATestBase
+from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, MATestBase, MATestUserArguments
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
@@ -35,6 +35,8 @@ def pytest_addoption(parser):
     parser.addoption("--target_version", action="store", default=None)
     parser.addoption("--keep_workflows", action="store_true", default=False,
                      help="If set, will not delete Argo workflows created by tests")
+    parser.addoption("--reuse_clusters", action="store_true", default=False,
+                     help="If set, will reuse source and target clusters if they already exist")
     parser.addoption("--config_file_path", action="store", default="/config/migration_services.yaml",
                      help="Path to config file for console library")
     parser.addoption("--source_proxy_alb_endpoint", action="store", default=None,
@@ -58,6 +60,7 @@ def pytest_generate_tests(metafunc):
     if metafunc.function.__name__ == "test_migration_assistant_workflow":
         source_version = metafunc.config.getoption("source_version")
         target_version = metafunc.config.getoption("target_version")
+        reuse_clusters = metafunc.config.getoption("reuse_clusters")
         if not source_version or not target_version:
             raise ValueError("The migration_assistant_workflow test requires both a '--source_version' "
                              "and '--target_version' parameter")
@@ -65,7 +68,9 @@ def pytest_generate_tests(metafunc):
         metafunc.config.test_summary["source_version"] = source_version
         metafunc.config.test_summary["target_version"] = target_version
         test_ids_list = metafunc.config.getoption("test_ids")
-        test_cases_param = _generate_test_cases(source_version, target_version, unique_id, test_ids_list)
+        user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
+                                        unique_id=unique_id, reuse_clusters=reuse_clusters)
+        test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.parametrize("test_case", test_cases_param)
 
 
@@ -79,14 +84,13 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
     return filtered_cases
 
 
-def _generate_test_cases(source_version: str, target_version: str, unique_id: str, test_ids_list: List[str]):
+def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):
     test_cases_to_run = []
     unsupported_test_cases = []
     cases = _filter_test_cases(test_ids_list)
     for test_case in cases:
         try:
-            valid_case: MATestBase = test_case(source_version=source_version, target_version=target_version,
-                                               unique_id=unique_id)
+            valid_case: MATestBase = test_case(user_args=user_args)
             test_cases_to_run.append(valid_case)
         except ClusterVersionCombinationUnsupported:
             unsupported_test_cases.append(test_case)
