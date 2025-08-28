@@ -26,11 +26,9 @@ def call(Map config = [:]) {
         }
 
         stages {
-            stage('Generate and Run Migration Tests') {
+            stage('Create and Monitor Integ Tests') {
                 steps {
                     script {
-                        echo "🚀 Starting dynamic migration test matrix"
-                        
                         // Determine which combinations to run
                         def sourceVersions = params.SOURCE_VERSION == '(all)' ? 
                             ['ES_5.6', 'ES_7.10'] : [params.SOURCE_VERSION]

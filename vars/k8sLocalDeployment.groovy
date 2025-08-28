@@ -4,9 +4,9 @@ def call(Map config = [:]) {
 //            throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
 //        }
 //    }
-    def jobName = config.jobName
-    def sourceVersion = config.sourceVersion
-    def targetVersion = config.targetVersion
+    def jobName = config.jobName ?: "k8s-integ-test"
+    def sourceVersion = config.sourceVersion ?: ""
+    def targetVersion = config.targetVersion ?: ""
     def testIdsArg = config.testIdsArg ?: ""
 
     pipeline {
@@ -15,6 +15,16 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            choice(
+                    name: 'SOURCE_VERSION',
+                    choices: ['ES_5.6', 'ES_7.10'],
+                    description: 'Pick a specific source version'
+            )
+            choice(
+                    name: 'TARGET_VERSION',
+                    choices: ['OS_1.3', 'OS_2.19'],
+                    description: 'Pick a specific target version'
+            )
         }
 
         options {
@@ -52,6 +62,9 @@ def call(Map config = [:]) {
                             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
                         }
                         git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                        def sv = sourceVersion ?: params.SOURCE_VERSION
+                        def tv = targetVersion ?: params.TARGET_VERSION
+                        echo "SV: ${sv} and TV: ${tv}"
                     }
                 }
             }
