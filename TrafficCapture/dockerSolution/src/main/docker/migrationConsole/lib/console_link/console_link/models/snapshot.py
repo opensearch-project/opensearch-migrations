@@ -294,7 +294,6 @@ class SnapshotStatus(BaseModel):
     data_throughput_bytes_avg_sec: Optional[float] = None
     shard_total: Optional[int] = None
     shard_complete: Optional[int] = None
-    shard_failed: Optional[int] = None
     model_config = {
         'from_attributes': True,
     }
@@ -374,7 +373,6 @@ class SnapshotStatus(BaseModel):
             data_throughput_bytes_avg_sec=throughput_bytes,
             shard_total=total_shards,
             shard_complete=completed_shards,
-            shard_failed=failed_shards
         )
 
 
@@ -466,7 +464,6 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
             f"Throughput: {throughput_mb:.3f} MiB/sec\n"
             f"Total shards: {snapshot_status.shard_total}\n"
             f"Successful shards: {snapshot_status.shard_complete}\n"
-            f"Failed shards: {snapshot_status.shard_failed}\n"
         )
         
         return CommandResult(success=True, value=message)

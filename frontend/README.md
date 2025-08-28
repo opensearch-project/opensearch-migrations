@@ -60,3 +60,25 @@ Once the deployment has completed, run the following command. Then open [http://
 ```bash
 kubectl -n ma port-forward deploy/ma-migration-console 8080:80
 ```
+
+### AWS ECS Deployment
+
+
+1. Open the AWS Console for the account where Migration Assistant is deployed.
+2. Navigate to **EC2**, select or launch an instance to use as a forwarding proxy, and note its **region** and **instance ID**.
+3. In the EC2 section, go to **Security Groups**, locate the group named `MigrationInfra-serviceSecurityGroup`, and add an **ingress rule** allowing traffic on port `80` from the selected EC2 instance.
+4. Go to **ECS (Elastic Container Service)**, open the `migration` ECS cluster, then the `console` service. Click **Tasks**, and identify the running task (1 of 1). Click into the task and copy its **private IP address**.
+5. From your local machine, run the following command to establish a port forwarding session from the EC2 instance to the web server running in the ECS container:
+6. Once the session is established, open [http://localhost:8080](http://localhost:8080) in your browser.
+
+```bash
+REGION="us-east-1"
+INSTANCE_ID="i-029db1XXXXXX8486"
+HOST_IP="10.256.256.256"
+
+aws ssm start-session \
+  --region "$REGION" \
+  --target "$INSTANCE_ID" \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "{\"host\":[\"$HOST_IP\"],\"portNumber\":[\"80\"],\"localPortNumber\":[\"8080\"]}"
+```

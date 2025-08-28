@@ -194,10 +194,6 @@ public interface IWorkCoordinator extends AutoCloseable {
             return v.onAcquiredWork(this);
         }
 
-        public int getStartingDocId() {
-            return workItem.startingDocId;
-        }
-
         @EqualsAndHashCode
         @Getter
         public static class WorkItem implements Serializable {

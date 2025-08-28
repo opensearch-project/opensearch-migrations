@@ -4,7 +4,7 @@ metadata:
   name: full-migration-with-clusters
 spec:
   serviceAccountName: argo-workflow-executor
-  onExit: cleanup-all-clusters
+  onExit: conditional-cleanup
   entrypoint: main
   parallelism: 100
 
@@ -31,6 +31,8 @@ spec:
       - name: replayer-config
         value: |
           {"batchSize": 1000, "concurrency": 4}
+      - name: skip-cleanup
+        value: "false"
       # Any references to workflow.parameters must come from top level workflow
       - name: etcd-endpoints
         value: "http://etcd.ma.svc.cluster.local:2379"
@@ -124,7 +126,6 @@ spec:
                 - name: targets
                   value: "{{steps.generate-migration-configs.outputs.parameters.targets}}"
         
-        # Pause for integration test migration verification
         - - name: pause-for-migration-verification
             template: suspend-step
 
@@ -211,13 +212,20 @@ spec:
                 '[' + inputs.parameters['target-config'] + ']'
       steps: [[]]  # no-op
 
-    # Cleanup template that always runs on exit (success or failure)
+    - name: conditional-cleanup
+      steps:
+        - - name: check-cleanup-needed
+            template: cleanup-all-clusters
+            when: "{{workflow.parameters.skip-cleanup}} != true"
+
     - name: cleanup-all-clusters
       container:
-        image: alpine/helm:latest
+        image: dtzar/helm-kubectl:latest
         command: [sh, -c]
         args:
           - |
+            echo "Starting cluster cleanup process..."
+            
             # Regenerate the same cluster names using workflow UID and template names
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             
@@ -236,6 +244,9 @@ spec:
             helm uninstall ${SOURCE_CLUSTER_NAME} \
               --namespace {{workflow.parameters.cluster-namespace}} \
               --ignore-not-found || true
+
+            echo "Removing source cluster configmap"
+            kubectl delete configmap ${SOURCE_CLUSTER_NAME}-migration-config
             
             # Cleanup target cluster  
             echo "Uninstalling target cluster: ${TARGET_CLUSTER_NAME}"
@@ -243,4 +254,7 @@ spec:
               --namespace {{workflow.parameters.cluster-namespace}} \
               --ignore-not-found || true
             
-            echo "Cluster cleanup completed"
+            echo "Removing target cluster configmap"
+            kubectl delete configmap ${TARGET_CLUSTER_NAME}-migration-config
+            
+            echo "Cluster cleanup completed successfully"

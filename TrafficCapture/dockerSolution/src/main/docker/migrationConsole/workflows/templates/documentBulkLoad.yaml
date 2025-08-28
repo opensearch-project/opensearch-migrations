@@ -374,11 +374,12 @@ spec:
                     python -c '
                     import sys
                     from lib.console_link.console_link.environment import Environment
-                    from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
+                    from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_obj
                     from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
                     
-                    status = get_detailed_status_dict(Environment(config_file="/config/migration_services.yaml").target_cluster, 
-                                                      "{{=inputs.parameters['session-name']}}")
+                    status = get_detailed_status_obj(Environment(config_file="/config/migration_services.yaml").target_cluster,
+                                                     True,
+                                                     "{{=inputs.parameters['session-name']}}")
                     print(status)
                     all_finished = all_shards_finished_processing(Environment(config_file="/config/migration_services.yaml").target_cluster,
                                                                   "{{=inputs.parameters['session-name']}}")
