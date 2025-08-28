@@ -135,7 +135,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
                 .log();
             
             if (mappingsArray.size() < 2) {
-                final var firstElement = mappingsArray.get(0);
+                var firstElement = mappingsArray.get(0);
                 log.atInfo()
                     .setMessage("First element for index {}: type={}, isArray={}, isObject={}")
                     .addArgument(index.getName())
@@ -148,6 +148,20 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
                     .addArgument(index.getName())
                     .addArgument(firstElement.toPrettyString())
                     .log();
+                
+                // Handle ES 5.6 nested array case where mappings can be [[...]] instead of [...]
+                if (firstElement.isArray()) {
+                    var nestedArray = (ArrayNode) firstElement;
+                    if (nestedArray.size() > 0) {
+                        firstElement = nestedArray.get(0);
+                        log.atInfo()
+                            .setMessage("Unwrapped nested array for ES 5.6 index {}: new type={}, isObject={}")
+                            .addArgument(index.getName())
+                            .addArgument(firstElement.getNodeType())
+                            .addArgument(firstElement.isObject())
+                            .log();
+                    }
+                }
                 
                 if (firstElement.isObject()) {
                     final var mappingsInnerNode = (ObjectNode) firstElement;

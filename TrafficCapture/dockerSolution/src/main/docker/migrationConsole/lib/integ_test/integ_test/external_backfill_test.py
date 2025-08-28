@@ -91,8 +91,8 @@ def create_config_with_source_version(original_config_path: str) -> str:
     if 'metadata_migration' not in config:
         config['metadata_migration'] = {}
     
-    config['metadata_migration']['source_cluster_version'] = 'ES_5.6'
-    logger.info("Added source_cluster_version: ES_5.6 to metadata_migration config")
+    config['metadata_migration']['source_cluster_version'] = 'ES_6.8'
+    logger.info("Added source_cluster_version: ES_6.8 to metadata_migration config")
     
     # Write temporary config
     temp_config_fd, temp_config_path = tempfile.mkstemp(suffix='.yaml', prefix='migration_services_')
