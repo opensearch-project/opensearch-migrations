@@ -2,7 +2,7 @@ def call(Map config = [:]) {
     def jobName = config.jobName ?: "k8s-local-integ-test"
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
-    def testIdsArg = config.testIdsArg ?: "--test-ids=0001"
+    def testIds = config.testIds ?: ""
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -20,6 +20,7 @@ def call(Map config = [:]) {
                     choices: ['OS_1.3', 'OS_2.19'],
                     description: 'Pick a specific target version'
             )
+            string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
         }
 
         options {
@@ -103,10 +104,15 @@ def call(Map config = [:]) {
                             script {
                                 def sourceVer = sourceVersion ?: params.SOURCE_VERSION
                                 def targetVer = targetVersion ?: params.TARGET_VERSION
+                                def testIdsArg = ""
+                                def testIdsResolved = testIds ?: params.TEST_IDS
+                                if (testIdsResolved != "" && testIdsResolved != "all") {
+                                    testIdsArg = "--test-ids='$testIdsResolved'"
+                                }
                                 echo "SV: ${sourceVer} and TV: ${targetVer}"
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
-                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete --test-reports-dir='./reports'"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --skip-delete --test-reports-dir='./reports'"
                             }
                         }
                     }
