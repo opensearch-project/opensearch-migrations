@@ -39,11 +39,10 @@ def create_session(session: Session):
 
 def update_session(session: Session):
     session_query = Query()
-    raw_session = session.model_dump()
     # Always enforce update time
-    raw_session.updated = datetime.now(UTC)
+    session.updated = datetime.now(UTC)
 
-    _sessions_table.update(raw_session, session_query.name == session.name)
+    _sessions_table.update(session.model_dump(), session_query.name == session.name)
 
 
 def delete_session(session_name: str):
