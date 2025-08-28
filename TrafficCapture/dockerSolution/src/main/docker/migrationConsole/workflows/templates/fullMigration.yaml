@@ -469,7 +469,7 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['image']}}"
                 - name: etcd-utils-pull-policy
                   value: "{{=fromJSON(inputs.parameters['image-config'])['etcd-utils']['pull-policy']}}"
-        # Enable once Replay support has been added
+        # Enable once Capture and Replay support has been added: https://opensearch.atlassian.net/browse/MIGRATIONS-2607
         # - - name: run-replayer-for-target
         #     template: run-replayer-for-target
         #     when: "{{steps.target-backfill-complete-check.outputs.parameters.should-finalize}} == true"
@@ -480,7 +480,6 @@ spec:
         #         - name: image-config
         #           value: "{{inputs.parameters.image-config}}"
 
-    # This is where we'd start running live-replay
     - name: run-replayer-for-target
       inputs:
         parameters:

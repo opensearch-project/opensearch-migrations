@@ -1,13 +1,13 @@
 import logging
 from ..cluster_version import ElasticsearchV5_X, ElasticsearchV7_X, OpensearchV1_X, OpensearchV2_X
-from .ma_argo_test_base import MATestBase, MigrationType
+from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
 
 
 # This test case is subject to removal, as its value looks limited
 class Test0001SingleDocumentBackfill(MATestBase):
-    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
+    def __init__(self, user_args: MATestUserArguments):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
@@ -16,11 +16,8 @@ class Test0001SingleDocumentBackfill(MATestBase):
         ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document."
-        super().__init__(source_version=source_version,
-                         target_version=target_version,
-                         unique_id=unique_id,
+        super().__init__(user_args=user_args,
                          description=description,
-                         reuse_clusters=reuse_clusters,
                          migrations_required=migrations_required,
                          allow_source_target_combinations=allow_combinations)
         self.index_name = f"test_0001_{self.unique_id}"

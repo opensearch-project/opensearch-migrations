@@ -21,16 +21,24 @@ class ClusterVersionCombinationUnsupported(Exception):
         super().__init__(self.message)
 
 
+class MATestUserArguments:
+    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
+        self.source_version = source_version
+        self.target_version = target_version
+        self.unique_id = unique_id
+        self.reuse_clusters = reuse_clusters
+
+
 class MATestBase:
-    def __init__(self, source_version: str, target_version: str, unique_id: str, description: str,
-                 reuse_clusters=False, migrations_required=None, allow_source_target_combinations=None):
+    def __init__(self, user_args: MATestUserArguments, description: str, migrations_required=None,
+                 allow_source_target_combinations=None):
         self.allow_source_target_combinations = allow_source_target_combinations or []
         self.description = description
-        self.reuse_clusters = reuse_clusters
+        self.reuse_clusters = user_args.reuse_clusters
         self.migrations_required = migrations_required if migrations_required else [MigrationType.METADATA,
                                                                                     MigrationType.BACKFILL]
-        self.source_version = ClusterVersion(version_str=source_version)
-        self.target_version = ClusterVersion(version_str=target_version)
+        self.source_version = ClusterVersion(version_str=user_args.source_version)
+        self.target_version = ClusterVersion(version_str=user_args.target_version)
         self.argo_service = ArgoService()
         self.workflow_name = None
         self.source_cluster = None
@@ -58,7 +66,7 @@ class MATestBase:
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
         self.target_operations = get_operations_library_by_version(self.target_version)
-        self.unique_id = unique_id
+        self.unique_id = user_args.unique_id
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
