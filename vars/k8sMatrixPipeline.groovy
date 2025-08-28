@@ -1,5 +1,8 @@
 def call(Map config = [:]) {
-    def childJobName = "elasticsearch-5x-k8s-local-test"
+    def childJobName = "k8s-local-integ-tests"
+
+    def allSourceVersions = ['ES_5.6', 'ES_7.10']
+    def allTargetVersions = ['OS_1.3', 'OS_2.19']
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -8,14 +11,14 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/lewijacn/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'k8s-matrix-test', description: 'Git branch to use for repository')
             choice(
-                name: 'SOURCE_VERSION',
-                choices: ['(all)', 'ES_5.6', 'ES_7.10'],
-                description: 'Pick a specific source version, or "(all)"'
+                    name: 'SOURCE_VERSION',
+                    choices: ['(all)'] + allSourceVersions,
+                    description: 'Pick a specific source version, or "(all)"'
             )
             choice(
-                name: 'TARGET_VERSION',
-                choices: ['(all)', 'OS_2.19', 'OS_3.1'],
-                description: 'Pick a specific target version, or "(all)"'
+                    name: 'TARGET_VERSION',
+                    choices: ['(all)'] + allTargetVersions,
+                    description: 'Pick a specific target version, or "(all)"'
             )
         }
 
@@ -30,27 +33,27 @@ def call(Map config = [:]) {
                 steps {
                     script {
                         // Determine which combinations to run
-                        def sourceVersions = params.SOURCE_VERSION == '(all)' ? 
-                            ['ES_5.6', 'ES_7.10'] : [params.SOURCE_VERSION]
-                        def targetVersions = params.TARGET_VERSION == '(all)' ? 
-                            ['OS_2.19', 'OS_3.1'] : [params.TARGET_VERSION]
-                        
+                        def sourceVersions = params.SOURCE_VERSION == '(all)' ? allSourceVersions : [params.SOURCE_VERSION]
+                        def targetVersions = params.TARGET_VERSION == '(all)' ? allTargetVersions : [params.TARGET_VERSION]
+
                         echo "📋 Source versions: ${sourceVersions}"
                         echo "📋 Target versions: ${targetVersions}"
                         echo "📋 Total combinations: ${sourceVersions.size() * targetVersions.size()}"
-                        
+
                         // Create parallel jobs map
                         def jobs = [:]
                         def results = [:]
-                        
+
+                        sh "mkdir -p libraries/testAutomation/reports"
+
                         sourceVersions.each { source ->
                             targetVersions.each { target ->
                                 def combination = "${source}_to_${target}"
                                 def displayName = "${source} → ${target}"
-                                
+
                                 jobs[displayName] = {
                                     echo "🔄 Starting: ${displayName}"
-                                    
+
                                     try {
                                         def result = build(
                                             job: childJobName,
@@ -63,20 +66,29 @@ def call(Map config = [:]) {
                                             wait: true,
                                             propagate: false // Don't fail parent if child fails
                                         )
-                                        
+
+                                        copyArtifacts(
+                                                projectName: childJobName,
+                                                selector: specific("${result.number}"),
+                                                filter: 'reports/**',
+                                                target: "libraries/testAutomation/reports/${displayName.replaceAll(' ', '_')}",
+                                                flatten: true,
+                                                optional: true
+                                        )
+
                                         results[displayName] = [
                                             result: result.result,
                                             url: result.absoluteUrl,
                                             number: result.number,
                                             duration: result.duration
                                         ]
-                                        
+
                                         if (result.result == 'SUCCESS') {
                                             echo "✅ ${displayName}: SUCCESS (Build #${result.number})"
                                         } else {
                                             echo "❌ ${displayName}: ${result.result} (Build #${result.number})"
                                         }
-                                        
+
                                     } catch (Exception e) {
                                         echo "💥 ${displayName}: EXCEPTION - ${e.message}"
                                         results[displayName] = [
@@ -90,28 +102,28 @@ def call(Map config = [:]) {
                                 }
                             }
                         }
-                        
+
                         echo "🏃 Running ${jobs.size()} migration tests in parallel..."
-                        
+
                         // Execute all jobs in parallel
                         parallel jobs
-                        
+
                         echo "📊 All migration tests completed. Processing results..."
-                        
+
                         // Process and display results
                         def successCount = 0
                         def failureCount = 0
                         def totalCount = results.size()
-                        
+
                         echo ""
                         echo "=" * 60
                         echo "📊 MIGRATION TEST RESULTS SUMMARY"
                         echo "=" * 60
-                        
+
                         results.each { combination, data ->
                             def status = ""
                             def details = ""
-                            
+
                             switch(data.result) {
                                 case 'SUCCESS':
                                     status = "✅"
@@ -142,20 +154,20 @@ def call(Map config = [:]) {
                                     details = "Unknown result: ${data.result}"
                                     currentBuild.result = 'UNSTABLE'
                             }
-                            
+
                             echo "${status} ${combination.padRight(20)} | ${details}"
                             if (data.url) {
                                 echo "   🔗 Details: ${data.url}"
                             }
                         }
-                        
+
                         echo "=" * 60
                         echo "📈 SUMMARY: ${successCount}/${totalCount} tests passed, ${failureCount} failed"
                         echo "=" * 60
-                        
+
                         // Set build description
                         currentBuild.description = "Migration Tests: ${successCount}/${totalCount} passed"
-                        
+
                         // Set overall build result
                         if (failureCount > 0) {
                             if (successCount == 0) {
@@ -168,11 +180,24 @@ def call(Map config = [:]) {
                         } else {
                             echo "🎉 All tests passed successfully!"
                         }
-                        
+
                         // Store results as environment variables for potential use in post actions
                         env.TOTAL_TESTS = totalCount.toString()
                         env.PASSED_TESTS = successCount.toString()
                         env.FAILED_TESTS = failureCount.toString()
+                    }
+                }
+            }
+            stage('Print Complete Results') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        dir('libraries/testAutomation') {
+                            script {
+                                sh "ls -al"
+                                sh "pipenv install --deploy"
+                                sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only"
+                            }
+                        }
                     }
                 }
             }

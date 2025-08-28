@@ -1,20 +1,15 @@
 def call(Map config = [:]) {
-//    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
-//        if (!config[key]) {
-//            throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
-//        }
-//    }
-    def jobName = config.jobName ?: "k8s-integ-test"
+    def jobName = config.jobName ?: "k8s-local-integ-test"
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
-    def testIdsArg = config.testIdsArg ?: ""
+    def testIdsArg = config.testIdsArg ?: "--test-ids=0001"
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/lewijacn/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'k8s-matrix-test', description: 'Git branch to use for repository')
             choice(
                     name: 'SOURCE_VERSION',
                     choices: ['ES_5.6', 'ES_7.10'],
@@ -62,74 +57,76 @@ def call(Map config = [:]) {
                             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
                         }
                         git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
-                        def sv = sourceVersion ?: params.SOURCE_VERSION
-                        def tv = targetVersion ?: params.TARGET_VERSION
-                        echo "SV: ${sv} and TV: ${tv}"
                     }
                 }
             }
 
-//            stage('Check Minikube Status') {
-//                steps {
-//                    timeout(time: 5, unit: 'MINUTES') {
-//                        script {
-//                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-//                            if (status == "Running") {
-//                                echo "✅ Minikube is running"
-//                            } else {
-//                                echo "Minikube is not running, status: " + status
-//                                sh(script: "minikube delete", returnStdout: true)
-//                                sh(script: "minikube start", returnStdout: true)
-//                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-//                                if (status2 == "Running") {
-//                                    echo "✅ Minikube was started as is running"
-//                                } else {
-//                                    error("❌ Minikube failed to start")
-//                                }
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//
-//            stage('Build Docker Images (Minikube)') {
-//                steps {
-//                    timeout(time: 30, unit: 'MINUTES') {
-//                        dir('deployment/k8s') {
-//                            script {
-//                                sh "./buildDockerImagesMini.sh"
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//
-//            stage('Perform Python E2E Tests') {
-//                steps {
-//                    timeout(time: 15, unit: 'MINUTES') {
-//                        dir('libraries/testAutomation') {
-//                            script {
-//                                sh "pipenv install --deploy"
-//                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete"
-//                            }
-//                        }
-//                    }
-//                }
-//            }
+            stage('Check Minikube Status') {
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+                            if (status == "Running") {
+                                echo "✅ Minikube is running"
+                            } else {
+                                echo "Minikube is not running, status: " + status
+                                sh(script: "minikube delete", returnStdout: true)
+                                sh(script: "minikube start", returnStdout: true)
+                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+                                if (status2 == "Running") {
+                                    echo "✅ Minikube was started as is running"
+                                } else {
+                                    error("❌ Minikube failed to start")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Build Docker Images (Minikube)') {
+                steps {
+                    timeout(time: 30, unit: 'MINUTES') {
+                        dir('deployment/k8s') {
+                            script {
+                                sh "./buildDockerImagesMini.sh"
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Perform Python E2E Tests') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        dir('libraries/testAutomation') {
+                            script {
+                                def sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                def targetVer = targetVersion ?: params.TARGET_VERSION
+                                echo "SV: ${sourceVer} and TV: ${targetVer}"
+                                sh "pipenv install --deploy"
+                                sh "mkdir -p ./reports"
+                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete --test-reports-dir='./reports'"
+                            }
+                        }
+                    }
+                }
+            }
         }
-//        post {
-//            always {
-//                timeout(time: 15, unit: 'MINUTES') {
-//                    dir('libraries/testAutomation') {
-//                        script {
-//                            sh "pipenv install --deploy"
-//                            sh "pipenv run app --copy-logs-only"
-//                            archiveArtifacts artifacts: 'logs/**', fingerprint: true, onlyIfSuccessful: false
-//                            sh "pipenv run app --delete-only"
-//                        }
-//                    }
-//                }
-//            }
-//        }
+        post {
+            always {
+                timeout(time: 15, unit: 'MINUTES') {
+                    dir('libraries/testAutomation') {
+                        script {
+                            sh "pipenv install --deploy"
+                            sh "pipenv run app --copy-logs-only"
+                            archiveArtifacts artifacts: 'logs/**, reports/**', fingerprint: true, onlyIfSuccessful: false
+                            sh "rm -rf ./reports"
+                            sh "pipenv run app --delete-only"
+                        }
+                    }
+                }
+            }
+        }
     }
 }
