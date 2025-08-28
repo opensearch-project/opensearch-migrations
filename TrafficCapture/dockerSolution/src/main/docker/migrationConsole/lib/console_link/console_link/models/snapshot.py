@@ -1,4 +1,3 @@
-from asyncio import streams
 from enum import Enum
 import logging
 from abc import ABC, abstractmethod
@@ -112,7 +111,7 @@ class Snapshot(ABC):
         Fetch all indexes that will be included in the snapshot with accurate document count and size information.
         
         Args:
-            index_patterns: Optional list of index patterns to filter the indexes. If None, 
+            index_patterns: Optional list of index patterns to filter the indexes. If None,
                           all indexes in the cluster will be considered.
         
         Returns:

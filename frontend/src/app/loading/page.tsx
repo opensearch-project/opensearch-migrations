@@ -24,6 +24,7 @@ export default function LoadingPage() {
   const [debugIsReady, setDebugIsReady] = useState<boolean | null>(null);
 
   const { data, error } = usePollingSystemHealth(
+    // Need to figure out how to make sure we've got browser access without blowing up the missing local storage references
     !getSiteReadiness(),
     (data: HealthApiResponse) => {
       const ready = data?.status === "ok";
