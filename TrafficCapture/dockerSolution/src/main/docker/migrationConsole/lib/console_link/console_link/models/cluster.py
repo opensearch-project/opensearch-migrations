@@ -97,6 +97,7 @@ class Cluster:
     An elasticcsearch or opensearch cluster.
     """
 
+    config: Dict
     endpoint: str = ""
     version: Optional[str] = None
     aws_secret_arn: Optional[str] = None

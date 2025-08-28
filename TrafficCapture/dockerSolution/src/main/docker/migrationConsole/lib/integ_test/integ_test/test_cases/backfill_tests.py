@@ -1,6 +1,6 @@
 import logging
 from ..cluster_version import ElasticsearchV5_X, ElasticsearchV7_X, ElasticsearchV8_X, OpensearchV1_X, OpensearchV2_X
-from .ma_argo_test_base import MATestBase, MigrationType
+from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
 full_indices = {
@@ -18,7 +18,7 @@ full_indices = {
 
 
 class Test0006OpenSearchBenchmarkBackfill(MATestBase):
-    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
+    def __init__(self, user_args: MATestUserArguments):
         allow_combinations = [
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
@@ -28,11 +28,8 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
             (ElasticsearchV8_X, OpensearchV2_X),
         ]
         description = "Run OpenSearch Benchmark tests and then runs metadata and backfill."
-        super().__init__(source_version=source_version,
-                         target_version=target_version,
-                         unique_id=unique_id,
+        super().__init__(user_args=user_args,
                          description=description,
-                         reuse_clusters=reuse_clusters,
                          allow_source_target_combinations=allow_combinations,
                          migrations_required=[MigrationType.BACKFILL, MigrationType.METADATA])
 

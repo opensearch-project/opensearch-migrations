@@ -8,7 +8,7 @@ import uuid
 import logging
 from typing import List
 
-from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, MATestBase
+from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, MATestBase, MATestUserArguments
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
@@ -68,8 +68,9 @@ def pytest_generate_tests(metafunc):
         metafunc.config.test_summary["source_version"] = source_version
         metafunc.config.test_summary["target_version"] = target_version
         test_ids_list = metafunc.config.getoption("test_ids")
-        test_cases_param = _generate_test_cases(source_version, target_version, unique_id, test_ids_list,
-                                                reuse_clusters)
+        user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
+                                        unique_id=unique_id, reuse_clusters=reuse_clusters)
+        test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.parametrize("test_case", test_cases_param)
 
 
@@ -83,15 +84,13 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
     return filtered_cases
 
 
-def _generate_test_cases(source_version: str, target_version: str, unique_id: str, test_ids_list: List[str],
-                         reuse_clusters: bool):
+def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):
     test_cases_to_run = []
     unsupported_test_cases = []
     cases = _filter_test_cases(test_ids_list)
     for test_case in cases:
         try:
-            valid_case: MATestBase = test_case(source_version=source_version, target_version=target_version,
-                                               unique_id=unique_id, reuse_clusters=reuse_clusters)
+            valid_case: MATestBase = test_case(user_args=user_args)
             test_cases_to_run.append(valid_case)
         except ClusterVersionCombinationUnsupported:
             unsupported_test_cases.append(test_case)
