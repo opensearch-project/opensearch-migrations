@@ -8,7 +8,6 @@ import Box from "@cloudscape-design/components/box";
 import Table, { TableProps } from "@cloudscape-design/components/table";
 import TextFilter from "@cloudscape-design/components/text-filter";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
-import { useState } from "react";
 
 interface SnapshotIndexesTableProps {
   readonly indexes: SnapshotIndex[] | SnapshotIndexStatus[];
@@ -26,8 +25,9 @@ export default function SnapshotIndexesTable({
   snapshotStatus = null,
 }: SnapshotIndexesTableProps) {
   const getIndexStatus = (indexName: string) => {
-    if (!snapshotStatus || !snapshotStatus.indexes) return null;
-    
+    if (!snapshotStatus?.indexes) {
+      return null;
+    }
     const matchingIndex = snapshotStatus.indexes.find(idx => idx.name === indexName);
     return matchingIndex ? matchingIndex.status : null;
   };

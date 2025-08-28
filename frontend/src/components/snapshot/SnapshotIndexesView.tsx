@@ -9,10 +9,10 @@ import Alert from "@cloudscape-design/components/alert";
 import SnapshotIndexesTable from "./SnapshotIndexesTable";
 
 interface SnapshotIndexesViewProps {
-  isLoading: boolean;
-  snapshotIndexes: SnapshotIndex[] | SnapshotIndexStatus[] | null | undefined;
-  error: string | null;
-  snapshotStatus?: SnapshotStatus | null;
+  readonly isLoading: boolean;
+  readonly snapshotIndexes: SnapshotIndex[] | SnapshotIndexStatus[] | null | undefined;
+  readonly error: string | null;
+  readonly snapshotStatus?: SnapshotStatus | null;
 }
 
 export default function SnapshotIndexesView({

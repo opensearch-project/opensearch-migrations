@@ -57,7 +57,7 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
     await removeSnapshot(sessionName);
   };
 
-  const error = createError || deleteError || statusError;
+  const error = createError ?? deleteError ?? statusError;
 
   return (
     <SpaceBetween size="l">
@@ -75,8 +75,8 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
       <SpaceBetween direction="horizontal" size="m">
         <Button
           onClick={takeSnapshot}
-          loading={isCreating || snapshotInProgress}
-          disabled={isCreating || isDeleting || snapshotInProgress}
+          loading={isCreating ?? snapshotInProgress}
+          disabled={isCreating ?? isDeleting ?? snapshotInProgress}
           data-testid="take-snapshot"
         >
           Take Snapshot
@@ -84,7 +84,7 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
         <Button
           onClick={deleteSnapshot}
           loading={isDeleting}
-          disabled={isCreating || isDeleting || !snapshotStatus}
+          disabled={isCreating ?? isDeleting ?? !snapshotStatus}
           data-testid="delete-snapshot"
         >
           Delete Snapshot
