@@ -150,10 +150,76 @@ def setup_backfill(request):
         # Phase 1: Metadata Migration
         logger.info("=== PHASE 1: METADATA MIGRATION ===")
         logger.info("Starting metadata migration from external snapshot")
+        
+        # === COMPREHENSIVE CONFIGURATION DEBUGGING ===
+        logger.info("=== CONFIGURATION DEBUG INFORMATION ===")
+        
+        # 1. Print the complete config file content
+        logger.info("1. COMPLETE CONFIG FILE CONTENT:")
+        try:
+            with open(temp_config_path, 'r') as f:
+                config_content = f.read()
+                logger.info("Config file content:")
+                for i, line in enumerate(config_content.split('\n'), 1):
+                    logger.info(f"  {i:2d}: {line}")
+        except Exception as e:
+            logger.error(f"Could not read config file: {e}")
+        
+        # 2. Show all relevant environment variables
+        logger.info("2. ENVIRONMENT VARIABLES:")
+        env_vars = [
+            'CONFIG_FILE_PATH', 'STAGE', 'SNAPSHOT_NAME', 'SNAPSHOT_REPO', 
+            'BACKFILL_SCALE', 'UNIQUE_ID', 'AWS_DEFAULT_REGION', 'AWS_REGION'
+        ]
+        for var in env_vars:
+            value = os.environ.get(var, 'NOT_SET')
+            logger.info(f"  {var}: {value}")
+        
+        # 3. Show console environment details
+        logger.info("3. CONSOLE ENVIRONMENT DETAILS:")
+        logger.info(f"  Target cluster endpoint: {console_env.target_cluster.endpoint}")
+        logger.info(f"  Snapshot name: {console_env.snapshot.snapshot_name}")
+        logger.info(f"  Snapshot repo: {console_env.snapshot.snapshot_repo_name}")
+        logger.info(f"  S3 URI: {getattr(console_env.snapshot, 's3_uri', 'N/A')}")
+        
+        # 4. Show metadata configuration details
+        logger.info("4. METADATA MIGRATION CONFIGURATION:")
+        if hasattr(console_env.metadata, 'config'):
+            metadata_config = console_env.metadata.config
+            logger.info(f"  Source cluster version: {metadata_config.get('source_cluster_version', 'NOT_SET')}")
+            logger.info(f"  Cluster awareness attributes: {metadata_config.get('cluster_awareness_attributes', 'NOT_SET')}")
+            logger.info(f"  From snapshot: {metadata_config.get('from_snapshot', 'NOT_SET')}")
+            logger.info(f"  OTEL endpoint: {metadata_config.get('otel_endpoint', 'NOT_SET')}")
+        
+        logger.info("=== END CONFIGURATION DEBUG ===")
+        
         metadata_result: CommandResult = metadata.migrate()
-        assert metadata_result.success, f"Metadata migration failed: {metadata_result.value}"
-        logger.info("Metadata migration completed successfully")
-        logger.info(f"Metadata migration result: {metadata_result.value}")
+        
+        if not metadata_result.success:
+            logger.error("=== METADATA MIGRATION FAILED ===")
+            logger.error(f"Full error details: {metadata_result.value}")
+            
+            # Extract and log the specific error details
+            error_msg = str(metadata_result.value)
+            if "basic_index" in error_msg:
+                logger.error("The error is specifically related to basic_index transformation")
+                
+                # Look for the detailed log file path
+                import re
+                log_match = re.search(r'/shared-logs-output/[^\s]+metadata[^\s]+\.log', error_msg)
+                if log_match:
+                    log_file = log_match.group(0)
+                    logger.error(f"Check detailed transformation logs at: {log_file}")
+                    logger.error("This log file will contain the debug information about the mapping structure")
+            
+            # Re-raise the assertion error with more context
+            raise AssertionError(f"Metadata migration failed for basic_index. "
+                               f"This appears to be a mapping structure issue. "
+                               f"Check the logs for detailed mapping structure information. "
+                               f"Error: {metadata_result.value}")
+        else:
+            logger.info("Metadata migration completed successfully")
+            logger.info(f"Metadata migration result: {metadata_result.value}")
 
         # Phase 2: RFS Backfill Setup
         logger.info("=== PHASE 2: RFS BACKFILL MIGRATION ===")

@@ -92,27 +92,106 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
     @Override
     public boolean applyTransformation(final Index index) {
+        log.atInfo()
+            .setMessage("=== INDEX MAPPING TRANSFORMATION DEBUG ===")
+            .log();
+        log.atInfo()
+            .setMessage("Processing index: {}")
+            .addArgument(index.getName())
+            .log();
+        
         if (CanApplyResult.YES != canApply(index)) {
+            log.atInfo()
+                .setMessage("Transformation not applicable for index: {}")
+                .addArgument(index.getName())
+                .log();
             return false;
         }
 
         final var mappingsNode = index.getRawJson().get(MAPPINGS_KEY);
+        log.atInfo()
+            .setMessage("Mappings node for index {}: type={}, isArray={}, isObject={}")
+            .addArgument(index.getName())
+            .addArgument(mappingsNode.getNodeType())
+            .addArgument(mappingsNode.isArray())
+            .addArgument(mappingsNode.isObject())
+            .log();
+        log.atInfo()
+            .setMessage("Raw mappings structure for index {}: {}")
+            .addArgument(index.getName())
+            .addArgument(mappingsNode.toPrettyString())
+            .log();
+        
         final var resolvedMappingsNode = MAPPER.createObjectNode();
         final var resolvedProperties = resolvedMappingsNode.withObject(PROPERTIES_KEY);
+        
         // Handle array case
         if (mappingsNode.isArray()) {
             var mappingsArray = (ArrayNode) mappingsNode;
+            log.atInfo()
+                .setMessage("Processing array mappings for index: {} with size: {}")
+                .addArgument(index.getName())
+                .addArgument(mappingsArray.size())
+                .log();
+            
             if (mappingsArray.size() < 2) {
-                final var mappingsInnerNode = (ObjectNode) mappingsArray.get(0);
-                var properties = mappingsInnerNode.properties().iterator().next().getValue().get(PROPERTIES_KEY);
-                resolvedMappingsNode.set(PROPERTIES_KEY, properties);
+                final var firstElement = mappingsArray.get(0);
+                log.atInfo()
+                    .setMessage("First element for index {}: type={}, isArray={}, isObject={}")
+                    .addArgument(index.getName())
+                    .addArgument(firstElement.getNodeType())
+                    .addArgument(firstElement.isArray())
+                    .addArgument(firstElement.isObject())
+                    .log();
+                log.atInfo()
+                    .setMessage("First element content for index {}: {}")
+                    .addArgument(index.getName())
+                    .addArgument(firstElement.toPrettyString())
+                    .log();
+                
+                if (firstElement.isObject()) {
+                    final var mappingsInnerNode = (ObjectNode) firstElement;
+                    var properties = mappingsInnerNode.properties().iterator().next().getValue().get(PROPERTIES_KEY);
+                    resolvedMappingsNode.set(PROPERTIES_KEY, properties);
+                    log.atInfo()
+                        .setMessage("Successfully processed object mapping for index: {}")
+                        .addArgument(index.getName())
+                        .log();
+                } else {
+                    log.atError()
+                        .setMessage("UNEXPECTED: First element is not an object for index: {} - Type: {}, Content: {}")
+                        .addArgument(index.getName())
+                        .addArgument(firstElement.getNodeType())
+                        .addArgument(firstElement.toPrettyString())
+                        .log();
+                    throw new IllegalArgumentException("Expected ObjectNode but got " + firstElement.getNodeType() + " for index " + index.getName());
+                }
             } else if (MultiTypeResolutionBehavior.UNION.equals(multiTypeResolutionBehavior)) {
+                log.atInfo()
+                    .setMessage("Processing multi-type union for index: {}")
+                    .addArgument(index.getName())
+                    .log();
                 mergePropertiesFromMappings(mappingsArray, index, resolvedProperties);
             }
             index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         } else if (mappingsNode.isObject()) {
+            log.atInfo()
+                .setMessage("Processing object mappings for index: {}")
+                .addArgument(index.getName())
+                .log();
             mergePropertiesFromMappings((ObjectNode) mappingsNode, index, resolvedProperties);
         }
+        
+        log.atInfo()
+            .setMessage("Final transformed mappings for index {}: {}")
+            .addArgument(index.getName())
+            .addArgument(resolvedMappingsNode.toPrettyString())
+            .log();
+        log.atInfo()
+            .setMessage("=== COMPLETED TRANSFORMATION FOR INDEX: {} ===")
+            .addArgument(index.getName())
+            .log();
+        
         index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         return true;
     }
