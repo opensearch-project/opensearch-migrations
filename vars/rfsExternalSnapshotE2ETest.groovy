@@ -128,7 +128,7 @@ def call(Map config = [:]) {
             "domainName": "os-cluster-<STAGE>",
             "dataNodeCount": "<TARGET_DATA_NODE_COUNT>",
             "dataNodeType": "<TARGET_DATA_NODE_TYPE>",
-            "ebsEnabled": <TARGET_EBS_ENABLED>,
+            "ebsEnabled": "<TARGET_EBS_ENABLED>",
             "dedicatedManagerNodeCount": "<TARGET_MANAGER_NODE_COUNT>",
             "dedicatedManagerNodeType": "<TARGET_MANAGER_NODE_TYPE>",
             "domainAZCount": 2,
@@ -178,21 +178,26 @@ def call(Map config = [:]) {
         localMetricsPath: localMetricsPath,
         metricsOutputDir: metricsOutputDir,
         plotMetricsCallback: plotMetricsCallback,
-        // Pass through all parameters from cover file
-        GIT_REPO_URL: config.GIT_REPO_URL,
-        GIT_BRANCH: config.GIT_BRANCH,
-        STAGE: config.STAGE,
-        BACKFILL_SCALE: config.BACKFILL_SCALE,
-        CUSTOM_COMMIT: config.CUSTOM_COMMIT,
-        SNAPSHOT_S3_URI: config.SNAPSHOT_S3_URI,
-        SNAPSHOT_NAME: config.SNAPSHOT_NAME,
-        SNAPSHOT_REGION: config.SNAPSHOT_REGION,
-        SNAPSHOT_REPO_NAME: config.SNAPSHOT_REPO_NAME,
-        TARGET_VERSION: config.TARGET_VERSION,
-        TARGET_DATA_NODE_COUNT: config.TARGET_DATA_NODE_COUNT,
-        TARGET_DATA_NODE_TYPE: config.TARGET_DATA_NODE_TYPE,
-        TARGET_MANAGER_NODE_COUNT: config.TARGET_MANAGER_NODE_COUNT,
-        TARGET_MANAGER_NODE_TYPE: config.TARGET_MANAGER_NODE_TYPE,
-        TARGET_EBS_ENABLED: config.TARGET_EBS_ENABLED
+        // Fix: Pass parameters in the params map that the pipeline expects
+        params: [
+            gitRepoUrl: config.GIT_REPO_URL,
+            gitBranch: config.GIT_BRANCH,
+            stage: config.STAGE,
+            backfillScale: config.BACKFILL_SCALE,
+            customCommit: config.CUSTOM_COMMIT,
+            snapshotS3Uri: config.SNAPSHOT_S3_URI,
+            snapshotName: config.SNAPSHOT_NAME,
+            region: config.SNAPSHOT_REGION,
+            snapshotRepoName: config.SNAPSHOT_REPO_NAME,
+            targetVersion: config.TARGET_VERSION,
+            targetDataNodeCount: config.TARGET_DATA_NODE_COUNT,
+            targetDataNodeType: config.TARGET_DATA_NODE_TYPE,
+            targetManagerNodeCount: config.TARGET_MANAGER_NODE_COUNT,
+            targetManagerNodeType: config.TARGET_MANAGER_NODE_TYPE,
+            targetEbsEnabled: config.TARGET_EBS_ENABLED,
+            testUniqueId: testUniqueId,
+            skipCleanup: false,
+            debugMode: false
+        ]
     ])
 }

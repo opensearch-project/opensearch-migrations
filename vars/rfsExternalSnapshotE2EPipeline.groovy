@@ -1,355 +1,340 @@
 // RFS External Snapshot E2E Pipeline Implementation
+// Restructured to match the working reference pattern for reliability
 // This pipeline deploys a target cluster, runs snapshot-based migration tests, and generates performance metrics
-// Following DocMultiplicationPipeline pattern for reliable agent context and cleanup
 
 def call(Map config = [:]) {
-    def sourceContext = config.sourceContext
-    def migrationContext = config.migrationContext
-    def sourceContextId = config.sourceContextId ?: 'source-empty'
-    def migrationContextId = config.migrationContextId ?: 'migration-rfs-external-snapshot'
-    def stageId = config.stageId ?: 'rfs-external-snapshot-integ'
-    def lockResourceName = config.lockResourceName ?: stageId
-    def testUniqueId = config.testUniqueId
-    def remoteMetricsPath = config.remoteMetricsPath
-    def localMetricsPath = config.localMetricsPath
-    def metricsOutputDir = config.metricsOutputDir
-    def plotMetricsCallback = config.plotMetricsCallback
+    def params = config.params ?: [:]
+    def workerAgent = config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host'
     
-    // Extract parameters from config (passed from cover file)
-    def params = [
-        GIT_REPO_URL: config.GIT_REPO_URL ?: 'https://github.com/jugal-chauhan/opensearch-migrations.git',
-        GIT_BRANCH: config.GIT_BRANCH ?: 'jenkins-rfs-metrics',
-        STAGE: config.STAGE ?: 'rfs-metrics',
-        BACKFILL_SCALE: config.BACKFILL_SCALE ?: '80',
-        CUSTOM_COMMIT: config.CUSTOM_COMMIT ?: '',
-        SNAPSHOT_S3_URI: config.SNAPSHOT_S3_URI,
-        SNAPSHOT_NAME: config.SNAPSHOT_NAME ?: 'large-snapshot',
-        SNAPSHOT_REGION: config.SNAPSHOT_REGION ?: 'us-west-2',
-        SNAPSHOT_REPO_NAME: config.SNAPSHOT_REPO_NAME ?: 'migration_assistant_repo',
-        TARGET_VERSION: config.TARGET_VERSION ?: 'OS_2.19',
-        TARGET_DATA_NODE_COUNT: config.TARGET_DATA_NODE_COUNT ?: '10',
-        TARGET_DATA_NODE_TYPE: config.TARGET_DATA_NODE_TYPE ?: 'r6g.4xlarge.search',
-        TARGET_MANAGER_NODE_COUNT: config.TARGET_MANAGER_NODE_COUNT ?: '4',
-        TARGET_MANAGER_NODE_TYPE: config.TARGET_MANAGER_NODE_TYPE ?: 'm6g.xlarge.search',
-        TARGET_EBS_ENABLED: config.TARGET_EBS_ENABLED ?: true
-    ]
+    // Parse contexts from the config
+    def contexts = [:]
+    if (config.sourceContext && config.migrationContext) {
+        contexts.source = readJSON text: config.sourceContext
+        contexts.migration = readJSON text: config.migrationContext
+    }
     
-    // Debug parameter passing
-    echo "DEBUG: config.SNAPSHOT_S3_URI = '${config.SNAPSHOT_S3_URI}'"
-    echo "DEBUG: params.SNAPSHOT_S3_URI = '${params.SNAPSHOT_S3_URI}'"
-
-    if(sourceContext == null || sourceContext.isEmpty()){
-        throw new RuntimeException("The sourceContext argument must be provided");
-    }
-    if(migrationContext == null || migrationContext.isEmpty()){
-        throw new RuntimeException("The migrationContext argument must be provided");
-    }
-
-    def source_context_file_name = 'sourceJenkinsContext.json'
-    def migration_context_file_name = 'migrationJenkinsContext.json'
-    def workerAgent = 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host'
-
-    // Use single node pattern like DocMultiplicationPipeline for reliable agent context
     node(workerAgent) {
         try {
             echo "Starting RFS External Snapshot E2E Pipeline with Performance Monitoring"
-            echo "Target: Test migration from external snapshot to OpenSearch ${params.TARGET_VERSION}"
-            echo "Stage: ${params.STAGE}"
-            echo "Backfill Scale: ${params.BACKFILL_SCALE} workers"
+            echo "Target: Test migration from external snapshot to OpenSearch ${params.targetVersion}"
+            echo "Stage: ${params.stage}"
+            echo "Backfill Scale: ${params.backfillScale} workers"
             
-            // Set environment variables
-            env.AWS_DEFAULT_REGION = params.SNAPSHOT_REGION
-            env.STAGE = params.STAGE
-            env.BACKFILL_SCALE = params.BACKFILL_SCALE
+            env.AWS_DEFAULT_REGION = "${params.region}"
+            env.STAGE = "${params.stage}"
+            env.DEBUG_MODE = "${params.debugMode}"
             
-            stage('1. Enhanced Checkout & Setup') {
-                timeout(time: 15, unit: 'MINUTES') {
-                    echo "=== STAGE 1: ENHANCED CHECKOUT & SETUP ==="
-                    
-                    // Clean workspace
-                    sh 'sudo chown -R $(whoami) . || true'
-                    sh 'sudo chmod -R u+w . || true'
-                    if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
-                        echo 'Cleaning any existing git files in workspace'
-                        sh 'git reset --hard'
-                        sh 'git clean -fd'
-                    }
-                    
-                    // Checkout your fork for pipeline code
-                    git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
-                    
-                    // Determine commit to test from main repo
-                    if (params.CUSTOM_COMMIT) {
-                        env.TEST_COMMIT = params.CUSTOM_COMMIT
-                        echo "Using custom commit: ${env.TEST_COMMIT}"
-                    } else {
-                        env.TEST_COMMIT = sh(
-                            script: "git ls-remote https://github.com/opensearch-project/opensearch-migrations.git refs/heads/main | cut -f1",
-                            returnStdout: true
-                        ).trim()
-                        echo "Using latest main commit: ${env.TEST_COMMIT}"
-                    }
-                    
-                    // Get commit info for metrics
-                    env.TEST_COMMIT_SHORT = env.TEST_COMMIT.take(7)
-                    env.COMMIT_DATE = sh(
-                        script: "git log -1 --format='%cd' --date=format:'%b %d' ${env.TEST_COMMIT} 2>/dev/null || echo 'Unknown'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    // Use direct S3 URI parameter
-                    if (params.SNAPSHOT_S3_URI) {
-                        env.SNAPSHOT_S3_URI = params.SNAPSHOT_S3_URI
-                        echo "Using direct S3 URI parameter: ${env.SNAPSHOT_S3_URI}"
-                    } else {
-                        error("SNAPSHOT_S3_URI parameter is required")
-                    }
-                    
-                    // AWS identity verification
-                    sh 'aws sts get-caller-identity'
-                    
-                    echo "Commit for metrics: ${env.TEST_COMMIT_SHORT} (${env.COMMIT_DATE})"
-                    echo "Stage 1 completed successfully"
+            stage('1. Checkout') {
+                echo "Stage 1: Checking out repository"
+                echo "Repository: ${params.gitRepoUrl}"
+                echo "Branch: ${params.gitBranch}"
+                
+                sh 'sudo chown -R $(whoami) . || true'
+                sh 'sudo chmod -R u+w . || true'
+                
+                if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
+                    sh 'git reset --hard && git clean -fd'
                 }
+                
+                git branch: "${params.gitBranch}", url: "${params.gitRepoUrl}"
+                
+                echo "Repository checked out successfully"
             }
-
-            stage('2. Setup Enhanced CDK Context') {
-                timeout(time: 10, unit: 'MINUTES') {
-                    echo "=== STAGE 2: SETUP ENHANCED CDK CONTEXT ==="
-                    
-                    // Generate enhanced context files with parameter substitution
-                    def populatedSourceContext = sourceContext
-                        .replaceAll('<STAGE>', params.STAGE)
-                    
-                    def populatedMigrationContext = migrationContext
-                        .replaceAll('<STAGE>', params.STAGE)
-                        .replaceAll('<TARGET_VERSION>', params.TARGET_VERSION)
-                        .replaceAll('<TARGET_DATA_NODE_COUNT>', params.TARGET_DATA_NODE_COUNT)
-                        .replaceAll('<TARGET_DATA_NODE_TYPE>', params.TARGET_DATA_NODE_TYPE)
-                        .replaceAll('<TARGET_EBS_ENABLED>', params.TARGET_EBS_ENABLED.toString())
-                        .replaceAll('<TARGET_MANAGER_NODE_COUNT>', params.TARGET_MANAGER_NODE_COUNT)
-                        .replaceAll('<TARGET_MANAGER_NODE_TYPE>', params.TARGET_MANAGER_NODE_TYPE)
-                        .replaceAll('<SNAPSHOT_S3_URI>', env.SNAPSHOT_S3_URI)
-                        .replaceAll('<SNAPSHOT_NAME>', params.SNAPSHOT_NAME)
-                        .replaceAll('<SNAPSHOT_REPO_NAME>', params.SNAPSHOT_REPO_NAME)
-                        .replaceAll('<SNAPSHOT_REGION>', params.SNAPSHOT_REGION)
-                    
-                    writeFile(file: "test/${source_context_file_name}", text: populatedSourceContext)
-                    writeFile(file: "test/${migration_context_file_name}", text: populatedMigrationContext)
-                    
-                    echo 'Using source context:'
-                    sh "cat test/${source_context_file_name}"
-                    echo 'Using migration context:'
-                    sh "cat test/${migration_context_file_name}"
-                    
-                    echo "Stage 2 completed successfully"
-                }
+            
+            stage('2. Test Caller Identity') {
+                echo "Stage 2: Verifying AWS credentials"
+                
+                sh 'aws sts get-caller-identity'
+                
+                echo "AWS credentials verified"
             }
-
+            
             stage('3. Build') {
-                timeout(time: 60, unit: 'MINUTES') {
-                    echo "=== STAGE 3: BUILD ==="
+                timeout(time: 1, unit: 'HOURS') {
+                    echo "Stage 3: Building project"
                     
                     sh './gradlew clean build --no-daemon --stacktrace'
                     
-                    echo "Stage 3 completed successfully"
+                    echo "Project built successfully"
                 }
             }
-
+            
             stage('4. Deploy Target Cluster') {
                 timeout(time: 90, unit: 'MINUTES') {
+                    echo "Stage 4: Deploying target cluster"
+                    echo "Target Version: ${params.targetVersion}"
+                    echo "Data Nodes: ${params.targetDataNodeCount} x ${params.targetDataNodeType}"
+                    echo "Manager Nodes: ${params.targetManagerNodeCount} x ${params.targetManagerNodeType}"
+                    echo "Region: ${params.region}"
+                    
                     dir('test') {
-                        echo "=== STAGE 4: DEPLOY TARGET CLUSTER ==="
-                        echo "Target Version: ${params.TARGET_VERSION}"
-                        echo "Data Nodes: ${params.TARGET_DATA_NODE_COUNT} x ${params.TARGET_DATA_NODE_TYPE}"
-                        echo "Manager Nodes: ${params.TARGET_MANAGER_NODE_COUNT} x ${params.TARGET_MANAGER_NODE_TYPE}"
-                        echo "EBS Enabled: ${params.TARGET_EBS_ENABLED}"
+                        // Use the focused target cluster setup script
+                        def command = "./awsTargetClusterSetup.sh " +
+                            "--cluster-version ${params.targetVersion} " +
+                            "--stage ${params.stage} " +
+                            "--region ${params.region}"
                         
-                        // Generate target cluster context JSON file for AWS Samples CDK
-                        // Based on the AWS Samples CDK structure and test examples
-                        def clusterId = "target-os2x"
-                        
-                        def targetClusterContext = """
-                        {
-                          "stage": "${params.STAGE}",
-                          "clusters": [
-                            {
-                              "clusterId": "${clusterId}",
-                              "clusterName": "target-os2x-rfs-metrics",
-                              "clusterType": "OPENSEARCH_MANAGED_SERVICE",
-                              "clusterVersion": "${params.TARGET_VERSION}",
-                              "dataNodeType": "${params.TARGET_DATA_NODE_TYPE}",
-                              "dataNodeCount": ${params.TARGET_DATA_NODE_COUNT},
-                              "dedicatedManagerNodeType": "${params.TARGET_MANAGER_NODE_TYPE}",
-                              "dedicatedManagerNodeCount": ${params.TARGET_MANAGER_NODE_COUNT},
-                              "ebsEnabled": ${params.TARGET_EBS_ENABLED},
-                              "ebsVolumeType": "GP3",
-                              "ebsVolumeSize": 100,
-                              "enforceHTTPS": true,
-                              "tlsSecurityPolicy": "TLS_1_2",
-                              "encryptionAtRestEnabled": true,
-                              "nodeToNodeEncryptionEnabled": true,
-                              "openAccessPolicyEnabled": true,
-                              "domainRemovalPolicy": "DESTROY"
-                            }
-                          ]
-                        }
-                        """
-                        
-                        writeFile(file: "targetClusterContext.json", text: targetClusterContext)
-                        
-                        echo 'Generated target cluster context:'
-                        sh "cat targetClusterContext.json"
-                        
+                        def clusterOutput = ""
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
-                                // Deploy target cluster using enhanced setup script with context file
-                                sh """
-                                    ./awsEnhancedE2ESolutionSetup.sh \\
-                                        --deploy-target-only \\
-                                        --stage ${params.STAGE} \\
-                                        --target-context-file ./targetClusterContext.json \\
-                                        --target-context-id ${clusterId}
-                                """
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                clusterOutput = sh(script: command, returnStdout: true)
                             }
                         }
                         
-                        // Extract target cluster information using AWS Samples CDK stack names
-                        // Network Stack: NetworkInfra-{stage}-{region}
-                        // Domain Stack: OpenSearchDomain-{clusterId}-{stage}-{region}
-                        def networkStackName = "NetworkInfra-${params.STAGE}-${params.SNAPSHOT_REGION}"
-                        def domainStackName = "OpenSearchDomain-${clusterId}-${params.STAGE}-${params.SNAPSHOT_REGION}"
+                        // Parse cluster information from output and set environment variables
+                        echo "Parsing target cluster information from Stage 4 output..."
+                        def endpointMatch = clusterOutput =~ /CLUSTER_ENDPOINT=(.+)/
+                        def vpcMatch = clusterOutput =~ /VPC_ID=(.+)/
+                        def domainMatch = clusterOutput =~ /DOMAIN_NAME=(.+)/
                         
-                        echo "Looking for stacks: ${networkStackName}, ${domainStackName}"
-                        
-                        // Get VPC ID from CloudFormation export (AWS Samples CDK creates exports)
-                        // Using the same pattern as source cluster extraction
-                        env.TARGET_VPC_ID = sh(
-                            script: "aws cloudformation list-exports --region ${params.SNAPSHOT_REGION} --query \"Exports[?Name=='VpcId-${params.STAGE}'].Value\" --output text 2>/dev/null || echo ''",
-                            returnStdout: true
-                        ).trim()
-                        
-                        // Get cluster endpoint from CloudFormation export
-                        env.TARGET_ENDPOINT = sh(
-                            script: "aws cloudformation list-exports --region ${params.SNAPSHOT_REGION} --query \"Exports[?Name=='ClusterEndpoint-${params.STAGE}-${clusterId}'].Value\" --output text 2>/dev/null || echo ''",
-                            returnStdout: true
-                        ).trim()
-                        
-                        // Fallback to stack outputs if exports don't work
-                        if (!env.TARGET_VPC_ID) {
-                            env.TARGET_VPC_ID = sh(
-                                script: "aws cloudformation describe-stacks --stack-name '${networkStackName}' --region ${params.SNAPSHOT_REGION} --query 'Stacks[0].Outputs[?contains(OutputValue, \"vpc\")].OutputValue' --output text 2>/dev/null || echo ''",
-                                returnStdout: true
-                            ).trim()
+                        if (endpointMatch) {
+                            env.TARGET_CLUSTER_ENDPOINT = endpointMatch[0][1].trim()
+                            echo "Captured TARGET_CLUSTER_ENDPOINT: ${env.TARGET_CLUSTER_ENDPOINT}"
+                        } else {
+                            error("Failed to extract CLUSTER_ENDPOINT from Stage 4 output")
                         }
                         
-                        if (!env.TARGET_ENDPOINT) {
-                            env.TARGET_ENDPOINT = sh(
-                                script: "aws cloudformation describe-stacks --stack-name '${domainStackName}' --region ${params.SNAPSHOT_REGION} --query 'Stacks[0].Outputs[?OutputKey==\\`domainEndpoint\\`].OutputValue' --output text 2>/dev/null || echo ''",
-                                returnStdout: true
-                            ).trim()
+                        if (vpcMatch) {
+                            env.TARGET_VPC_ID = vpcMatch[0][1].trim()
+                            echo "Captured TARGET_VPC_ID: ${env.TARGET_VPC_ID}"
+                        } else {
+                            error("Failed to extract VPC_ID from Stage 4 output")
                         }
                         
-                        echo "Target VPC ID: ${env.TARGET_VPC_ID}"
-                        echo "Target Endpoint: ${env.TARGET_ENDPOINT}"
-                        
-                        if (!env.TARGET_VPC_ID || !env.TARGET_ENDPOINT) {
-                            error("Failed to extract target cluster information")
+                        if (domainMatch) {
+                            env.TARGET_DOMAIN_NAME = domainMatch[0][1].trim()
+                            echo "Captured TARGET_DOMAIN_NAME: ${env.TARGET_DOMAIN_NAME}"
                         }
                         
-                        echo "Stage 4 completed successfully"
+                        // Validate captured values
+                        if (!env.TARGET_CLUSTER_ENDPOINT || env.TARGET_CLUSTER_ENDPOINT.isEmpty()) {
+                            error("Invalid TARGET_CLUSTER_ENDPOINT captured from Stage 4")
+                        }
+                        if (!env.TARGET_VPC_ID || env.TARGET_VPC_ID.isEmpty()) {
+                            error("Invalid TARGET_VPC_ID captured from Stage 4")
+                        }
+                        
+                        // Additional validation for proper format
+                        if (!env.TARGET_CLUSTER_ENDPOINT.startsWith("https://")) {
+                            error("Invalid TARGET_CLUSTER_ENDPOINT format: ${env.TARGET_CLUSTER_ENDPOINT}")
+                        }
+                        if (!env.TARGET_VPC_ID.startsWith("vpc-")) {
+                            error("Invalid TARGET_VPC_ID format: ${env.TARGET_VPC_ID}")
+                        }
                     }
+                    
+                    echo "Target cluster deployed successfully"
+                    echo "Cluster information captured in environment variables"
                 }
             }
-
+            
             stage('5. Deploy Migration Assistant') {
                 timeout(time: 90, unit: 'MINUTES') {
+                    echo "Stage 5: Deploying migration infrastructure"
+                    
                     dir('test') {
-                        echo "=== STAGE 5: DEPLOY MIGRATION ASSISTANT ==="
-                        echo "Configuring MA for snapshot-based migration"
-                        echo "Target VPC: ${env.TARGET_VPC_ID}"
-                        echo "Target Endpoint: ${env.TARGET_ENDPOINT}"
+                        // Use cluster information captured from Stage 4 environment variables
+                        def targetEndpoint = env.TARGET_CLUSTER_ENDPOINT
+                        def vpcId = env.TARGET_VPC_ID
                         
-                        // Update migration context with target cluster information
-                        sh "sed -i -e 's/<VPC_ID>/${env.TARGET_VPC_ID}/g' ${migration_context_file_name}"
+                        echo "Using cluster information from Stage 4 environment variables:"
+                        echo "Target Endpoint: ${targetEndpoint}"
+                        echo "VPC ID: ${vpcId}"
+                        echo "Source S3 URI: ${params.snapshotS3Uri}"
                         
-                        echo 'Updated migration context:'
-                        sh "cat ${migration_context_file_name}"
-                        
-                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
-                                // Deploy Migration Assistant infrastructure
-                                sh """
-                                    ./awsEnhancedE2ESolutionSetup.sh \\
-                                        --deploy-migration-only \\
-                                        --migration-context-file './${migration_context_file_name}' \\
-                                        --migration-context-id ${migrationContextId} \\
-                                        --stage ${params.STAGE} \\
-                                        --skip-capture-proxy \\
-                                        --migrations-git-url ${params.GIT_REPO_URL} \\
-                                        --migrations-git-branch ${params.GIT_BRANCH}
-                                """
-                            }
+                        // Validate that we have the required values from Stage 4
+                        if (!targetEndpoint || targetEndpoint.isEmpty()) {
+                            error("TARGET_CLUSTER_ENDPOINT not available from Stage 4. Check Stage 4 execution.")
+                        }
+                        if (!vpcId || vpcId.isEmpty()) {
+                            error("TARGET_VPC_ID not available from Stage 4. Check Stage 4 execution.")
                         }
                         
-                        echo "Stage 5 completed successfully"
-                    }
-                }
-            }
-
-            stage('6. Enhanced Integration Test with Metrics Collection') {
-                timeout(time: 120, unit: 'MINUTES') {
-                    dir('test') {
-                        echo "=== STAGE 6: ENHANCED INTEGRATION TEST WITH METRICS COLLECTION ==="
-                        echo "Running 3-phase external backfill test:"
-                        echo "  Phase 1: Metadata Migration"
-                        echo "  Phase 2: RFS Backfill (${params.BACKFILL_SCALE} workers)"
-                        echo "  Phase 3: Performance Metrics Calculation"
+                        // Additional validation for proper format
+                        if (!targetEndpoint.startsWith("https://")) {
+                            error("Invalid TARGET_CLUSTER_ENDPOINT format: ${targetEndpoint}")
+                        }
+                        if (!vpcId.startsWith("vpc-")) {
+                            error("Invalid TARGET_VPC_ID format: ${vpcId}")
+                        }
                         
-                        // Enhanced test command with all parameters
-                        def testCommand = "python /root/lib/integ_test/integ_test/external_backfill_test.py " +
-                                        "--config-file-path /config/migration_services.yaml " +
-                                        "--stage ${params.STAGE} " +
-                                        "--snapshot-name ${params.SNAPSHOT_NAME} " +
-                                        "--snapshot-repo ${params.SNAPSHOT_REPO_NAME} " +
-                                        "--backfill-scale ${params.BACKFILL_SCALE} " +
-                                        "--unique-id ${testUniqueId}"
+                        // Write migration context to file with captured target cluster info
+                        sh 'mkdir -p tmp'
+                        writeJSON file: 'tmp/migrationContext.json', json: contexts.migration
+                        
+                        // Update migration context with target cluster information
+                        sh "sed -i -e 's/<VPC_ID>/${vpcId}/g' tmp/migrationContext.json"
+                        sh "sed -i -e 's|<TARGET_CLUSTER_ENDPOINT>|${targetEndpoint}|g' tmp/migrationContext.json"
+                        sh "sed -i -e 's|<SNAPSHOT_S3_URI>|${params.snapshotS3Uri}|g' tmp/migrationContext.json"
+                        
+                        if (params.debugMode) {
+                            sh "echo 'Updated Migration Context:' && cat tmp/migrationContext.json"
+                        }
+                        
+                        // Deploy Migration Assistant infrastructure using focused script
+                        def command = "./awsMigrationAssistantSetup.sh " +
+                            "--target-endpoint ${targetEndpoint} " +
+                            "--target-version ${params.targetVersion} " +
+                            "--vpc-id ${vpcId} " +
+                            "--snapshot-s3-uri ${params.snapshotS3Uri} " +
+                            "--snapshot-name ${params.snapshotName} " +
+                            "--snapshot-repo ${params.snapshotRepoName} " +
+                            "--stage ${params.stage} " +
+                            "--region ${params.region}"
+                        
+                        echo "Executing migration infrastructure deployment with command:"
+                        echo "${command}"
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                // Execute test with metrics collection
-                                sh "./awsRunIntegTests.sh --command '${testCommand}' --stage ${params.STAGE}"
+                                sh command
                             }
                         }
-                        
-                        echo "Stage 6 completed successfully"
                     }
+                    
+                    echo "Migration infrastructure deployed successfully"
                 }
             }
-
+            
+            stage('6. Enhanced Integration Test with Metrics Collection') {
+                timeout(time: 120, unit: 'MINUTES') {
+                    echo "Stage 6: Enhanced Integration Test with Metrics Collection"
+                    echo "Running 3-phase external backfill test:"
+                    echo "  Phase 1: Metadata Migration"
+                    echo "  Phase 2: RFS Backfill (${params.backfillScale} workers)"
+                    echo "  Phase 3: Performance Metrics Calculation"
+                    
+                    dir('test') {
+                        // Enhanced test command with environment variables
+                        def command = "bash -c \"source /.venv/bin/activate && " +
+                            "export CONFIG_FILE_PATH='/config/migration_services.yaml' && " +
+                            "export STAGE='${params.stage}' && " +
+                            "export SNAPSHOT_NAME='${params.snapshotName}' && " +
+                            "export SNAPSHOT_REPO='${params.snapshotRepoName}' && " +
+                            "export BACKFILL_SCALE='${params.backfillScale}' && " +
+                            "export UNIQUE_ID='${params.testUniqueId}' && " +
+                            "cd /root/lib/integ_test && " +
+                            "python -m pytest integ_test/external_backfill_test.py::ExternalBackfillTests::test_backfill_large_snapshot -v -s\""
+                        
+                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                sh "./awsRunIntegTests.sh --command '${command}' --stage ${params.stage}"
+                            }
+                        }
+                    }
+                    
+                    echo "Enhanced Integration Test completed successfully"
+                }
+            }
+            
             stage('7. Metrics Collection and Plotting') {
                 timeout(time: 15, unit: 'MINUTES') {
+                    echo "Stage 7: Metrics Collection and Plotting"
+                    echo "Starting metrics collection for test: ${params.testUniqueId}"
+                    
                     dir('test') {
-                        echo "=== STAGE 7: METRICS COLLECTION AND PLOTTING ==="
-                        echo "Starting metrics collection for commit: ${env.TEST_COMMIT_SHORT} (${env.COMMIT_DATE})"
-                        
                         // Create metrics output directory
-                        sh "mkdir -p ${metricsOutputDir}"
+                        sh "mkdir -p ${config.metricsOutputDir}"
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
                                 // Retrieve metrics file from ECS container
-                                sh "./awsRunIntegTests.sh --retrieve-file ${remoteMetricsPath} --local-path ${localMetricsPath} --stage ${params.STAGE}"
+                                sh "./awsRunIntegTests.sh --retrieve-file ${config.remoteMetricsPath} --local-path ${config.localMetricsPath} --stage ${params.stage}"
                             }
                         }
                         
-                        // Execute plotting callback
-                        plotMetricsCallback()
-                        
                         // Archive metrics file
-                        archiveArtifacts artifacts: "${metricsOutputDir}/*", allowEmptyArchive: true
+                        archiveArtifacts artifacts: "${config.metricsOutputDir}/*", allowEmptyArchive: true
+                    }
+                    
+                    echo "Metrics collection completed successfully"
+                }
+            }
+            
+            // Success-only cleanup stage
+            if (!params.skipCleanup && (currentBuild.result == null || currentBuild.result == 'SUCCESS')) {
+                stage('8. CDK-Based Cleanup') {
+                    timeout(time: 1, unit: 'HOURS') {
+                        echo "Stage 8: CDK-Based Cleanup - Using proper CDK destroy commands"
+                        echo "Cleanup Mode: Success-only (preserves resources on failure for debugging)"
+                        echo "This matches the official customer cleanup process"
                         
-                        echo "Stage 7 completed successfully"
+                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                
+                                // First: Clean up Migration Assistant infrastructure using full context
+                                echo "Cleaning up Migration Assistant infrastructure using CDK destroy..."
+                                dir('test') {
+                                    sh """
+                                        echo "Destroying Migration Assistant CDK stacks with context..."
+                                        echo "This will destroy in proper dependency order:"
+                                        echo "  - MigrationConsole"
+                                        echo "  - ReindexFromSnapshot" 
+                                        echo "  - MigrationInfra"
+                                        echo "  - NetworkInfra"
+                                        
+                                        # Use the migration assistant script's cleanup function with full context
+                                        # This generates context with actual values instead of placeholders
+                                        ./awsMigrationAssistantSetup.sh --cleanup \\
+                                            --target-endpoint "${env.TARGET_CLUSTER_ENDPOINT}" \\
+                                            --target-version "${params.targetVersion}" \\
+                                            --vpc-id "${env.TARGET_VPC_ID}" \\
+                                            --snapshot-s3-uri "${params.snapshotS3Uri}" \\
+                                            --snapshot-name "${params.snapshotName}" \\
+                                            --snapshot-repo "${params.snapshotRepoName}" \\
+                                            --stage "${params.stage}" \\
+                                            --region "${params.region}"
+                                        
+                                        if [ \$? -eq 0 ]; then
+                                            echo "Migration Assistant infrastructure cleaned up successfully"
+                                        else
+                                            echo "CDK destroy completed with warnings (some resources may have been already deleted)"
+                                        fi
+                                    """
+                                }
+                                
+                                // Second: Clean up target cluster (AWS Samples CDK) - ACTUALLY EXECUTE CLEANUP
+                                echo "Cleaning up target cluster infrastructure..."
+                                dir('test') {
+                                    sh """
+                                        echo "Destroying target cluster CDK stacks..."
+                                        echo "This will destroy:"
+                                        echo "  - OpenSearchDomain-target-os2x-${params.stage}-${params.region}"
+                                        echo "  - NetworkInfra-${params.stage}-${params.region}"
+                                        echo ""
+                                        
+                                        # Execute target cluster cleanup with full context
+                                        ./awsTargetClusterSetup.sh --cleanup \\
+                                            --cluster-version ${params.targetVersion} \\
+                                            --stage ${params.stage} \\
+                                            --region ${params.region}
+                                        
+                                        if [ \$? -eq 0 ]; then
+                                            echo "Target cluster infrastructure cleaned up successfully"
+                                        else
+                                            echo "Target cluster cleanup completed with warnings (some resources may have been already deleted)"
+                                        fi
+                                    """
+                                }
+                                
+                                // Third: Clean up any orphaned bootstrap stacks if they exist
+                                echo "Checking for orphaned bootstrap stacks..."
+                                sh """
+                                    echo "Checking for MigrationBootstrap stack..."
+                                    if aws cloudformation describe-stacks --stack-name "MigrationBootstrap" --region ${params.region} >/dev/null 2>&1; then
+                                        echo "Found MigrationBootstrap stack, cleaning up..."
+                                        aws cloudformation delete-stack --stack-name "MigrationBootstrap" --region ${params.region}
+                                        echo "MigrationBootstrap stack deletion initiated"
+                                    else
+                                        echo "No MigrationBootstrap stack found"
+                                    fi
+                                """
+                            }
+                        }
+                        
+                        echo "CDK-based cleanup completed successfully"
+                        echo "Migration Assistant infrastructure destroyed using proper CDK commands"
+                        echo "Target cluster infrastructure destroyed - complete cleanup achieved"
                     }
                 }
             }
@@ -358,14 +343,14 @@ def call(Map config = [:]) {
             echo "SUCCESS: RFS External Snapshot E2E Test completed successfully!"
             echo ""
             echo "Test Results Summary:"
-            echo "  Target Cluster: ${params.TARGET_VERSION}"
-            echo "  Data Nodes: ${params.TARGET_DATA_NODE_COUNT} x ${params.TARGET_DATA_NODE_TYPE}"
-            echo "  Manager Nodes: ${params.TARGET_MANAGER_NODE_COUNT} x ${params.TARGET_MANAGER_NODE_TYPE}"
-            echo "  Snapshot Source: ${params.SNAPSHOT_NAME} from ${params.SNAPSHOT_REPO_NAME}"
-            echo "  RFS Workers: ${params.BACKFILL_SCALE}"
-            echo "  Commit Tested: ${env.TEST_COMMIT_SHORT} (${env.COMMIT_DATE})"
+            echo "  Target Cluster: ${params.targetVersion}"
+            echo "  Data Nodes: ${params.targetDataNodeCount} x ${params.targetDataNodeType}"
+            echo "  Manager Nodes: ${params.targetManagerNodeCount} x ${params.targetManagerNodeType}"
+            echo "  Snapshot Source: ${params.snapshotName} from ${params.snapshotRepoName}"
+            echo "  RFS Workers: ${params.backfillScale}"
+            echo "  Test ID: ${params.testUniqueId}"
             echo ""
-            echo "Performance metrics collected and plotted successfully"
+            echo "Performance metrics collected successfully"
             echo ""
             
         } catch (Exception e) {
@@ -373,10 +358,10 @@ def call(Map config = [:]) {
             echo "FAILURE: RFS External Snapshot E2E Test failed"
             echo ""
             echo "Debugging Information:"
-            echo "  - Stage: ${params.STAGE}"
-            echo "  - Target Version: ${params.TARGET_VERSION}"
-            echo "  - Snapshot: ${params.SNAPSHOT_NAME}"
-            echo "  - Commit: ${env.TEST_COMMIT_SHORT ?: 'Unknown'}"
+            echo "  - Stage: ${params.stage}"
+            echo "  - Target Version: ${params.targetVersion}"
+            echo "  - Snapshot: ${params.snapshotName}"
+            echo "  - Test ID: ${params.testUniqueId}"
             echo "  - Error: ${e.message}"
             echo ""
             echo "Resources preserved for debugging"
@@ -384,64 +369,25 @@ def call(Map config = [:]) {
             echo "Manual Cleanup Commands:"
             echo "  # Clean up Migration Assistant infrastructure"
             echo "  cd test"
-            echo "  ./awsEnhancedE2ESolutionSetup.sh --cleanup-migration --stage ${params.STAGE}"
+            echo "  ./awsMigrationAssistantSetup.sh --cleanup --stage ${params.stage}"
             echo ""
             echo "  # Clean up Target Cluster"
-            echo "  ./awsEnhancedE2ESolutionSetup.sh --cleanup-target --stage ${params.STAGE}"
+            echo "  ./awsTargetClusterSetup.sh --cleanup --cluster-version ${params.targetVersion} --stage ${params.stage}"
             echo ""
             
             throw e
             
         } finally {
-            timeout(time: 30, unit: 'MINUTES') {
-                dir('test') {
-                    echo ""
-                    echo "=== CLEANUP PHASE ==="
-                    echo "Starting dual cleanup process..."
-                    echo "This cleanup runs regardless of test success/failure"
-                    
-                    try {
-                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                
-                                // Cleanup Migration Assistant infrastructure
-                                echo "Cleaning up Migration Assistant infrastructure..."
-                                sh """
-                                    ./awsEnhancedE2ESolutionSetup.sh --cleanup-migration --stage ${params.STAGE} || {
-                                        echo "Migration cleanup completed with warnings (some resources may have been already deleted)"
-                                        exit 0
-                                    }
-                                """
-                                
-                                // Cleanup Target Cluster
-                                echo "Cleaning up Target Cluster..."
-                                sh """
-                                    ./awsEnhancedE2ESolutionSetup.sh --cleanup-target --stage ${params.STAGE} || {
-                                        echo "Target cleanup completed with warnings (some resources may have been already deleted)"
-                                        exit 0
-                                    }
-                                """
-                                
-                                echo "Note: External snapshot remains untouched as requested"
-                            }
-                        }
-                        
-                        echo "Dual cleanup process completed successfully"
-                        
-                    } catch (Exception cleanupError) {
-                        echo "Cleanup encountered error: ${cleanupError.message}"
-                        echo "Some resources may need manual cleanup"
-                    }
-                }
-            }
             echo ""
             echo "Pipeline Summary:"
             echo "  Result: ${currentBuild.result ?: 'SUCCESS'}"
-            echo "  Stage: ${params.STAGE}"
-            echo "  Target Version: ${params.TARGET_VERSION}"
-            echo "  Commit Tested: ${env.TEST_COMMIT_SHORT ?: 'Unknown'} (${env.COMMIT_DATE ?: 'Unknown'})"
-            echo "  Backfill Scale: ${params.BACKFILL_SCALE} workers"
+            echo "  Stage: ${params.stage}"
+            echo "  Target Version: ${params.targetVersion}"
+            echo "  Test ID: ${params.testUniqueId}"
+            echo "  Backfill Scale: ${params.backfillScale} workers"
             echo ""
+            echo "Note: Cleanup handled by Stage 8 (success-only) or manual commands (on failure)"
+            echo "External snapshot remains untouched as requested"
         }
     }
 }
