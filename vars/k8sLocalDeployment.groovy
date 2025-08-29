@@ -104,12 +104,12 @@ def call(Map config = [:]) {
                             script {
                                 def sourceVer = sourceVersion ?: params.SOURCE_VERSION
                                 def targetVer = targetVersion ?: params.TARGET_VERSION
+                                currentBuild.description = "${sourceVer} → ${targetVer}"
                                 def testIdsArg = ""
                                 def testIdsResolved = testIds ?: params.TEST_IDS
                                 if (testIdsResolved != "" && testIdsResolved != "all") {
                                     testIdsArg = "--test-ids='$testIdsResolved'"
                                 }
-                                echo "SV: ${sourceVer} and TV: ${targetVer}"
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --skip-delete --test-reports-dir='./reports'"
