@@ -88,7 +88,7 @@ def call(Map config = [:]) {
                                                 projectName: childJobName,
                                                 selector: specific("${result.number}"),
                                                 filter: 'reports/**',
-                                                target: "libraries/testAutomation/reports/${displayName.replaceAll(' ', '_')}",
+                                                target: "libraries/testAutomation/reports",
                                                 flatten: true,
                                                 optional: true
                                         )
@@ -210,7 +210,7 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('libraries/testAutomation') {
                             script {
-                                sh "ls -al"
+                                sh "ls -al ./reports"
                                 sh "pipenv install --deploy"
                                 sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only"
                             }
