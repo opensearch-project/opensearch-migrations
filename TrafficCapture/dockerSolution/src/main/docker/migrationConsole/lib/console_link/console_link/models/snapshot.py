@@ -354,10 +354,46 @@ class SnapshotStatus(BaseModel):
 
     @classmethod
     def from_snapshot_info(cls, snapshot_info: dict) -> "SnapshotStatus":
-        # 1) Extract progress metrics
+        """
+        Create a SnapshotStatus object from snapshot information.
+        """
+        progress_metrics = cls._extract_progress_metrics(snapshot_info)
+        
+        percentage, eta_ms = cls._calculate_progress_metrics(
+            progress_metrics["processed_units"], 
+            progress_metrics["total_units"], 
+            progress_metrics["elapsed_ms"],
+            progress_metrics["state"]
+        )
+        
+        indexes = cls._extract_index_statuses(snapshot_info, progress_metrics["state"])
+        
+        return cls(
+            status=progress_metrics["state"],
+            percentage_completed=percentage,
+            eta_ms=eta_ms,
+            started=datetime.fromtimestamp(progress_metrics["start_ms"] / 1000)
+            if progress_metrics["start_ms"] else None,
+            finished=datetime.fromtimestamp(progress_metrics["finished_ms"] / 1000)
+            if progress_metrics["finished_ms"] else None,
+            data_total_bytes=progress_metrics["total_bytes"],
+            data_processed_bytes=progress_metrics["processed_bytes"],
+            data_throughput_bytes_avg_sec=progress_metrics["throughput_bytes"],
+            shard_total=progress_metrics["total_shards"],
+            shard_complete=progress_metrics["completed_shards"],
+            indexes=indexes
+        )
+        
+    @classmethod
+    def _extract_progress_metrics(cls, snapshot_info: dict) -> dict:
+        """
+        Extract progress metrics from the snapshot information.
+        """
         total_bytes = processed_bytes = throughput_bytes = None
         total_shards = completed_shards = failed_shards = None
         total_units = processed_units = 0
+        start_ms = elapsed_ms = 0
+        
         if shards_stats := snapshot_info.get("shards_stats"):
             # ES ≥7.8 / OS: shard-level stats
             total_units = total_shards = shards_stats.get("total", 0)
@@ -391,76 +427,103 @@ class SnapshotStatus(BaseModel):
                 (processed_bytes / (1024 ** 2)) / (duration_ms / 1000)
                 if duration_ms > 0 else 0
             )
-
-        # 2) Compute percentage complete
+        
+        raw_state = snapshot_info.get("state", "")
+        state = convert_snapshot_state_to_step_state(raw_state)
+        
+        return {
+            "total_bytes": total_bytes,
+            "processed_bytes": processed_bytes,
+            "throughput_bytes": throughput_bytes,
+            "total_shards": total_shards,
+            "completed_shards": completed_shards,
+            "failed_shards": failed_shards,
+            "total_units": total_units,
+            "processed_units": processed_units,
+            "start_ms": start_ms,
+            "elapsed_ms": elapsed_ms,
+            "finished_ms": start_ms + elapsed_ms,
+            "state": state
+        }
+    
+    @classmethod
+    def _calculate_progress_metrics(
+        cls,
+        processed_units: int,
+        total_units: int,
+        elapsed_ms: int,
+        state: StepState
+    ) -> tuple:
+        """
+        Calculate percentage complete and estimated time to completion.
+        """
+        # Compute percentage complete
         percentage = (processed_units / total_units * 100) if total_units else 0.0
-
-        # 3) Compute ETA in ms (only once we've made some progress)
+        
+        # Compute ETA in ms (only once we've made some progress)
         eta_ms: Optional[float] = None
         if 0 < percentage < 100:
             eta_ms = (elapsed_ms / percentage) * (100 - percentage)
-
-        # 4) Normalize finished time
-        finished_ms = start_ms + elapsed_ms
-
-        # 5) Map snapshot state to your status string
-        raw_state = snapshot_info.get("state", "")
-        state = convert_snapshot_state_to_step_state(raw_state)
-
-        # 6) If it's already done, clamp to 100%
+        
+        # If it's already done, clamp to 100%
         if state == StepState.COMPLETED:
             percentage = 100.0
             eta_ms = 0.0
-
-        # 7) Extract index status information
+            
+        return percentage, eta_ms
+    
+    @classmethod
+    def _extract_index_statuses(cls, snapshot_info: dict, overall_state: StepState) -> List[SnapshotIndexStatus]:
+        """
+        Extract status information for individual indexes in the snapshot.
+        """
         indexes = []
         indices = snapshot_info.get("indices", {})
-        if indices:
-            for index_name, index_info in indices.items():
-                # Extract basic index info
-                shards_info = index_info.get("shards", 0)
-                # Ensure shard_count is an integer, not a dictionary
-                if isinstance(shards_info, dict):
-                    # If it's a dictionary of shard data, just use the count of keys
-                    shard_count = len(shards_info)
-                else:
-                    shard_count = shards_info
-                doc_count = index_info.get("docs", 0)
-                size_bytes = index_info.get("size_in_bytes", 0)
-                
-                # Determine index status
-                index_state = index_info.get("state", "")
-                if index_state == "SUCCESS" or state == StepState.COMPLETED:
-                    index_status = SnapshotIndexState.completed
-                elif index_state in ["IN_PROGRESS", "STARTED"]:
-                    index_status = SnapshotIndexState.in_progress
-                else:
-                    index_status = SnapshotIndexState.not_started
-                
-                # Create and add SnapshotIndexStatus
-                indexes.append(
-                    SnapshotIndexStatus(
-                        name=index_name,
-                        document_count=doc_count,
-                        size_bytes=size_bytes,
-                        shard_count=shard_count,
-                        status=index_status
-                    )
-                )
+        
+        if not indices:
+            return indexes
+            
+        for index_name, index_info in indices.items():
+            # Extract basic index info
+            shards_info = index_info.get("shards", 0)
 
-        return cls(
-            status=state,
-            percentage_completed=percentage,
-            eta_ms=eta_ms,
-            started=datetime.fromtimestamp(start_ms / 1000) if start_ms else None,
-            finished=datetime.fromtimestamp(finished_ms / 1000) if finished_ms else None,
-            data_total_bytes=total_bytes,
-            data_processed_bytes=processed_bytes,
-            data_throughput_bytes_avg_sec=throughput_bytes,
-            shard_total=total_shards,
-            shard_complete=completed_shards,
-            indexes=indexes
-        )
+            # Ensure shard_count is an integer, not a dictionary
+            if isinstance(shards_info, dict):
+                # If it's a dictionary of shard data, just use the count of keys
+                shard_count = len(shards_info)
+            else:
+                shard_count = shards_info
+
+            doc_count = index_info.get("docs", 0)
+            size_bytes = index_info.get("size_in_bytes", 0)
+            
+            # Determine index status
+            index_status = cls._determine_index_status(index_info.get("state", ""), overall_state)
+            
+            # Create and add SnapshotIndexStatus
+            indexes.append(
+                SnapshotIndexStatus(
+                    name=index_name,
+                    document_count=doc_count,
+                    size_bytes=size_bytes,
+                    shard_count=shard_count,
+                    status=index_status
+                )
+            )
+
+        return indexes
+    
+    @staticmethod
+    def _determine_index_status(index_state: str, overall_state: StepState) -> SnapshotIndexState:
+        """
+        Determine the status of an individual index based on its state and the overall snapshot state.
+        """
+        if index_state == "SUCCESS" or overall_state == StepState.COMPLETED:
+            return SnapshotIndexState.completed
+        elif index_state in ["IN_PROGRESS", "STARTED"]:
+            return SnapshotIndexState.in_progress
+        else:
+            return SnapshotIndexState.not_started
 
 
 def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
@@ -677,105 +740,133 @@ class SnapshotConfig(BaseModel):
     source: SnapshotType
 
 
+def _resolve_index_patterns(cluster: Cluster, index_patterns: Optional[List[str]]) -> Optional[str]:
+    """
+    Resolve index patterns to concrete indices including hidden/closed indices.
+    """
+    if not index_patterns:
+        return None
+
+    # Resolve via _resolve/index to capture indices + backing indices of data streams.
+    resolve = cluster.call_api(
+        "/_resolve/index",
+        params={
+            "name": ",".join(index_patterns),
+            "expand_wildcards": "all",
+        },
+    ).json()
+
+    concrete = [i["name"] for i in resolve.get("indices", [])]
+
+    # Include backing indices for any matched data streams
+    for ds in resolve.get("data_streams", []):
+        backing_indices = ds.get("backing_indices", [])
+        backing_index_names = [bi["name"] for bi in backing_indices]
+        concrete.extend(backing_index_names)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_indices = []
+    for x in concrete:
+        if x not in seen:
+            seen.add(x)
+            unique_indices.append(x)
+
+    return ",".join(unique_indices) if unique_indices else None
+
+
+def _get_index_stats(cluster: Cluster, targets: Optional[str]) -> Dict:
+    """
+    Fetch document count and size statistics for indices.
+    """
+    path = f"/{targets}/_stats" if targets else "/_stats"
+    params = {
+        "level": "indices",
+        "filter_path": (
+            "indices.*.primaries.docs.count,"
+            "indices.*.primaries.docs.deleted,"
+            "indices.*.primaries.store.size_in_bytes"
+        ),
+        "expand_wildcards": "all",
+        "metric": "docs,store",
+    }
+    
+    stats = cluster.call_api(path, params=params).json()
+    return stats.get("indices", {}) or {}
+
+
+def _get_shard_counts(cluster: Cluster, targets: Optional[str]) -> Dict[str, int]:
+    """
+    Retrieve shard counts for indices from the _settings endpoint.
+    """
+    settings_path = f"/{targets}/_settings" if targets else "/_settings"
+    settings_params = {
+        "filter_path": "*.settings.index.number_of_shards",
+        "expand_wildcards": "all",
+    }
+    
+    settings_response = cluster.call_api(settings_path, params=settings_params).json()
+
+    # Create a mapping of index name to shard count
+    shard_count_map = {}
+    for index_name, index_data in settings_response.items():
+        # The settings path might include the index name as a prefix
+        clean_name = index_name.split(".")[-1]
+        try:
+            num_shards = int(index_data.get("settings", {}).get("index", {}).get("number_of_shards", 0))
+            shard_count_map[clean_name] = num_shards
+        except (ValueError, AttributeError):
+            # In case of parsing issues, default to 0
+            shard_count_map[clean_name] = 0
+            
+    return shard_count_map
+
+
+def _build_index_list(indices: Dict, shard_count_map: Dict[str, int]) -> List[SnapshotIndex]:
+    """
+    Build and sort a list of SnapshotIndex objects.
+    """
+    index_list: List[SnapshotIndex] = []
+
+    for name, body in indices.items():
+        prim = body.get("primaries", {})
+        docs = prim.get("docs", {})
+        store = prim.get("store", {})
+
+        # Live docs (excludes deletions)
+        doc_count = int(docs.get("count", 0) or 0)
+        size_bytes = int(store.get("size_in_bytes", 0) or 0)
+        
+        shard_count = shard_count_map.get(name, 0)
+
+        index_list.append(SnapshotIndex(
+            name=name,
+            document_count=doc_count,
+            size_bytes=size_bytes,
+            shard_count=shard_count,
+        ))
+
+    # Stable ordering
+    index_list.sort(key=lambda x: x.name)
+    return index_list
+
+
 def get_cluster_indexes(cluster: Cluster, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
     """
     Programmatic, more reliable index sizing:
     - Uses /_stats/docs,store (primary bytes & doc counts)
     - Includes hidden/closed indices if patterns match
-    - Optionally resolves data streams to backing indices
+    - Resolves data streams to backing indices
     """
     if not cluster:
         raise NoSourceClusterDefinedError()
 
     try:
-        # If patterns were provided, resolve them to concrete indices (incl. hidden/closed)
-        # This avoids surprises with data streams & wildcards.
-        targets = None
-        if index_patterns:
-            # Resolve via _resolve/index to capture indices + backing indices of data streams.
-            resolve = cluster.call_api(
-                "/_resolve/index",
-                params={
-                    "name": ",".join(index_patterns),
-                    "expand_wildcards": "all",
-                },
-            ).json()
-            concrete = [i["name"] for i in resolve.get("indices", [])]
-            # Include backing indices for any matched data streams
-            for ds in resolve.get("data_streams", []):
-                backing_indices = ds.get("backing_indices", [])
-                backing_index_names = [bi["name"] for bi in backing_indices]
-                concrete.extend(backing_index_names)
-            # Deduplicate while preserving order
-            seen = set()
-            # Filter out duplicates while preserving order
-            unique_indices = []
-            for x in concrete:
-                # If not already seen, add to unique indices
-                if x not in seen:
-                    seen.add(x)
-                    unique_indices.append(x)
-            targets = ",".join(unique_indices) if unique_indices else None
-
-        # First get regular stats for document count and size
-        path = f"/{targets}/_stats" if targets else "/_stats"
-        params = {
-            "level": "indices",
-            "filter_path": (
-                "indices.*.primaries.docs.count,"
-                "indices.*.primaries.docs.deleted,"
-                "indices.*.primaries.store.size_in_bytes"
-            ),
-            "expand_wildcards": "all",
-            "metric": "docs,store",
-        }
-
-        stats = cluster.call_api(path, params=params).json()
-        indices = stats.get("indices", {}) or {}
+        targets = _resolve_index_patterns(cluster, index_patterns)
+        indices = _get_index_stats(cluster, targets)
+        shard_count_map = _get_shard_counts(cluster, targets)
+        index_list = _build_index_list(indices, shard_count_map)
         
-        # Now get shard counts from _settings endpoint
-        settings_path = f"/{targets}/_settings" if targets else "/_settings"
-        settings_params = {
-            "filter_path": "*.settings.index.number_of_shards",
-            "expand_wildcards": "all",
-        }
-        
-        settings_response = cluster.call_api(settings_path, params=settings_params).json()
-
-        # Create a mapping of index name to shard count
-        shard_count_map = {}
-        for index_name, index_data in settings_response.items():
-            # The settings path might include the index name as a prefix
-            clean_name = index_name.split(".")[-1]
-            try:
-                num_shards = int(index_data.get("settings", {}).get("index", {}).get("number_of_shards", 0))
-                shard_count_map[clean_name] = num_shards
-            except (ValueError, AttributeError):
-                # In case of parsing issues, default to 0
-                shard_count_map[clean_name] = 0
-                
-        index_list: List[SnapshotIndex] = []
-        for name, body in indices.items():
-            prim = body.get("primaries", {})
-            docs = prim.get("docs", {})
-            store = prim.get("store", {})
-
-            # Live docs (excludes deletions). Add docs.get("deleted") if you want to expose it.
-            doc_count = int(docs.get("count", 0) or 0)
-            size_bytes = int(store.get("size_in_bytes", 0) or 0)
-            
-            # Get shard count from our mapping
-            shard_count = shard_count_map.get(name, 0)
-
-            index_list.append(SnapshotIndex(
-                name=name,
-                document_count=doc_count,
-                size_bytes=size_bytes,
-                shard_count=shard_count,
-            ))
-
-        # Optional: stable order
-        index_list.sort(key=lambda x: x.name)
         return SnapshotIndexes(indexes=index_list)
 
     except Exception as e:

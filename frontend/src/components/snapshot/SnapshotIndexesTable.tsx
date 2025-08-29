@@ -75,7 +75,7 @@ export default function SnapshotIndexesTable({
     }
   ];
   
-  if (snapshotStatus && snapshotStatus.indexes) {
+  if (snapshotStatus?.indexes) {
     columnDefinitions.push({
       id: 'status',
       header: 'Status',
