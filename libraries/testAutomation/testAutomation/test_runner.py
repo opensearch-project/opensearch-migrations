@@ -108,7 +108,7 @@ class TestRunner:
         summary = TestSummary(**data.get("summary"))
         return TestReport(tests=tests, summary=summary)
 
-    def write_report_to_file(self, base_dir: str, report_data: dict,  source_version: str, target_version: str):
+    def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str):
         dir_normal = base_dir.rstrip("/")
         source_version_normal = source_version.lower().replace("_", "-").replace(".", "-")
         target_version_normal = target_version.lower().replace("_", "-").replace(".", "-")
