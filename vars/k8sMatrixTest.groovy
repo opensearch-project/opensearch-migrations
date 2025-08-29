@@ -69,8 +69,6 @@ def call(Map config = [:]) {
                                 def displayName = "${source} → ${target}"
 
                                 jobs[displayName] = {
-                                    echo "🔄 Starting: ${displayName}"
-
                                     try {
                                         def result = build(
                                             job: childJobName,
@@ -100,12 +98,6 @@ def call(Map config = [:]) {
                                             duration: result.duration
                                         ]
 
-                                        if (result.result == 'SUCCESS') {
-                                            echo "✅ ${displayName}: SUCCESS (Build #${result.number})"
-                                        } else {
-                                            echo "❌ ${displayName}: ${result.result} (Build #${result.number})"
-                                        }
-
                                     } catch (Exception e) {
                                         echo "💥 ${displayName}: EXCEPTION - ${e.message}"
                                         results[displayName] = [
@@ -119,8 +111,6 @@ def call(Map config = [:]) {
                                 }
                             }
                         }
-
-                        echo "🏃 Running ${jobs.size()} migration tests in parallel..."
 
                         // Execute all jobs in parallel
                         parallel jobs
@@ -210,7 +200,6 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('libraries/testAutomation') {
                             script {
-                                sh "ls -al ./reports"
                                 sh "pipenv install --deploy"
                                 sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only"
                             }

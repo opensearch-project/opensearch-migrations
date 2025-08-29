@@ -78,7 +78,7 @@ class TestRunner:
             row = [version_label]
             test_results = {test.name: "✓" if test.result == "passed" else "X" for test in report.tests}
             for name in all_test_names:
-                row.append(test_results.get(name, ""))
+                row.append(test_results.get(name, "N/A"))
             matrix_rows.append(row)
 
         # Build test description rows
@@ -88,7 +88,7 @@ class TestRunner:
                 test_descriptions.setdefault(test.name, test.description)
 
         # Print Test Matrix
-        headers = ["Version"] + all_test_names
+        headers = ["Version"] + [name[:8] for name in all_test_names]
         print("\nTest Matrix:")
         print(tabulate(matrix_rows, headers=headers, tablefmt="fancy_grid"))
 
