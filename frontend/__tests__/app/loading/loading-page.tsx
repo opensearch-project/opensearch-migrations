@@ -60,10 +60,13 @@ describe("LoadingPage", () => {
   it("shows error details on failure response", async () => {
     let callCount = 0;
     server.use(
-      http.get("http://localhost/system/health", () =>
+      http.get("http://localhost/system/health", () => {
         callCount++;
-        HttpResponse.json({ status: "error", checks: {} }, { status: 503 }),
-      ),
+        return HttpResponse.json(
+          { status: "error", checks: {} },
+          { status: 503 },
+        );
+      }),
     );
 
     render(<LoadingPage />);
