@@ -77,10 +77,11 @@ export function templateInputParametersAsExpressions<WP extends InputParametersR
     const result: any = {};
     const workflowParams = params || {};
     Object.keys(params).forEach(key => {
-        const paramDef = workflowParams[key];
-        if (paramDef && paramDef.type) {
-            result[key] = inputParam(key, paramDef);
-        }
+        result[key] = inputParam(key, workflowParams[key]);
+        // const paramDef = workflowParams[key];
+        // if (paramDef && paramDef.type) {
+        //     result[key] = inputParam(key, paramDef);
+        // }
     });
     return result;
 }

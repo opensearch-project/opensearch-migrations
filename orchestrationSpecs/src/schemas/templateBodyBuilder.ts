@@ -73,7 +73,7 @@ export abstract class TemplateBodyBuilder<
 
     get inputs(): InputParamsToExpressions<InputParamsScope> {
         const rval = templateInputParametersAsExpressions(this.inputsScope);
-        return rval as InputParamsToExpressions<InputParamsScope>;
+        return rval as unknown as InputParamsToExpressions<InputParamsScope>;
     }
 
     get workflowInputs(): WorkflowInputsToExpressions<ContextualScope> {
