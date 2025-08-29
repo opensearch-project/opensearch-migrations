@@ -28,6 +28,11 @@ def call(Map config = [:]) {
             skipDefaultCheckout(true)
         }
 
+        triggers {
+            // Scheduled run every 6 hours
+            cron('H */6 * * *')
+        }
+
         stages {
             stage('Checkout') {
                 steps {
