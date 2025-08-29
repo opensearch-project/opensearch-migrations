@@ -8,12 +8,11 @@ import {
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {BaseExpression, ComparisonExpression, concat, equals, literal} from "@/schemas/expression";
+import {BaseExpression, concat, equals, literal} from "@/schemas/expression";
 import {LoopWithParams, makeItemsLoop, makeParameterLoop, makeSequenceLoop} from "@/schemas/workflowTypes";
 
 const leftE: BaseExpression<string, "govaluate"> = literal("a");
 const rightE: BaseExpression<string,  "govaluate"> = literal("a");
-const cE: BaseExpression<boolean, "govaluate"> = new ComparisonExpression("==", leftE, rightE);
 const eE: BaseExpression<boolean, "govaluate"> = equals(leftE, rightE);
 
 export const FullMigration = WorkflowBuilder.create({
@@ -28,13 +27,13 @@ export const FullMigration = WorkflowBuilder.create({
         )
     )
     .addTemplate("main", t=> t
+        .addOptionalInput("simpleString", s=>"hello")
         .addRequiredInput("sourceMigrationConfigs",
             z.array(SOURCE_MIGRATION_CONFIG),
             "List of server configurations to direct migrated traffic toward")
         .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
             "List of server configurations to direct migrated traffic toward")
         .addOptionalInput("doSecondWhenTest", s=>true)
-        .addOptionalInput("simpleString", s=>"hello")
         .addOptionalInput("imageParams",
             scope => literal(
                 Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]

@@ -72,13 +72,19 @@ export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = 
 };
 
 export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {
-    [K in keyof InputParamsScope]: InputParamsScope[K] extends InputParamDef<infer T, any>
+    [K in keyof InputParamsScope]: InputParamsScope[K] extends { type: ZodType<infer T> }
         ? T extends PlainObject
-            ? T extends null | undefined
-                ? never
-                : FromParameterExpression<NonNullable<T>>
+            ? ReturnType<typeof inputParam<T>>
             : never
         : never
+
+    // [K in keyof InputParamsScope]: InputParamsScope[K] extends InputParamDef<infer T, any>
+    //     ? T extends PlainObject
+    //         ? T extends null | undefined
+    //             ? never
+    //             : FromParameterExpression<NonNullable<T>>
+    //         : never
+    //     : never
 };
 
 // Helper type to extract workflow inputs from contextual scope

@@ -90,11 +90,11 @@ export class TemplateBuilder<
         }) => T;
         const param = defineParam({
             defaultValue: fn({
-                workflowParameters: workflowParametersAsExpressions(this.contextualScope.workflowParameters || {}),
-                inputParameters: templateInputParametersAsExpressions(this.inputScope),
+                workflowParameters: workflowParametersAsExpressions(this.contextualScope.workflowParameters || {}) as unknown as WorkflowInputsToExpressions<ContextualScope>,
+                inputParameters: templateInputParametersAsExpressions(this.inputScope) as unknown as InputParamsToExpressions<InputParamsScope>,
                 rawParameters: { workflow: this.contextualScope,
                 currentTemplate: this.getTemplateSignatureScope()
-            }}),
+            }}) as DeepWiden<T>,
             description
         });
 

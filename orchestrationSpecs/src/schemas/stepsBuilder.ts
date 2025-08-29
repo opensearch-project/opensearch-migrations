@@ -105,7 +105,7 @@ export class StepsBuilder<
 > {
     constructor(
         contextualScope: ContextualScope,
-        inputsScope: InputParamsScope,
+        public inputsScope: InputParamsScope,
         bodyScope: StepsScope,
         protected readonly stepGroups: StepGroup[],
         outputsScope: OutputParamsScope

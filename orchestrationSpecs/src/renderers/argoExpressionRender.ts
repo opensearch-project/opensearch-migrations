@@ -126,7 +126,7 @@ export function isArithmeticExpression(expr: BaseExpression<any>): expr is Arith
     return expr.kind === 'arithmetic';
 }
 
-export function isComparisonExpression(expr: BaseExpression<any>): expr is ComparisonExpression<any, any> {
+export function isComparisonExpression(expr: BaseExpression<any>): expr is ComparisonExpression<any, any, any> {
     return expr.kind === 'comparison';
 }
 

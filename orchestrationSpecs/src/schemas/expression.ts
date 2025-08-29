@@ -1,31 +1,36 @@
 import { InputParamDef, OutputParamDef } from "@/schemas/parameterSchemas";
-import {DeepWiden, PlainObject} from "@/schemas/plainObject";
+import { DeepWiden, PlainObject } from "@/schemas/plainObject";
+
 
 export type ExpressionType = "govaluate" | "template";
 
 export abstract class BaseExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> {
+    // Invariant phantom to prevent `BaseExpression<number>` from being assignable to `BaseExpression<string>`
+    // private _phantom!: (arg: T) => T;
+
     readonly _resultType!: T; // phantom only
     readonly _complexity!: C; // phantom only
+
     constructor(public readonly kind: string) {}
 }
 
 export type SimpleExpression<T extends PlainObject>   = BaseExpression<T, "govaluate">;
 export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "template">;
-export type AnyExpression<T extends PlainObject>      = BaseExpression<T, ExpressionType>;
+export type AnyExpression<T extends PlainObject>      = BaseExpression<T, ExpressionType>; // kept for external callers; not used below
 
-/** Brand combinators to help generate expression types for compound expressions */
-type ExprC<E> = E extends BaseExpression<any, infer C> ? C : never;
+type Scalar = number | string;
+type ResultOf<E> = E extends BaseExpression<infer U, any> ? U : never;
+type ExprC<E>    = E extends BaseExpression<any, infer C> ? C : never;
+export type IsAny<T>    = 0 extends (1 & T) ? true : false;
+export type NoAny<T>    =  IsAny<ResultOf<T>> extends true ? never : T;
+
 type WidenComplexity2<A extends ExpressionType, B extends ExpressionType> =
     A extends "template" ? "template" :
         B extends "template" ? "template" : "govaluate";
-type WidenComplexity3 <A extends ExpressionType, B extends ExpressionType, C extends ExpressionType> = WidenComplexity2<WidenComplexity2<A,B>, C>;
+type WidenComplexity3<A extends ExpressionType, B extends ExpressionType, C extends ExpressionType> = WidenComplexity2<WidenComplexity2<A,B>, C>;
 type WidenExpressionComplexity2<L, R> = WidenComplexity2<ExprC<L>, ExprC<R>>;
 type WidenExpressionComplexity3<A, B, C> = WidenComplexity3<ExprC<A>, ExprC<B>, ExprC<C>>;
-/**
- *  Helper used to pull a value from one expression so that it can be fixed in other counterparts
- * (e.g. ternary)
- * */
-type ValueOf<E> = E extends AnyExpression<infer U> ? U : never;
+
 
 /** ───────────────────────────────────────────────────────────────────────────
  *  Leaves
@@ -60,9 +65,9 @@ export class FromConfigMapExpression<T extends PlainObject>
  *  Derived nodes (single class; brand inferred from children)
  *  ───────────────────────────────────────────────────────────────────────── */
 export class AsStringExpression<
-    E extends AnyExpression<any>,
-    C extends ExpressionType = ExprC<E>
-> extends BaseExpression<string, C> {
+    E extends BaseExpression<any, CE>,
+    CE extends ExpressionType = ExprC<E>
+> extends BaseExpression<string, CE> {
     constructor(public readonly source: E) { super("as_string"); }
 }
 
@@ -74,8 +79,8 @@ type PathValue<T, P extends string> =
                 : never;
 
 export class PathExpression<
-    E extends AnyExpression<any>,
-    TSource extends PlainObject = E extends AnyExpression<infer S> ? S : never,
+    E extends BaseExpression<any, any>,
+    TSource extends PlainObject = ResultOf<E>,
     TPath extends string = string,
     TResult extends PlainObject = PathValue<TSource, TPath> & PlainObject
 > extends BaseExpression<TResult, "template"> {
@@ -83,7 +88,7 @@ export class PathExpression<
 }
 
 export class ConcatExpression<
-    ES extends readonly AnyExpression<string>[]
+    ES extends readonly BaseExpression<string, any>[]
 > extends BaseExpression<string, "template"> {
     constructor(public readonly expressions: ES, public readonly separator?: string) {
         super("concat");
@@ -92,10 +97,13 @@ export class ConcatExpression<
 
 export class TernaryExpression<
     OutT extends PlainObject,
-    B extends AnyExpression<boolean>,
-    L extends AnyExpression<OutT>,
-    R extends AnyExpression<OutT>,
-    C extends ExpressionType = WidenExpressionComplexity3<B, L, R>
+    B extends BaseExpression<boolean, CB>,
+    L extends BaseExpression<OutT, CL>,
+    R extends BaseExpression<OutT, CR>,
+    CB extends ExpressionType = ExprC<B>,
+    CL extends ExpressionType = ExprC<L>,
+    CR extends ExpressionType = ExprC<R>,
+    C extends ExpressionType = WidenComplexity3<CB, CL, CR>
 > extends BaseExpression<OutT, C> {
     constructor(
         public readonly condition: B,
@@ -105,10 +113,11 @@ export class TernaryExpression<
 }
 
 export class ArithmeticExpression<
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>,
-    C extends ExpressionType = WidenExpressionComplexity2<L, R>
-> extends BaseExpression<number, C> {
+    L extends BaseExpression<number, CL>,
+    R extends BaseExpression<number, CR>,
+    CL extends ExpressionType = ExprC<L>,
+    CR extends ExpressionType = ExprC<R>
+> extends BaseExpression<number, WidenComplexity2<CL, CR>> {
     constructor(
         public readonly operator: "+" | "-" | "*" | "/" | "%",
         public readonly left: L,
@@ -116,10 +125,19 @@ export class ArithmeticExpression<
     ) { super("arithmetic"); }
 }
 
+export const add = <
+    L extends BaseExpression<number, any>,
+    R extends BaseExpression<number, any>
+>(l: L, r: R): BaseExpression<number, WidenComplexity2<ExprC<L>, ExprC<R>>> =>
+    new ArithmeticExpression<L, R>("+", l, r);
+
 export class ComparisonExpression<
-    L extends AnyExpression<number | string>,
-    R extends AnyExpression<number | string>,
-    C extends ExpressionType = WidenExpressionComplexity2<L, R>
+    T extends number | string,
+    L extends BaseExpression<T, CL>,
+    R extends BaseExpression<T, CR>,
+    CL extends ExpressionType = ExprC<L>,
+    CR extends ExpressionType = ExprC<R>,
+    C extends ExpressionType = WidenComplexity2<CL, CR>
 > extends BaseExpression<boolean, C> {
     constructor(
         public readonly operator: "==" | "!=" | "<" | ">" | "<=" | ">=",
@@ -129,20 +147,22 @@ export class ComparisonExpression<
 }
 
 export class ArrayLengthExpression<
-    E extends AnyExpression<any[]>,
-    C extends ExpressionType = ExprC<E>
-> extends BaseExpression<number, C> {
+    E extends BaseExpression<any[], CE>,
+    CE extends ExpressionType = ExprC<E>
+> extends BaseExpression<number, CE> {
     constructor(public readonly array: E) { super("array_length"); }
 }
 
 export class ArrayIndexExpression<
-    A extends AnyExpression<any[]>,
-    I extends AnyExpression<number>,
+    A extends BaseExpression<any[], CA>,
+    I extends BaseExpression<number, CI>,
     Elem extends PlainObject =
-        A extends AnyExpression<infer Arr>
+        A extends BaseExpression<infer Arr, any>
             ? Arr extends (infer U)[] ? U & PlainObject : never
             : never,
-    C extends ExpressionType = WidenExpressionComplexity2<A, I>
+    CA extends ExpressionType = ExprC<A>,
+    CI extends ExpressionType = ExprC<I>,
+    C extends ExpressionType = WidenComplexity2<CA, CI>
 > extends BaseExpression<Elem, C> {
     constructor(public readonly array: A, public readonly index: I) { super("array_index"); }
 }
@@ -150,89 +170,117 @@ export class ArrayIndexExpression<
 export const literal = <T extends PlainObject>(v: T): SimpleExpression<DeepWiden<T>> =>
     new LiteralExpression<DeepWiden<T>>(v as DeepWiden<T>);
 
-export const asString = <E extends AnyExpression<any>>(e: E) =>
+export const asString = <E extends BaseExpression<any, any>>(e: E): BaseExpression<string, ExprC<E>> =>
     new AsStringExpression(e);
 
 export const path = <
-    E extends AnyExpression<any>,
+    E extends BaseExpression<any, any>,
     TPath extends string
 >(source: E, p: TPath) =>
     new PathExpression(source, p);
 
-export const concat = <ES extends readonly AnyExpression<string>[]>(...es: ES) =>
+export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "template"> =>
     new ConcatExpression(es);
 
-export const concatWith = <ES extends readonly AnyExpression<string>[]>(sep: string, ...es: ES) =>
+export const concatWith = <ES extends readonly BaseExpression<string, any>[]>(sep: string, ...es: ES): BaseExpression<string, "template"> =>
     new ConcatExpression(es, sep);
 
-export const ternary = <
-    B extends AnyExpression<boolean>,
-    L extends AnyExpression<OutT>,
-    R extends AnyExpression<OutT>,
-    OutT extends PlainObject = ValueOf<L>
->(cond: B, whenTrue: L, whenFalse: R) =>
-    new TernaryExpression<OutT, B, L, R>(cond, whenTrue, whenFalse);
+/* ───────── ternary: symmetrical overloads (outputs can be any PlainObject) ───────── */
 
-// Would be nice to drop the specific ones, but not worth it at the moment
-export function equals<
-    L extends AnyExpression<string>,
-    R extends AnyExpression<DeepWiden<ValueOf<L>>>
->(l: L, r: R): BaseExpression<boolean, WidenExpressionComplexity2<L, R>>;
-export function equals<
-    L extends AnyExpression<number>,
-    R extends AnyExpression<DeepWiden<ValueOf<L>>>
->(l: L, r: R): BaseExpression<boolean, WidenExpressionComplexity2<L, R>>;
-export function equals<
-    L extends AnyExpression<string | number>,
-    R extends AnyExpression<string | number>
->(l: L, r: R): BaseExpression<boolean, WidenExpressionComplexity2<L, R>> {
-    // Thread L, R, and brand into the class so C narrows to "govaluate" when possible.
-    return new ComparisonExpression<L, R, WidenExpressionComplexity2<L, R>>("==", l, r);
+// Overload: infer Out from L; force R to match L’s result type
+export function ternary<
+    B extends BaseExpression<boolean, any>,
+    L extends BaseExpression<any, any>,
+    R extends BaseExpression<ResultOf<L>, any>
+>(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<L>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
+
+// Overload: infer Out from R; force L to match R’s result type
+export function ternary<
+    B extends BaseExpression<boolean, any>,
+    R extends BaseExpression<any, any>,
+    L extends BaseExpression<ResultOf<R>, any>
+>(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<R>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
+
+// Implementation
+export function ternary(cond: any, whenTrue: any, whenFalse: any): BaseExpression<any, any> {
+    return new TernaryExpression(cond, whenTrue, whenFalse);
 }
 
-export const lessThan = <
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>
->(l: L, r: R): BaseExpression<boolean, WidenExpressionComplexity2<L, R>> =>
-    new ComparisonExpression<L, R, WidenExpressionComplexity2<L, R>>("<", l, r);
+/* ───────── equals: numeric & string overloads ───────── */
 
-export const greaterThan = <
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>
+// hidden impl binds both sides to the same T (satisfies invariance)
+const _equals = <
+    T extends Scalar,
+    L extends BaseExpression<T, any>,
+    R extends BaseExpression<T, any>
 >(l: L, r: R): BaseExpression<boolean, WidenExpressionComplexity2<L, R>> =>
-    new ComparisonExpression<L, R, WidenExpressionComplexity2<L, R>>(">", l, r);
+    new ComparisonExpression<T, L, R>("==", l, r);
 
-export const add = <
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>
->(l: L, r: R): BaseExpression<number, WidenExpressionComplexity2<L, R>> =>
-    new ArithmeticExpression<L, R, WidenExpressionComplexity2<L, R>>("+", l, r);
+// public API: only number/number and string/string calls exist to the editor.
+// NoAny blocks accidental `any` from matching.
+export const equals = _equals as {
+    <L extends BaseExpression<number, any>, R extends BaseExpression<number, any>>(
+        l: NoAny<L>, r: NoAny<R>
+    ): BaseExpression<boolean, WidenExpressionComplexity2<L, R>>;
+    <L extends BaseExpression<string, any>, R extends BaseExpression<string, any>>(
+        l: NoAny<L>, r: NoAny<R>
+    ): BaseExpression<boolean, WidenExpressionComplexity2<L, R>>;
+};
+
+/* ───────── ordered comparisons: numbers only ───────── */
+
+export function lessThan<
+    L extends BaseExpression<number, any>,
+    R extends BaseExpression<number, any>
+>(l: L, r: R): BaseExpression<boolean, WidenComplexity2<ExprC<L>, ExprC<R>>> {
+    return new ComparisonExpression<number,L,R>("<", l, r);
+}
+
+export function greaterThan<
+    L extends BaseExpression<number, any>,
+    R extends BaseExpression<number, any>
+>(l: L, r: R): BaseExpression<boolean, WidenComplexity2<ExprC<L>, ExprC<R>>> {
+    return new ComparisonExpression<number,L,R>(">", l, r);
+}
+
+/* ───────── arithmetic: numbers only ───────── */
 
 export const subtract = <
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>
->(l: L, r: R): BaseExpression<number, WidenExpressionComplexity2<L, R>> =>
-    new ArithmeticExpression<L, R, WidenExpressionComplexity2<L, R>>("-", l, r);
+    L extends BaseExpression<number, CL>,
+    R extends BaseExpression<number, CR>,
+    CL extends ExpressionType = ExprC<L>,
+    CR extends ExpressionType = ExprC<R>
+>(l: L, r: R): BaseExpression<number, WidenComplexity2<CL, CR>> =>
+    new ArithmeticExpression("-", l, r);
 
-export const multiply = <
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>
->(l: L, r: R): BaseExpression<number, WidenExpressionComplexity2<L, R>> =>
-    new ArithmeticExpression<L, R, WidenExpressionComplexity2<L, R>>("*", l, r);
+// export const multiply = <
+//     L extends BaseExpression<number, CL>,
+//     R extends BaseExpression<number, CR>,
+//     CL extends ExpressionType = ExprC<L>,
+//     CR extends ExpressionType = ExprC<R>,
+//     C extends ExpressionType = WidenComplexity2<CL, CR>
+// >(l: L, r: R): BaseExpression<number, C> =>
+//     new ArithmeticExpression("*", l, r);
+//
+// export const divide = <
+//     L extends BaseExpression<number, CL>,
+//     R extends BaseExpression<number, CR>,
+//     CL extends ExpressionType = ExprC<L>,
+//     CR extends ExpressionType = ExprC<R>,
+//     C extends ExpressionType = WidenComplexity2<CL, CR>
+// >(l: L, r: R): BaseExpression<number, C> =>
+//     new ArithmeticExpression("/", l, r);
 
-export const divide = <
-    L extends AnyExpression<number>,
-    R extends AnyExpression<number>
->(l: L, r: R): BaseExpression<number, WidenExpressionComplexity2<L, R>> =>
-    new ArithmeticExpression<L, R, WidenExpressionComplexity2<L, R>>("/", l, r);
+/* ───────── arrays ───────── */
 
-export const length = <E extends AnyExpression<any[]>>(arr: E) =>
+export const length = <E extends BaseExpression<any[], any>>(arr: E): BaseExpression<number, ExprC<E>> =>
     new ArrayLengthExpression(arr);
 
 export const index = <
-    A extends AnyExpression<any[]>,
-    I extends AnyExpression<number>
->(arr: A, i: I) => new ArrayIndexExpression(arr, i);
+    A extends BaseExpression<any[], any>,
+    I extends BaseExpression<number, any>
+>(arr: A, i: I) =>
+    new ArrayIndexExpression(arr, i);
 
 /** ───────────────────────────────────────────────────────────────────────────
  *  Helpers to create convenience records of parameter expressions for pulling them into expression slots
@@ -254,14 +302,20 @@ export const stepOutput = <T extends PlainObject>(
     parameterName: string,
     def?: OutputParamDef<T>
 ): SimpleExpression<DeepWiden<T>> =>
-    new FromParameterExpression<DeepWiden<T>>({ kind: "step_output", stepName, parameterName }, def as any);
+    new FromParameterExpression<DeepWiden<T>>(
+        { kind: "step_output", stepName, parameterName },
+        def as any
+    );
 
 export const taskOutput = <T extends PlainObject>(
     taskName: string,
     parameterName: string,
     def?: OutputParamDef<T>
 ): SimpleExpression<DeepWiden<T>> =>
-    new FromParameterExpression<DeepWiden<T>>({ kind: "task_output", taskName, parameterName }, def as any);
+    new FromParameterExpression<DeepWiden<T>>(
+        { kind: "task_output", taskName, parameterName },
+        def as any
+    );
 
-export const configMap = <T extends PlainObject>(name: string, key: string): TemplateExpression<T> =>
-    new FromConfigMapExpression(name, key);
+// export const configMap = <T extends PlainObject>(name: string, key: string): TemplateExpression<T> =>
+//     new FromConfigMapExpression(name, key);
