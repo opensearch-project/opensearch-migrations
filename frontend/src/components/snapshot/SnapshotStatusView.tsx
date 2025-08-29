@@ -1,16 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { StatusFieldDefinition } from './statusUtils';
-import { useSnapshotStatus } from './apiHooks';
-import StatusContainer from './StatusContainer';
+import { StatusFieldDefinition } from '../session/statusUtils';
+import { useSnapshotStatus } from '../../hooks/apiFetch';
+import StatusContainer from '../session/StatusContainer';
 import { 
   StatusDisplay, 
   DateDisplay,
   DurationDisplay,
   ProgressDisplay,
   ETADisplay 
-} from './statusComponents';
+} from '../session/statusComponents';
 import { SNAPSHOT_SCENARIOS } from './mockData/snapshotScenarios';
 import { SnapshotDebugControls } from './debug/SnapshotDebugControls';
 import { SnapshotStatus } from '@/generated/api';

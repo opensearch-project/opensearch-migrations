@@ -2,8 +2,8 @@
 
 import { Button, ButtonDropdown } from "@cloudscape-design/components";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import DebugCommands from "@/components/playground/debug/DebugCommands";
-import { METADATA_SCENARIOS } from "@/components/session/mockData/metadataScenarios";
+import DebugCommands from "@/components/debug/DebugCommands";
+import { METADATA_SCENARIOS } from "@/components/metadata/mockData/metadataScenarios";
 
 interface MetadataDebugControlsProps {
   readonly onScenarioSelect: (scenario: keyof typeof METADATA_SCENARIOS) => void;
