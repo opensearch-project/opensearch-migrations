@@ -1,5 +1,6 @@
 import logging
-from typing import Optional
+from pathlib import Path
+from typing import Dict, Optional, Union
 from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
     get_metrics_source
 from console_link.models.cluster import Cluster
@@ -41,20 +42,33 @@ class Environment:
     replay: Optional[Replayer] = None
     kafka: Optional[Kafka] = None
     client_options: Optional[ClientOptions] = None
+    config: Dict
 
-    def __init__(self, config_file: str):
-        logger.info(f"Loading config file: {config_file}")
-        self.config_file = config_file
-        with open(self.config_file) as f:
-            self.config = yaml.safe_load(f)
-            logger.info(f"Loaded config file: {self.config}")
+    def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None):
+        """
+        Initialize the environment either from a configuration file or a direct configuration object.
+
+        :param config: Direct configuration object (overrides config_file).
+        :param config_file: Path to the YAML config file.
+        """
+        if config_file:
+            logger.info(f"Loading config file: {config_file}")
+            with open(config_file) as f:
+                self.config = yaml.safe_load(f)
+                logger.info(f"Loaded config file: {self.config}")
+        elif config:
+            self.config = config
+            logger.info(f"Using provided config: {self.config}")
+        else:
+            raise ValueError("Either config or config_file must be provided.")
+
         v = Validator(SCHEMA)
         if not v.validate(self.config):
             logger.error(f"Config file validation errors: {v.errors}")
             raise ValueError("Invalid config file", v.errors)
 
         if 'client_options' in self.config:
-            self.client_options: ClientOptions = ClientOptions(self.config["client_options"])
+            self.client_options = ClientOptions(self.config["client_options"])
 
         if 'source_cluster' in self.config:
             self.source_cluster = Cluster(config=self.config["source_cluster"],
@@ -66,14 +80,14 @@ class Environment:
         # At some point, target and replayers should be stored as pairs, but for the time being
         # we can probably assume one target cluster.
         if 'target_cluster' in self.config:
-            self.target_cluster: Cluster = Cluster(config=self.config["target_cluster"],
-                                                   client_options=self.client_options)
+            self.target_cluster = Cluster(config=self.config["target_cluster"],
+                                          client_options=self.client_options)
             logger.info(f"Target cluster initialized: {self.target_cluster.endpoint}")
         else:
             logger.warning("No target cluster provided. This may prevent other actions from proceeding.")
 
         if 'metrics_source' in self.config:
-            self.metrics_source: MetricsSource = get_metrics_source(
+            self.metrics_source = get_metrics_source(
                 config=self.config["metrics_source"],
                 client_options=self.client_options
             )
@@ -82,27 +96,30 @@ class Environment:
             logger.info("No metrics source provided")
 
         if 'backfill' in self.config:
-            self.backfill: Backfill = get_backfill(self.config["backfill"],
-                                                   target_cluster=self.target_cluster,
-                                                   client_options=self.client_options)
+            if self.target_cluster is None:
+                raise ValueError("target_cluster must be provided for RFS backfill")
+            self.backfill = get_backfill(self.config["backfill"],
+                                         target_cluster=self.target_cluster,
+                                         client_options=self.client_options)
             logger.info(f"Backfill migration initialized: {self.backfill}")
         else:
             logger.info("No backfill provided")
 
         if 'replay' in self.config:
-            self.replay: Replayer = get_replayer(self.config["replay"], client_options=self.client_options)
+            self.replay = get_replayer(self.config["replay"], client_options=self.client_options)
             logger.info(f"Replay initialized: {self.replay}")
 
         if 'snapshot' in self.config:
-            self.snapshot: Snapshot = get_snapshot(self.config["snapshot"],
-                                                   source_cluster=self.source_cluster)
+            self.snapshot = get_snapshot(self.config["snapshot"],
+                                         source_cluster=self.source_cluster)
             logger.info(f"Snapshot initialized: {self.snapshot}")
         else:
             logger.info("No snapshot provided")
         if 'metadata_migration' in self.config:
-            self.metadata: Metadata = Metadata(self.config["metadata_migration"],
-                                               target_cluster=self.target_cluster,
-                                               snapshot=self.snapshot)
+            self.metadata = Metadata(self.config["metadata_migration"],
+                                     target_cluster=self.target_cluster,
+                                     source_cluster=self.source_cluster,
+                                     snapshot=self.snapshot)
         if 'kafka' in self.config:
-            self.kafka: Kafka = get_kafka(self.config["kafka"])
+            self.kafka = get_kafka(self.config["kafka"])
             logger.info(f"Kafka initialized: {self.kafka}")

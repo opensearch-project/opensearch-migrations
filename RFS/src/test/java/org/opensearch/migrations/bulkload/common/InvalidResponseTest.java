@@ -126,4 +126,75 @@ class InvalidResponseTest {
         assertThat(result, containsInAnyOrder("index.provided_name", "index.lifecycle.name", "index.creation_date"));
     }
 
+    @Test
+    void testGetIllegalArguments_WithSettingsException() {
+        var errorBody = "{\r\n" + //
+            "  \"error\": {\r\n" + //
+            "    \"root_cause\": [\r\n" + //
+            "      {\r\n" + //
+            "        \"type\": \"settings_exception\",\r\n" + //
+            "        \"reason\": \"unknown setting [index.bloom_filter_for_id_field.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings\"\r\n"
+            + //
+            "      }\r\n"
+            + //
+            "    ],\r\n"
+            + //
+            "    \"type\": \"settings_exception\",\r\n"
+            + //
+            "    \"reason\": \"unknown setting [index.bloom_filter_for_id_field.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings\"\r\n"
+            + //
+            "  },\r\n"
+            + //
+            "  \"status\": 400\r\n"
+            + //
+            "}";
+        var response = new HttpResponse(200, "statusText", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.bloom_filter_for_id_field.enabled"));
+    }
+
+    @Test
+    void testGetIllegalArguments_WithMixedExceptionTypes() {
+        var errorBody = "{\r\n" + //
+            "  \"error\": {\r\n" + //
+            "    \"root_cause\": [\r\n" + //
+            "      {\r\n" + //
+            "        \"type\": \"illegal_argument_exception\",\r\n" + //
+            "        \"reason\": \"unknown setting [index.creation_date] please check that any required plugins are installed, or check the breaking changes documentation for removed settings\"\r\n"
+            + //
+            "      }\r\n"
+            + //
+            "    ],\r\n"
+            + //
+            "    \"type\": \"settings_exception\",\r\n"
+            + //
+            "    \"reason\": \"unknown setting [index.bloom_filter_for_id_field.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings\",\r\n"
+            + //
+            "    \"suppressed\": [\r\n"
+            + //
+            "      {\r\n"
+            + //
+            "        \"type\": \"illegal_argument_exception\",\r\n"
+            + //
+            "        \"reason\": \"unknown setting [index.provided_name] please check that any required plugins are installed, or check the breaking changes documentation for removed settings\"\r\n"
+            + //
+            "      }\r\n"
+            + //
+            "    ]\r\n"
+            + //
+            "  },\r\n"
+            + //
+            "  \"status\": 400\r\n"
+            + //
+            "}";
+        var response = new HttpResponse(200, "statusText", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.creation_date", "index.bloom_filter_for_id_field.enabled", "index.provided_name"));
+    }
 }

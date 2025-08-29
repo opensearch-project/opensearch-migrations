@@ -1,20 +1,20 @@
-import datetime
 import logging
 import time
 from abc import ABC, abstractmethod
-from requests.exceptions import HTTPError
-from typing import Dict
-
 from cerberus import Validator
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
+from datetime import datetime
+from pydantic import BaseModel, Field, field_serializer
+from requests.exceptions import HTTPError
+from typing import Any, Dict, Optional
+
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.step_state import StepState
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
-
 logger = logging.getLogger(__name__)
-
 
 SNAPSHOT_SCHEMA = {
     'snapshot': {
@@ -48,7 +48,7 @@ class Snapshot(ABC):
     """
     Interface for creating and managing snapshots.
     """
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         self.config = config
         self.source_cluster = source_cluster
         v = Validator(SNAPSHOT_SCHEMA)
@@ -84,6 +84,9 @@ class Snapshot(ABC):
         pass
 
     def _collect_universal_command_args(self) -> Dict:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         command_args = {
             "--snapshot-name": self.snapshot_name,
             "--snapshot-repo-name": self.snapshot_repo_name,
@@ -118,20 +121,24 @@ class Snapshot(ABC):
 
 
 class S3Snapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
+        self.s3_endpoint = config['s3'].get('endpoint')
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         s3_command_args = {
             "--s3-repo-uri": self.s3_repo_uri,
             "--s3-region": self.s3_region,
         }
+        if self.s3_endpoint:
+            s3_command_args["--s3-endpoint"] = self.s3_endpoint
 
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)
@@ -161,27 +168,38 @@ class S3Snapshot(Snapshot):
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
-        if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
 class FileSystemSnapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.source_cluster, Cluster)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()
@@ -207,41 +225,34 @@ class FileSystemSnapshot(Snapshot):
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
-        if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
-
-
-def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
-    path = f"/_snapshot/{repository}/{snapshot}"
-    try:
-        response = cluster.call_api(path, HttpMethod.GET)
-        logging.debug(f"Raw get snapshot status response: {response.text}")
-        response.raise_for_status()
-
-        snapshot_data = response.json()
-        snapshots = snapshot_data.get('snapshots', [])
-        if not snapshots:
-            return CommandResult(success=False, value="Snapshot not started")
-
-        return CommandResult(success=True, value=snapshots[0].get("state"))
-    except Exception as e:
-        return CommandResult(success=False, value=f"Failed to get snapshot status: {str(e)}")
 
 
 def format_date(millis: int) -> str:
     if millis == 0:
         return "N/A"
-    return datetime.datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_duration(millis: int) -> str:
@@ -251,76 +262,216 @@ def format_duration(millis: int) -> str:
     return f"{hours}h {minutes}m {seconds}s"
 
 
-def get_snapshot_status_message(snapshot_info: Dict) -> str:
-    snapshot_state = snapshot_info.get("state")
-    stats = snapshot_info.get("stats", {})
-    total_size_in_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-    processed_size_in_bytes = stats.get("processed", stats.get("incremental", {})).get("size_in_bytes", 0)
-    percent_completed = (processed_size_in_bytes / total_size_in_bytes) * 100 if total_size_in_bytes > 0 else 0
-    total_size_gibibytes = total_size_in_bytes / (1024 ** 3)
-    processed_size_gibibytes = processed_size_in_bytes / (1024 ** 3)
+class SnapshotStateAndDetails:
+    def __init__(self, state: str, details: Any):
+        self.state = state
+        self.details = details
 
-    total_shards = snapshot_info.get('shards_stats', {}).get('total', 0)
-    successful_shards = snapshot_info.get('shards_stats', {}).get('done', 0)
-    failed_shards = snapshot_info.get('shards_stats', {}).get('failed', 0)
 
-    start_time = snapshot_info.get('stats', {}).get('start_time_in_millis', 0)
-    duration_in_millis = snapshot_info.get('stats', {}).get('time_in_millis', 0)
+class SnapshotNotStarted(Exception):
+    pass
 
-    start_time_formatted = format_date(start_time)
-    duration_formatted = format_duration(duration_in_millis)
 
-    anticipated_duration_remaining_formatted = (
-        format_duration((duration_in_millis / percent_completed) * (100 - percent_completed))
-        if percent_completed > 0 else "N/A (not enough data to compute)"
+class SnapshotStatusUnavailable(Exception):
+    pass
+
+
+class SnapshotStatus(BaseModel):
+    status: StepState
+    percentage_completed: float
+    eta_ms: Optional[float] = None
+    started: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
     )
-
-    throughput_mib_per_sec = (
-        (processed_size_in_bytes / (1024 ** 2)) / (duration_in_millis / 1000)
-        if duration_in_millis > 0 else 0
+    finished: Optional[datetime] = Field(
+        default=None,
+        description="Start time in ISO 8601 format",
+        json_schema_extra={"format": "date-time"}
     )
+    data_total_bytes: Optional[int] = None
+    data_processed_bytes: Optional[int] = None
+    data_throughput_bytes_avg_sec: Optional[float] = None
+    shard_total: Optional[int] = None
+    shard_complete: Optional[int] = None
+    model_config = {
+        'from_attributes': True,
+    }
 
-    return (
-        f"Snapshot is {snapshot_state}.\n"
-        f"Percent completed: {percent_completed:.2f}%\n"
-        f"Data GiB done: {processed_size_gibibytes:.3f}/{total_size_gibibytes:.3f}\n"
-        f"Total shards: {total_shards}\n"
-        f"Successful shards: {successful_shards}\n"
-        f"Failed shards: {failed_shards}\n"
-        f"Start time: {start_time_formatted}\n"
-        f"Duration: {duration_formatted}\n"
-        f"Anticipated duration remaining: {anticipated_duration_remaining_formatted}\n"
-        f"Throughput: {throughput_mib_per_sec:.2f} MiB/sec"
-    )
+    @field_serializer("started", "finished")
+    def serialize_completed(self, dt: datetime | None) -> str | None:
+        return dt.isoformat() if dt else None
+
+    @classmethod
+    def from_snapshot_info(cls, snapshot_info: dict) -> "SnapshotStatus":
+        # 1) Extract progress metrics
+        total_bytes = processed_bytes = throughput_bytes = None
+        total_shards = completed_shards = failed_shards = None
+        total_units = processed_units = 0
+        if shards_stats := snapshot_info.get("shards_stats"):
+            # ES ≥7.8 / OS: shard-level stats
+            total_units = total_shards = shards_stats.get("total", 0)
+            completed_shards = shards_stats.get("done", 0)
+            failed_shards = shards_stats.get("failed", 0)
+            processed_units = completed_shards + failed_shards
+            # these sometimes live at the top level
+            start_ms = snapshot_info.get("start_time_in_millis", 0)
+            elapsed_ms = snapshot_info.get("time_in_millis", 0)
+        else:
+            # ES <7.8: simple shards summary
+            shards = snapshot_info.get("shards", {})
+            total_units = total_shards = shards.get("total", 0)
+            completed_shards = shards.get("successful", 0)
+            failed_shards = shards.get("failed", 0)
+            processed_units = completed_shards + failed_shards
+            start_ms = snapshot_info.get("start_time_in_millis", 0)
+            elapsed_ms = snapshot_info.get("time_in_millis", 0)
+
+        if stats := snapshot_info.get("stats"):
+            # OpenSearch: byte-level stats
+            total_units = total_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+            processed_units = processed_bytes = (
+                stats.get("processed", {}).get("size_in_bytes", 0) +
+                stats.get("incremental", {}).get("size_in_bytes", 0)
+            )
+            start_ms = stats.get("start_time_in_millis", 0)
+            elapsed_ms = stats.get("time_in_millis", 0)
+            duration_ms = stats.get("time_in_millis", 0)
+            throughput_bytes = (
+                (processed_bytes / (1024 ** 2)) / (duration_ms / 1000)
+                if duration_ms > 0 else 0
+            )
+
+        # 2) Compute percentage complete
+        percentage = (processed_units / total_units * 100) if total_units else 0.0
+
+        # 3) Compute ETA in ms (only once we've made some progress)
+        eta_ms: Optional[float] = None
+        if 0 < percentage < 100:
+            eta_ms = (elapsed_ms / percentage) * (100 - percentage)
+
+        # 4) Normalize finished time
+        finished_ms = start_ms + elapsed_ms
+
+        # 5) Map snapshot state to your status string
+        raw_state = snapshot_info.get("state", "")
+        state = convert_snapshot_state_to_step_state(raw_state)
+
+        # 6) If it's already done, clamp to 100%
+        if state == StepState.COMPLETED:
+            percentage = 100.0
+            eta_ms = 0.0
+
+        return cls(
+            status=state,
+            percentage_completed=percentage,
+            eta_ms=eta_ms,
+            started=datetime.fromtimestamp(start_ms / 1000) if start_ms else None,
+            finished=datetime.fromtimestamp(finished_ms / 1000) if finished_ms else None,
+            data_total_bytes=total_bytes,
+            data_processed_bytes=processed_bytes,
+            data_throughput_bytes_avg_sec=throughput_bytes,
+            shard_total=total_shards,
+            shard_complete=completed_shards,
+        )
 
 
-def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str) -> CommandResult:
+def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
+    state_mapping = {
+        "FAILED": StepState.FAILED,
+        "IN_PROGRESS": StepState.RUNNING,
+        "PARTIAL": StepState.FAILED,
+        "SUCCESS": StepState.COMPLETED,
+    }
+
+    if (mapped := state_mapping.get(snapshot_state)) is None:
+        logging.warning("Unknown snapshot_state %r; defaulting to 'FAILED'", snapshot_state)
+        return StepState.FAILED
+    return mapped
+
+
+def get_latest_snapshot_status_raw(cluster: Cluster,
+                                   snapshot: str,
+                                   repository: str,
+                                   deep_check: bool) -> SnapshotStateAndDetails:
     try:
         path = f"/_snapshot/{repository}/{snapshot}"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status response: {response.text}")
         response.raise_for_status()
+    except HTTPError:
+        raise SnapshotNotStarted()
 
-        snapshot_data = response.json()
-        snapshots = snapshot_data.get('snapshots', [])
-        if not snapshots:
-            return CommandResult(success=False, value="Snapshot not started")
+    snapshot_data = response.json()
+    snapshots = snapshot_data.get('snapshots', [])
+    if not snapshots:
+        raise SnapshotNotStarted()
+    
+    snapshot_info = snapshots[0]
+    state = snapshot_info.get("state")
+    if not deep_check:
+        return SnapshotStateAndDetails(state, None)
 
-        snapshot_info = snapshots[0]
-        state = snapshot_info.get("state")
-
+    try:
         path = f"/_snapshot/{repository}/{snapshot}/_status"
         response = cluster.call_api(path, HttpMethod.GET)
         logging.debug(f"Raw get snapshot status full response: {response.text}")
         response.raise_for_status()
+    except HTTPError:
+        raise SnapshotStatusUnavailable()
 
-        snapshot_data = response.json()
-        snapshots = snapshot_data.get('snapshots', [])
-        if not snapshots:
-            return CommandResult(success=False, value="Snapshot status not available")
+    snapshot_data = response.json()
+    snapshots = snapshot_data.get('snapshots', [])
+    if not snapshots or not snapshots[0]:
+        raise SnapshotStatusUnavailable()
+    
+    return SnapshotStateAndDetails(state, snapshots[0])
 
-        message = get_snapshot_status_message(snapshots[0])
-        return CommandResult(success=True, value=f"{state}\n{message}")
+
+def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:
+    try:
+        # Get raw snapshot status data
+        latest_snapshot_status_raw = get_latest_snapshot_status_raw(cluster, snapshot, repository, deep_check)
+
+        if not deep_check:
+            return CommandResult(success=True, value=latest_snapshot_status_raw.state)
+
+        snapshot_status = SnapshotStatus.from_snapshot_info(latest_snapshot_status_raw.details)
+        
+        # Format datetime values for display
+        start_time = snapshot_status.started.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.started else ''
+        finish_time = snapshot_status.finished.strftime('%Y-%m-%d %H:%M:%S') if snapshot_status.finished else ''
+        
+        # Format the ETA string
+        eta_ms = snapshot_status.eta_ms or 0
+        eta_str = format_duration(int(eta_ms)) if eta_ms else "0h 0m 0s"
+
+        # Format byte data
+        def mb_or_blank(n: int | float | None) -> str | float:
+            bytes_to_megabytes = (1024 ** 2)
+            return "" if n is None else n / bytes_to_megabytes
+
+        total_mb = mb_or_blank(snapshot_status.data_total_bytes)
+        processed_mb = mb_or_blank(snapshot_status.data_processed_bytes)
+        throughput_mb = mb_or_blank(snapshot_status.data_throughput_bytes_avg_sec)
+        message = (
+            f"Snapshot status: {latest_snapshot_status_raw.state}\n"
+            f"Start time: {start_time}\n"
+            f"Finished time: {finish_time}\n"
+            f"Percent completed: {snapshot_status.percentage_completed:.2f}%\n"
+            f"Estimated time to completion: {eta_str}\n"
+            f"Data processed: {processed_mb:.3f}/{total_mb:.3f} MiB\n"
+            f"Throughput: {throughput_mb:.3f} MiB/sec\n"
+            f"Total shards: {snapshot_status.shard_total}\n"
+            f"Successful shards: {snapshot_status.shard_complete}\n"
+        )
+        
+        return CommandResult(success=True, value=message)
+    except SnapshotNotStarted:
+        return CommandResult(success=False, value="Snapshot not started")
+    except SnapshotStatusUnavailable:
+        return CommandResult(success=False, value="Snapshot status not available")
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 

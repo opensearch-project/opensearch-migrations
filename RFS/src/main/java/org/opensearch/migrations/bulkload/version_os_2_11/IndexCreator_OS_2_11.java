@@ -129,10 +129,11 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 }
 
                 var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+                log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, index.getName());
                 ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
             }
 
-            log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
+            log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", index.getName(), illegalArguments);
             client.createIndex(index.getName(), body, context);
         }
     }

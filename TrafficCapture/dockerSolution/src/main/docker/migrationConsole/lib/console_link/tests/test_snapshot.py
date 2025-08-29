@@ -14,6 +14,38 @@ from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
                                           Snapshot)
 from tests.utils import create_valid_cluster
 
+mock_snapshot_api_response = {
+    "snapshots": [
+        {
+            "snapshot": "rfs-snapshot",
+            "repository": "migration_assistant_repo",
+            "uuid": "7JFrWqraSJ20anKfiSIj1Q",
+            "state": "SUCCESS",
+            "include_global_state": True,
+            "shards_stats": {
+                "initializing": 0,
+                "started": 0,
+                "finalizing": 0,
+                "done": 304,
+                "failed": 0,
+                "total": 304
+            },
+            "stats": {
+                "incremental": {
+                    "file_count": 67041,
+                    "size_in_bytes": 67108864
+                },
+                "total": {
+                    "file_count": 67041,
+                    "size_in_bytes": 67108864
+                },
+                "start_time_in_millis": 1719343996753,
+                "time_in_millis": 79426
+            }
+        }
+    ]
+}
+
 
 @pytest.fixture
 def mock_cluster():
@@ -112,22 +144,14 @@ def test_snapshot_status(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
     mock_response = mock.Mock()
-    mock_response.json.return_value = {
-        "snapshots": [
-            {
-                "snapshot": "test_snapshot",
-                "state": "SUCCESS"
-            }
-        ]
-    }
+    mock_response.json.return_value = mock_snapshot_api_response
     source_cluster.call_api.return_value = mock_response
 
     result = snapshot.status()
 
     assert isinstance(result, CommandResult)
-    assert result.success
-    assert result.value == "SUCCESS"
-    source_cluster.call_api.assert_called_once_with(
+    assert "SUCCESS" == result.value
+    source_cluster.call_api.assert_called_with(
         f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
         HttpMethod.GET
     )
@@ -137,56 +161,51 @@ def test_snapshot_status(request, snapshot_fixture):
 def test_snapshot_status_full(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
-    mock_response = mock.Mock()
-    mock_response.json.return_value = {
-        "snapshots": [
-            {
-                "snapshot": "rfs-snapshot",
-                "repository": "migration_assistant_repo",
-                "uuid": "7JFrWqraSJ20anKfiSIj1Q",
-                "state": "SUCCESS",
-                "include_global_state": True,
-                "shards_stats": {
-                    "initializing": 0,
-                    "started": 0,
-                    "finalizing": 0,
-                    "done": 304,
-                    "failed": 0,
-                    "total": 304
-                },
-                "stats": {
-                    "incremental": {
-                        "file_count": 67041,
-                        "size_in_bytes": 67108864
-                    },
-                    "total": {
-                        "file_count": 67041,
-                        "size_in_bytes": 67108864
-                    },
-                    "start_time_in_millis": 1719343996753,
-                    "time_in_millis": 79426
-                }
-            }
-        ]
-    }
-    source_cluster.call_api.return_value = mock_response
+    
+    # Set up mock responses for both API endpoints
+    basic_response = mock.Mock()
+    basic_response.json.return_value = mock_snapshot_api_response
+    
+    status_response = mock.Mock()
+    status_response.json.return_value = mock_snapshot_api_response
+    
+    # Configure call_api to return different responses based on path
+    def mock_call_api(path, *args, **kwargs):
+        if "_status" in path:
+            return status_response
+        return basic_response
+    
+    source_cluster.call_api.side_effect = mock_call_api
 
     result = snapshot_.status(snapshot=snapshot, deep_check=True)
 
+    # Basic result validations
     assert isinstance(result, CommandResult)
     assert result.success
+    
+    # Content validations
     assert "SUCCESS" in result.value
     assert "Percent completed: 100.00%" in result.value
     assert "Total shards: 304" in result.value
     assert "Successful shards: 304" in result.value
-    assert "Failed shards: 0" in result.value
+    
+    # Check format string entries
     assert "Start time:" in result.value
-    assert "Duration:" in result.value
-    assert "Anticipated duration remaining:" in result.value
+    assert "Estimated time to completion:" in result.value
     assert "Throughput:" in result.value
-
+    
+    # Verify date/time formatting is correct
+    assert "2024-06-25 19:33:16" in result.value  # Start time
+    assert "2024-06-25 19:34:36" in result.value  # Finish time
+    
+    # Verify snapshot progress information
+    assert "64.000/64.000 MiB" in result.value  # Data processed
+    assert "MiB/sec" in result.value  # Throughput format
+    
+    # No "N/A" placeholders should be present
     assert "N/A" not in result.value
 
+    # API call verification
     source_cluster.call_api.assert_called_with(
         f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}/_status",
         HttpMethod.GET

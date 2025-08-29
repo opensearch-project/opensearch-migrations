@@ -29,6 +29,20 @@ public class S3Repo implements SourceRepo {
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
     private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
+
+    // Transfer Manager maintains buffers for CRT responses which without being careful can overload heap.
+    // A quick calculation for heap usage is:
+    //  MaxHeapUsedByCrtBuffers = (initialReadBufferSizeInBytes *  concurrentFileDownloads) +
+    //                                  minimalPartSizeInBytes * min(concurrentFileDownloads, maxConcurrency)
+    // The default values that we use are:
+    //      initialReadBufferSizeInBytes = 80MB
+    //      minimalPartSizeInBytes = 8MB
+    //      maxConcurrency = 100
+    //
+    //  To reduce heap memory usage to under 1GB we will set concurrentFileDownloads to 10 (otherwise it defaults to 100)
+    private static final int TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS = 10;
+
+
     public static final String INDICES_PREFIX_STR = "indices/";
     private final Path s3LocalDir;
     private final S3AsyncClient s3Client;
@@ -150,7 +164,10 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public void prepBlobFiles(ShardMetadata shardMetadata) {
-        try (S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build()) {
+        try (S3TransferManager transferManager = S3TransferManager.builder()
+        .s3Client(s3Client)
+        .transferDirectoryMaxConcurrency(TRANSFER_DIRECTORY_MAX_CONCURRENT_FILE_DOWNLOADS)
+        .build()) {
 
             Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
             ensureS3LocalDirectoryExists(shardDirPath);

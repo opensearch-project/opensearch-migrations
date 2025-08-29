@@ -297,7 +297,8 @@ public class ConnectionContext {
 
         @Override
         public boolean isDisableCompression() {
-            return false;
+            // No need to interrogate source cluster for compression information
+             return true;
         }
     }
 

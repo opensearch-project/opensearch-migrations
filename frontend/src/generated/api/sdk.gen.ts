@@ -20,8 +20,36 @@ import type {
   SessionUpdateData,
   SessionUpdateResponses,
   SessionUpdateErrors,
+  SnapshotStatusData,
+  SnapshotStatusResponses,
+  SnapshotStatusErrors,
+  MetadataMigrateData,
+  MetadataMigrateResponses,
+  MetadataMigrateErrors,
+  MetadataStatusData,
+  MetadataStatusResponses,
+  MetadataStatusErrors,
+  BackfillStatusData,
+  BackfillStatusResponses,
+  BackfillStatusErrors,
+  ClusterSourceData,
+  ClusterSourceResponses,
+  ClusterSourceErrors,
+  ClusterTargetData,
+  ClusterTargetResponses,
+  ClusterTargetErrors,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
+import {
+  sessionsListResponseTransformer,
+  sessionCreateResponseTransformer,
+  sessionGetResponseTransformer,
+  sessionUpdateResponseTransformer,
+  snapshotStatusResponseTransformer,
+  metadataMigrateResponseTransformer,
+  metadataStatusResponseTransformer,
+  backfillStatusResponseTransformer,
+} from "./transformers.gen";
 
 export type Options<
   TData extends TDataShape = TDataShape,
@@ -83,6 +111,7 @@ export const sessionsList = <ThrowOnError extends boolean = false>(
     unknown,
     ThrowOnError
   >({
+    responseTransformer: sessionsListResponseTransformer,
     url: "/sessions/",
     ...options,
   });
@@ -99,6 +128,7 @@ export const sessionCreate = <ThrowOnError extends boolean = false>(
     SessionCreateErrors,
     ThrowOnError
   >({
+    responseTransformer: sessionCreateResponseTransformer,
     url: "/sessions/",
     ...options,
     headers: {
@@ -135,6 +165,7 @@ export const sessionGet = <ThrowOnError extends boolean = false>(
     SessionGetErrors,
     ThrowOnError
   >({
+    responseTransformer: sessionGetResponseTransformer,
     url: "/sessions/{session_name}",
     ...options,
   });
@@ -151,11 +182,119 @@ export const sessionUpdate = <ThrowOnError extends boolean = false>(
     SessionUpdateErrors,
     ThrowOnError
   >({
+    responseTransformer: sessionUpdateResponseTransformer,
     url: "/sessions/{session_name}",
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+};
+
+/**
+ * Get Snapshot Status
+ */
+export const snapshotStatus = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotStatusData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotStatusResponses,
+    SnapshotStatusErrors,
+    ThrowOnError
+  >({
+    responseTransformer: snapshotStatusResponseTransformer,
+    url: "/sessions/{session_name}/snapshot/status",
+    ...options,
+  });
+};
+
+/**
+ * Migrate Metadata
+ * Migrate metadata for the given session.
+ * If dry_run=True, only evaluates the migration without making changes.
+ */
+export const metadataMigrate = <ThrowOnError extends boolean = false>(
+  options: Options<MetadataMigrateData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    MetadataMigrateResponses,
+    MetadataMigrateErrors,
+    ThrowOnError
+  >({
+    responseTransformer: metadataMigrateResponseTransformer,
+    url: "/sessions/{session_name}/metadata/migrate",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+};
+
+/**
+ * Get Metadata Status
+ * Get the status of the most recent metadata operation for the session.
+ */
+export const metadataStatus = <ThrowOnError extends boolean = false>(
+  options: Options<MetadataStatusData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    MetadataStatusResponses,
+    MetadataStatusErrors,
+    ThrowOnError
+  >({
+    responseTransformer: metadataStatusResponseTransformer,
+    url: "/sessions/{session_name}/metadata/status",
+    ...options,
+  });
+};
+
+/**
+ * Get Metadata Status
+ */
+export const backfillStatus = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillStatusData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    BackfillStatusResponses,
+    BackfillStatusErrors,
+    ThrowOnError
+  >({
+    responseTransformer: backfillStatusResponseTransformer,
+    url: "/sessions/{session_name}/backfill/status",
+    ...options,
+  });
+};
+
+/**
+ * Get Source Cluster
+ */
+export const clusterSource = <ThrowOnError extends boolean = false>(
+  options: Options<ClusterSourceData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    ClusterSourceResponses,
+    ClusterSourceErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/clusters/source",
+    ...options,
+  });
+};
+
+/**
+ * Get Target Cluster
+ */
+export const clusterTarget = <ThrowOnError extends boolean = false>(
+  options: Options<ClusterTargetData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    ClusterTargetResponses,
+    ClusterTargetErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/clusters/target",
+    ...options,
   });
 };
