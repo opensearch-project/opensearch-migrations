@@ -53,8 +53,8 @@ def setup_backfill(request):
     metadata: Metadata = pytest.console_env.metadata
     assert metadata is not None
 
-    snapshot_result: CommandResult = pytest.console_env.snapshot.create(wait=True)
-    assert snapshot_result.success
+    snapshot_result = pytest.console_env.snapshot.create(wait=True)
+    assert "success" in snapshot_result
     metadata_result: CommandResult = metadata.migrate()
     assert metadata_result.success
     backfill_start_result: CommandResult = backfill.start()

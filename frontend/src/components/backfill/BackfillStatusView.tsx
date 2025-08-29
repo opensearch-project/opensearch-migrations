@@ -57,16 +57,6 @@ export default function BackfillStatusView({
       value: <StatusDisplay status={backfillData?.status} />,
     },
     {
-      label: "Progress",
-      value: (
-        <ProgressDisplay percentage={backfillData?.percentage_completed} />
-      ),
-    },
-    {
-      label: "ETA",
-      value: <ETADisplay etaMs={backfillData?.eta_ms} />,
-    },
-    {
       label: "Started",
       value: <DateDisplay date={backfillData?.started} />,
     },
@@ -82,6 +72,16 @@ export default function BackfillStatusView({
           finished={backfillData?.finished}
         />
       ),
+    },
+    {
+      label: "Progress",
+      value: (
+        <ProgressDisplay percentage={backfillData?.percentage_completed} />
+      ),
+    },
+    {
+      label: "ETA",
+      value: <ETADisplay etaMs={backfillData?.eta_ms} />,
     },
   ];
 

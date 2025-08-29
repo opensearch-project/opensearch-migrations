@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Alert,
   Box,
@@ -13,54 +11,32 @@ import {
   SpaceBetween,
   Spinner,
 } from "@cloudscape-design/components";
-import { systemHealth } from "@/generated/api";
+import { HealthApiResponse } from "@/generated/api";
 import { getSiteReadiness, setSiteReadiness } from "@/lib/site-readiness";
-import { withTimeLimit } from "@/utils/async";
 import DebugCommands from "@/components/debug/DebugCommands";
 import Image from "next/image";
-
-const DEFAULT_POLLING_INTERVAL_MS = 5000;
+import { usePollingSystemHealth } from "@/hooks/apiPoll";
+import router from "next/router";
+import { useState } from "react";
 
 export default function LoadingPage() {
-  const [isReady, setIsReady] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const router = useRouter();
+  const [debugError, setDebugError] = useState<string | null>(null);
+  const [debugIsReady, setDebugIsReady] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    const pollHealth = async () => {
-      if (getSiteReadiness()) {
-        setIsReady(true);
-        return true;
-      }
-      try {
-        const res = await withTimeLimit(
-          systemHealth(),
-          DEFAULT_POLLING_INTERVAL_MS,
-        );
-        if (res.data?.status === "ok") {
-          setIsReady(true);
-          setSiteReadiness(true);
-          return true;
-        } else {
-          setErrorMessage(JSON.stringify(res.error, null, 2));
-        }
-      } catch (err) {
-        const formatted =
-          err instanceof Error ? { name: err.name, message: err.message } : err;
-        setErrorMessage(JSON.stringify(formatted, null, 2));
-      }
-      return false;
-    };
-
-    const startPolling = async () => {
-      if (await pollHealth()) return;
-      const interval = setInterval(async () => {
-        if (await pollHealth()) clearInterval(interval);
-      }, DEFAULT_POLLING_INTERVAL_MS);
-    };
-
-    startPolling();
-  }, []);
+  const { data, error } = usePollingSystemHealth(
+    // Need to figure out how to make sure we've got browser access without blowing up the missing local storage references
+    !getSiteReadiness(),
+    (data: HealthApiResponse) => {
+      const ready = data?.status === "ok";
+      if (ready) setSiteReadiness(true);
+      return ready;
+    },
+  );
+  const isReady =
+    debugIsReady == null
+      ? (getSiteReadiness() ?? data?.status === "ok")
+      : debugIsReady;
+  const errorMessage = debugError == null ? (error ?? null) : debugError;
 
   const startMigration = () => router.push("/migration");
 
@@ -178,11 +154,13 @@ export default function LoadingPage() {
 
       <DebugCommands>
         <SpaceBetween size="xs" direction="horizontal">
-          <Button onClick={() => setIsReady(true)}>Simulate Loaded</Button>
-          <Button onClick={() => setIsReady(false)}>Simulate Loading</Button>
+          <Button onClick={() => setDebugIsReady(true)}>Simulate Loaded</Button>
+          <Button onClick={() => setDebugIsReady(false)}>
+            Simulate Loading
+          </Button>
           <Button
             onClick={() =>
-              setErrorMessage(
+              setDebugError(
                 JSON.stringify({ error: "simulated", details: "N/A" }),
               )
             }
@@ -191,8 +169,8 @@ export default function LoadingPage() {
           </Button>
           <Button
             onClick={() => {
-              setIsReady(false);
-              setErrorMessage(null);
+              setDebugIsReady(null);
+              setDebugError(null);
             }}
           >
             Reset
