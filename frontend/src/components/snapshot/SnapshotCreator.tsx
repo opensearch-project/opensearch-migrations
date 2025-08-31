@@ -1,17 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Box, Button, SpaceBetween, Alert, Spinner, StatusIndicator } from "@cloudscape-design/components";
+import {
+  Box,
+  Button,
+  SpaceBetween,
+  Alert,
+  Spinner,
+  StatusIndicator,
+} from "@cloudscape-design/components";
 import SnapshotStatusView from "./SnapshotStatusView";
 import SnapshotIndexesTable from "./SnapshotIndexesTable";
-import { useSnapshotCreateAction, useSnapshotDeleteAction } from "@/hooks/apiAction";
+import {
+  useSnapshotCreateAction,
+  useSnapshotDeleteAction,
+} from "@/hooks/apiAction";
 import { usePollingSnapshotStatus } from "@/hooks/apiPoll";
 
 interface SnapshotControllerProps {
   readonly sessionName: string;
 }
 
-export default function SnapshotCreator({ sessionName }: SnapshotControllerProps) {
+export default function SnapshotCreator({
+  sessionName,
+}: SnapshotControllerProps) {
   const [snapshotInProgress, setSnapshotInProgress] = useState(false);
 
   const {
@@ -39,7 +51,10 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
   const indexes = snapshotStatus?.indexes ?? [];
 
   useEffect(() => {
-    if (snapshotStatus?.status === "Completed" || snapshotStatus?.status === "Failed") {
+    if (
+      snapshotStatus?.status === "Completed" ||
+      snapshotStatus?.status === "Failed"
+    ) {
       setSnapshotInProgress(false);
     }
   }, [snapshotStatus?.status]);
@@ -62,9 +77,7 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
   return (
     <SpaceBetween size="l">
       {/* Prefer passing the already-polled data down to avoid double-polling */}
-      <SnapshotStatusView
-        sessionName={sessionName}
-      />
+      <SnapshotStatusView sessionName={sessionName} />
 
       {error && (
         <Alert type="error" header="Error">
@@ -93,9 +106,13 @@ export default function SnapshotCreator({ sessionName }: SnapshotControllerProps
 
       {isPolling && (
         <Box>
-          <StatusIndicator type="loading">Polling for snapshot updates…</StatusIndicator>
+          <StatusIndicator type="loading">
+            Polling for snapshot updates…
+          </StatusIndicator>
           {lastUpdated && (
-            <Box variant="p">Last updated: {new Date(lastUpdated).toLocaleTimeString()}</Box>
+            <Box variant="p">
+              Last updated: {new Date(lastUpdated).toLocaleTimeString()}
+            </Box>
           )}
         </Box>
       )}
