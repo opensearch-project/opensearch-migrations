@@ -100,10 +100,13 @@ export class TemplateBuilder<
             inputParameters: InputParamsToExpressions<InputParamsScope>,
             rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
         }) => T;
+        const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
+        const inputParams = templateInputParametersAsExpressions(this.inputScope);
+        
         const param = defineParam({
             defaultValue: fn({
-                workflowParameters: workflowParametersAsExpressions(this.contextualScope.workflowParameters || {}) as unknown as WorkflowInputsToExpressions<ContextualScope>,
-                inputParameters: templateInputParametersAsExpressions(this.inputScope) as unknown as InputParamsToExpressions<InputParamsScope>,
+                workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
+                inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
                 rawParameters: { workflow: this.contextualScope,
                 currentTemplate: this.getTemplateSignatureScope()
             }}) as T,

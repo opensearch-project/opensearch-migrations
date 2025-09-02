@@ -83,10 +83,10 @@ export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = 
 
 export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {
     [K in keyof InputParamsScope]: InputParamsScope[K] extends InputParamDef<infer T, any>
-        ? T extends PlainObject
-            ? T extends null | undefined
+        ? [T] extends [PlainObject]
+            ? [T] extends [null | undefined]
                 ? never
-                : ReturnType<typeof inputParam<T>>
+                : FromParameterExpression<T>
             : never
         : never
 };

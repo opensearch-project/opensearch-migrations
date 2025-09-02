@@ -56,17 +56,17 @@ export const FullMigration = WorkflowBuilder.create({
                 }
             }))
                 .addInternalStep("split", "pipelineSourceMigration", stepScope=> ({
-                        sourceMigrationConfig: stepScope.tasks.init.prefix
+                        sourceMigrationConfig: stepScope.item
                     }),
                     makeParameterLoop(b.inputs.sourceMigrationConfigs)
                 )
-                // .addInternalStep("split2", "pipelineSourceMigration", stepScope=> ({
-                //         sourceMigrationConfig: stepScope.item
-                //     }),
-                //     makeParameterLoop(b.inputs.sourceMigrationConfigs),
-                //     equals(literal("hello"), b.inputs.simpleString)
-                //     //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
-                // )
+                .addInternalStep("split2", "pipelineSourceMigration", stepScope=> ({
+                        sourceMigrationConfig: stepScope.item
+                    }),
+                    makeParameterLoop(b.inputs.sourceMigrationConfigs),
+                    equals(literal("hello"), b.inputs.simpleString)
+                    //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
+                )
 
             .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
                 prefix: stepScope.tasks.init.prefix,

@@ -21,10 +21,10 @@ import { PlainObject } from "@/schemas/plainObject";
 import { inputParam, workflowParam } from "@/schemas/expression";
 
 // A unique symbol so the field can’t be faked by random objects
-declare const __param_T: unique symbol;
-declare const __out_T: unique symbol;
+export declare const __param_T: unique symbol;
+export declare const __out_T: unique symbol;
 // Zero-runtime “type witness” object that carries a generic T.
-declare const __type_token__: unique symbol;
+export declare const __type_token__: unique symbol;
 
 export type TypeToken<T> = {
     readonly [__type_token__]?: (x: T) => T; // phantom to make T invariant
@@ -120,18 +120,34 @@ export type CallerParams<T extends InputParametersRecord> =
  * initialization in a way that depends on expression.ts having finished
  * evaluating. Typical usage is inside builders/factories.
  */
-export function templateInputParametersAsExpressions<WP extends InputParametersRecord>(params: WP) {
+export function templateInputParametersAsExpressions<WP extends InputParametersRecord>(params: WP): {
+    [K in keyof WP]: WP[K] extends InputParamDef<infer T, any>
+        ? [T] extends [PlainObject]
+            ? [T] extends [null | undefined]
+                ? never
+                : ReturnType<typeof inputParam<T>>
+            : never
+        : never
+} {
     const out: any = {};
     for (const key of Object.keys(params)) {
         out[key] = inputParam(key, params[key]);
     }
-    return out as any; // The runtime values are correct, we just need proper typing at the call site
+    return out;
 }
 
-export function workflowParametersAsExpressions<WP extends InputParametersRecord>(params: WP) {
+export function workflowParametersAsExpressions<WP extends InputParametersRecord>(params: WP): {
+    [K in keyof WP]: WP[K] extends InputParamDef<infer T, any>
+        ? [T] extends [PlainObject]
+            ? [T] extends [null | undefined]
+                ? never
+                : ReturnType<typeof workflowParam<T>>
+            : never
+        : never
+} {
     const out: any = {};
     for (const key of Object.keys(params)) {
         out[key] = workflowParam(key, params[key]);
     }
-    return out as { [K in keyof WP]: any };
+    return out;
 }
