@@ -21,13 +21,13 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["ge
         metadata: wf.metadata.k8sMetadata,
         spec: {
             serviceAccountName: wf.metadata.serviceAccountName,
-            entrypoint:  wf.metadata.entrypoint,
+            entrypoint: wf.metadata.entrypoint,
             parallelism: 100,
-            ...(wf.workflowParameters != null && { arguments: formatParameters(wf.workflowParameters) }),
+            ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
             templates: (() => {
                 const list = [];
                 for (const k in wf.templates) {
-                    list.push({[k]: formatTemplate(wf.templates[k]) });
+                    list.push({[k]: formatTemplate(wf.templates[k])});
                 }
                 return list;
             })()
@@ -35,7 +35,7 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["ge
     };
 }
 
-function formatParameterDefinition<T extends PlainObject, P extends InputParamDef<T, boolean>>(inputs : P) {
+function formatParameterDefinition<T extends PlainObject, P extends InputParamDef<T, boolean>>(inputs: P) {
     const out: Record<string, unknown> = {};
     if (inputs.description != null) {
         out.description = inputs.description;
@@ -46,7 +46,7 @@ function formatParameterDefinition<T extends PlainObject, P extends InputParamDe
     return out;
 }
 
-function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
+function formatParameters<IPR extends InputParametersRecord>(inputs: IPR) {
     return inputs == undefined ? [] : {
         parameters:
             Object.entries(inputs).map(([fieldName, definition]) => {
@@ -60,11 +60,11 @@ function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {
 
 function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     if (loopWith.loopWith == "items") {
-        return { withItems: loopWith.items};
+        return {withItems: loopWith.items};
     } else if (loopWith.loopWith == "sequence") {
-        return { withSequence: loopWith.count };
+        return {withSequence: loopWith.count};
     } else if (loopWith.loopWith == "params") {
-        return { withParams: toArgoExpression(loopWith.value) };
+        return {withParams: toArgoExpression(loopWith.value)};
     } else {
         throw new Error(`Expected loopWith value; got ${loopWith}`);
     }
@@ -76,7 +76,8 @@ function formatStep<T extends NamedTask & { loopWith?: unknown }>(step: T) {
         ...(loopWith !== undefined
             ? renderWithLoop(loopWith as LoopWithUnion<any>)
             : {}),
-        ...(transformExpressionsDeep(rest) as object) };
+        ...(transformExpressionsDeep(rest) as object)
+    };
 }
 
 function formatBody(body: GenericScope) {
@@ -98,35 +99,35 @@ function formatBody(body: GenericScope) {
 function formatOutputSource(def: OutputParamDef<any>) {
     switch (def.fromWhere) {
         case "path":
-            return { path: def.path };
+            return {path: def.path};
         case "expression":
-            return { expression: def.expression };
+            return {expression: def.expression};
         case "parameter":
-            return { parameter: def.parameter };
+            return {parameter: def.parameter};
         case "jsonPath":
-            return { jsonPath: def.jsonPath };
+            return {jsonPath: def.jsonPath};
         case "jqFilter":
-            return { jqFilter: def.jqFilter };
+            return {jqFilter: def.jqFilter};
         case "event":
-            return { event: def.event };
+            return {event: def.event};
         case "configMapKeyRef":
-            return { configMapKeyRef: def.configMapKeyRef };
+            return {configMapKeyRef: def.configMapKeyRef};
         case "supplied":
-            return { supplied: def.supplied };
+            return {supplied: def.supplied};
         case "default":
-            return { default: def.default };
+            return {default: def.default};
         default:
             throw new Error(`Unsupported output parameter type: ${(def as any).fromWhere}`);
     }
 }
 
-function formatOutputParameters<OPR extends OutputParametersRecord>(outputs : OPR)  {
+function formatOutputParameters<OPR extends OutputParametersRecord>(outputs: OPR) {
     if (!outputs) return undefined;
-    
+
     return {
         parameters: Object.entries(outputs).map(([fieldName, definition]) => ({
             name: fieldName,
-            ...(definition.description && { description: definition.description }),
+            ...(definition.description && {description: definition.description}),
             ...formatOutputSource(definition)
         }))
     };

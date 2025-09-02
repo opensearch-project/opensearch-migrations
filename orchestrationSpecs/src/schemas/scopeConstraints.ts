@@ -1,4 +1,4 @@
-import {ScopeFn, ExtendScope, DataScope, GenericScope} from "@/schemas/workflowTypes";
+import {ExtendScope, GenericScope, ScopeFn} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;

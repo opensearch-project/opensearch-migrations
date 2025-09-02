@@ -17,11 +17,11 @@ function addCommonTargetLatchInputs<
         // this makes it much easier to standardize handling in the rest of the template below, rather than pulling
         // now all values can come from input parameters!
         .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
-        .addOptionalInput("etcdPassword",  s => s.workflowParameters.etcdPassword)
-        .addOptionalInput("etcdUser",  s => s.workflowParameters.etcdUser)
+        .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
+        .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
         .addOptionalInput("etcdUtilsImage", s => s.workflowParameters.etcdImage)
         .addRequiredInput("etcdUtilsImagePullPolicy", typeToken<IMAGE_PULL_POLICY>())
-    ;
+        ;
 }
 
 export const TargetLatchHelpers = WorkflowBuilder.create({
@@ -31,11 +31,11 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         parallelism: 1
     })
     .addParams(CommonWorkflowParameters)
-    .addTemplate("init", t=> t
+    .addTemplate("init", t => t
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targets", typeToken<z.infer<typeof CLUSTER_CONFIG>[]>())
         .addRequiredInput("configuration", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
-        .addContainer(b=>b
+        .addContainer(b => b
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
@@ -50,7 +50,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targetName", typeToken<string>())
         .addRequiredInput("processorId", typeToken<string>())
-        .addContainer(b=>b
+        .addContainer(b => b
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
@@ -61,7 +61,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
     )
     .addTemplate("cleanup", t => t
         .addInputs(addCommonTargetLatchInputs)
-        .addContainer(b=>b
+        .addContainer(b => b
             .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])

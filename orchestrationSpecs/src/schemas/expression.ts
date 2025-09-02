@@ -1,5 +1,5 @@
-import { InputParamDef, OutputParamDef } from "@/schemas/parameterSchemas";
-import { DeepWiden, PlainObject } from "@/schemas/plainObject";
+import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
+import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 
 
 export type ExpressionType = "govaluate" | "template";

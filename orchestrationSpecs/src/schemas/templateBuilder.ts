@@ -1,32 +1,34 @@
 /**
  * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
- * 
+ *
  * This schema system is designed to provide an intuitive, ergonomic developer experience.
- * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or
  * cumbersome workarounds to make the type system work. If the API requires such casts,
  * the type system implementation needs to be improved, not the caller code.
- * 
+ *
  * The goal is to make template building feel natural and safe, with proper type inference
  * working automatically without forcing developers to manually specify types.
  */
 
 import {
     defineParam,
-    InputParamDef, InputParametersRecord, OutputParametersRecord,
-    templateInputParametersAsExpressions, TypeToken,
+    InputParamDef,
+    InputParametersRecord,
+    OutputParametersRecord,
+    templateInputParametersAsExpressions,
+    TypeToken,
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
 import {
-    ExtendScope,
-    FieldSpecs,
-    FieldGroupConstraint,
-    FieldSpecsToInputParams,
-    WorkflowInputsToExpressions,
-    InputParamsToExpressions,
     AllowLiteralOrExpression,
+    ExtendScope,
+    FieldGroupConstraint,
+    FieldSpecs,
+    FieldSpecsToInputParams,
     GenericScope,
+    InputParamsToExpressions,
+    WorkflowInputsToExpressions,
 } from "@/schemas/workflowTypes";
-import {z, ZodType} from "zod";
 import {TypescriptError} from "@/utils";
 import {
     extendScope,
@@ -102,14 +104,16 @@ export class TemplateBuilder<
         }) => T;
         const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
         const inputParams = templateInputParametersAsExpressions(this.inputScope);
-        
+
         const param = defineParam({
             defaultValue: fn({
                 workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
                 inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
-                rawParameters: { workflow: this.contextualScope,
-                currentTemplate: this.getTemplateSignatureScope()
-            }}) as T,
+                rawParameters: {
+                    workflow: this.contextualScope,
+                    currentTemplate: this.getTemplateSignatureScope()
+                }
+            }) as T,
             description
         });
 
@@ -127,7 +131,7 @@ export class TemplateBuilder<
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, true> }>,
             OutputParamsScope
         >> {
-        const param: InputParamDef<T, true> = { description } as const;
+        const param: InputParamDef<T, true> = {description} as const;
         return this.extendWithParam(name as any, param) as any;
     }
 
@@ -201,7 +205,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new DagBuilder(c,this.inputScope,{},[],{})))
+            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {})))
         (this.contextualScope, this.inputScope));
     }
 
@@ -211,7 +215,7 @@ export class TemplateBuilder<
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
-        factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+        factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder {
         const fn = builderFn as (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
@@ -225,7 +229,7 @@ export class TemplateBuilder<
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, OutputParamsScope>) => FinalBuilder>,
-        factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+        factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder {
         const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}>) => FinalBuilder;
         return fn((factory ??

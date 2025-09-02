@@ -1,14 +1,10 @@
-import {FullMigration} from "@/workflowTemplates/fullMigration";
 import {renderWorkflowTemplate} from "@/renderers/argoResourceRenderer";
-import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {SetupKafka} from "@/workflowTemplates/setupKafka";
+import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
+import {FullMigration} from "@/workflowTemplates/fullMigration";
 
-// console.log("TargetLatchHelper: " + JSON.stringify(TargetLatchHelpers, null, 2));
-// console.log("FullMigration: " + JSON.stringify(FullMigration, null, 2));
-// console.log("\n\n\n");
 
 console.log("OUTPUT: ");
-TargetLatchHelpers.templates.init.inputs;
 const finalConfigTlh = renderWorkflowTemplate(TargetLatchHelpers);
 console.log(JSON.stringify(finalConfigTlh, null, 2));
 

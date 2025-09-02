@@ -26,11 +26,11 @@ export function isPlainObject(value: any): value is PlainObject {
     if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
         return true;
     }
-    
+
     if (Array.isArray(value)) {
         return value.every(isPlainObject);
     }
-    
+
     if (typeof value === 'object' && value !== null) {
         // Only allow plain objects (created with {} or Object.create(null))
         const proto = Object.getPrototypeOf(value);
@@ -39,7 +39,7 @@ export function isPlainObject(value: any): value is PlainObject {
         }
         return Object.values(value).every(isPlainObject);
     }
-    
+
     return false;
 }
 

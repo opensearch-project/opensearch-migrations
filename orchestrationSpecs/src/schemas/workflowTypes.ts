@@ -1,21 +1,21 @@
 /**
  * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
- * 
+ *
  * This schema system is designed to provide an intuitive, ergonomic developer experience.
- * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or
  * cumbersome workarounds to make the type system work. If the API requires such casts,
  * the type system implementation needs to be improved, not the caller code.
- * 
+ *
  * The goal is to make template building feel natural and safe, with proper type inference
  * working automatically without forcing developers to manually specify types.
  */
 
 // Internal types for workflow schema implementation
-import {ZodType, ZodTypeAny, z} from "zod";
+import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
-import {BaseExpression, FromParameterExpression, inputParam, stepOutput} from "@/schemas/expression";
-import {DeepWiden, PlainObject} from "@/schemas/plainObject";
+import {BaseExpression, FromParameterExpression, stepOutput} from "@/schemas/expression";
+import {PlainObject} from "@/schemas/plainObject";
 
 declare global {
     // true: worse LSP, but squigglies under the name declaration
@@ -24,12 +24,18 @@ declare global {
 }
 
 // Specific scope types for different purposes
-export type WorkflowAndTemplatesScope<TemplateSignatures extends TemplateSignaturesScope = TemplateSignaturesScope> = { workflowParameters?: InputParametersRecord, templates?: TemplateSignatures };
+export type WorkflowAndTemplatesScope<TemplateSignatures extends TemplateSignaturesScope = TemplateSignaturesScope> = {
+    workflowParameters?: InputParametersRecord,
+    templates?: TemplateSignatures
+};
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type GenericScope = Record<string, any>;
 //export type DagScope = Record<string, DagTask>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
-export type TemplateSignaturesScope = Record<string, TemplateSigEntry<{ inputs: InputParametersRecord; outputs?: OutputParametersRecord }>>;
+export type TemplateSignaturesScope = Record<string, TemplateSigEntry<{
+    inputs: InputParametersRecord;
+    outputs?: OutputParametersRecord
+}>>;
 
 export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
 
@@ -149,6 +155,6 @@ export function makeParameterLoop<T extends PlainObject>(param: FromParameterExp
     } as LoopWithParams<T>;
 }
 
-export type LoopWithUnion<T extends PlainObject> = ( T extends number ? LoopWithSequence : never)
+export type LoopWithUnion<T extends PlainObject> = (T extends number ? LoopWithSequence : never)
     | LoopWithItems<T>
     | LoopWithParams<T>;

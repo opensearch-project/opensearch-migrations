@@ -1,15 +1,19 @@
 // Type-safe visitor pattern for conversion
 import {
+    AnyExpression,
     ArithmeticExpression,
     ArrayIndexExpression,
-    ArrayLengthExpression, AsStringExpression,
+    ArrayLengthExpression,
+    AsStringExpression,
+    BaseExpression,
     ComparisonExpression,
     ConcatExpression,
+    ExpressionType,
     FromConfigMapExpression,
     FromParameterExpression,
     LiteralExpression,
-    PathExpression, BaseExpression,
-    TernaryExpression, ExpressionType, AnyExpression
+    PathExpression,
+    TernaryExpression
 } from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
 
@@ -114,8 +118,8 @@ export function isConcatExpression(expr: BaseExpression<any>): expr is ConcatExp
 }
 
 export function isTernaryExpression<
-    T extends AnyExpression<boolean>, 
-    L extends AnyExpression<OutT>, 
+    T extends AnyExpression<boolean>,
+    L extends AnyExpression<OutT>,
     R extends AnyExpression<OutT>,
     OutT extends PlainObject,
     C extends ExpressionType>(expr: BaseExpression<any>): expr is TernaryExpression<any, any, any, any> {

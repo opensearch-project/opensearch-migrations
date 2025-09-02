@@ -1,11 +1,8 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {z} from "zod";
-import {K8sActionVerb, K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
 import {typeToken} from "@/schemas/parameterSchemas";
 
-function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: string })
-{
+function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: string }) {
     return {
         "apiVersion": "kafka.strimzi.io/v1beta2",
         "kind": "Kafka",

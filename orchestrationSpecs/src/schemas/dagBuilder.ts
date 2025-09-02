@@ -1,33 +1,29 @@
-import {
-    CallerParams,
-    InputParametersRecord,
-    OutputParametersRecord
-} from "@/schemas/parameterSchemas";
+import {CallerParams, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
     LoopWithUnion,
     ParamsWithLiteralsOrExpressions,
-    TasksOutputsScope, TasksScopeToTasksWithOutputs,
+    TasksOutputsScope,
+    TasksScopeToTasksWithOutputs,
     WorkflowAndTemplatesScope,
 } from "@/schemas/workflowTypes";
 
-import {NamedTask, ParamsFromContextFn, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
+import {NamedTask, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {z} from "zod/index";
 import {SimpleExpression} from "@/schemas/expression";
 
 class DagFactory<
     ContextualScope extends WorkflowAndTemplatesScope,
-    InputParamsScope  extends InputParametersRecord,
+    InputParamsScope extends InputParametersRecord,
     OutputParamsScope extends OutputParametersRecord
 >
-    implements TaskBuilderFactory<ContextualScope, DagBuilder<ContextualScope, InputParamsScope, any, OutputParamsScope>>
-{
+    implements TaskBuilderFactory<ContextualScope, DagBuilder<ContextualScope, InputParamsScope, any, OutputParamsScope>> {
     constructor(
         public readonly inputsScope: InputParamsScope,
         public readonly outputsScope: OutputParamsScope
-    ) {}
+    ) {
+    }
 
     create<NS extends TasksOutputsScope>(
         context: ContextualScope,
@@ -51,6 +47,7 @@ export class DagBuilder<
     public addExternalTask!: OmitThisParameter<
         TaskBuilder<ContextualScope, TaskScope, any, any>["addExternalTask"]
     >;
+
     public addInternalTask<
         Name extends string,
         TKey extends Extract<keyof ContextualScope["templates"], string>,

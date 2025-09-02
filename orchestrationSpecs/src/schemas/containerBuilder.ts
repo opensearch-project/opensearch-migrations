@@ -1,24 +1,25 @@
 /**
  * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
- * 
+ *
  * This schema system is designed to provide an intuitive, ergonomic developer experience.
- * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or
  * cumbersome workarounds to make the type system work. If the API requires such casts,
  * the type system implementation needs to be improved, not the caller code.
- * 
+ *
  * The goal is to make template building feel natural and safe, with proper type inference
  * working automatically without forcing developers to manually specify types.
  */
 
-import {OutputParamDef, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
+    AllowLiteralOrExpression,
     DataScope,
     ExtendScope,
-    AllowLiteralOrExpression,
+    GenericScope,
     InputParamsToExpressions,
-    WorkflowAndTemplatesScope, GenericScope
+    WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {z, ZodType} from "zod";
+import {ZodType} from "zod";
 import {toEnvVarName, TypescriptError} from "@/utils";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
@@ -53,8 +54,7 @@ export class ContainerBuilder<
     EnvScope extends DataScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope,
-    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope, any>>
-{
+    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope, any>> {
     constructor(contextualScope: ContextualScope,
                 inputsScope: InputParamsScope,
                 bodyScope: ContainerScope,
@@ -75,8 +75,7 @@ export class ContainerBuilder<
                 pullPolicy: AllowLiteralOrExpression<string>
             }>,
             EnvScope,  // Preserve env scope
-            OutputParamsScope>
-    {
+            OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
             ...this.bodyScope,
             'image': image,
@@ -86,11 +85,11 @@ export class ContainerBuilder<
 
     addCommand(s: string[]):
         ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, {command: string[]}>, EnvScope, OutputParamsScope>
-    {
+            ExtendScope<ContainerScope, { command: string[] }>, EnvScope, OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
-                command: s},
+                command: s
+            },
             this.envScope,  // Preserve env scope
             this.outputsScope
         );
@@ -98,11 +97,11 @@ export class ContainerBuilder<
 
     addArgs(a: string[]):
         ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, {args: string[]}>, EnvScope, OutputParamsScope>
-    {
+            ExtendScope<ContainerScope, { args: string[] }>, EnvScope, OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
-                args: a},
+                args: a
+            },
             this.envScope,  // Preserve env scope
             this.outputsScope
         );
@@ -149,8 +148,7 @@ export class ContainerBuilder<
         ContainerScope,
         ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>,
         OutputParamsScope
-    >
-    {
+    > {
         return this.addEnvVarUnchecked(name as string, value) as any;
     }
 
@@ -160,8 +158,7 @@ export class ContainerBuilder<
         ) => ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, NewEnvScope, OutputParamsScope>
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, NewEnvScope, OutputParamsScope>
-    >
-    {
+    > {
         const emptyEnvBuilder = new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
@@ -183,14 +180,16 @@ export class ContainerBuilder<
         ContainerScope,
         ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>,
         OutputParamsScope
-    >
-    {
+    > {
         const currentEnv = (this.bodyScope as any).env || {};
-        const newEnvScope = { ...this.envScope, [name as string]: value } as ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>;
+        const newEnvScope = {
+            ...this.envScope,
+            [name as string]: value
+        } as ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>;
 
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
             ...this.bodyScope,
-            env: { ...currentEnv, [name as string]: value }
+            env: {...currentEnv, [name as string]: value}
         }, newEnvScope, this.outputsScope);
     }
 
@@ -208,8 +207,7 @@ export class ContainerBuilder<
             ContainerScope,
             ModifiedInputs,
             OutputParamsScope
-        >>
-    {
+        >> {
         const envVars = modifierFn(this.inputs);
 
         return new ContainerBuilder(

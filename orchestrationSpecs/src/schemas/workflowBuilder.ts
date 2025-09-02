@@ -1,28 +1,19 @@
 /**
  * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
- * 
+ *
  * This schema system is designed to provide an intuitive, ergonomic developer experience.
- * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or
  * cumbersome workarounds to make the type system work. If the API requires such casts,
  * the type system implementation needs to be improved, not the caller code.
- * 
+ *
  * The goal is to make template building feel natural and safe, with proper type inference
  * working automatically without forcing developers to manually specify types.
  */
 
 import {InputParametersRecord} from "@/schemas/parameterSchemas";
-import {
-    DataScope,
-    ExtendScope,
-    GenericScope,
-    TemplateSigEntry,
-    TemplateSignaturesScope,
-} from "@/schemas/workflowTypes";
+import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScope,} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
-import {
-    UniqueNameConstraintAtDeclaration,
-    UniqueNameConstraintOutsideDeclaration
-} from "@/schemas/scopeConstraints";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 
@@ -73,7 +64,7 @@ export class WorkflowBuilder<
         name: Name
     ) {
         return new WorkflowBuilder(
-            { ...this.metadataScope, entrypoint: name },
+            {...this.metadataScope, entrypoint: name},
             this.inputsScope,
             this.templateSigScope,
             this.templateFullScope
@@ -90,7 +81,7 @@ export class WorkflowBuilder<
             TemplateFullScope
         >
         : TypescriptError<`Parameter name '${keyof WorkflowInputsScope & keyof P & string}' already exists in workflow inputs`> {
-        const newInputs = { ...this.inputsScope, ...params } as ExtendScope<WorkflowInputsScope, P>;
+        const newInputs = {...this.inputsScope, ...params} as ExtendScope<WorkflowInputsScope, P>;
         return new WorkflowBuilder(
             this.metadataScope,
             newInputs,
@@ -114,7 +105,7 @@ export class WorkflowBuilder<
             MetadataScope,
             WorkflowInputsScope,
             // update the next line to use the macro
-            ExtendScope<TemplateSigScope, { [K in Name]: (Name extends keyof TemplateSigScope ? Exclude<TemplateSigEntry<FullTemplate>, Name> : TemplateSigEntry<FullTemplate>)}>,
+            ExtendScope<TemplateSigScope, { [K in Name]: (Name extends keyof TemplateSigScope ? Exclude<TemplateSigEntry<FullTemplate>, Name> : TemplateSigEntry<FullTemplate>) }>,
             ExtendScope<TemplateFullScope, { [K in Name]: FullTemplate }>
         >
     > {
@@ -148,7 +139,7 @@ export class WorkflowBuilder<
         ) as any;
     }
 
-    getFullScope() : Workflow<MetadataScope, WorkflowInputsScope, TemplateFullScope> {
+    getFullScope(): Workflow<MetadataScope, WorkflowInputsScope, TemplateFullScope> {
         return {
             metadata: {name: "", ...this.metadataScope},//this.metadataScope.metadata,
             templates: this.templateFullScope,

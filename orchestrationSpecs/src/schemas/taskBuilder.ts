@@ -1,21 +1,21 @@
 // taskBuilderBase.ts
 import {
-    ExtendScope, IfNever, LoopWithUnion, ParamsWithLiteralsOrExpressions,
-    TasksOutputsScope, TasksScopeToTasksWithOutputs, TasksWithOutputs,
-    TemplateSignaturesScope, WorkflowAndTemplatesScope
+    ExtendScope,
+    IfNever,
+    LoopWithUnion,
+    ParamsWithLiteralsOrExpressions,
+    TasksOutputsScope,
+    TasksScopeToTasksWithOutputs,
+    TasksWithOutputs,
+    TemplateSignaturesScope,
+    WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import { Workflow } from "@/schemas/workflowBuilder";
-import { PlainObject } from "@/schemas/plainObject";
-import {
-    UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration
-} from "@/schemas/scopeConstraints";
-import { z } from "zod";
-import {
-    CallerParams,
-    InputParametersRecord, OutputParametersRecord
-} from "@/schemas/parameterSchemas";
-import { BaseExpression, SimpleExpression, stepOutput } from "@/schemas/expression";
-import { TemplateDef } from "@/schemas/stepsBuilder";
+import {Workflow} from "@/schemas/workflowBuilder";
+import {PlainObject} from "@/schemas/plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
+import {CallerParams, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {SimpleExpression, stepOutput} from "@/schemas/expression";
+import {TemplateDef} from "@/schemas/stepsBuilder";
 
 /** Phantom brand to carry the *current* Scope S inside the subclass type. */
 export type WithScope<Self, S extends TasksOutputsScope> =
@@ -83,7 +83,7 @@ export class TaskBuilder<
 
     /** Hook for subclasses to tweak how a task is recorded (e.g., DAG adds `when`). */
     protected onTaskPushed(task: NamedTask, when?: SimpleExpression<boolean>): NamedTask {
-        return when !== undefined ? { ...task, "when": when } : task;
+        return when !== undefined ? {...task, "when": when} : task;
     }
 
     addExternalTask<
@@ -204,12 +204,12 @@ export class TaskBuilder<
         });
         return {
             tasks,
-            ...(loopWith ? { item: loopWith } : {})
+            ...(loopWith ? {item: loopWith} : {})
         } as TasksScopeToTasksWithOutputs<S>;
     }
 
     public getTasks() {
-        return { scope: this.tasksScope, taskList: this.orderedTaskList };
+        return {scope: this.tasksScope, taskList: this.orderedTaskList};
     }
 
     protected callTemplate<
@@ -227,8 +227,8 @@ export class TaskBuilder<
         return {
             name,
             template: templateKey,
-            ...(loopWith ? { loopWith } : {}),
-            arguments: { parameters: params }
+            ...(loopWith ? {loopWith} : {}),
+            arguments: {parameters: params}
         };
     }
 
@@ -250,7 +250,7 @@ export class TaskBuilder<
                 name: templateKey,
                 template: wf.metadata.k8sMetadata.name
             },
-            arguments: { parameters: params }
-         } as any;
+            arguments: {parameters: params}
+        } as any;
     }
 }

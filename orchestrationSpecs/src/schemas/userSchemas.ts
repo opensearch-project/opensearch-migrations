@@ -1,4 +1,4 @@
-import { z } from "zod";
+import {z} from "zod";
 
 export const IMAGE_SPECIFIER = z.string();
 // Define everything in Zod

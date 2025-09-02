@@ -1,32 +1,20 @@
-import {
-    CallerParams,
-    InputParametersRecord, OutputParamDef,
-    OutputParametersRecord,
-} from "@/schemas/parameterSchemas";
+import {CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord,} from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
+    LoopWithUnion,
+    ParamsWithLiteralsOrExpressions,
+    TasksOutputsScope,
     TasksScopeToTasksWithOutputs,
     TasksWithOutputs,
-    ParamsWithLiteralsOrExpressions,
-    WorkflowAndTemplatesScope,
-    TasksOutputsScope,
-    LoopWithUnion
+    WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import { z, ZodType } from "zod";
-import { BaseExpression, SimpleExpression } from "@/schemas/expression";
-import { TemplateBodyBuilder } from "@/schemas/templateBodyBuilder";
-import {
-    UniqueNameConstraintAtDeclaration,
-    UniqueNameConstraintOutsideDeclaration
-} from "@/schemas/scopeConstraints";
-import { PlainObject } from "@/schemas/plainObject";
-import { Workflow } from "@/schemas/workflowBuilder";
-import {
-    NamedTask,
-    TaskBuilder,
-    TaskBuilderFactory,
-    WithScope
-} from "@/schemas/taskBuilder";
+import {z, ZodType} from "zod";
+import {BaseExpression, SimpleExpression} from "@/schemas/expression";
+import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
+import {PlainObject} from "@/schemas/plainObject";
+import {Workflow} from "@/schemas/workflowBuilder";
+import {NamedTask, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
 
 const TemplateDefSchema = z.object({
     inputs: z.any(),
@@ -92,7 +80,7 @@ type AddStepGroupResult<
 
 export class StepsBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
-    InputParamsScope  extends InputParametersRecord,
+    InputParamsScope extends InputParametersRecord,
     StepsScope extends TasksOutputsScope,
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
@@ -131,7 +119,7 @@ export class StepsBuilder<
                 this.contextualScope,
                 this.inputsScope,
                 results.scope,
-                [...this.stepGroups, { steps: results.taskList }],
+                [...this.stepGroups, {steps: results.taskList}],
                 this.outputsScope
             ) as AddStepGroupResult<R, ContextualScope, InputParamsScope, StepsScope, OutputParamsScope>;
         }
@@ -246,6 +234,6 @@ export class StepsBuilder<
 
     getBody(): { body: { steps: StepGroup[] } } {
         // Steps are an ordered list of StepGroups in the final manifest.
-        return { body: { steps: this.stepGroups } };
+        return {body: {steps: this.stepGroups}};
     }
 }

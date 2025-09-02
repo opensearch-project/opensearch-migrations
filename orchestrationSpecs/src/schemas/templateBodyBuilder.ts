@@ -4,10 +4,10 @@ import {
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions
 } from "@/schemas/workflowTypes";
-import {inputParam, workflowParam} from "@/schemas/expression";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
 import {
-    InputParametersRecord, OutputParametersRecord,
+    InputParametersRecord,
+    OutputParametersRecord,
     templateInputParametersAsExpressions,
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
@@ -84,8 +84,8 @@ export abstract class TemplateBodyBuilder<
     // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow
     // others to reach into the body anyway.  They should interface through the inputs and outputs exclusively
     getBody(): { body: { [K in BodyKey]: Record<string, any> } } {
-        const impl = { [this.bodyKey]: this.bodyScope } as Record<BodyKey, BodyScope>;
-        return { body: {...impl} };
+        const impl = {[this.bodyKey]: this.bodyScope} as Record<BodyKey, BodyScope>;
+        return {body: {...impl}};
     }
 
     // used by the TemplateBuilder!
