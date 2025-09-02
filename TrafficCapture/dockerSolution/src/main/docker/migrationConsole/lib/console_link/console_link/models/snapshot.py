@@ -1,4 +1,5 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from cerberus import Validator
 from datetime import datetime
@@ -475,11 +476,25 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str):
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str, wait_for_completion: bool = True,
+                    timeout_seconds: int = 120):
     path = f"/_snapshot/{repository}/{snapshot_name}"
     response = cluster.call_api(path, HttpMethod.DELETE)
     logging.debug(f"Raw delete snapshot status response: {response.text}")
-    logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
+    logger.info(f"Initiated deletion of snapshot: {snapshot_name} from repository '{repository}'.")
+
+    if wait_for_completion:
+        logger.info(f"Waiting up to {timeout_seconds} seconds for deletion to complete...")
+        end_time = time.time() + timeout_seconds
+        while time.time() < end_time:
+            check_response = cluster.call_api(path, raise_error=False)
+            if check_response.status_code == 404:
+                logger.info(f"Snapshot {snapshot_name} successfully deleted.")
+                return
+            logger.debug(f"Waiting for snapshot {snapshot_name} to be deleted...")
+            time.sleep(2)
+        raise TimeoutError(f"Snapshot '{snapshot_name}' in repository '{repository}' was not deleted "
+                           f"after {timeout_seconds} seconds.")
 
 
 def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
