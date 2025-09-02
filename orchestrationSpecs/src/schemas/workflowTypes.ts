@@ -61,16 +61,7 @@ export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? 
 type PlainRecord = { [key: string]: PlainObject };
 
 // Helper type to allow both literal values and expressions
-export type AllowLiteralOrExpression<T extends PlainObject> =
-    T extends string | number | boolean | null
-        ? T | BaseExpression<T>
-        : T extends readonly (infer U extends PlainObject)[]
-            ? ReadonlyArray<U> | BaseExpression<T>
-            : T extends (infer U extends PlainObject)[]
-                ? Array<U> | BaseExpression<T>
-                : T extends PlainRecord
-                    ? { [K in keyof T]: T[K] } | BaseExpression<T>
-                    : {fred: string}; // fixme - should be never
+export type AllowLiteralOrExpression<T extends PlainObject> = T | BaseExpression<T>;
 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {

@@ -7,6 +7,12 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {BaseExpression} from "@/schemas/expression";
 import {NamedTask} from "@/schemas/taskBuilder";
 
+function hasDefault<T extends PlainObject>(
+    p: InputParamDef<T, boolean>
+): p is InputParamDef<T, false> & { _hasDefault: true; defaultValue: T } {
+    return (p as any)._hasDefault === true;
+}
+
 export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["getFullScope"]>>(wf: WF) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
@@ -30,10 +36,14 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["ge
 }
 
 function formatParameterDefinition<T extends PlainObject, P extends InputParamDef<T, boolean>>(inputs : P) {
-    return {
-        ...(inputs.description != null && { description: inputs.description }),
-        ...(inputs.defaultValue != null && { value: transformExpressionsDeep(inputs.defaultValue) })
-    };
+    const out: Record<string, unknown> = {};
+    if (inputs.description != null) {
+        out.description = inputs.description;
+    }
+    if (hasDefault(inputs)) {
+        out.value = transformExpressionsDeep(inputs.defaultValue);
+    }
+    return out;
 }
 
 function formatParameters<IPR extends InputParametersRecord>(inputs : IPR)  {

@@ -8,13 +8,15 @@ export type WidenPrimitive<T> =
             T extends boolean ? boolean :
                 T extends null ? null :
                     T;
+export type IsUnion<T, U = T> = T extends any ? [U] extends [T] ? false : true : never;
 
 export type DeepWiden<T> =
-    T extends readonly (infer U)[] ? Array<DeepWiden<U>> :
-        T extends (infer U)[] ? Array<DeepWiden<U>> :
-            // drop readonly and widen each property
-            T extends object ? { -readonly [K in keyof T]: DeepWiden<T[K]> } :
-                WidenPrimitive<T>;
+    IsUnion<T> extends true
+        ? T  // Preserve all unions (primitives, objects, arrays, mixed)
+        : T extends readonly (infer U)[] ? Array<DeepWiden<U>> :
+            T extends (infer U)[] ? Array<DeepWiden<U>> :
+                T extends object ? { -readonly [K in keyof T]: DeepWiden<T[K]> } :
+                    WidenPrimitive<T>;
 
 /**
  * Runtime validation helper to check if a value is a PlainObject

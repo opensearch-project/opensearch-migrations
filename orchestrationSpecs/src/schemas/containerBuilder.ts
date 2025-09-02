@@ -20,10 +20,11 @@ import {
 } from "@/schemas/workflowTypes";
 import {z, ZodType} from "zod";
 import {toEnvVarName, TypescriptError} from "@/utils";
-import {IMAGE_PULL_POLICY} from "@/schemas/userSchemas";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
+
+export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 
 export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpression<string>>>(
     inputs: T
@@ -65,7 +66,7 @@ export class ContainerBuilder<
     // Update existing methods to preserve EnvScope type parameter
 
     addImageInfo(image: AllowLiteralOrExpression<string>,
-                 pullPolicy: AllowLiteralOrExpression<z.infer<typeof IMAGE_PULL_POLICY>>):
+                 pullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>):
         ContainerBuilder<
             ContextualScope,
             InputParamsScope,

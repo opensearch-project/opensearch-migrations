@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 export const IMAGE_SPECIFIER = z.string();
-export const IMAGE_PULL_POLICY = z.enum(["ALWAYS", "NEVER", "IF_NOT_PRESENT"]);
 // Define everything in Zod
 export const HTTP_AUTH_BASIC = z.object({
     username: z.string(),

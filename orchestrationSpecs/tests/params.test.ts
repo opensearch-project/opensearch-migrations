@@ -3,7 +3,8 @@ import {TemplateBuilder} from "../src/schemas/templateBuilder";
 import {z} from "zod";
 import {CallerParams, defineParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
 import {ParamsWithLiteralsOrExpressions} from "@/schemas/workflowTypes";
-import {LiteralExpression} from "@/schemas/expression";
+import {BaseExpression, LiteralExpression} from "@/schemas/expression";
+import {expectTypeOf} from "expect-type";
 
 export type SIMPLE_ENUM = "a" | "b" | "c";
 
@@ -22,7 +23,6 @@ describe("paramsFns runtime validation", () => {
             .addRequiredInput("reqEnum", typeToken<SIMPLE_ENUM>())
             .addSteps(sb=>sb))
         .getFullScope();
-    doNothingTemplate.templates.reqEnum.inputs;
     const templateBuilder = new TemplateBuilder({}, {}, {}, {});
 
     it("optional and required are correct", () => {
@@ -72,11 +72,21 @@ describe("paramsFns runtime validation", () => {
         });
     });
 
+    it("defineParam widens appropriately", () => {
+        expectTypeOf(defineParam({defaultValue: "hi"})).toEqualTypeOf<InputParamDef<string, false>>();
+        type e1 = ("hi" | "world");
+        // @ts-expect-error — mixed scalar types should be rejected
+        expectTypeOf(defineParam({defaultValue: "hi" as e1})).toEqualTypeOf<InputParamDef<string, false>>();
+        expectTypeOf(defineParam({defaultValue: "hi" as e1})).toEqualTypeOf<InputParamDef<e1, false>>();
+    });
+
     it("workfllow param types can be used with input params", () => {
+        const standaloneParam = defineParam({defaultValue: "str"});
         const wpsBuilder = WorkflowBuilder.create({ k8sResourceName: "WorkflowParamSample"})
             .addParams({
                 wpStr: defineParam({defaultValue: "str"}),
-                wpEnum: defineParam({defaultValue: "b" as SIMPLE_ENUM})
+                wpEnum: defineParam({defaultValue: "b" as SIMPLE_ENUM}),
+                wpStandalone: standaloneParam
             });
 
         wpsBuilder.addTemplate("test", sb=>sb.addSteps(sb=> {

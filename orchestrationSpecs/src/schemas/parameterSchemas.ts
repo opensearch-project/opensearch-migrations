@@ -17,7 +17,7 @@
 // and simply serialize the in-memory model to YAML at runtime.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PlainObject } from "@/schemas/plainObject";
+import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 import { inputParam, workflowParam } from "@/schemas/expression";
 
 // A unique symbol so the field can’t be faked by random objects
@@ -49,11 +49,11 @@ export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
 export function defineParam<T extends PlainObject>(opts: {
     defaultValue: T;
     description?: string;
-}): InputParamDef<T, false> {
+}): InputParamDef<DeepWiden<T>, false> {
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
-        defaultValue: opts.defaultValue,
+        defaultValue: opts.defaultValue as DeepWiden<T>,
         description: opts.description,
     };
 }
