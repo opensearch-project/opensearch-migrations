@@ -20,9 +20,6 @@
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 import { inputParam, workflowParam } from "@/schemas/expression";
 
-// A unique symbol so the field can’t be faked by random objects
-export declare const __param_T: unique symbol;
-export declare const __out_T: unique symbol;
 // Zero-runtime “type witness” object that carries a generic T.
 export declare const __type_token__: unique symbol;
 
@@ -39,7 +36,7 @@ export const typeToken = <T>(): TypeToken<T> => ({}) as TypeToken<T>;
  */
 export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
     /** Phantom to preserve T and make it invariant. Never read or written. */
-    readonly [__param_T]?: (x: T) => T;
+    readonly __param_input_brand?: T; // Use a simple branded property instead
     /** Optional doc string */
     description?: string;
 } & (REQ extends false
@@ -82,7 +79,7 @@ export type SuppliedValueFrom = { [key: string]: any };
 /** Output param (same issue & same fix) */
 export type OutputParamDef<T extends PlainObject> = {
     /** Phantom to preserve T and make it invariant. Never read or written. */
-    readonly [__out_T]?: (x: T) => T;
+    readonly __param_output_brand?: T; // Use a simple branded property instead
     description?: string;
 } & (
     | { fromWhere: "path"; path: string }
