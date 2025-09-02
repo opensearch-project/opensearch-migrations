@@ -24,6 +24,7 @@ dependencies {
         include "*.jar"
         exclude "slf*.jar"
         exclude "netty*.jar"
+        exclude "google-java-format-*.jar"
     })
 
     implementation project(':TrafficCapture:captureOffloader')
