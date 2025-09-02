@@ -23,6 +23,7 @@ configurations.configureEach {
 
 // Extend resolvable *classpath* configs (excluding lucene ones)
 configurations {
+    // Define configuration that will be tied to all locked versions
     enforcedAlignment {
         canBeResolved = false
         canBeConsumed = false
@@ -31,11 +32,13 @@ configurations {
 
     configureEach {
         if (
+            // Avoid infinite loop with enforcedAlignment configuration
             name != "enforcedAlignment" &&
-            canBeResolved && !canBeConsumed &&
-            (name.toLowerCase().endsWith("classpath") || name == "annotationProcessor") &&
-            !name.toLowerCase().contains("lucene")
-        ) {
+            canBeResolved &&
+            // Exclude configurations involved with shadow lucene jar
+            !name.toLowerCase().contains("lucene") &&
+            !name.toLowerCase().contains("shadow")
+         ) {
             extendsFrom(enforcedAlignment)
         }
     }
