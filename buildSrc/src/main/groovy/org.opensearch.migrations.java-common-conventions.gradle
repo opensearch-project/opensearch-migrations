@@ -21,21 +21,24 @@ configurations.configureEach {
     resolutionStrategy.preferProjectModules()
 }
 
+// Extend resolvable *classpath* configs (excluding lucene ones)
 configurations {
-    // private bucket for BOMs / constraints
     enforcedAlignment {
         canBeResolved = false
         canBeConsumed = false
         visible = false
     }
-    // make classpaths inherit it (compile, runtime, tests, fixtures if used)
-    compileClasspath.extendsFrom(enforcedAlignment)
-    runtimeClasspath.extendsFrom(enforcedAlignment)
-    testCompileClasspath.extendsFrom(enforcedAlignment)
-    testRuntimeClasspath.extendsFrom(enforcedAlignment)
-    testFixturesCompileClasspath.extendsFrom(enforcedAlignment)
-    testFixturesRuntimeClasspath.extendsFrom(enforcedAlignment)
-    annotationProcessor.extendsFrom(enforcedAlignment)
+
+    configureEach {
+        if (
+            name != "enforcedAlignment" &&
+            canBeResolved && !canBeConsumed &&
+            (name.toLowerCase().endsWith("classpath") || name == "annotationProcessor") &&
+            !name.toLowerCase().contains("lucene")
+        ) {
+            extendsFrom(enforcedAlignment)
+        }
+    }
 }
 
 dependencies {
