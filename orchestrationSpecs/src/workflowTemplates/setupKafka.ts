@@ -2,6 +2,7 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
 import {K8sActionVerb, K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
+import {typeToken} from "@/schemas/parameterSchemas";
 
 function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: string })
 {
@@ -57,11 +58,11 @@ export const SetupKafka = WorkflowBuilder.create({
 })
     .addParams(CommonWorkflowParameters)
     .addTemplate("deployKafkaNodePool", t => t
-        .addRequiredInput("kafkaName", z.string())
+        .addRequiredInput("kafkaName", typeToken<string>())
         // .addContainer(b=>b.inputs.kafkaName)
         .addResourceTask(b => b
             .setDefinition({
-                action: "created",
+                action: "create",
                 setOwnerReference: true,
                 successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterZookeeperManifest

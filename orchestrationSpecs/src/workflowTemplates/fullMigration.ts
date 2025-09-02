@@ -10,6 +10,7 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {BaseExpression, concat, equals, literal} from "@/schemas/expression";
 import {LoopWithParams, makeItemsLoop, makeParameterLoop, makeSequenceLoop} from "@/schemas/workflowTypes";
+import {typeToken} from "@/schemas/parameterSchemas";
 
 const leftE: BaseExpression<string, "govaluate"> = literal("a");
 const rightE: BaseExpression<string,  "govaluate"> = literal("a");
@@ -22,16 +23,16 @@ export const FullMigration = WorkflowBuilder.create({
     })
     .addParams(CommonWorkflowParameters)
     .addTemplate("pipelineSourceMigration", t => t
-        .addRequiredInput("sourceMigrationConfig", SOURCE_MIGRATION_CONFIG)
+        .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
         .addSteps(b => b
         )
     )
     .addTemplate("main", t=> t
         .addOptionalInput("simpleString", s=>"hello")
         .addRequiredInput("sourceMigrationConfigs",
-            z.array(SOURCE_MIGRATION_CONFIG),
+            typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
-        .addRequiredInput("targets", z.array(CLUSTER_CONFIG),
+        .addRequiredInput("targets", typeToken<z.infer<typeof CLUSTER_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
         .addOptionalInput("doSecondWhenTest", s=>true)
         .addOptionalInput("imageParams",
@@ -47,7 +48,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b
             .addStep("init", TargetLatchHelpers, "init", steps => ({
                 prefix: "w",
-                etcdUtilsImagePullPolicy: "aa",
+                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                 targets: [],
                 configuration: {
                     indices: [],
@@ -55,17 +56,17 @@ export const FullMigration = WorkflowBuilder.create({
                 }
             }))
                 .addInternalStep("split", "pipelineSourceMigration", stepScope=> ({
-                        sourceMigrationConfig: stepScope.item
+                        sourceMigrationConfig: stepScope.tasks.init.prefix
                     }),
                     makeParameterLoop(b.inputs.sourceMigrationConfigs)
                 )
-                .addInternalStep("split2", "pipelineSourceMigration", stepScope=> ({
-                        sourceMigrationConfig: stepScope.item
-                    }),
-                    makeParameterLoop(b.inputs.sourceMigrationConfigs),
-                    equals(literal("hello"), b.inputs.simpleString)
-                    //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
-                )
+                // .addInternalStep("split2", "pipelineSourceMigration", stepScope=> ({
+                //         sourceMigrationConfig: stepScope.item
+                //     }),
+                //     makeParameterLoop(b.inputs.sourceMigrationConfigs),
+                //     equals(literal("hello"), b.inputs.simpleString)
+                //     //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
+                // )
 
             .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
                 prefix: stepScope.tasks.init.prefix,

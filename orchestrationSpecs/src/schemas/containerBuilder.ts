@@ -1,3 +1,15 @@
+/**
+ * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
+ * 
+ * This schema system is designed to provide an intuitive, ergonomic developer experience.
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * cumbersome workarounds to make the type system work. If the API requires such casts,
+ * the type system implementation needs to be improved, not the caller code.
+ * 
+ * The goal is to make template building feel natural and safe, with proper type inference
+ * working automatically without forcing developers to manually specify types.
+ */
+
 import {OutputParamDef, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
     DataScope,

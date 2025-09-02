@@ -1,7 +1,7 @@
 import {
+    CallerParams,
     InputParametersRecord, OutputParamDef,
     OutputParametersRecord,
-    paramsToCallerSchema
 } from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
@@ -107,7 +107,7 @@ export class StepsBuilder<
         contextualScope: ContextualScope,
         public inputsScope: InputParamsScope,
         bodyScope: StepsScope,
-        protected readonly stepGroups: StepGroup[],
+        public readonly stepGroups: StepGroup[],
         outputsScope: OutputParamsScope
     ) {
         super("steps", contextualScope, inputsScope, bodyScope, outputsScope);
@@ -154,9 +154,7 @@ export class StepsBuilder<
             Name,
             StepsScope,
             (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<
-                    z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
-                >
+                ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>
         >,
         loopWith?: LoopWithUnion<LoopT>,
         when?: SimpleExpression<boolean>
@@ -197,9 +195,7 @@ export class StepsBuilder<
             Name,
             StepsScope,
             (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<
-                    z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>
-                >
+                ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
         >,
         loopWith?: LoopWithUnion<LoopT>,
         when?: SimpleExpression<boolean>

@@ -1,3 +1,15 @@
+/**
+ * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
+ * 
+ * This schema system is designed to provide an intuitive, ergonomic developer experience.
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * cumbersome workarounds to make the type system work. If the API requires such casts,
+ * the type system implementation needs to be improved, not the caller code.
+ * 
+ * The goal is to make template building feel natural and safe, with proper type inference
+ * working automatically without forcing developers to manually specify types.
+ */
+
 // Internal types for workflow schema implementation
 import {ZodType, ZodTypeAny, z} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
@@ -46,21 +58,19 @@ export type FieldGroupConstraint<T extends FieldSpecs, S extends Record<string, 
 
 // Helper types for extracting output types and creating step references
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
+type PlainRecord = { [key: string]: PlainObject };
 
 // Helper type to allow both literal values and expressions
-export type AllowLiteralOrExpression<T extends PlainObject> = T extends string
-    ? string | BaseExpression<string>
-    : T extends number
-        ? number | BaseExpression<number>
-        : T extends boolean
-            ? boolean | BaseExpression<boolean>
-            : T extends Array<infer U>
-                ? U extends PlainObject
-                    ? Array<AllowLiteralOrExpression<U>> | BaseExpression<T>
-                    : never
-                : T extends object
-                    ? { [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : never } | BaseExpression<T>
-                    : T | BaseExpression<T>;
+export type AllowLiteralOrExpression<T extends PlainObject> =
+    T extends string | number | boolean | null
+        ? T | BaseExpression<T>
+        : T extends readonly (infer U extends PlainObject)[]
+            ? ReadonlyArray<U> | BaseExpression<T>
+            : T extends (infer U extends PlainObject)[]
+                ? Array<U> | BaseExpression<T>
+                : T extends PlainRecord
+                    ? { [K in keyof T]: T[K] } | BaseExpression<T>
+                    : {fred: string}; // fixme - should be never
 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {
@@ -72,19 +82,13 @@ export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = 
 };
 
 export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {
-    [K in keyof InputParamsScope]: InputParamsScope[K] extends { type: ZodType<infer T> }
+    [K in keyof InputParamsScope]: InputParamsScope[K] extends InputParamDef<infer T, any>
         ? T extends PlainObject
-            ? ReturnType<typeof inputParam<T>>
+            ? T extends null | undefined
+                ? never
+                : ReturnType<typeof inputParam<T>>
             : never
         : never
-
-    // [K in keyof InputParamsScope]: InputParamsScope[K] extends InputParamDef<infer T, any>
-    //     ? T extends PlainObject
-    //         ? T extends null | undefined
-    //             ? never
-    //             : FromParameterExpression<NonNullable<T>>
-    //         : never
-    //     : never
 };
 
 // Helper type to extract workflow inputs from contextual scope

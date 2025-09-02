@@ -8,6 +8,7 @@ import {SetupKafka} from "@/workflowTemplates/setupKafka";
 // console.log("\n\n\n");
 
 console.log("OUTPUT: ");
+TargetLatchHelpers.templates.init.inputs;
 const finalConfigTlh = renderWorkflowTemplate(TargetLatchHelpers);
 console.log(JSON.stringify(finalConfigTlh, null, 2));
 

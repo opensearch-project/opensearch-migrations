@@ -1,6 +1,7 @@
 import {
+    CallerParams,
     InputParametersRecord,
-    OutputParametersRecord, paramsToCallerSchema
+    OutputParametersRecord
 } from "@/schemas/parameterSchemas";
 import {
     LoopWithUnion,
@@ -66,7 +67,7 @@ export class DagBuilder<
         templateKey: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, TaskScope,
             (tasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>>
+                ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
         >,
         loopWith?: LoopWithUnion<LoopT>,
         when?: SimpleExpression<boolean>

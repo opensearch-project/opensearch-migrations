@@ -1,7 +1,19 @@
+/**
+ * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
+ * 
+ * This schema system is designed to provide an intuitive, ergonomic developer experience.
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or 
+ * cumbersome workarounds to make the type system work. If the API requires such casts,
+ * the type system implementation needs to be improved, not the caller code.
+ * 
+ * The goal is to make template building feel natural and safe, with proper type inference
+ * working automatically without forcing developers to manually specify types.
+ */
+
 import {
     defineParam,
     InputParamDef, InputParametersRecord, OutputParametersRecord,
-    templateInputParametersAsExpressions,
+    templateInputParametersAsExpressions, TypeToken,
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
 import {
@@ -24,7 +36,7 @@ import {
 } from "./scopeConstraints";
 import {StepsBuilder} from "@/schemas/stepsBuilder";
 import {ContainerBuilder} from "@/schemas/containerBuilder";
-import {DeepWiden, PlainObject} from "@/schemas/plainObject";
+import {PlainObject} from "@/schemas/plainObject";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
 
@@ -42,7 +54,7 @@ export class TemplateBuilder<
 > {
     constructor(protected readonly contextualScope: ContextualScope,
                 protected readonly bodyScope: BodyScope,
-                protected readonly inputScope: InputParamsScope,
+                public readonly inputScope: InputParamsScope,
                 protected readonly outputScope: OutputParamsScope) {
     }
 
@@ -73,13 +85,13 @@ export class TemplateBuilder<
                 workflowParameters: WorkflowInputsToExpressions<ContextualScope>,
                 inputParameters: InputParamsToExpressions<InputParamsScope>,
                 rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
-            }) => AllowLiteralOrExpression<DeepWiden<T>>>,
+            }) => AllowLiteralOrExpression<T>>,
         description?: string
     ): ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
             ContextualScope,
             BodyScope,
-            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<DeepWiden<T>, false> }>,
+            ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, false> }>,
             OutputParamsScope
         >>>
     {
@@ -94,7 +106,7 @@ export class TemplateBuilder<
                 inputParameters: templateInputParametersAsExpressions(this.inputScope) as unknown as InputParamsToExpressions<InputParamsScope>,
                 rawParameters: { workflow: this.contextualScope,
                 currentTemplate: this.getTemplateSignatureScope()
-            }}) as DeepWiden<T>,
+            }}) as T,
             description
         });
 
@@ -103,7 +115,7 @@ export class TemplateBuilder<
 
     addRequiredInput<Name extends string, T extends PlainObject>(
         name: UniqueNameConstraintAtDeclaration<Name, InputParamsScope>,
-        t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, ZodType<T>>>,
+        t: ScopeIsEmptyConstraint<BodyScope, UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope, TypeToken<T>>>,
         description?: string
     ): UniqueNameConstraintOutsideDeclaration<Name, InputParamsScope,
         TemplateBuilder<
@@ -112,11 +124,7 @@ export class TemplateBuilder<
             ExtendScope<InputParamsScope, { [K in Name]: InputParamDef<T, true> }>,
             OutputParamsScope
         >> {
-        const param: InputParamDef<T, true> = {
-            type: t as ZodType<T>,
-            description
-        };
-
+        const param: InputParamDef<T, true> = { description } as const;
         return this.extendWithParam(name as any, param) as any;
     }
 

@@ -11,7 +11,8 @@ import {
 } from "@/schemas/scopeConstraints";
 import { z } from "zod";
 import {
-    InputParametersRecord, OutputParametersRecord, paramsToCallerSchema
+    CallerParams,
+    InputParametersRecord, OutputParametersRecord
 } from "@/schemas/parameterSchemas";
 import { BaseExpression, SimpleExpression, stepOutput } from "@/schemas/expression";
 import { TemplateDef } from "@/schemas/stepsBuilder";
@@ -58,9 +59,7 @@ export type ParamsFromContextFn<S extends TasksOutputsScope,
     TKey extends Extract<keyof TWorkflow["templates"], string>,
     LoopT extends PlainObject = never
 > = (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
-    ParamsWithLiteralsOrExpressions<
-        z.infer<ReturnType<typeof paramsToCallerSchema<TWorkflow["templates"][TKey]["inputs"]>>>
-    >;
+    ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>;
 
 /**
  * Base builder:
@@ -136,7 +135,7 @@ export class TaskBuilder<
         templateKey: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S,
             (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<z.infer<ReturnType<typeof paramsToCallerSchema<TInput>>>>
+                ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
         >,
         loopWith?: LoopWithUnion<LoopT>,
         when?: SimpleExpression<boolean>
@@ -219,7 +218,7 @@ export class TaskBuilder<
     >(
         name: string,
         templateKey: TKey,
-        params: z.infer<ReturnType<typeof paramsToCallerSchema<TemplateSignaturesScope[TKey]["input"]>>>,
+        params: CallerParams<TemplateSignaturesScope[TKey]["input"]>,
         loopWith?: LoopWithUnion<LoopT>
     ): NamedTask<
         TemplateSignaturesScope[TKey]["input"],
@@ -240,7 +239,7 @@ export class TaskBuilder<
         name: string,
         wf: WF,
         templateKey: TKey,
-        params: z.infer<ReturnType<typeof paramsToCallerSchema<WF["templates"][TKey]["inputs"]>>>
+        params: CallerParams<WF["templates"][TKey]["inputs"]>
     ): NamedTask<
         WF["templates"][TKey]["inputs"],
         WF["templates"][TKey]["outputs"] extends OutputParametersRecord ? WF["templates"][TKey]["outputs"] : {}

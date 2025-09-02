@@ -1,16 +1,10 @@
-import {InputParamDef, defineParam, defineRequiredParam} from "../src/schemas/parameterSchemas";
-import {expectTypeOf} from "expect-type";
-import {DeepWiden} from "../src/schemas/plainObject";
-import {expectNotType} from "tsd";
 import {WorkflowBuilder} from "../src/schemas/workflowBuilder";
 import {TemplateBuilder} from "../src/schemas/templateBuilder";
-import {z, ZodType} from "zod";
-import {NamedTask} from "../src/schemas/taskBuilder";
-import {TargetLatchHelpers} from "../src/workflowTemplates/targetLatchHelpers";
-import {FullMigration} from "../src/workflowTemplates/fullMigration";
-import {StepsBuilder} from "@/schemas/stepsBuilder";
+import {z} from "zod";
+import {CallerParams, defineParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
+import {ParamsWithLiteralsOrExpressions} from "@/schemas/workflowTypes";
+import {LiteralExpression} from "@/schemas/expression";
 
-export const SIMPLE_ZOD_ENUM = z.enum(["A", "B", "C"]);
 export type SIMPLE_ENUM = "a" | "b" | "c";
 
 describe("paramsFns runtime validation", () => {
@@ -19,17 +13,16 @@ describe("paramsFns runtime validation", () => {
             .addOptionalInput("optionalA", s=>"str")
             .addSteps(x=>x))
         .addTemplate("reqNum", b=>b
-            .addRequiredInput("reqNum", z.number())
+            .addRequiredInput("reqNum", typeToken<number>())
             .addSteps(sb=>sb))
         .addTemplate("opEnum", b=>b
             .addOptionalInput("opEnum", s => "a" as SIMPLE_ENUM)
             .addSteps(x=>x))
         .addTemplate("reqEnum", b=>b
-            .addRequiredInput("reqEnum", SIMPLE_ZOD_ENUM)
+            .addRequiredInput("reqEnum", typeToken<SIMPLE_ENUM>())
             .addSteps(sb=>sb))
         .getFullScope();
     doNothingTemplate.templates.reqEnum.inputs;
-    doNothingTemplate.templates.opEnum.inputs;
     const templateBuilder = new TemplateBuilder({}, {}, {}, {});
 
     it("optional and required are correct", () => {
@@ -59,14 +52,18 @@ describe("paramsFns runtime validation", () => {
         });
     });
 
-
+    type cpo = CallerParams<typeof doNothingTemplate.templates.opEnum.inputs>;
     it("optional enum param types work", () => {
-        templateBuilder.addSteps(sb=> {
+        templateBuilder.addSteps(sb => {
             // @ts-expect-error — mixed scalar types should be rejected
             sb.addStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "aaa"}));
-            sb.addStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "a"}));
+            sb.addStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "a"} as cpo));
             return sb;
         });
+    });
+
+    type cpr = CallerParams<typeof doNothingTemplate.templates.reqEnum.inputs>;
+    it("required enum param types work", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
             sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: "aaa"}));
@@ -74,4 +71,20 @@ describe("paramsFns runtime validation", () => {
             return sb;
         });
     });
+
+    it("workfllow param types can be used with input params", () => {
+        const wpsBuilder = WorkflowBuilder.create({ k8sResourceName: "WorkflowParamSample"})
+            .addParams({
+                wpStr: defineParam({defaultValue: "str"}),
+                wpEnum: defineParam({defaultValue: "b" as SIMPLE_ENUM})
+            });
+
+        wpsBuilder.addTemplate("test", sb=>sb.addSteps(sb=> {
+            // @ts-expect-error — mixed scalar types should be rejected
+            sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: sb.workflowInputs.wpStr}));
+            sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: sb.workflowInputs.wpEnum}));
+            return sb;
+        }));
+    });
+
 });
