@@ -9,6 +9,7 @@ def call(Map config = [:]) {
     def jobName = config.jobName
     def sourceVersion = config.sourceVersion
     def targetVersion = config.targetVersion
+    def testIdsArg = config.testIdsArg ?: ""
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -98,7 +99,7 @@ def call(Map config = [:]) {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"
-                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion --skip-delete"
+                                sh "pipenv run app --source-version=$sourceVersion --target-version=$targetVersion $testIdsArg --skip-delete"
                             }
                         }
                     }
@@ -111,6 +112,8 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
+                            sh "pipenv run app --copy-logs-only"
+                            archiveArtifacts artifacts: 'logs/**', fingerprint: true, onlyIfSuccessful: false
                             sh "pipenv run app --delete-only"
                         }
                     }
