@@ -187,12 +187,12 @@ def call(Map config = [:]) {
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
                             "export SNAPSHOT_REGION='${params.region}' && " +
-                            "export LARGE_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
-                            "export LARGE_S3_DIRECTORY_PREFIX='${params.s3DirectoryPrefix}' && " +
+                            "export FINAL_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
+                            "export FINAL_SNAPSHOT_BUCKET_PREFIX='${params.s3DirectoryPrefix}' && " +
                             "export CLUSTER_VERSION='${params.clusterVersion}' && " +
                             "export ENGINE_VERSION='${params.engineVersion}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.large_snapshot_generator.CleanUpAndPrepare\""
+                            "python -m integ_test.snapshot_generator.CleanUpAndPrepare\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 1800, roleSessionName: 'jenkins-session') {
@@ -226,12 +226,12 @@ def call(Map config = [:]) {
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
                             "export SNAPSHOT_REGION='${params.region}' && " +
-                            "export LARGE_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
-                            "export LARGE_S3_DIRECTORY_PREFIX='${params.s3DirectoryPrefix}' && " +
+                            "export FINAL_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
+                            "export FINAL_SNAPSHOT_BUCKET_PREFIX='${params.s3DirectoryPrefix}' && " +
                             "export CLUSTER_VERSION='${params.clusterVersion}' && " +
                             "export ENGINE_VERSION='${params.engineVersion}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.large_snapshot_generator.MultiplyDocuments\""
+                            "python -m integ_test.snapshot_generator.MultiplyDocuments\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 10800, roleSessionName: 'jenkins-session') {
@@ -264,12 +264,12 @@ def call(Map config = [:]) {
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
                             "export SNAPSHOT_REGION='${params.region}' && " +
-                            "export LARGE_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
-                            "export LARGE_S3_DIRECTORY_PREFIX='${params.s3DirectoryPrefix}' && " +
+                            "export FINAL_SNAPSHOT_BUCKET_PREFIX='${params.snapshotBucketPrefix}' && " +
+                            "export FINAL_SNAPSHOT_BUCKET_PREFIX='${params.s3DirectoryPrefix}' && " +
                             "export CLUSTER_VERSION='${params.clusterVersion}' && " +
                             "export ENGINE_VERSION='${params.engineVersion}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.large_snapshot_generator.CreateFinalSnapshot\""
+                            "python -m integ_test.snapshot_generator.CreateFinalSnapshot\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
