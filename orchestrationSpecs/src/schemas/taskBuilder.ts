@@ -1,50 +1,31 @@
 // taskBuilderBase.ts
 import {
-    ExtendScope,
-    IfNever,
-    LoopWithUnion,
-    ParamsWithLiteralsOrExpressions,
-    TasksOutputsScope,
-    TasksScopeToTasksWithOutputs,
-    TasksWithOutputs,
-    TemplateSignaturesScope, TemplateSignaturesScopeTyped,
-    WorkflowAndTemplatesScope
+    ExtendScope, IfNever, LoopWithUnion, ParamsWithLiteralsOrExpressions,
+    TasksOutputsScope, TasksScopeToTasksWithOutputs, TasksWithOutputs,
+    TemplateSignaturesScope, WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {Workflow} from "@/schemas/workflowBuilder";
-import {PlainObject} from "@/schemas/plainObject";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {CallerParams, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {SimpleExpression, stepOutput} from "@/schemas/expression";
+import { Workflow } from "@/schemas/workflowBuilder";
+import { PlainObject } from "@/schemas/plainObject";
+import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
+import { CallerParams, InputParametersRecord, OutputParametersRecord } from "@/schemas/parameterSchemas";
+import { SimpleExpression, stepOutput } from "@/schemas/expression";
 
-/** Phantom brand to carry the *current* Scope S inside the subclass type. */
-export type WithScope<Self, S extends TasksOutputsScope> =
-    Self;// & { readonly __scopeBrand?: S };
-
-/** The factory knows how to make the same subclass `Self` but rebound to a new scope `NS`. */
-export interface TaskBuilderFactory<
-    C extends WorkflowAndTemplatesScope,
-    Self /* concrete subclass, e.g. StepsTaskBuilder<C, *> */
-> {
-    create<NS extends TasksOutputsScope>(
-        context: C,
-        scope: NS,
-        tasks: NamedTask[]
-    ): WithScope<Self, NS>;
+export type TaskOpts<LoopT extends PlainObject> = {
+    loopWith?: LoopWithUnion<LoopT>,
+    when?: SimpleExpression<boolean>
 }
 
-/** Your existing shared task types (unchanged) */
 export type WorkflowTask<
     IN extends InputParametersRecord,
     OUT extends OutputParametersRecord,
     LoopT extends PlainObject = never
 > = {
-    arguments?: { parameters?: Record<string, any> },
+    args?: { parameters?: Record<string, any> },
     when?: SimpleExpression<boolean>
 } & (
-    | { templateRef: { key: string; value: TemplateSignaturesScopeTyped<IN, OUT> } }
+    | { templateRef: { name: string; template: string } }
     | { template: string }
-    ) & IfNever<LoopT, {}, { withLoop: LoopT }>
-    & {};
+    ) & IfNever<LoopT, {}, { withLoop: LoopT }>;
 
 export type NamedTask<
     IN extends InputParametersRecord = InputParametersRecord,
@@ -53,36 +34,49 @@ export type NamedTask<
     Extra extends Record<string, any> = {}
 > = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
 
-export type ParamsFromContextFn<S extends TasksOutputsScope,
+export type ParamsFromContextFn<
+    S extends TasksOutputsScope,
     TWorkflow extends Workflow<any, any, any>,
     TKey extends Extract<keyof TWorkflow["templates"], string>,
     LoopT extends PlainObject = never
 > = (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
     ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>;
 
+/** ---- NEW: type-level “rebinder” (a type constructor at the value level) ---- */
+export type TaskRebinder<C extends WorkflowAndTemplatesScope> =
+    <NS extends TasksOutputsScope>(context: C, scope: NS, tasks: NamedTask[]) => any;
+
+/** Helper to “apply” the rebinder and get its precise return type */
+export type ApplyRebinder<
+    RB,
+    C extends WorkflowAndTemplatesScope,
+    NS extends TasksOutputsScope
+> = RB extends (context: C, scope: NS, tasks: NamedTask[]) => infer R ? R : never;
+
 /**
- * Base builder:
- *  - C: contextual scope
- *  - S: current tasks scope
- *  - Self: the *concrete* subclass type (CRTP)
- *  - Factory: a factory that can rebind `Self` to a new `S`
+ * Base TaskBuilder THAT CAN REBIND ITS RETURN TYPE:
+ * - C: contextual scope
+ * - S: current tasks scope
+ * - RB: a function type that, given a NEW scope NS, returns the concrete “next builder” type
+ *
+ * IMPORTANT: every method that “extends the scope” now returns ApplyRebinder<RB, C, NewScope>.
  */
 export class TaskBuilder<
     C extends WorkflowAndTemplatesScope,
     S extends TasksOutputsScope,
-    Self,
-    Factory extends TaskBuilderFactory<C, Self>
+    RB extends TaskRebinder<C>
 > {
     constructor(
         protected readonly contextualScope: C,
         protected readonly tasksScope: S,
         protected readonly orderedTaskList: NamedTask[],
-        protected readonly factory: Factory
+        /** the rebinder function that constructs the next instance (subclass, wrapper, etc.) */
+        private readonly rebind: RB
     ) {}
 
-    /** Hook for subclasses to tweak how a task is recorded (e.g., DAG adds `when`). */
+    /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
     protected onTaskPushed(task: NamedTask, when?: SimpleExpression<boolean>): NamedTask {
-        return when !== undefined ? {...task, "when": when} : task;
+        return when !== undefined ? { ...task, when } : task;
     }
 
     addExternalTask<
@@ -95,14 +89,9 @@ export class TaskBuilder<
         workflowIn: UniqueNameConstraintOutsideDeclaration<Name, S, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S, ParamsFromContextFn<S, TWorkflow, TKey, LoopT>>,
-        loopWith?: LoopWithUnion<LoopT>,
-        when?: SimpleExpression<boolean>
-    ):
-        // UniqueNameConstraintOutsideDeclaration<
-        // Name,
-        // S,
-        WithScope<Self, ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }>
-        //>
+        opts?: TaskOpts<LoopT>
+    ): ApplyRebinder<RB, C,
+        ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }>
     > {
         const workflow = workflowIn as TWorkflow;
         const templateKey = key as TKey;
@@ -110,14 +99,10 @@ export class TaskBuilder<
             name as string,
             workflow,
             templateKey,
-            (paramsFn as any)(this.buildTasksWithOutputs(loopWith))
+            (paramsFn as any)(this.buildTasksWithOutputs(opts?.loopWith))
         );
-        return this.addTaskHelper(
-            name,
-            templateCall,
-            workflow.templates[templateKey].outputs,
-            when
-        ) as any;
+
+        return this.addTaskHelper(name, templateCall, workflow.templates[templateKey].outputs, opts?.when);
     }
 
     addInternalTask<
@@ -138,51 +123,39 @@ export class TaskBuilder<
             (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
                 ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
         >,
-        loopWith?: LoopWithUnion<LoopT>,
-        when?: SimpleExpression<boolean>
-    ): UniqueNameConstraintOutsideDeclaration<
-        Name,
-        S,
-        WithScope<Self, ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TOutput> }>>
+        opts?: TaskOpts<LoopT>
+    ): ApplyRebinder<RB, C,
+        ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TOutput> }>
     > {
         const template = this.contextualScope.templates?.[templateKey as string];
         const outputs = (template && "output" in template ? template.output : {}) as TOutput;
 
         const templateCall = this.callTemplate(
-            name,
+            name as string,
             templateKey as string,
-            (paramsFn as any)(this.buildTasksWithOutputs(loopWith)),
-            loopWith
+            (paramsFn as any)(this.buildTasksWithOutputs(opts?.loopWith)),
+            opts?.loopWith
         );
 
-        // Create a properly typed template call that matches the expected output type
-        const typedTemplateCall: NamedTask<TInput, TOutput> = {
-            ...templateCall,
-            // Ensure the types align with what addTaskHelper expects
-        } as NamedTask<TInput, TOutput>;
-
-        return this.addTaskHelper(name, typedTemplateCall, outputs, when) as any;
+        return this.addTaskHelper(name, templateCall, outputs, opts?.when);
     }
 
-    /** Core helper that extends scope and returns a *rebound* Self typed with the new scope. */
+    /** Core helper extends scope and returns the REBOUND type for the new scope. */
     protected addTaskHelper<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        Task extends NamedTask<IN, OUT, LoopT>,
         LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<TKey, S>,
-        templateCall: Task,
+        templateCall: NamedTask<IN, OUT, LoopT>,
         outputs: OUT,
         when?: SimpleExpression<boolean>
-    ): WithScope<Self, ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>> {
+    ): ApplyRebinder<RB, C, ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>> {
         const nameStr = name as string;
 
-        // runtime tasks list
         this.orderedTaskList.push(this.onTaskPushed(templateCall, when));
 
-        // type-level output description
         const taskDef: TasksWithOutputs<TKey, OUT> = {
             name: nameStr as TKey,
             outputTypes: outputs
@@ -193,8 +166,8 @@ export class TaskBuilder<
             [nameStr]: taskDef
         } as ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>;
 
-        // factory returns the SAME subclass type, rebound to nextScope
-        return this.factory.create(this.contextualScope, nextScope, this.orderedTaskList);
+        // Use the rebinder to produce the precise next instance
+        return this.rebind(this.contextualScope, nextScope, this.orderedTaskList) as any;
     }
 
     protected buildTasksWithOutputs<LoopT extends PlainObject = never>(
@@ -211,12 +184,12 @@ export class TaskBuilder<
         });
         return {
             tasks,
-            ...(loopWith ? {item: loopWith} : {})
+            ...(loopWith ? { item: loopWith } : {})
         } as TasksScopeToTasksWithOutputs<S>;
     }
 
     public getTasks() {
-        return {scope: this.tasksScope, taskList: this.orderedTaskList};
+        return { scope: this.tasksScope, taskList: this.orderedTaskList };
     }
 
     protected callTemplate<
@@ -234,30 +207,30 @@ export class TaskBuilder<
         return {
             name,
             template: templateKey,
-            ...(loopWith ? {loopWith} : {}),
-            arguments: {parameters: params}
+            ...(loopWith ? { withLoop: loopWith } : {}),
+            args: params
         };
     }
 
     protected callExternalTemplate<
         WF extends Workflow<any, any, any>,
-        TKey extends Extract<keyof WF["templates"], string>
+        TKey extends Extract<keyof WF["templates"], string>,
+        LoopT extends PlainObject = never
     >(
         name: string,
         wf: WF,
         templateKey: TKey,
-        params: CallerParams<WF["templates"][TKey]["inputs"]>
+        params: CallerParams<WF["templates"][TKey]["inputs"]>,
+        loopWith?: LoopWithUnion<LoopT>
     ): NamedTask<
         WF["templates"][TKey]["inputs"],
         WF["templates"][TKey]["outputs"] extends OutputParametersRecord ? WF["templates"][TKey]["outputs"] : {}
     > {
         return {
-            "name": name,
-            templateRef: {
-                name: templateKey,
-                template: wf.metadata.k8sMetadata.name
-            },
-            arguments: {parameters: params}
+            name,
+            templateRef: { name: templateKey, template: wf.metadata.k8sMetadata.name },
+            ...(loopWith ? { withLoop: loopWith } : {}),
+            args: params
         } as any;
     }
 }

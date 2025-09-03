@@ -3,31 +3,32 @@ import {OutputParamDef} from "@/schemas/parameterSchemas";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {expectTypeOf} from "expect-type";
 import {DagBuilder} from "@/schemas/dagBuilder";
+import {StepsBuilder} from "@/schemas/stepsBuilder";
 
 describe("paramsFns runtime validation", () => {
     const sharedNothingTemplate =
         WorkflowBuilder.create({ k8sResourceName: "SharedDoNothing"})
-        .addTemplate("doNothing", b=> {
-            const result = b
-                .addOptionalInput("strParam", s=>"str")
-                .addSteps(x=>x)
-                .addExpressionOutput("out1", "outputStr" as string)
-            ;
-            expectTypeOf(result.outputsScope).toEqualTypeOf<{out1: OutputParamDef<string>}>();
-            return result;
-        })
+            .addTemplate("doNothing", b=> {
+                const result = b
+                    .addOptionalInput("strParam", s=>"str")
+                    .addSteps(x=>x)
+                    .addExpressionOutput("out1", "outputStr" as string)
+                ;
+                expectTypeOf(result.outputsScope).toEqualTypeOf<{out1: OutputParamDef<string>}>();
+                return result;
+            })
             .getFullScope();
     expectTypeOf(sharedNothingTemplate.templates.doNothing.outputs).toEqualTypeOf<{out1: OutputParamDef<string>}>();
     const templateBuilder = new TemplateBuilder({}, {}, {}, {});
 
-    it("Creates empty dag template", () => {
+    it("Creates empty steps template", () => {
         const empty =
             WorkflowBuilder
                 .create({
                     k8sResourceName: "Test"
                 })
                 .addTemplate("emptyDag", b=> b
-                    .addDag(d => d)
+                    .addSteps(d => d)
                 )
                 .getFullScope();
         expect(empty).toEqual({
@@ -39,7 +40,7 @@ describe("paramsFns runtime validation", () => {
             },
             "templates": {
                 "emptyDag": {
-                    "body": {"dag": {}},
+                    "body": {"steps": []},
                     "inputs": {},
                     "outputs": {}
                 },
@@ -49,13 +50,14 @@ describe("paramsFns runtime validation", () => {
     })
 
     it("addTasks to dag template", () => {
-        const d = templateBuilder.addDag(td => {
-            const result = td.addExternalTask("init", sharedNothingTemplate, "doNothing", b => ({
-                strParam: "b"
-            }));
-            expectTypeOf(result).toExtend<DagBuilder<any,any,any,any>>();
-            expectTypeOf(result).not.toBeAny();
-            return result;
+        const d = templateBuilder.addSteps(td => {
+                const result = td.addExternalStep("init", sharedNothingTemplate, "doNothing", b => ({
+                    strParam: "b"
+                }));
+                // let result: never;
+                expectTypeOf(result).toExtend<StepsBuilder<any,any, { init: any }, any>>();
+                expectTypeOf(result).not.toBeAny();
+                return result;
             }
         );
     })

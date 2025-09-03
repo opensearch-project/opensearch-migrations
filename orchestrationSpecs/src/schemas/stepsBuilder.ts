@@ -9,30 +9,15 @@ import {
     TasksWithOutputs,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {BaseExpression, SimpleExpression} from "@/schemas/expression";
+import {SimpleExpression} from "@/schemas/expression";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
 import {Workflow} from "@/schemas/workflowBuilder";
-import {NamedTask, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
+import {NamedTask, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
 
 export interface StepGroup {
     steps: NamedTask[];
-}
-
-/** Factory that rebinds StepGroupBuilder to a new scope */
-class StepsFactory<C extends WorkflowAndTemplatesScope>
-    implements TaskBuilderFactory<C, StepGroupBuilder<C, any>> {
-    create<NS extends TasksOutputsScope>(
-        context: C,
-        scope: NS,
-        tasks: NamedTask[]
-    ): WithScope<StepGroupBuilder<C, any>, NS> {
-        return new StepGroupBuilder<C, NS>(context, scope, tasks) as WithScope<
-            StepGroupBuilder<C, any>,
-            NS
-        >;
-    }
 }
 
 class StepGroupBuilder<
@@ -41,15 +26,18 @@ class StepGroupBuilder<
 > extends TaskBuilder<
     ContextualScope,
     TasksScope,
-    StepGroupBuilder<ContextualScope, any>,
-    StepsFactory<ContextualScope>
+    TaskRebinder<ContextualScope>
 > {
     constructor(
         contextualScope: ContextualScope,
         tasksScope: TasksScope,
         tasks: NamedTask[]
     ) {
-        super(contextualScope, tasksScope, tasks, new StepsFactory<ContextualScope>());
+        const rebind: TaskRebinder<ContextualScope> =
+            <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, t: NamedTask[]) =>
+                new StepGroupBuilder<ContextualScope, NS>(ctx, scope, t);
+
+        super(contextualScope, tasksScope, tasks, rebind);
     }
 }
 
@@ -83,7 +71,7 @@ export class StepsBuilder<
         public inputsScope: InputParamsScope,
         bodyScope: StepsScope,
         public readonly stepGroups: StepGroup[],
-        outputsScope: OutputParamsScope
+        public outputsScope: OutputParamsScope
     ) {
         super("steps", contextualScope, inputsScope, bodyScope, outputsScope);
     }
@@ -93,7 +81,7 @@ export class StepsBuilder<
      * If caller returns a TypescriptError<...>, it won't have getTasks and we propagate that error type back.
      * If it succeeds, we infer the extended scope and return a new StepsBuilder with that scope.
      */
-    addStepGroup<R>(
+    public addStepGroup<R>(
         builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => R
     ): AddStepGroupResult<R, ContextualScope, InputParamsScope, StepsScope, OutputParamsScope> {
         const newGroup = builderFn(
@@ -116,7 +104,7 @@ export class StepsBuilder<
     }
 
     // Convenience method for single external step
-    addStep<
+    public addExternalStep<
         Name extends string,
         TWorkflow extends Workflow<any, any, any>,
         TKey extends Extract<keyof TWorkflow["templates"], string>,
@@ -131,8 +119,7 @@ export class StepsBuilder<
             (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
                 ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>
         >,
-        loopWith?: LoopWithUnion<LoopT>,
-        when?: SimpleExpression<boolean>
+        opts?: TaskOpts<LoopT>
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         StepsScope,
@@ -147,12 +134,12 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder =>
-            groupBuilder.addExternalTask(name, workflow, key, paramsFn, loopWith, when)
+            groupBuilder.addExternalTask(name, workflow, key, paramsFn, opts)
         ) as any;
     }
 
     // Convenience method for single internal step
-    addInternalStep<
+    public addInternalStep<
         Name extends string,
         TKey extends Extract<keyof ContextualScope["templates"], string>,
         TTemplate extends ContextualScope["templates"][TKey],
@@ -172,8 +159,7 @@ export class StepsBuilder<
             (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
                 ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
         >,
-        loopWith?: LoopWithUnion<LoopT>,
-        when?: SimpleExpression<boolean>
+        opts?: TaskOpts<LoopT>
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         StepsScope,
@@ -185,11 +171,11 @@ export class StepsBuilder<
         >
     > {
         return this.addStepGroup(groupBuilder =>
-            groupBuilder.addInternalTask(name, templateKey, paramsFn, loopWith, when)
+            groupBuilder.addInternalTask(name, templateKey, paramsFn, opts)
         ) as any;
     }
 
-    addExpressionOutput<T extends PlainObject, Name extends string>(
+    public addExpressionOutput<T extends PlainObject, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
         expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, AllowLiteralOrExpression<T>>,
         descriptionValue?: string

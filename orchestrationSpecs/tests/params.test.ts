@@ -27,7 +27,7 @@ describe("paramsFns runtime validation", () => {
 
     it("optional and required are correct", () => {
         templateBuilder.addSteps(sb=> {
-            sb.addStep("init", doNothingTemplate, "opStr", steps => ({optionalA: "hi"}));
+            sb.addExternalStep("init", doNothingTemplate, "opStr", steps => ({optionalA: "hi"}));
             return sb;
         });
     });
@@ -35,8 +35,8 @@ describe("paramsFns runtime validation", () => {
     it("spurious parameters are rejected", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addStep("init", doNothingTemplate, "opStr", steps => ({notReal: "1"}));
-            sb.addStep("init", doNothingTemplate, "opStr", steps => ({}));
+            sb.addExternalStep("init", doNothingTemplate, "opStr", steps => ({notReal: "1"}));
+            sb.addExternalStep("init", doNothingTemplate, "opStr", steps => ({}));
             return sb;
         });
     });
@@ -44,10 +44,10 @@ describe("paramsFns runtime validation", () => {
     it("required param is required and must match type", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addStep("init", doNothingTemplate, "reqNum", steps => ({}));
+            sb.addExternalStep("init", doNothingTemplate, "reqNum", steps => ({}));
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addStep("init", doNothingTemplate, "reqNum", steps => ({reqNum: "1"}));
-            sb.addStep("init", doNothingTemplate, "reqNum", steps => ({reqNum: 1}));
+            sb.addExternalStep("init", doNothingTemplate, "reqNum", steps => ({reqNum: "1"}));
+            sb.addExternalStep("init", doNothingTemplate, "reqNum", steps => ({reqNum: 1}));
             return sb;
         });
     });
@@ -56,8 +56,8 @@ describe("paramsFns runtime validation", () => {
     it("optional enum param types work", () => {
         templateBuilder.addSteps(sb => {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "aaa"}));
-            sb.addStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "a"} as cpo));
+            sb.addExternalStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "aaa"}));
+            sb.addExternalStep("init", doNothingTemplate, "opEnum", steps => ({opEnum: "a"} as cpo));
             return sb;
         });
     });
@@ -66,8 +66,8 @@ describe("paramsFns runtime validation", () => {
     it("required enum param types work", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: "aaa"}));
-            sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: "a"}));
+            sb.addExternalStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: "aaa"}));
+            sb.addExternalStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: "a"}));
             return sb;
         });
     });
@@ -91,8 +91,8 @@ describe("paramsFns runtime validation", () => {
 
         wpsBuilder.addTemplate("test", sb=>sb.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: sb.workflowInputs.wpStr}));
-            sb.addStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: sb.workflowInputs.wpEnum}));
+            sb.addExternalStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: sb.workflowInputs.wpStr}));
+            sb.addExternalStep("init", doNothingTemplate, "reqEnum", steps => ({reqEnum: sb.workflowInputs.wpEnum}));
             return sb;
         }));
     });

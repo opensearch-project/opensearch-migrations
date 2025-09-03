@@ -41,7 +41,7 @@ export const FullMigration = WorkflowBuilder.create({
             ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
-            .addStep("init", TargetLatchHelpers, "init", steps => ({
+            .addExternalStep("init", TargetLatchHelpers, "init", steps => ({
                 prefix: "w",
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                 targets: [],
@@ -53,17 +53,19 @@ export const FullMigration = WorkflowBuilder.create({
             .addInternalStep("split", "pipelineSourceMigration", stepScope => ({
                     sourceMigrationConfig: stepScope.item
                 }),
-                makeParameterLoop(b.inputs.sourceMigrationConfigs)
+                { loopWith: makeParameterLoop(b.inputs.sourceMigrationConfigs) }
             )
             .addInternalStep("split2", "pipelineSourceMigration", stepScope => ({
                     sourceMigrationConfig: stepScope.item
                 }),
-                makeParameterLoop(b.inputs.sourceMigrationConfigs),
-                equals(literal("hello"), b.inputs.simpleString)
+                {
+                    loopWith: makeParameterLoop(b.inputs.sourceMigrationConfigs),
+                    when: equals(literal("hello"), b.inputs.simpleString)
+                }
                 //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
             )
 
-            .addStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
+            .addExternalStep("cleanup", TargetLatchHelpers, "cleanup", stepScope => ({
                 prefix: stepScope.tasks.init.prefix,
                 etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
             }))

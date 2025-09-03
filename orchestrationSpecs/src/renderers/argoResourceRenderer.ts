@@ -23,7 +23,7 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["ge
             serviceAccountName: wf.metadata.serviceAccountName,
             entrypoint: wf.metadata.entrypoint,
             parallelism: 100,
-            ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
+            ...(wf.workflowParameters != null && {args: formatParameters(wf.workflowParameters)}),
             templates: (() => {
                 const list = [];
                 for (const k in wf.templates) {
@@ -70,13 +70,27 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     }
 }
 
-function formatStep<T extends NamedTask & { loopWith?: unknown }>(step: T) {
-    const {loopWith, ...rest} = step;
+function convertArgumentValue(value: any) {
+    return (value && typeof value === 'object' && 'loopWith' in value) ?
+        "{{item}}" : transformExpressionsDeep(value);
+}
+
+function formatArguments(passedParameters: {parameters?: Record<string, any> | undefined} | undefined) {
+    if (passedParameters == undefined) { return {}};
+    return Object.entries(passedParameters).map(([key, value]) => ({
+        name: key,
+        value: convertArgumentValue(value)
+    }));
+}
+
+function formatStep<T extends NamedTask & { args?: unknown, withLoop?: unknown }>(step: T) {
+    const {withLoop, args, ...rest} = step;
     return {
-        ...(loopWith !== undefined
-            ? renderWithLoop(loopWith as LoopWithUnion<any>)
+        ...(withLoop !== undefined
+            ? renderWithLoop(withLoop as LoopWithUnion<any>)
             : {}),
-        ...(transformExpressionsDeep(rest) as object)
+        ...rest,
+        ...{ "arguments": { parameters: (formatArguments(args) as object) } }
     };
 }
 
