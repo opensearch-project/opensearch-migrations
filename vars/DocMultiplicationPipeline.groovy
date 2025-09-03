@@ -181,7 +181,8 @@ def call(Map config = [:]) {
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
-                            "export TOTAL_DOCUMENTS_TO_INGEST='${params.docsToIngest}' && " +
+                            "export BATCH_COUNT='${params.batchCount}' && " +
+                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
@@ -191,7 +192,7 @@ def call(Map config = [:]) {
                             "export CLUSTER_VERSION='${params.clusterVersion}' && " +
                             "export ENGINE_VERSION='${params.engineVersion}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.multiplication_test.CleanUpAndPrepare\""
+                            "python -m integ_test.large_snapshot_generator.CleanUpAndPrepare\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 1800, roleSessionName: 'jenkins-session') {
@@ -209,7 +210,8 @@ def call(Map config = [:]) {
                 timeout(time: 3, unit: 'HOURS') {
                     echo "Stage 7: MultiplyDocuments - Creating large dataset"
                     echo "CORE STAGE: This creates the big dataset for the snapshot"
-                    echo "Docs Ingested: ${params.docsToIngest}"
+                    echo "Batch Count: ${params.batchCount}"
+                    echo "Docs Per Batch: ${params.docsPerBatch}"
                     echo "Multiplication Factor: ${params.multiplicationFactor}"
                     echo "RFS Workers: ${params.rfsWorkers}"
                     
@@ -218,7 +220,8 @@ def call(Map config = [:]) {
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
-                            "export TOTAL_DOCUMENTS_TO_INGEST='${params.docsToIngest}' && " +
+                            "export BATCH_COUNT='${params.batchCount}' && " +
+                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
@@ -228,7 +231,7 @@ def call(Map config = [:]) {
                             "export CLUSTER_VERSION='${params.clusterVersion}' && " +
                             "export ENGINE_VERSION='${params.engineVersion}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.multiplication_test.MultiplyDocuments\""
+                            "python -m integ_test.large_snapshot_generator.MultiplyDocuments\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 10800, roleSessionName: 'jenkins-session') {
@@ -255,7 +258,8 @@ def call(Map config = [:]) {
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export INDEX_NAME='${params.indexName}' && " +
                             "export NUM_SHARDS='${params.numShards}' && " +
-                            "export TOTAL_DOCUMENTS_TO_INGEST='${params.docsToIngest}' && " +
+                            "export BATCH_COUNT='${params.batchCount}' && " +
+                            "export DOCS_PER_BATCH='${params.docsPerBatch}' && " +
                             "export MULTIPLICATION_FACTOR='${params.multiplicationFactor}' && " +
                             "export RFS_WORKERS='${params.rfsWorkers}' && " +
                             "export STAGE='${params.stage}' && " +
@@ -265,7 +269,7 @@ def call(Map config = [:]) {
                             "export CLUSTER_VERSION='${params.clusterVersion}' && " +
                             "export ENGINE_VERSION='${params.engineVersion}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.multiplication_test.CreateFinalSnapshot\""
+                            "python -m integ_test.large_snapshot_generator.CreateFinalSnapshot\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {

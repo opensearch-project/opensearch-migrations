@@ -4,9 +4,8 @@
 
 - CDK deploy has been performed successfully for MA v2.5 and greater
 - RFS service is enabled with transformation support
-- Access to the migration-console container
 - Source cluster == target cluster (only source cluster needed)
-- Source cluster is connected and accessible
+- Source cluster is connected and accessible from migration-console
 
 ## Prerequisites
 
@@ -43,13 +42,13 @@ Run the following commands **sequentially** from within the migration-console:
 cd /root/lib/integ_test/
 
 # Part 1: Clean up and prepare environment
-python -m integ_test.multiplication_test.CleanUpAndPrepare
+python -m integ_test.snapshot_generator.CleanUpAndPrepare
 
 # Part 2: Run RFS to multiply documents
-python -m integ_test.multiplication_test.MultiplyDocuments
+python -m integ_test.snapshot_generator.MultiplyDocuments
 
 # Part 3: Create final snapshot
-python -m integ_test.multiplication_test.CreateFinalSnapshot
+python -m integ_test.snapshot_generator.CreateFinalSnapshot
 ```
 
 **Note**: These modules must be run in order. Do not run them in parallel.
