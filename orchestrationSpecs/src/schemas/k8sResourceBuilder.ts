@@ -21,22 +21,24 @@ export type ResourceWorkflowDefinition = {
 export class K8sResourceBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
-    ContainerScope extends GenericScope,
+    ResourceScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope,
-    K8sResourceBuilder<ContextualScope, InputParamsScope, ContainerScope, any>>
+> extends TemplateBodyBuilder<ContextualScope, "resource", InputParamsScope, ResourceScope, OutputParamsScope,
+    K8sResourceBuilder<ContextualScope, InputParamsScope, ResourceScope, any>>
 {
     constructor(contextualScope: ContextualScope,
                 inputsScope: InputParamsScope,
-                bodyScope: ContainerScope,
-                outputsScope: OutputParamsScope,
-                public readonly workflowDefinition?: ResourceWorkflowDefinition) {
-        super("container", contextualScope, inputsScope, bodyScope, outputsScope)
+                bodyScope: ResourceScope,
+                outputsScope: OutputParamsScope) {
+        super("resource", contextualScope, inputsScope, bodyScope, outputsScope)
     }
 
     setDefinition(workflowDefinition: ResourceWorkflowDefinition) {
-        return new K8sResourceBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.outputsScope,
-            workflowDefinition);
+        const newBody = {
+            ...this.bodyScope,
+            workflowDefinition
+        }
+        return new K8sResourceBuilder(this.contextualScope, this.inputsScope, newBody, this.outputsScope);
     }
 
     addJsonPathOutput<T extends PlainObject, Name extends string>(
@@ -44,7 +46,7 @@ export class K8sResourceBuilder<
         pathValue: string, // todo - make this strongly typed
         t: ZodType<T>,
         descriptionValue?: string):
-        K8sResourceBuilder<ContextualScope, InputParamsScope, ContainerScope,
+        K8sResourceBuilder<ContextualScope, InputParamsScope, ResourceScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new K8sResourceBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
             ...this.outputsScope,
@@ -54,6 +56,6 @@ export class K8sResourceBuilder<
                 path: pathValue,
                 description: descriptionValue
             },
-        }, this.workflowDefinition);
+        });
     }
 }

@@ -1,8 +1,9 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {typeToken} from "@/schemas/parameterSchemas";
+import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
 
-function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: string }) {
+function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: AllowLiteralOrExpression<string> }) {
     return {
         "apiVersion": "kafka.strimzi.io/v1beta2",
         "kind": "Kafka",
@@ -62,7 +63,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 action: "create",
                 setOwnerReference: true,
                 successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterZookeeperManifest
+                manifest: makeDeployKafkaClusterZookeeperManifest(b.inputs)
             })))
     // .addTemplate("clusterDeploy", t=> t
     //     .addRequiredInput("kafkaName", z.string())
