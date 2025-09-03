@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/schemas/userSchemas'
+import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
@@ -41,8 +41,8 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
 
-            .addPathOutput("prefix", "/tmp/prefix", z.string())
-            .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", z.number())
+            .addPathOutput("prefix", "/tmp/prefix", typeToken<string>())
+            .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", typeToken<number>())
         )
     )
     //.templateSigScope.init.input
@@ -56,7 +56,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
 
-            .addPathOutput("shouldFinalize", "/tmp/should-finalize", z.boolean())
+            .addPathOutput("shouldFinalize", "/tmp/should-finalize", typeToken<boolean>())
         )
     )
     .addTemplate("cleanup", t => t

@@ -7,7 +7,7 @@ import {
     TasksOutputsScope,
     TasksScopeToTasksWithOutputs,
     TasksWithOutputs,
-    TemplateSignaturesScope,
+    TemplateSignaturesScope, TemplateSignaturesScopeTyped,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
 import {Workflow} from "@/schemas/workflowBuilder";
@@ -15,7 +15,6 @@ import {PlainObject} from "@/schemas/plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {CallerParams, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {SimpleExpression, stepOutput} from "@/schemas/expression";
-import {TemplateDef} from "@/schemas/stepsBuilder";
 
 /** Phantom brand to carry the *current* Scope S inside the subclass type. */
 export type WithScope<Self, S extends TasksOutputsScope> =
@@ -42,7 +41,7 @@ export type WorkflowTask<
     arguments?: { parameters?: Record<string, any> },
     when?: SimpleExpression<boolean>
 } & (
-    | { templateRef: { key: string; value: TemplateDef<IN, OUT> } }
+    | { templateRef: { key: string; value: TemplateSignaturesScopeTyped<IN, OUT> } }
     | { template: string }
     ) & IfNever<LoopT, {}, { withLoop: LoopT }>
     & {};
@@ -98,10 +97,12 @@ export class TaskBuilder<
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S, ParamsFromContextFn<S, TWorkflow, TKey, LoopT>>,
         loopWith?: LoopWithUnion<LoopT>,
         when?: SimpleExpression<boolean>
-    ): UniqueNameConstraintOutsideDeclaration<
-        Name,
-        S,
-        WithScope<Self, ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }>>
+    ):
+        // UniqueNameConstraintOutsideDeclaration<
+        // Name,
+        // S,
+        WithScope<Self, ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }>
+        //>
     > {
         const workflow = workflowIn as TWorkflow;
         const templateKey = key as TKey;
@@ -154,7 +155,13 @@ export class TaskBuilder<
             loopWith
         );
 
-        return this.addTaskHelper(name, templateCall, outputs, when) as any;
+        // Create a properly typed template call that matches the expected output type
+        const typedTemplateCall: NamedTask<TInput, TOutput> = {
+            ...templateCall,
+            // Ensure the types align with what addTaskHelper expects
+        } as NamedTask<TInput, TOutput>;
+
+        return this.addTaskHelper(name, typedTemplateCall, outputs, when) as any;
     }
 
     /** Core helper that extends scope and returns a *rebound* Self typed with the new scope. */

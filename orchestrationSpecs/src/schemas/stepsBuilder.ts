@@ -1,5 +1,6 @@
 import {CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord,} from "@/schemas/parameterSchemas";
 import {
+    AllowLiteralOrExpression,
     ExtendScope,
     LoopWithUnion,
     ParamsWithLiteralsOrExpressions,
@@ -8,26 +9,12 @@ import {
     TasksWithOutputs,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {z, ZodType} from "zod";
 import {BaseExpression, SimpleExpression} from "@/schemas/expression";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
 import {Workflow} from "@/schemas/workflowBuilder";
 import {NamedTask, TaskBuilder, TaskBuilderFactory, WithScope} from "@/schemas/taskBuilder";
-
-const TemplateDefSchema = z.object({
-    inputs: z.any(),
-    outputs: z.any(),
-});
-
-export type TemplateDef<
-    IN extends InputParametersRecord,
-    OUT extends OutputParametersRecord
-> = z.infer<typeof TemplateDefSchema> & {
-    inputs: IN;
-    outputs: OUT;
-};
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -204,8 +191,7 @@ export class StepsBuilder<
 
     addExpressionOutput<T extends PlainObject, Name extends string>(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
-        expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, BaseExpression<T>>,
-        t: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, ZodType<T>>,
+        expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, AllowLiteralOrExpression<T>>,
         descriptionValue?: string
     ):
         UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
@@ -223,7 +209,6 @@ export class StepsBuilder<
             {
                 ...this.outputsScope,
                 [name as string]: {
-                    type: t,
                     fromWhere: "expression" as const,
                     expression,
                     description: descriptionValue

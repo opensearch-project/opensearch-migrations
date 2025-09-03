@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {CLUSTER_CONFIG, SOURCE_MIGRATION_CONFIG} from '@/schemas/userSchemas'
+import {CLUSTER_CONFIG, SOURCE_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
@@ -19,7 +19,7 @@ export const FullMigration = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
     .addTemplate("pipelineSourceMigration", t => t
         .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
-        .addSteps(b => b
+        .addSteps(b => b // TODO empty for now
         )
     )
     .addTemplate("main", t => t

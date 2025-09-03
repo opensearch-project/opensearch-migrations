@@ -80,7 +80,7 @@ describe("paramsFns runtime validation", () => {
         expectTypeOf(defineParam({defaultValue: "hi" as e1})).toEqualTypeOf<InputParamDef<e1, false>>();
     });
 
-    it("workfllow param types can be used with input params", () => {
+    it("workflow param types can be used with input params", () => {
         const standaloneParam = defineParam({defaultValue: "str"});
         const wpsBuilder = WorkflowBuilder.create({ k8sResourceName: "WorkflowParamSample"})
             .addParams({

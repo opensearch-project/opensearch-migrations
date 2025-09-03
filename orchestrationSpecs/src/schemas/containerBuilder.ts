@@ -10,7 +10,7 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord, TypeToken} from "@/schemas/parameterSchemas";
 import {
     AllowLiteralOrExpression,
     DataScope,
@@ -19,7 +19,6 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {ZodType} from "zod";
 import {toEnvVarName, TypescriptError} from "@/utils";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
@@ -107,13 +106,14 @@ export class ContainerBuilder<
         );
     }
 
-    addPathOutput<T extends PlainObject, Name extends string>(name: Name, pathValue: string, t: ZodType<T>, descriptionValue?: string):
+    addPathOutput<T extends PlainObject, Name extends string>(
+        name: Name, pathValue: string, t: TypeToken<T>, descriptionValue?: string
+    ):
         ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, {
             ...this.outputsScope,
             [name as string]: {
-                type: t,
                 fromWhere: "path" as const,
                 path: pathValue,
                 description: descriptionValue
@@ -121,13 +121,12 @@ export class ContainerBuilder<
         });
     }
 
-    addExpressionOutput<T extends PlainObject, Name extends string>(name: Name, expression: string, t: ZodType<T>, descriptionValue?: string):
+    addExpressionOutput<T extends PlainObject, Name extends string>(name: Name, expression: string, t: TypeToken<T>, descriptionValue?: string):
         ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, {
             ...this.outputsScope,
             [name as string]: {
-                type: t,
                 fromWhere: "expression" as const,
                 expression: expression,
                 description: descriptionValue

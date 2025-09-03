@@ -1,6 +1,5 @@
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord, TypeToken} from "@/schemas/parameterSchemas";
 import {AllowLiteralOrExpression, ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/schemas/workflowTypes";
-import {ZodType} from "zod";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 
@@ -44,14 +43,13 @@ export class K8sResourceBuilder<
     addJsonPathOutput<T extends PlainObject, Name extends string>(
         name: Name,
         pathValue: string, // todo - make this strongly typed
-        t: ZodType<T>,
+        t: TypeToken<T>,
         descriptionValue?: string):
         K8sResourceBuilder<ContextualScope, InputParamsScope, ResourceScope,
             ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
         return new K8sResourceBuilder(this.contextualScope, this.inputsScope, this.bodyScope, {
             ...this.outputsScope,
             [name as string]: {
-                type: t,
                 fromWhere: "path" as const,
                 path: pathValue,
                 description: descriptionValue

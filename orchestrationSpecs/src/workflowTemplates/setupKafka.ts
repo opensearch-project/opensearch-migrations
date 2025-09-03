@@ -57,7 +57,6 @@ export const SetupKafka = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
     .addTemplate("deployKafkaNodePool", t => t
         .addRequiredInput("kafkaName", typeToken<string>())
-        // .addContainer(b=>b.inputs.kafkaName)
         .addResourceTask(b => b
             .setDefinition({
                 action: "create",
@@ -65,11 +64,13 @@ export const SetupKafka = WorkflowBuilder.create({
                 successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterZookeeperManifest(b.inputs)
             })))
-    // .addTemplate("clusterDeploy", t=> t
-    //     .addRequiredInput("kafkaName", z.string())
-    //     .addOptionalInput("useKraft", s=>true)
-    //     .addDag(b=>b
-    //         .addInternalTask("deployPool", "deployKafkaNodePool", d => {
-    //         }))
-    // )
+    .addTemplate("clusterDeploy", t=> t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addOptionalInput("useKraft", s=>true)
+        .addDag(b=>b
+            .addInternalTask("deployPool", "deployKafkaNodePool", d => ({
+                kafkaName: "NEVERNEVER",//b.inputs.kafkaName,
+                aNever: b.inputs.kafkaName
+            })))
+    )
     .getFullScope();

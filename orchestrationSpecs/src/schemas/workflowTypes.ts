@@ -10,8 +10,6 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-// Internal types for workflow schema implementation
-import {ZodTypeAny} from "zod";
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {TypescriptError} from "@/utils";
 import {BaseExpression, FromParameterExpression, stepOutput} from "@/schemas/expression";
@@ -30,12 +28,13 @@ export type WorkflowAndTemplatesScope<TemplateSignatures extends TemplateSignatu
 };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type GenericScope = Record<string, any>;
-//export type DagScope = Record<string, DagTask>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
-export type TemplateSignaturesScope = Record<string, TemplateSigEntry<{
-    inputs: InputParametersRecord;
-    outputs?: OutputParametersRecord
-}>>;
+export type TemplateSignaturesScope = TemplateSignaturesScopeTyped<any, any>;
+export type TemplateSignaturesScopeTyped<IPR extends InputParametersRecord, OPR extends OutputParametersRecord> =
+    Record<string, TemplateSigEntry<{
+        inputs: IPR,
+        outputs?: OPR
+    }>>;
 
 export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
 
@@ -48,7 +47,7 @@ export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
 };
 
 // shared-types.ts - Export these types from a shared file
-export type FieldSpecs = Record<string, ZodTypeAny | string | number | boolean>;
+export type FieldSpecs = Record<string, string | number | boolean>;
 
 export type FieldSpecsToInputParams<T extends FieldSpecs> = {
     [K in keyof T]: InputParamDef<any, true>;
