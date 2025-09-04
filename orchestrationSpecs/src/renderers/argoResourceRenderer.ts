@@ -13,7 +13,7 @@ function hasDefault<T extends PlainObject>(
     return (p as any)._hasDefault === true;
 }
 
-export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder["getFullScope"]>>(wf: WF) {
+export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any, any, any>["getFullScope"]>>(wf: WF) {
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",

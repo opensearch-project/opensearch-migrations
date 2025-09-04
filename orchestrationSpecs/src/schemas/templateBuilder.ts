@@ -26,7 +26,7 @@ import {
     FieldSpecs,
     FieldSpecsToInputParams,
     GenericScope,
-    InputParamsToExpressions,
+    InputParamsToExpressions, WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
 } from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
@@ -49,7 +49,7 @@ import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
  * receives the specification up to that point.
  */
 export class TemplateBuilder<
-    ContextualScope extends { workflowParameters?: InputParametersRecord },
+    ContextualScope extends WorkflowAndTemplatesScope,
     BodyScope extends GenericScope = GenericScope,
     InputParamsScope extends InputParametersRecord = InputParametersRecord,
     OutputParamsScope extends OutputParametersRecord = OutputParametersRecord

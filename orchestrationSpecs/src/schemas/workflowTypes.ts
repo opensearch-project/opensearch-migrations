@@ -22,19 +22,22 @@ declare global {
 }
 
 // Specific scope types for different purposes
-export type WorkflowAndTemplatesScope<TemplateSignatures extends TemplateSignaturesScope = TemplateSignaturesScope> = {
+export type WorkflowAndTemplatesScope<
+    TemplateSignatures extends TemplateSignaturesScopeTyped<Record<string, { inputs: any; outputs?: any }>> =
+        TemplateSignaturesScopeTyped<Record<string, { inputs: any; outputs?: any }>>> =
+{
     workflowParameters?: InputParametersRecord,
     templates?: TemplateSignatures
 };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type GenericScope = Record<string, any>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
-export type TemplateSignaturesScope = TemplateSignaturesScopeTyped<any, any>;
-export type TemplateSignaturesScopeTyped<IPR extends InputParametersRecord, OPR extends OutputParametersRecord> =
-    Record<string, TemplateSigEntry<{
-        inputs: IPR,
-        outputs?: OPR
-    }>>;
+export type TemplateSignaturesScopeTyped<Sigs extends Record<string, { inputs: any; outputs?: any }>> = {
+    [K in keyof Sigs]: TemplateSigEntry<Sigs[K]>;
+};
+
+// Keep a permissive alias for backward compatibility where exact keys aren't needed
+export type TemplateSignaturesScope = TemplateSignaturesScopeTyped<Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }>>;
 
 export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
 
@@ -42,8 +45,8 @@ export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<stri
 export type ExtendScope<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = S & ADDITIONS;
 
 export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
-    input: T["inputs"];
-    output?: T extends { outputs: infer O } ? O : never;
+    inputs: T["inputs"];
+    outputs?: T extends { outputs: infer O } ? O : never;
 };
 
 // shared-types.ts - Export these types from a shared file

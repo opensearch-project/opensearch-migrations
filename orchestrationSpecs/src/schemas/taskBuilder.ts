@@ -15,6 +15,16 @@ export type TaskOpts<LoopT extends PlainObject> = {
     when?: SimpleExpression<boolean>
 }
 
+export type InputsOf<T> =
+    T extends { inputs: infer I }
+        ? I extends Record<string, any> ? I : never  // Keep it as Record<string, any> to preserve exact keys
+        : never;
+
+export type OutputsOf<T> =
+    T extends { outputs: infer O }
+        ? O extends OutputParametersRecord ? O : {}
+        : {};
+
 export type WorkflowTask<
     IN extends InputParametersRecord,
     OUT extends OutputParametersRecord,
@@ -109,26 +119,20 @@ export class TaskBuilder<
         Name extends string,
         TKey extends Extract<keyof C["templates"], string>,
         TTemplate extends C["templates"][TKey],
-        TInput extends TTemplate extends { input: infer I }
-            ? I extends InputParametersRecord ? I : InputParametersRecord
-            : InputParametersRecord,
-        TOutput extends TTemplate extends { output: infer O }
-            ? O extends OutputParametersRecord ? O : {}
-            : {},
         LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         templateKey: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S,
             (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
+                ParamsWithLiteralsOrExpressions<CallerParams<InputsOf<TTemplate>>>
         >,
         opts?: TaskOpts<LoopT>
     ): ApplyRebinder<RB, C,
-        ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TOutput> }>
+        ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, OutputsOf<TTemplate>> }>
     > {
         const template = this.contextualScope.templates?.[templateKey as string];
-        const outputs = (template && "output" in template ? template.output : {}) as TOutput;
+        const outputs = (template && "outputs" in template ? template.outputs : {}) as OutputsOf<TTemplate>;
 
         const templateCall = this.callTemplate(
             name as string,
@@ -198,11 +202,11 @@ export class TaskBuilder<
     >(
         name: string,
         templateKey: TKey,
-        params: CallerParams<TemplateSignaturesScope[TKey]["input"]>,
+        params: CallerParams<TemplateSignaturesScope[TKey]["inputs"]>,
         loopWith?: LoopWithUnion<LoopT>
     ): NamedTask<
-        TemplateSignaturesScope[TKey]["input"],
-        TemplateSignaturesScope[TKey]["output"] extends OutputParametersRecord ? TemplateSignaturesScope[TKey]["output"] : {}
+        TemplateSignaturesScope[TKey]["inputs"],
+        TemplateSignaturesScope[TKey]["outputs"] extends OutputParametersRecord ? TemplateSignaturesScope[TKey]["outputs"] : {}
     > {
         return {
             name,

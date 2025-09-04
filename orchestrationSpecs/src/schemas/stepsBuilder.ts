@@ -14,7 +14,7 @@ import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
 import {Workflow} from "@/schemas/workflowBuilder";
-import {NamedTask, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
+import {InputsOf, NamedTask, OutputsOf, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -142,13 +142,6 @@ export class StepsBuilder<
     public addInternalStep<
         Name extends string,
         TKey extends Extract<keyof ContextualScope["templates"], string>,
-        TTemplate extends ContextualScope["templates"][TKey],
-        TInput extends TTemplate extends { input: infer I }
-            ? I extends InputParametersRecord ? I : InputParametersRecord
-            : InputParametersRecord,
-        TOutput extends TTemplate extends { output: infer O }
-            ? O extends OutputParametersRecord ? O : {}
-            : {},
         LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
@@ -157,7 +150,7 @@ export class StepsBuilder<
             Name,
             StepsScope,
             (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
+                ParamsWithLiteralsOrExpressions<CallerParams<InputsOf<ContextualScope["templates"][TKey]>>>
         >,
         opts?: TaskOpts<LoopT>
     ): UniqueNameConstraintOutsideDeclaration<
@@ -166,7 +159,7 @@ export class StepsBuilder<
         StepsBuilder<
             ContextualScope,
             InputParamsScope,
-            ExtendScope<StepsScope, { [K in Name]: TasksWithOutputs<Name, TOutput> }>,
+            ExtendScope<StepsScope, { [K in Name]: TasksWithOutputs<Name, OutputsOf<ContextualScope["templates"][TKey]>> }>,
             OutputParamsScope
         >
     > {

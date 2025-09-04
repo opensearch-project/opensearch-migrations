@@ -5,7 +5,7 @@ import {
     LoopWithUnion, ParamsWithLiteralsOrExpressions, TasksOutputsScope,
     TasksScopeToTasksWithOutputs, TasksWithOutputs, WorkflowAndTemplatesScope,
 } from "@/schemas/workflowTypes";
-import {NamedTask, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
+import {InputsOf, NamedTask, OutputsOf, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
 import { TemplateBodyBuilder } from "@/schemas/templateBodyBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
@@ -90,12 +90,6 @@ export class DagBuilder<
         Name extends string,
         TKey extends Extract<keyof ContextualScope["templates"], string>,
         TTemplate extends ContextualScope["templates"][TKey],
-        TInput extends TTemplate extends { input: infer I }
-            ? I extends InputParametersRecord ? I : InputParametersRecord
-            : InputParametersRecord,
-        TOutput extends TTemplate extends { output: infer O }
-            ? O extends OutputParametersRecord ? O : {}
-            : {},
         LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
@@ -104,7 +98,7 @@ export class DagBuilder<
             Name,
             TaskScope,
             (tasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<TInput>>
+                ParamsWithLiteralsOrExpressions<CallerParams<InputsOf<TTemplate>>>
         >,
         opts?: DagTaskOpts<TaskScope, LoopT>
     ): UniqueNameConstraintOutsideDeclaration<
@@ -113,7 +107,7 @@ export class DagBuilder<
         DagBuilder<
             ContextualScope,
             InputParamsScope,
-            ExtendScope<TaskScope, { [K in Name]: TasksWithOutputs<Name, TOutput> }>,
+            ExtendScope<TaskScope, { [K in Name]: TasksWithOutputs<Name, OutputsOf<TTemplate>> }>,
             OutputParamsScope
         >
     > {

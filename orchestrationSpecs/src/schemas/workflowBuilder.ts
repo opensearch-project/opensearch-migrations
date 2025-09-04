@@ -11,7 +11,13 @@
  */
 
 import {InputParametersRecord} from "@/schemas/parameterSchemas";
-import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScope,} from "@/schemas/workflowTypes";
+import {
+    ExtendScope,
+    GenericScope,
+    TemplateSigEntry,
+    TemplateSignaturesScope,
+    TemplateSignaturesScopeTyped
+} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
@@ -25,9 +31,9 @@ type MetadataScopeBase = {
 };
 
 export class WorkflowBuilder<
-    MetadataScope extends MetadataScopeBase = MetadataScopeBase,
-    WorkflowInputsScope extends InputParametersRecord = InputParametersRecord,
-    TemplateSigScope extends TemplateSignaturesScope = TemplateSignaturesScope,
+    MetadataScope extends MetadataScopeBase,
+    WorkflowInputsScope extends InputParametersRecord,
+    TemplateSigScope extends TemplateSignaturesScopeTyped<any>,
     TemplateFullScope extends GenericScope = GenericScope
 > {
     constructor(
@@ -104,7 +110,6 @@ export class WorkflowBuilder<
         WorkflowBuilder<
             MetadataScope,
             WorkflowInputsScope,
-            // update the next line to use the macro
             ExtendScope<TemplateSigScope, { [K in Name]: (Name extends keyof TemplateSigScope ? Exclude<TemplateSigEntry<FullTemplate>, Name> : TemplateSigEntry<FullTemplate>) }>,
             ExtendScope<TemplateFullScope, { [K in Name]: FullTemplate }>
         >
@@ -124,8 +129,8 @@ export class WorkflowBuilder<
 
         const newSig = {
             [name as string]: {
-                input: fullTemplate.inputs,
-                output: (fullTemplate as any).outputs
+                inputs: fullTemplate.inputs,
+                outputs: (fullTemplate as any).outputs
             }
         } as { [K in Name]: TemplateSigEntry<FullTemplate> };
 
@@ -151,7 +156,7 @@ export class WorkflowBuilder<
 export type Workflow<
     MetadataScope extends MetadataScopeBase,
     WorkflowInputsScope extends InputParametersRecord,
-    TemplateScope extends TemplateSignaturesScope
+    TemplateScope extends Record<string, { inputs: any; outputs?: any }>
 > = {
     metadata: MetadataScopeBase,
     entrypoint?: string,
