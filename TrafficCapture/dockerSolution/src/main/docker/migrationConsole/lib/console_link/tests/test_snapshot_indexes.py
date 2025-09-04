@@ -10,10 +10,10 @@ import yaml
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.snapshot import (
-    SnapshotIndex, 
-    SnapshotIndexes, 
-    _get_index_stats, 
-    _get_shard_counts, 
+    SnapshotIndex,
+    SnapshotIndexes,
+    _get_index_stats,
+    _get_shard_counts,
     _build_index_list,
     get_cluster_indexes
 )

@@ -1,17 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SessionStatusProps } from "../session/types";
-import { StatusFieldDefinition } from "../session/statusUtils";
-import { useBackfillStatus } from "../../hooks/apiFetch";
-import StatusContainer from "../session/StatusContainer";
+import { SessionStatusProps } from "@/components/session/types";
+import { StatusFieldDefinition } from "@/components/session/statusUtils";
+import { useBackfillStatus } from "@/hooks/apiFetch";
+import StatusContainer from "@/components/session/StatusContainer";
 import {
   StatusDisplay,
   DateDisplay,
   DurationDisplay,
   ProgressDisplay,
   ETADisplay,
-} from "../session/statusComponents";
+} from "@/components/session/statusComponents";
 import { BACKFILL_SCENARIOS } from "./mockData/backfillScenarios";
 import { BackfillDebugControls } from "./debug/BackfillDebugControls";
 import { BackfillOverallStatus } from "@/generated/api";
@@ -25,9 +25,12 @@ export default function BackfillStatusView({
     error,
   } = useBackfillStatus(sessionName);
 
-  const [debugData, setDebugData] = useState<BackfillOverallStatus | null>(null);
+  const [debugData, setDebugData] = useState<BackfillOverallStatus | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(apiLoading);
-  const [backfillData, setBackfillData] = useState<BackfillOverallStatus | null>(null);
+  const [backfillData, setBackfillData] =
+    useState<BackfillOverallStatus | null>(null);
 
   useEffect(() => {
     if (!debugData) {

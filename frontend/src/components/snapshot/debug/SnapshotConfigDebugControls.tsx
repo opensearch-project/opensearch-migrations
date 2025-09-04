@@ -1,15 +1,20 @@
-import React from 'react';
+import React from "react";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import { Button, ButtonDropdown } from "@cloudscape-design/components";
-import DebugCommands from '@/components/debug/DebugCommands';
-import { SNAPSHOT_CONFIG_SCENARIOS } from '@/components/snapshot/mockData/snapshotConfigScenarios';
+import DebugCommands from "@/components/debug/DebugCommands";
+import { SNAPSHOT_CONFIG_SCENARIOS } from "@/components/snapshot/mockData/snapshotConfigScenarios";
 
 interface SnapshotConfigDebugControlsProps {
-  readonly onScenarioSelect: (scenario: keyof typeof SNAPSHOT_CONFIG_SCENARIOS) => void;
+  readonly onScenarioSelect: (
+    scenario: keyof typeof SNAPSHOT_CONFIG_SCENARIOS,
+  ) => void;
   readonly onReset: () => void;
 }
 
-export function SnapshotConfigDebugControls({ onScenarioSelect, onReset }: SnapshotConfigDebugControlsProps) {
+export function SnapshotConfigDebugControls({
+  onScenarioSelect,
+  onReset,
+}: SnapshotConfigDebugControlsProps) {
   return (
     <DebugCommands>
       <SpaceBetween size="s" direction="horizontal">
@@ -20,14 +25,14 @@ export function SnapshotConfigDebugControls({ onScenarioSelect, onReset }: Snaps
             { id: "emptyConfig", text: "Empty Config" },
           ]}
           onItemClick={({ detail }) =>
-            onScenarioSelect(detail.id as keyof typeof SNAPSHOT_CONFIG_SCENARIOS)
+            onScenarioSelect(
+              detail.id as keyof typeof SNAPSHOT_CONFIG_SCENARIOS,
+            )
           }
         >
           Simulate Scenario
         </ButtonDropdown>
-        <Button onClick={onReset}>
-          Reset to API Data
-        </Button>
+        <Button onClick={onReset}>Reset to API Data</Button>
       </SpaceBetween>
     </DebugCommands>
   );

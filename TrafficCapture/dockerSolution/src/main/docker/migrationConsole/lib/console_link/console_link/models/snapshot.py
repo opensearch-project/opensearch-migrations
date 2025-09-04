@@ -361,8 +361,8 @@ class SnapshotStatus(BaseModel):
         progress_metrics = cls._extract_progress_metrics(snapshot_info)
         
         percentage, eta_ms = cls._calculate_progress_metrics(
-            progress_metrics["processed_units"], 
-            progress_metrics["total_units"], 
+            progress_metrics["processed_units"],
+            progress_metrics["total_units"],
             progress_metrics["elapsed_ms"],
             progress_metrics["state"]
         )

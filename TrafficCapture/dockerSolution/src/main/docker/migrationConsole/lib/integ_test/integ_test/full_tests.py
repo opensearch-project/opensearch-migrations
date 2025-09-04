@@ -116,7 +116,7 @@ class E2ETests(unittest.TestCase):
         backfill.create()
         snapshot: Snapshot = pytest.console_env.snapshot
         snapshot_result = snapshot.create(wait=True)
-        assert "sucess" in snapshot_result
+        assert "creation initiated successfully" in snapshot_result
 
         # Perform metadata migration with a transform to index name
         index_name_transform = ops.get_index_name_transformation(existing_index_name=index_name,

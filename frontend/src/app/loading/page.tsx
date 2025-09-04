@@ -32,11 +32,8 @@ export default function LoadingPage() {
       return ready;
     },
   );
-  const isReady =
-    debugIsReady == null
-      ? (getSiteReadiness() ?? data?.status === "ok")
-      : debugIsReady;
-  const errorMessage = debugError == null ? (error ?? null) : debugError;
+  const isReady = debugIsReady ?? getSiteReadiness() ?? data?.status === "ok";
+  const errorMessage = debugError ?? error ?? null;
 
   const startMigration = () => router.push("/migration");
 
