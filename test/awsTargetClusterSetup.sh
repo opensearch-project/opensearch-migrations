@@ -15,6 +15,11 @@ CLUSTER_VERSION=""
 STAGE="rfs-metrics"
 REGION="us-west-2"
 CLEANUP=false
+TARGET_DATA_NODE_TYPE="r6g.4xlarge.search"
+TARGET_DATA_NODE_COUNT="10"
+TARGET_MANAGER_NODE_TYPE="m6g.xlarge.search"
+TARGET_MANAGER_NODE_COUNT="4"
+TARGET_EBS_ENABLED="true"
 
 # Create required service-linked roles
 create_service_linked_roles() {
@@ -60,24 +65,53 @@ generate_target_context() {
     echo "Domain Name: ${domain_name}"
     echo "Stage: ${STAGE}"
     echo "Region: ${REGION}"
+    echo "Target Configuration:"
+    echo "  - Data Nodes: ${TARGET_DATA_NODE_COUNT} x ${TARGET_DATA_NODE_TYPE}"
+    echo "  - Manager Nodes: ${TARGET_MANAGER_NODE_COUNT} x ${TARGET_MANAGER_NODE_TYPE}"
+    echo "  - EBS Enabled: ${TARGET_EBS_ENABLED}"
     
-    # Create a basic target context file for AWS Solutions CDK
     mkdir -p "$TMP_DIR_PATH"
+    
+    # Write the context in the schema the sample CDK expects using parameters
     cat > "$TMP_DIR_PATH/targetContext.json" << EOF
 {
-  "target-${cluster_id}": {
-    "stage": "${STAGE}",
-    "region": "${REGION}",
-    "clusterId": "${cluster_id}",
-    "domainName": "${domain_name}",
-    "versionFamily": "${VERSION_FAMILY}",
-    "osVersion": "${OS_VERSION}",
-    "clusterVersion": "${CDK_CLUSTER_VERSION}"
-  }
+  "stage": "${STAGE}",
+  "region": "${REGION}",
+  "vpcAZCount": 2,
+  "clusters": [
+    {
+      "clusterId": "${cluster_id}",
+      "clusterType": "opensearch-managed-service",
+      "clusterVersion": "${OS_VERSION}",
+      "domainName": "${domain_name}",
+      "dataNodeType": "${TARGET_DATA_NODE_TYPE}",
+      "dataNodeCount": ${TARGET_DATA_NODE_COUNT},
+      "dedicatedManagerNodeType": "${TARGET_MANAGER_NODE_TYPE}",
+      "dedicatedManagerNodeCount": ${TARGET_MANAGER_NODE_COUNT},
+      "ebsEnabled": ${TARGET_EBS_ENABLED},
+      "ebsVolumeSize": 100,
+      "ebsVolumeType": "gp3",
+      "useUnsignedBasicAuth": false,
+      "enforceHTTPS": true,
+      "tlsSecurityPolicy": "TLS_1_2",
+      "encryptionAtRestEnabled": true,
+      "nodeToNodeEncryptionEnabled": true,
+      "openAccessPolicyEnabled": true
+    }
+  ]
 }
 EOF
     
     echo "Target context file created successfully"
+    echo "Context includes:"
+    echo "  - Stage: ${STAGE}"
+    echo "  - Cluster ID: ${cluster_id}"
+    echo "  - Cluster Type: opensearch-managed-service"
+    echo "  - Data Nodes: ${TARGET_DATA_NODE_COUNT} x ${TARGET_DATA_NODE_TYPE}"
+    echo "  - Manager Nodes: ${TARGET_MANAGER_NODE_COUNT} x ${TARGET_MANAGER_NODE_TYPE}"
+    echo "  - EBS Enabled: ${TARGET_EBS_ENABLED}"
+    echo "  - OpenSearch Version: ${OS_VERSION}"
+    echo "  - VPC AZ Count: 2"
 }
 
 # Clone AWS Solutions CDK repository
@@ -161,10 +195,16 @@ extract_cluster_info() {
     echo "  OpenSearch Stack: $opensearch_stack_name"
     echo "  Network Stack: $network_stack_name"
     
+    # Debug: List all available exports to understand the naming pattern
+    echo "DEBUG: Listing all CloudFormation exports to identify correct naming pattern..."
+    aws cloudformation list-exports --region "$REGION" --query "Exports[].Name" --output table 2>/dev/null || echo "Could not list exports"
+    
     # Get cluster endpoint using CloudFormation exports (based on your actual export names)
     # From your previous output: ClusterEndpointExportrfsmetricstargetos2x
     local stage_no_hyphens=$(echo "$STAGE" | tr -d '-')
     local cluster_id_no_hyphens=$(echo "$cluster_id" | tr -d '-')
+    
+    echo "DEBUG: Looking for export with pattern: ClusterEndpointExport${stage_no_hyphens}${cluster_id_no_hyphens}"
     
     local cluster_endpoint=$(aws cloudformation list-exports \
         --region "$REGION" \
@@ -172,12 +212,47 @@ extract_cluster_info() {
         --output text 2>/dev/null)
     
     if [ -z "$cluster_endpoint" ] || [ "$cluster_endpoint" = "None" ]; then
+        echo "Warning: Could not retrieve cluster endpoint from CloudFormation export, trying alternative patterns..."
+        
+        # Try different export name patterns that might be used by AWS Solutions CDK
+        local alt_patterns=(
+            "ClusterEndpointExport${STAGE}${cluster_id}"
+            "ClusterEndpointExport${stage_no_hyphens}targetos2x"
+            "ClusterEndpointExport${STAGE}targetos2x"
+            "DomainEndpointExport${stage_no_hyphens}${cluster_id_no_hyphens}"
+            "DomainEndpointExport${STAGE}${cluster_id}"
+        )
+        
+        for pattern in "${alt_patterns[@]}"; do
+            echo "DEBUG: Trying export pattern: $pattern"
+            cluster_endpoint=$(aws cloudformation list-exports \
+                --region "$REGION" \
+                --query "Exports[?Name=='$pattern'].Value" \
+                --output text 2>/dev/null)
+            
+            if [ -n "$cluster_endpoint" ] && [ "$cluster_endpoint" != "None" ]; then
+                echo "SUCCESS: Found cluster endpoint using pattern: $pattern"
+                break
+            fi
+        done
+    fi
+    
+    if [ -z "$cluster_endpoint" ] || [ "$cluster_endpoint" = "None" ]; then
         echo "Warning: Could not retrieve cluster endpoint from CloudFormation export, trying stack outputs..."
-        # Fallback to stack outputs
+        
+        # Debug: List stack outputs to understand what's available
+        echo "DEBUG: Listing stack outputs for $opensearch_stack_name..."
+        aws cloudformation describe-stacks \
+            --stack-name "$opensearch_stack_name" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" \
+            --output table 2>/dev/null || echo "Could not describe stack outputs"
+        
+        # Fallback to stack outputs with broader search patterns
         cluster_endpoint=$(aws cloudformation describe-stacks \
             --stack-name "$opensearch_stack_name" \
             --region "$REGION" \
-            --query "Stacks[0].Outputs[?contains(OutputKey, 'ClusterEndpoint') || contains(OutputKey, 'domainEndpoint')].OutputValue" \
+            --query "Stacks[0].Outputs[?contains(OutputKey, 'ClusterEndpoint') || contains(OutputKey, 'domainEndpoint') || contains(OutputKey, 'DomainEndpoint') || contains(OutputKey, 'Endpoint')].OutputValue" \
             --output text 2>/dev/null)
     fi
     
@@ -185,6 +260,7 @@ extract_cluster_info() {
         echo "Error: Could not retrieve cluster endpoint from CloudFormation"
         echo "Tried export: ClusterEndpointExport${stage_no_hyphens}${cluster_id_no_hyphens}"
         echo "Tried stack: $opensearch_stack_name"
+        echo "Please check the CloudFormation console for available exports and outputs"
         exit 1
     fi
     
@@ -331,14 +407,20 @@ usage() {
     echo "  ./awsTargetClusterSetup.sh --cluster-version OS_2.19 --stage rfs-metrics --region us-west-2"
     echo ""
     echo "Options:"
-    echo "  --cluster-version    Required. Cluster version (ES_6.8, ES_7.10, OS_1.3, OS_2.19)"
-    echo "  --stage             Stage name for deployment (default: rfs-metrics)"
-    echo "  --region            AWS region (default: us-west-2)"
-    echo "  --cleanup           Cleanup deployed resources and exit"
-    echo "  -h, --help          Show this help message"
+    echo "  --cluster-version           Required. Cluster version (ES_6.8, ES_7.10, OS_1.3, OS_2.19)"
+    echo "  --stage                     Stage name for deployment (default: rfs-metrics)"
+    echo "  --region                    AWS region (default: us-west-2)"
+    echo "  --target-data-node-type     Data node instance type (default: r6g.4xlarge.search)"
+    echo "  --target-data-node-count    Number of data nodes (default: 10)"
+    echo "  --target-manager-node-type  Manager node instance type (default: m6g.xlarge.search)"
+    echo "  --target-manager-node-count Number of manager nodes (default: 4)"
+    echo "  --target-ebs-enabled        Enable EBS storage (default: true)"
+    echo "  --cleanup                   Cleanup deployed resources and exit"
+    echo "  -h, --help                  Show this help message"
     echo ""
     echo "Examples:"
     echo "  ./awsTargetClusterSetup.sh --cluster-version OS_2.19 --stage rfs-metrics --region us-west-2"
+    echo "  ./awsTargetClusterSetup.sh --cluster-version OS_2.19 --target-data-node-count 20 --target-data-node-type r6g.8xlarge.search"
     echo "  ./awsTargetClusterSetup.sh --cleanup --cluster-version OS_2.19 --stage rfs-metrics"
     echo ""
     exit 1
@@ -357,6 +439,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --region)
             REGION="$2"
+            shift 2
+            ;;
+        --target-data-node-type)
+            TARGET_DATA_NODE_TYPE="$2"
+            shift 2
+            ;;
+        --target-data-node-count)
+            TARGET_DATA_NODE_COUNT="$2"
+            shift 2
+            ;;
+        --target-manager-node-type)
+            TARGET_MANAGER_NODE_TYPE="$2"
+            shift 2
+            ;;
+        --target-manager-node-count)
+            TARGET_MANAGER_NODE_COUNT="$2"
+            shift 2
+            ;;
+        --target-ebs-enabled)
+            TARGET_EBS_ENABLED="$2"
             shift 2
             ;;
         --cleanup)
@@ -379,6 +481,33 @@ if [ -z "$CLUSTER_VERSION" ]; then
     usage
 fi
 
+# Validate target cluster configuration parameters
+if ! [[ "$TARGET_DATA_NODE_COUNT" =~ ^[0-9]+$ ]] || [ "$TARGET_DATA_NODE_COUNT" -lt 1 ]; then
+    echo "Error: --target-data-node-count must be a positive integer, got: $TARGET_DATA_NODE_COUNT"
+    usage
+fi
+
+if ! [[ "$TARGET_MANAGER_NODE_COUNT" =~ ^[0-9]+$ ]] || [ "$TARGET_MANAGER_NODE_COUNT" -lt 0 ]; then
+    echo "Error: --target-manager-node-count must be a non-negative integer, got: $TARGET_MANAGER_NODE_COUNT"
+    usage
+fi
+
+if [[ "$TARGET_EBS_ENABLED" != "true" && "$TARGET_EBS_ENABLED" != "false" ]]; then
+    echo "Error: --target-ebs-enabled must be 'true' or 'false', got: $TARGET_EBS_ENABLED"
+    usage
+fi
+
+# Validate instance types (basic format check)
+if ! [[ "$TARGET_DATA_NODE_TYPE" =~ ^[a-z0-9]+\.[a-z0-9]+\.search$ ]]; then
+    echo "Error: --target-data-node-type must be a valid OpenSearch instance type (e.g., r6g.4xlarge.search), got: $TARGET_DATA_NODE_TYPE"
+    usage
+fi
+
+if ! [[ "$TARGET_MANAGER_NODE_TYPE" =~ ^[a-z0-9]+\.[a-z0-9]+\.search$ ]]; then
+    echo "Error: --target-manager-node-type must be a valid OpenSearch instance type (e.g., m6g.xlarge.search), got: $TARGET_MANAGER_NODE_TYPE"
+    usage
+fi
+
 # Set version family variables for OS_2.19
 VERSION_FAMILY="os2x"
 OS_VERSION="2.19"
@@ -398,6 +527,10 @@ echo "Starting AWS Target Cluster Setup..."
 echo "Cluster Version: $CLUSTER_VERSION"
 echo "Stage: $STAGE"
 echo "Region: $REGION"
+echo "Target Cluster Configuration:"
+echo "  - Data Nodes: $TARGET_DATA_NODE_COUNT x $TARGET_DATA_NODE_TYPE"
+echo "  - Manager Nodes: $TARGET_MANAGER_NODE_COUNT x $TARGET_MANAGER_NODE_TYPE"
+echo "  - EBS Enabled: $TARGET_EBS_ENABLED"
 
 # Execute deployment pipeline
 create_service_linked_roles

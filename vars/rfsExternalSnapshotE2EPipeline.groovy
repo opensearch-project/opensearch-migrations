@@ -68,11 +68,16 @@ def call(Map config = [:]) {
                     echo "Region: ${params.region}"
                     
                     dir('test') {
-                        // Use the focused target cluster setup script
+                        // Use the target cluster setup script with Jenkins parameters
                         def command = "./awsTargetClusterSetup.sh " +
                             "--cluster-version ${params.targetVersion} " +
                             "--stage ${params.stage} " +
-                            "--region ${params.region}"
+                            "--region ${params.region} " +
+                            "--target-data-node-type ${params.targetDataNodeType} " +
+                            "--target-data-node-count ${params.targetDataNodeCount} " +
+                            "--target-manager-node-type ${params.targetManagerNodeType} " +
+                            "--target-manager-node-count ${params.targetManagerNodeCount} " +
+                            "--target-ebs-enabled ${params.targetEbsEnabled}"
                         
                         def clusterOutput = ""
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
