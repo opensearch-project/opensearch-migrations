@@ -637,7 +637,8 @@ def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str, wait_
         logger.debug(f"Error deleting snapshot '{snapshot_name}' from repository '{repository}': {e}")
         # For HTTP errors, check if it's a 404 (snapshot not found), which means it's already deleted
         if isinstance(e, HTTPError) and e.response.status_code == 404:
-            logger.info(f"Snapshot '{snapshot_name}' not found in repository '{repository}', considering it already deleted.")
+            logger.info(f"Snapshot '{snapshot_name}' not found in repository '{repository}', "
+                        "considering it already deleted.")
             return f"Deleted snapshot: {snapshot_name} from repository '{repository}'"
         
         ex = FailedToDeleteSnapshot()
