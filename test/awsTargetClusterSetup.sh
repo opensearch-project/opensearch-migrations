@@ -81,8 +81,8 @@ generate_target_context() {
   "clusters": [
     {
       "clusterId": "${cluster_id}",
-      "clusterType": "opensearch-managed-service",
-      "clusterVersion": "${OS_VERSION}",
+      "clusterType": "OPENSEARCH_MANAGED_SERVICE",
+      "clusterVersion": "${CDK_CLUSTER_VERSION}",
       "domainName": "${domain_name}",
       "dataNodeType": "${TARGET_DATA_NODE_TYPE}",
       "dataNodeCount": ${TARGET_DATA_NODE_COUNT},
@@ -90,7 +90,7 @@ generate_target_context() {
       "dedicatedManagerNodeCount": ${TARGET_MANAGER_NODE_COUNT},
       "ebsEnabled": ${TARGET_EBS_ENABLED},
       "ebsVolumeSize": 100,
-      "ebsVolumeType": "gp3",
+      "ebsVolumeType": "GP3",
       "useUnsignedBasicAuth": false,
       "enforceHTTPS": true,
       "tlsSecurityPolicy": "TLS_1_2",
@@ -106,10 +106,11 @@ EOF
     echo "Context includes:"
     echo "  - Stage: ${STAGE}"
     echo "  - Cluster ID: ${cluster_id}"
-    echo "  - Cluster Type: opensearch-managed-service"
+    echo "  - Cluster Type: OPENSEARCH_MANAGED_SERVICE"
     echo "  - Data Nodes: ${TARGET_DATA_NODE_COUNT} x ${TARGET_DATA_NODE_TYPE}"
     echo "  - Manager Nodes: ${TARGET_MANAGER_NODE_COUNT} x ${TARGET_MANAGER_NODE_TYPE}"
     echo "  - EBS Enabled: ${TARGET_EBS_ENABLED}"
+    echo "  - EBS Volume Type: GP3"
     echo "  - OpenSearch Version: ${OS_VERSION}"
     echo "  - VPC AZ Count: 2"
 }
@@ -199,28 +200,23 @@ extract_cluster_info() {
     echo "DEBUG: Listing all CloudFormation exports to identify correct naming pattern..."
     aws cloudformation list-exports --region "$REGION" --query "Exports[].Name" --output table 2>/dev/null || echo "Could not list exports"
     
-    # Get cluster endpoint using CloudFormation exports (based on your actual export names)
-    # From your previous output: ClusterEndpointExportrfsmetricstargetos2x
-    local stage_no_hyphens=$(echo "$STAGE" | tr -d '-')
-    local cluster_id_no_hyphens=$(echo "$cluster_id" | tr -d '-')
-    
-    echo "DEBUG: Looking for export with pattern: ClusterEndpointExport${stage_no_hyphens}${cluster_id_no_hyphens}"
+    # Get cluster endpoint using CloudFormation exports (based on AWS Solutions CDK actual export pattern)
+    # The actual pattern from generateClusterExports is: ClusterEndpoint-${stage}-${clusterId}
+    echo "DEBUG: Looking for export with pattern: ClusterEndpoint-${STAGE}-${cluster_id}"
     
     local cluster_endpoint=$(aws cloudformation list-exports \
         --region "$REGION" \
-        --query "Exports[?Name=='ClusterEndpointExport${stage_no_hyphens}${cluster_id_no_hyphens}'].Value" \
+        --query "Exports[?Name=='ClusterEndpoint-${STAGE}-${cluster_id}'].Value" \
         --output text 2>/dev/null)
     
     if [ -z "$cluster_endpoint" ] || [ "$cluster_endpoint" = "None" ]; then
         echo "Warning: Could not retrieve cluster endpoint from CloudFormation export, trying alternative patterns..."
         
-        # Try different export name patterns that might be used by AWS Solutions CDK
         local alt_patterns=(
-            "ClusterEndpointExport${STAGE}${cluster_id}"
-            "ClusterEndpointExport${stage_no_hyphens}targetos2x"
-            "ClusterEndpointExport${STAGE}targetos2x"
-            "DomainEndpointExport${stage_no_hyphens}${cluster_id_no_hyphens}"
-            "DomainEndpointExport${STAGE}${cluster_id}"
+            "ClusterEndpoint-${STAGE}-${cluster_id}"
+            "ClusterEndpointExport-${STAGE}-${cluster_id}"
+            "ClusterEndpoint${STAGE}${cluster_id}"
+            "DomainEndpoint-${STAGE}-${cluster_id}"
         )
         
         for pattern in "${alt_patterns[@]}"; do
@@ -264,29 +260,65 @@ extract_cluster_info() {
         exit 1
     fi
     
-    # Get VPC ID using CloudFormation exports (based on your actual export names)
-    # From your previous output: VpcIdExportrfsmetrics
-    local vpc_id=$(aws cloudformation list-exports \
+    # Get VPC ID using CloudFormation stack outputs
+    echo "DEBUG: Looking for VPC ID from network stack outputs..."
+    local vpc_id=$(aws cloudformation describe-stacks \
+        --stack-name "$network_stack_name" \
         --region "$REGION" \
-        --query "Exports[?Name=='VpcIdExport${stage_no_hyphens}'].Value" \
+        --query "Stacks[0].Outputs[?contains(OutputKey, 'VpcId')].OutputValue" \
         --output text 2>/dev/null)
     
     if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ]; then
-        echo "Warning: Could not retrieve VPC ID from CloudFormation export, trying stack outputs..."
-        # Fallback to stack outputs
+        echo "Warning: Could not retrieve VPC ID using VpcId key, trying alternative patterns..."
+        # Try alternative patterns for VPC ID
         vpc_id=$(aws cloudformation describe-stacks \
             --stack-name "$network_stack_name" \
             --region "$REGION" \
-            --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc-')].OutputValue" \
+            --query "Stacks[0].Outputs[?contains(OutputKey, 'Vpc')].OutputValue" \
             --output text 2>/dev/null)
     fi
     
     if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ]; then
+        echo "Warning: Could not retrieve VPC ID from OutputKey patterns, trying OutputValue search..."
+        # Last resort: search by output value pattern and extract only VPC ID
+        local raw_output=$(aws cloudformation describe-stacks \
+            --stack-name "$network_stack_name" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc-')].OutputValue" \
+            --output text 2>/dev/null)
+        
+        # Extract only the VPC ID from potentially mixed output
+        vpc_id=$(echo "$raw_output" | grep -o 'vpc-[a-z0-9]*' | head -1)
+    fi
+    
+    # Validate VPC ID format and ensure it's a single VPC ID
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ]; then
         echo "Error: Could not retrieve VPC ID from CloudFormation"
-        echo "Tried export: VpcIdExport${stage_no_hyphens}"
         echo "Tried stack: $network_stack_name"
+        echo "DEBUG: Listing all stack outputs for debugging..."
+        aws cloudformation describe-stacks \
+            --stack-name "$network_stack_name" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" \
+            --output table 2>/dev/null || echo "Could not describe network stack outputs"
         exit 1
     fi
+    
+    # Ensure we have a valid VPC ID format (vpc-xxxxxxxxx)
+    if ! [[ "$vpc_id" =~ ^vpc-[a-z0-9]+$ ]]; then
+        echo "Warning: VPC ID format validation failed. Got: '$vpc_id'"
+        # Try to extract a valid VPC ID from the output
+        local clean_vpc_id=$(echo "$vpc_id" | grep -o 'vpc-[a-z0-9]*' | head -1)
+        if [ -n "$clean_vpc_id" ]; then
+            echo "Extracted valid VPC ID: $clean_vpc_id"
+            vpc_id="$clean_vpc_id"
+        else
+            echo "Error: Could not extract a valid VPC ID from: '$vpc_id'"
+            exit 1
+        fi
+    fi
+    
+    echo "Successfully extracted VPC ID: $vpc_id"
     
     # Get OpenSearch domain security group ID
     local opensearch_sg_id=$(aws cloudformation list-exports \
