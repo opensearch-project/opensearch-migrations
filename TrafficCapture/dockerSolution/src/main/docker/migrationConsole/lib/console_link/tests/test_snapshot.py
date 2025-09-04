@@ -1,5 +1,7 @@
 import unittest.mock as mock
 import pytest
+from requests.models import Response, HTTPError
+import logging
 import subprocess
 
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
@@ -72,6 +74,69 @@ def fs_snapshot(mock_cluster):
         }
     }
     return FileSystemSnapshot(config, mock_cluster)
+
+
+def snapshot_404_response():
+    mock_response = mock.Mock(spec=Response)
+    mock_response.status_code = 404
+    mock_response.json.return_value = {
+        "error": {
+            "type": "snapshot_missing_exception",
+            "reason": "snapshot does not exist"
+        },
+        "status": 404
+    }
+    return mock_response
+
+
+def snapshot_repo_404_error():
+    mock_response = mock.Mock(spec=Response)
+    mock_response.status_code = 404
+    mock_response.json.return_value = {
+        "error": {
+            "type": "repository_missing_exception",
+            "reason": "snapshot repository does not exist"
+        },
+        "status": 404
+    }
+    error = HTTPError()
+    error.response = mock_response
+    return error
+
+
+def all_snapshots_response_single():
+    mock_response = mock.Mock(spec=Response)
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "snapshots": [
+            {
+                "snapshot": "test_snapshot"
+            }
+        ]
+    }
+    return mock_response
+
+
+def all_snapshots_response_multiple():
+    mock_response = mock.Mock(spec=Response)
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "snapshots": [
+            {
+                "snapshot": "test_snapshot1"
+            },
+            {
+                "snapshot": "test_snapshot2"
+            }
+        ]
+    }
+    return mock_response
+
+
+def snapshot_delete_response():
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    return mock_response
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
@@ -455,23 +520,66 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
 def test_snapshot_delete(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
-    snapshot.delete()
-    source_cluster.call_api.assert_called_once()
-    source_cluster.call_api.assert_called_with(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}",
-                                               HttpMethod.DELETE)
+    source_cluster.call_api.side_effect = [
+        snapshot_delete_response(),  # DELETE snapshot call
+        snapshot_404_response()  # GET check if snapshot is deleted
+    ]
+
+    result = snapshot.delete()
+    assert "successfully deleted" in result
+    source_cluster.call_api.assert_called()
+    source_cluster.call_api.assert_has_calls([
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}", HttpMethod.DELETE),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}", raise_error=False)
+    ])
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
-def test_snapshot_delete_all_snapshots(request, snapshot_fixture):
+def test_snapshot_delete_all_snapshots_single_snapshot(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
-    source_cluster.call_api.return_value.json = lambda: {"snapshots": [{"snapshot": "test_snapshot"}]}
-    source_cluster.call_api.return_value.text = str({"snapshots": [{"snapshot": "test_snapshot"}]})
-    snapshot.delete_all_snapshots()
+    source_cluster.call_api.side_effect = [
+        all_snapshots_response_single(),  # GET all snapshots
+        snapshot_delete_response(),  # DELETE snapshot call
+        snapshot_404_response()  # GET check if snapshot is deleted
+    ]
+
+    result = snapshot.delete_all_snapshots()
+    assert "All snapshots cleared" in result
     source_cluster.call_api.assert_called()
     source_cluster.call_api.assert_has_calls([
         mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True),
-        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot', HttpMethod.DELETE),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot", HttpMethod.DELETE),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot", raise_error=False)
+    ])
+
+
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_snapshot_delete_all_snapshots_multiple_snapshots(request, snapshot_fixture, caplog):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
+    source_cluster.call_api.side_effect = [
+        all_snapshots_response_multiple(),  # GET all snapshots
+        snapshot_delete_response(),  # DELETE snapshot call
+        snapshot_404_response(),  # GET check if snapshot is deleted
+        snapshot_delete_response(),  # DELETE snapshot call
+        snapshot_404_response(),  # GET check if snapshot is deleted
+    ]
+
+    with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
+        snapshot.delete_all_snapshots()
+        assert (f"Initiated deletion of snapshot: test_snapshot1 from "
+                f"repository '{snapshot.snapshot_repo_name}'.") in caplog.text
+        assert (f"Initiated deletion of snapshot: test_snapshot2 from "
+                f"repository '{snapshot.snapshot_repo_name}'.") in caplog.text
+
+    source_cluster.call_api.assert_called()
+    source_cluster.call_api.assert_has_calls([
+        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot1", HttpMethod.DELETE),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot1", raise_error=False),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot2", HttpMethod.DELETE),
+        mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/test_snapshot2", raise_error=False),
     ])
 
 
@@ -512,3 +620,20 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     assert "creation initiated successfully" in result
     mock.assert_called_once()
     assert all([arg in mock.call_args.args[0] for arg in extra_args])
+
+
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_delete_all_snapshots_repository_missing(request, snapshot_fixture, caplog):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    source_cluster = snapshot.source_cluster
+    source_cluster.call_api.side_effect = [
+        snapshot_repo_404_error(),  # GET all snapshots
+    ]
+
+    with caplog.at_level(logging.INFO, logger='console_link.models.snapshot'):
+        snapshot.delete_all_snapshots()
+        assert f"Repository '{snapshot.snapshot_repo_name}' is missing. Skipping snapshot clearing." in caplog.text
+    source_cluster.call_api.assert_called_once()
+    source_cluster.call_api.assert_has_calls([
+        mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True)
+    ])

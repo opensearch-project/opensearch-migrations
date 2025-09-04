@@ -1,7 +1,7 @@
 [versions]
 aws-crt = "0.38.11"
 aws-msk-iam-auth = "2.3.2"
-aws-sdk = "2.32.29"
+aws-sdk = "2.33.0"
 bouncycastle = "1.81"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -13,7 +13,8 @@ groovy = "3.0.25"
 guava = "33.4.8-jre"
 hamcrest = "3.0"
 httpclient5 = "5.5"
-jackson = "2.19.2"
+jackson = "2.20.0"
+jackson-annotations = "2.20"
 jcommander = "2.0"
 jenkins-pipeline-unit = "1.23"
 jmespath-core = "0.6.0"
@@ -75,7 +76,7 @@ hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 
 httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpclient5" }
 
-jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
+jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson-annotations" }
 jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-dataformat-smile = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-smile", version.ref = "jackson" }

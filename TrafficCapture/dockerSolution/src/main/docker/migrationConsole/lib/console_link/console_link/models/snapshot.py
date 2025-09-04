@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import time
 from abc import ABC, abstractmethod
 from cerberus import Validator
 from datetime import datetime
@@ -625,22 +626,42 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
 
 
-def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str) -> str:
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str, wait_for_completion: bool = True,
+                    timeout_seconds: int = 120) -> str:
     try:
         path = f"/_snapshot/{repository}/{snapshot_name}"
         response = cluster.call_api(path, HttpMethod.DELETE)
         logging.debug(f"Raw delete snapshot status response: {response.text}")
-        logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
-        return f"Deleted snapshot: {snapshot_name} from repository '{repository}'"
+        logger.info(f"Initiated deletion of snapshot: {snapshot_name} from repository '{repository}'.")
     except Exception as e:
-        logger.error(f"Error deleting snapshot '{snapshot_name}' from repository '{repository}': {e}")
+        logger.debug(f"Error deleting snapshot '{snapshot_name}' from repository '{repository}': {e}")
+        # For HTTP errors, check if it's a 404 (snapshot not found), which means it's already deleted
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            logger.info(f"Snapshot '{snapshot_name}' not found in repository '{repository}', considering it already deleted.")
+            return f"Deleted snapshot: {snapshot_name} from repository '{repository}'"
+        
         ex = FailedToDeleteSnapshot()
-        ex.add_note(f"Cause {str(e)}")
+        ex.add_note(f"Unable to delete snapshot {snapshot_name} from repo {repository}, cause {str(e)}")
         raise ex
+
+    if wait_for_completion:
+        logger.info(f"Waiting up to {timeout_seconds} seconds for deletion to complete...")
+        end_time = time.time() + timeout_seconds
+        while time.time() < end_time:
+            try:
+                check_response = cluster.call_api(path, raise_error=False)
+                if check_response.status_code == 404:
+                    return f"Snapshot {snapshot_name} successfully deleted."
+                logger.debug(f"Waiting for snapshot {snapshot_name} to be deleted...")
+                time.sleep(2)
+            except Exception as e:
+                logger.debug(f"Error checking snapshot deletion status: {e}")
+                time.sleep(2)
+        raise TimeoutError(f"Snapshot '{snapshot_name}' in repository '{repository}' was not deleted "
+                           f"after {timeout_seconds} seconds.")
 
 
 def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
-    logger.info(f"Clearing snapshots from repository '{repository}'")
     """
     Clears all snapshots from the specified repository.
 
@@ -648,6 +669,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
     :param repository: Name of the snapshot repository to clear snapshots from.
     :raises Exception: For general errors during snapshot clearing, except when the repository is missing.
     """
+    logger.info(f"Clearing snapshots from repository '{repository}'")
     try:
         # List all snapshots in the repository
         snapshots_path = f"/_snapshot/{repository}/_all"
@@ -660,10 +682,16 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
             logger.info(f"No snapshots found in repository '{repository}'.")
             return f"No snapshots found in repository '{repository}'."
 
-        # Delete each snapshot
+        # Delete each snapshot - continue even if individual deletions fail
         for snapshot in snapshots:
-            snapshot_name = snapshot["snapshot"]
-            delete_snapshot(cluster, snapshot_name, repository)
+            try:
+                snapshot_name = snapshot["snapshot"]
+                delete_snapshot(cluster, snapshot_name, repository)
+            except FailedToDeleteSnapshot:
+                # Ignore expected exceptions, the inner message will log
+                pass
+            except Exception as e:
+                logger.warning(f"Error deleting snapshot '{snapshot_name}': {str(e)}")
 
     except Exception as e:
         # Handle 404 errors specifically for missing repository
@@ -671,8 +699,8 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
-                return f"Repository '{repository}' does not exist"
-        # Return error result instead of raising
+                return f"Repository '{repository}' does not exist, all snapshots are deleted."
+
         logger.debug(f"Error clearing snapshots from repository '{repository}': {e}")
         ex = FailedToDeleteSnapshot()
         ex.add_note(f"Cause {str(e)}")
