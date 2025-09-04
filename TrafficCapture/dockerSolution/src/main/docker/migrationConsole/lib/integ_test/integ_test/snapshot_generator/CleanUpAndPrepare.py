@@ -10,7 +10,6 @@ from integ_test.snapshot_generator.MultiplicationTestUtils import (
     get_environment_values
 )
 from integ_test.snapshot_generator.MultiplicationTestDataIngestion import (
-    SAMPLE_DOCUMENT,
     create_test_index,
     ingest_test_documents
 )
@@ -53,7 +52,7 @@ class CleanUpAndPrepare:
         
         logger.info("Step 3: Ingesting test documents")
         try:
-            ingest_test_documents(index_name, total_docs, SAMPLE_DOCUMENT, source_cluster)
+            ingest_test_documents(index_name, total_docs, None, source_cluster)
         except Exception as e:
             logger.error(f"Data ingestion failed: {e}")
             return 1

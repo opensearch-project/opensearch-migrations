@@ -80,7 +80,7 @@ class MultiplyDocuments:
             logger.info("Successfully scaled down backfill workers")
             
             # Step 3b: Completely stop migration and clean up state
-            logger.info("Completely stopping backfill using console command")
+            logger.info("Completely stopping migration and cleaning up working state")
             try:
                 run_console_command(["console", "backfill", "stop"])
                 logger.info("Successfully stopped backfill migration completely")

@@ -4,14 +4,95 @@ Data ingestion utilities for multiplication test suite.
 
 import json
 import logging
+from datetime import datetime
 from console_link.models.cluster import HttpMethod
 from integ_test.default_operations import DefaultOperationsLibrary as ops
 from integ_test.snapshot_generator.MultiplicationTestUtils import read_migration_config
 
 logger = logging.getLogger(__name__)
 
-# Sample document used for testing
-SAMPLE_DOCUMENT = {"title": "Large Snapshot Migration Test Document"}
+
+def generate_document(doc_id, batch_num, doc_in_batch):
+    """Generate document structure with realistic fields for all cluster versions."""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "value": f"test_value_{doc_in_batch}",
+        "doc_number": doc_in_batch,
+        "description": (
+            f"This is a detailed description for document {doc_id} "
+            "containing information about the test data and its purpose "
+            "in the large snapshot creation process."
+        ),
+        "metadata": {
+            "tags": [f"tag1_{doc_in_batch}", f"tag2_{doc_in_batch}", f"tag3_{doc_in_batch}"],
+            "category": f"category_{doc_in_batch % 10}",
+            "subcategories": [f"subcat1_{doc_in_batch % 5}", f"subcat2_{doc_in_batch % 5}"],
+            "attributes": [f"attr1_{doc_in_batch % 8}", f"attr2_{doc_in_batch % 8}"],
+            "status": f"status_{doc_in_batch % 6}",
+            "version": f"1.{doc_in_batch % 10}.{doc_in_batch % 5}",
+            "region": f"region_{doc_in_batch % 12}",
+            "details": f"Detailed metadata information for document {doc_id} including test parameters."
+        },
+        "content": (
+            f"Main content for document {doc_id}. This section contains the primary information "
+            "and data relevant to the testing process. The content is designed to create minimal "
+            "document for migration and multiplication."
+        ),
+        "additional_info": (
+            f"Supplementary information for document {doc_id} "
+            "providing extra context and details about the test data."
+        )
+    }
+
+
+def get_index_settings(shard_count, es_major_version):
+    """Get index settings with version-aware mapping structure for all 5 supported versions."""
+    
+    # Index properties common to all versions
+    index_properties = {
+        "timestamp": {"type": "date"},
+        "value": {"type": "keyword"},
+        "doc_number": {"type": "integer"},
+        "description": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
+        "metadata": {
+            "properties": {
+                "tags": {"type": "keyword"},
+                "category": {"type": "keyword"},
+                "subcategories": {"type": "keyword"},
+                "attributes": {"type": "keyword"},
+                "status": {"type": "keyword"},
+                "version": {"type": "keyword"},
+                "region": {"type": "keyword"},
+                "details": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}}
+            }
+        },
+        "content": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
+        "additional_info": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}}
+    }
+    
+    # Base settings
+    index_settings = {
+        "settings": {
+            "number_of_shards": str(shard_count),
+            "number_of_replicas": "0"
+        }
+    }
+    
+    # Version-specific mapping structure
+    if es_major_version <= 6:
+        # ES 5.x, ES 6.x: Include "doc" type in mapping
+        index_settings["mappings"] = {
+            "doc": {
+                "properties": index_properties
+            }
+        }
+    else:
+        # ES 7.x, OS 1.x, OS 2.x: No type, direct properties
+        index_settings["mappings"] = {
+            "properties": index_properties
+        }
+    
+    return index_settings
 
 
 def calculate_optimal_batch_size(total_docs, max_batch_size=1000):
@@ -116,13 +197,13 @@ def ingest_test_documents(index_name, document_count, sample_doc, source_cluster
         
         bulk_body_lines = []
         for doc_index in range(start_doc, end_doc + 1):
-            doc_id = str(doc_index)
+            doc_id = f"doc_{batch_num}_{doc_index - start_doc + 1}"
             
-            document = sample_doc.copy()
-            document["doc_number"] = str(doc_index)
+            # Generate each document to ingest
+            document = generate_document(doc_id, batch_num, doc_index - start_doc + 1)
             
             # Use version-specific bulk index action format
-            index_action = get_bulk_index_action(index_name, doc_id, es_version)
+            index_action = get_bulk_index_action(index_name, str(doc_index), es_version)
             bulk_body_lines.append(json.dumps(index_action))
             bulk_body_lines.append(json.dumps(document))
         
@@ -185,7 +266,11 @@ def ingest_test_documents(index_name, document_count, sample_doc, source_cluster
 
 
 def create_test_index(index_name, shard_count, source_cluster):
-    """Create index with specified number of shards, handling existing index case."""
+    """Create index with specific mapping and specified number of shards, handling existing index case."""
+    
+    # Get version info for index mappings
+    version_info = get_version_info_from_config()
+    es_major_version = version_info['es_major_version']
     
     # First, try to delete the index if it exists
     try:
@@ -201,21 +286,18 @@ def create_test_index(index_name, shard_count, source_cluster):
     except Exception as e:
         logger.info(f"Could not check/delete existing index (will try to create anyway): {e}")
     
-    # Create the index
-    index_settings = {
-        "settings": {
-            "number_of_shards": shard_count,
-            "number_of_replicas": 0
-        }
-    }
+    # Use enhanced index settings with version-aware mapping
+    index_settings = get_index_settings(shard_count, es_major_version)
     
     try:
+        # Use create_index with specific index mappings
         ops().create_index(
-            index_name=index_name,
             cluster=source_cluster,
+            index_name=index_name,
             data=json.dumps(index_settings)
         )
-        logger.info(f"Index '{index_name}' created with {shard_count} shards")
+        logger.info(f"Index '{index_name}' created with {shard_count} shards and enhanced mapping")
+        logger.info(f"Version-aware mapping applied for ES major version {es_major_version}")
     except Exception as e:
         if "resource_already_exists_exception" in str(e):
             logger.warning(f"Index '{index_name}' already exists, continuing...")
