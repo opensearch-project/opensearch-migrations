@@ -204,22 +204,22 @@ def call(Map config = [:]) {
             stage('6. Enhanced Integration Test with Metrics Collection') {
                 timeout(time: 120, unit: 'MINUTES') {
                     echo "Stage 6: Enhanced Integration Test with Metrics Collection"
-                    echo "Running 3-phase external backfill test:"
-                    echo "  Phase 1: Metadata Migration"
-                    echo "  Phase 2: RFS Backfill (${params.backfillScale} workers)"
-                    echo "  Phase 3: Performance Metrics Calculation"
+                    echo "Running 4-phase external backfill test:"
+                    echo "  Phase 1: Read Catalog File for Expected Metrics"
+                    echo "  Phase 2: Metadata Migration"
+                    echo "  Phase 3: RFS Backfill with Document Count Monitoring (${params.backfillScale} workers)"
+                    echo "  Phase 4: Performance Metrics Calculation"
                     
                     dir('test') {
-                        // Enhanced test command with environment variables
+                        // Script command with environment variables
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export CONFIG_FILE_PATH='/config/migration_services.yaml' && " +
+                            "export SNAPSHOT_S3_URI='${params.snapshotS3Uri}' && " +
                             "export STAGE='${params.stage}' && " +
-                            "export SNAPSHOT_NAME='${params.snapshotName}' && " +
-                            "export SNAPSHOT_REPO='${params.snapshotRepoName}' && " +
                             "export BACKFILL_SCALE='${params.backfillScale}' && " +
                             "export UNIQUE_ID='${params.testUniqueId}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m pytest integ_test/external_backfill_test.py::ExternalBackfillTests::test_backfill_large_snapshot -v -s\""
+                            "python -m integ_test.external_backfill_test\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
