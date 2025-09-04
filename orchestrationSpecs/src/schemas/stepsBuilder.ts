@@ -14,7 +14,16 @@ import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
 import {Workflow} from "@/schemas/workflowBuilder";
-import {InputsOf, NamedTask, OutputsOf, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
+import {
+    InputKind,
+    InputsOf, IsEmptyRecord,
+    NamedTask, NormalizeInputs,
+    OutputsOf,
+    ParamsRegistrationFn,
+    TaskBuilder,
+    TaskOpts,
+    TaskRebinder
+} from "@/schemas/taskBuilder";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -108,18 +117,92 @@ export class StepsBuilder<
         Name extends string,
         TWorkflow extends Workflow<any, any, any>,
         TKey extends Extract<keyof TWorkflow["templates"], string>,
-        LoopT extends PlainObject = never
+        LoopT extends PlainObject = never,
+
+        // Extract and normalize the Inputs type once
+        IInputs extends InputParametersRecord =
+            TWorkflow["templates"][TKey] extends { inputs: infer X }
+                ? NormalizeInputs<X> extends InputParametersRecord ? NormalizeInputs<X> : {}
+                : {}
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         workflow: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        paramsFn: UniqueNameConstraintOutsideDeclaration<
-            Name,
-            StepsScope,
-            (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>
-        >,
-        opts?: TaskOpts<LoopT>
+
+        // 🔑 3-way conditional parameter list:
+        ...args: InputKind<IInputs> extends "empty"
+            ? [opts?: TaskOpts<LoopT>] // no fields -> paramsFn not accepted/needed
+            : InputKind<IInputs> extends "allOptional"
+                ? [paramsFn?: UniqueNameConstraintOutsideDeclaration<
+                    Name,
+                    StepsScope,
+                    ParamsRegistrationFn<StepsScope, IInputs, LoopT>
+                >, opts?: TaskOpts<LoopT>] // fields exist but all optional -> paramsFn optional
+                : [paramsFn: UniqueNameConstraintOutsideDeclaration<
+                    Name,
+                    StepsScope,
+                    ParamsRegistrationFn<StepsScope, IInputs, LoopT>
+                >, opts?: TaskOpts<LoopT>] // at least one required -> paramsFn required
+    ): UniqueNameConstraintOutsideDeclaration<
+        Name,
+        StepsScope,
+        StepsBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ExtendScope<StepsScope, {
+                [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]>
+            }>,
+            OutputParamsScope
+        >
+    > {
+        // Runtime branching identical to internal version:
+        const [first, second] = args as [any, any];
+
+        const paramsFn =
+            typeof first === "function"
+                ? first
+                : ((_: unknown, register: (v: {}) => void) => register({})); // ok for empty/all-optional
+
+        const opts = typeof first === "function" ? second : first;
+
+        return this.addStepGroup(groupBuilder =>
+            groupBuilder.addExternalTask(
+                name,
+                workflow,
+                key,
+                paramsFn as any,
+                opts as TaskOpts<LoopT> | undefined
+            )
+        ) as any;
+    }
+
+
+    // Convenience method for single internal step
+// ==== addInternalStep with tri-state conditional tuple ====
+
+    public addInternalStep<
+        Name extends string,
+        TKey extends Extract<keyof ContextualScope["templates"], string>,
+        LoopT extends PlainObject = never,
+        // Normalize once for stable discrimination
+        IInputs extends InputParametersRecord =
+            NormalizeInputs<InputsOf<ContextualScope["templates"][TKey]>> extends InputParametersRecord
+                ? NormalizeInputs<InputsOf<ContextualScope["templates"][TKey]>>
+                : {}
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
+
+        // 3-way conditional on argument shape:
+        ...args: InputKind<IInputs> extends "empty"
+            ? [opts?: TaskOpts<LoopT>] // no fields at all -> paramsFn not accepted/needed
+            : InputKind<IInputs> extends "allOptional"
+                ? [paramsFn?: UniqueNameConstraintOutsideDeclaration<
+                    Name, StepsScope, ParamsRegistrationFn<StepsScope, IInputs, LoopT>
+                >, opts?: TaskOpts<LoopT>] // fields exist but all optional -> paramsFn optional
+                : [paramsFn: UniqueNameConstraintOutsideDeclaration<
+                    Name, StepsScope, ParamsRegistrationFn<StepsScope, IInputs, LoopT>
+                >, opts?: TaskOpts<LoopT>] // at least one required -> paramsFn required
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         StepsScope,
@@ -128,43 +211,28 @@ export class StepsBuilder<
             InputParamsScope,
             ExtendScope<
                 StepsScope,
-                { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }
+                { [K in Name]: TasksWithOutputs<Name, OutputsOf<ContextualScope["templates"][TKey]>> }
             >,
             OutputParamsScope
         >
     > {
-        return this.addStepGroup(groupBuilder =>
-            groupBuilder.addExternalTask(name, workflow, key, paramsFn, opts)
-        ) as any;
-    }
+        // Runtime branching identical to before:
+        const [first, second] = args as [any, any];
 
-    // Convenience method for single internal step
-    public addInternalStep<
-        Name extends string,
-        TKey extends Extract<keyof ContextualScope["templates"], string>,
-        LoopT extends PlainObject = never
-    >(
-        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        paramsFn: UniqueNameConstraintOutsideDeclaration<
-            Name,
-            StepsScope,
-            (steps: TasksScopeToTasksWithOutputs<StepsScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<InputsOf<ContextualScope["templates"][TKey]>>>
-        >,
-        opts?: TaskOpts<LoopT>
-    ): UniqueNameConstraintOutsideDeclaration<
-        Name,
-        StepsScope,
-        StepsBuilder<
-            ContextualScope,
-            InputParamsScope,
-            ExtendScope<StepsScope, { [K in Name]: TasksWithOutputs<Name, OutputsOf<ContextualScope["templates"][TKey]>> }>,
-            OutputParamsScope
-        >
-    > {
+        const paramsFn =
+            typeof first === "function"
+                ? first
+                : ((_: unknown, register: (v: {}) => void) => register({})); // okay for empty/all-optional
+
+        const opts = typeof first === "function" ? second : first;
+
         return this.addStepGroup(groupBuilder =>
-            groupBuilder.addInternalTask(name, templateKey, paramsFn, opts)
+            groupBuilder.addInternalTask(
+                name,
+                templateKey,
+                paramsFn as any,
+                opts as TaskOpts<LoopT> | undefined
+            )
         ) as any;
     }
 

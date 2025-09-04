@@ -90,11 +90,13 @@ export abstract class TemplateBodyBuilder<
 
     // used by the TemplateBuilder!
     getFullTemplateScope(): {
+        context: ContextualScope,
         inputs: InputParamsScope,
         outputs: OutputParamsScope,
         body: Record<string, any> // implementation of the body is purposefully type-erased
     } {
         return {
+            context: this.contextualScope,
             inputs: this.inputsScope,
             outputs: this.outputsScope,
             ...this.getBody()

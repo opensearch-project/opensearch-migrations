@@ -5,6 +5,7 @@ import {expectTypeOf} from "expect-type";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {StepsBuilder} from "@/schemas/stepsBuilder";
 import { CallerParams } from "@/schemas/parameterSchemas";
+import { no } from "zod/locales";
 
 describe("paramsFns runtime validation - comprehensive", () => {
     // Shared external templates with different parameter configurations
@@ -85,7 +86,8 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with no parameters", () => {
             baseWorkflow.addTemplate("testNoParamsValid", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", noParamsTemplate, "noParams", s => ({}));
+                    // @ts-expect-error — spurious property should be rejected
+                    const step = g.addExternalStep("step1", noParamsTemplate, "noParams", (s, register) => register({}));
                     return step;
                 })
             );
@@ -95,23 +97,12 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testNoParamsSpurious", t => t
                 .addSteps(g => {
                     // @ts-expect-error — spurious property should be rejected
-                    const step = g.addExternalStep("step1", noParamsTemplate, "noParams", s => ({
+                    const step = g.addExternalStep("step1", noParamsTemplate, "noParams", (s, register) => register({
                         spuriousField: "should error"
                     }));
                     return step;
                 })
             );
-        });
-
-        it("debug CallerParams: External NoParams spurious", () => {
-            type Inputs = typeof noParamsTemplate.templates.noParams.inputs;
-            const _debugInputsCheck: Inputs = {} as any;
-            type TestCallerParams = CallerParams<Inputs>;
-            // @ts-expect-error — spurious CallerParams property should be rejected
-            const _debugCallerParamsBad: TestCallerParams = { spuriousField: "should error" };
-            console.log("Debug caller params (External NoParams):", _debugCallerParamsBad);
-            const _debugCallerParams: TestCallerParams = {};
-            console.log("Debug caller params (External NoParams):", _debugCallerParams);
         });
     });
 
@@ -120,7 +111,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all required parameters", () => {
             baseWorkflow.addTemplate("testRequiredValid", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", s => ({
+                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", (s, register) => register({
                         reqStr: "validString",
                         reqNum: 123
                     }));
@@ -133,7 +124,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testRequiredMissing", t => t
                 .addSteps(g => {
                     // @ts-expect-error — missing required parameter reqNum
-                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", s => ({
+                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", (s, register) => register({
                         reqStr: "validString"
                         // reqNum is missing
                     }));
@@ -145,7 +136,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with wrong parameter types", () => {
             baseWorkflow.addTemplate("testRequiredWrongType", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", s => ({
+                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", (s, register) => register({
                         reqStr: "validString",
                         // @ts-expect-error — wrong type for reqNum
                         reqNum: "shouldBeNumber" // wrong type
@@ -158,10 +149,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with spurious parameters", () => {
             baseWorkflow.addTemplate("testRequiredSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious property should be rejected
-                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", s => ({
+                    const step = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", (s, register) => register({
                         reqStr: "validString",
                         reqNum: 123,
+                        // @ts-expect-error — spurious property should be rejected
                         spuriousField: "should error"
                     }));
                     return step;
@@ -175,18 +166,26 @@ describe("paramsFns runtime validation - comprehensive", () => {
             type TestCallerParams = CallerParams<Inputs>;
             // @ts-expect-error — spurious CallerParams property should be rejected
             const _debugCallerParamsBad: TestCallerParams = { reqStr: "validString", reqNum: 123, spuriousField: "should error" };
-            console.log("Debug caller params (External RequiredOnly):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = { reqStr: "validString", reqNum: 123 };
-            console.log("Debug caller params (External RequiredOnly):", _debugCallerParams);
         });
     });
 
     // Tests for External Templates - Optional Only Parameters
     describe("External Templates - Optional Only Parameters", () => {
+        it("should accept valid call with no paramsFn", () => {
+            baseWorkflow.addTemplate("testOptionalNoParamsFn", t => t
+                .addSteps(g => {
+                    // paramsFn omitted entirely
+                    const step = g.addExternalStep("stepNoParamsFn", optionalOnlyTemplate, "optionalOnly");
+                    return step;
+                })
+            );
+        });
+
         it("should accept valid call with no parameters", () => {
             baseWorkflow.addTemplate("testOptionalEmpty", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", s => ({}));
+                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", (s, register) => register({}));
                     return step;
                 })
             );
@@ -195,7 +194,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with some optional parameters", () => {
             baseWorkflow.addTemplate("testOptionalPartial", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", s => ({
+                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", (s, register) => register({
                         optStr: "customString"
                         // optNum omitted, should use default
                     }));
@@ -207,7 +206,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all optional parameters", () => {
             baseWorkflow.addTemplate("testOptionalAll", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", s => ({
+                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", (s, register) => register({
                         optStr: "customString",
                         optNum: 999
                     }));
@@ -219,7 +218,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with wrong parameter types", () => {
             baseWorkflow.addTemplate("testOptionalWrongType", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", s => ({
+                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", (s, register) => register({
                         optStr: "validString",
                         // @ts-expect-error — wrong type for optNum
                         optNum: "shouldBeNumber" // wrong type
@@ -232,7 +231,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with optional and spurious parameters", () => {
             baseWorkflow.addTemplate("testOptionalSpurious", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", s => ({
+                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", (s, register) => register({
                         optStr: "validString",
                         // @ts-expect-error — spurious property should be rejected
                         spuriousField: "should error"
@@ -248,9 +247,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             type TestCallerParams = CallerParams<Inputs>;
             // @ts-expect-error — spurious CallerParams property should be rejected
             const _debugCallerParamsBad: TestCallerParams = { optStr: "validString", spuriousField: "should error" };
-            console.log("Debug caller params (External OptionalOnly opt+spurious):", _debugCallerParamsBad);
             const _debugCallerParams2: TestCallerParams = { optStr: "validString" };
-            console.log("Debug caller params (External OptionalOnly opt+spurious):", _debugCallerParams2);
         });
 
         it("debug CallerParams: External OptionalOnly spurious-only", () => {
@@ -259,16 +256,14 @@ describe("paramsFns runtime validation - comprehensive", () => {
             type TestCallerParams = CallerParams<Inputs>;
             // @ts-expect-error — spurious CallerParams property should be rejected
             const _debugCallerParamsBad: TestCallerParams = { spuriousField: "should error" };
-            console.log("Debug caller params (External OptionalOnly spurious-only):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = {};
-            console.log("Debug caller params (External OptionalOnly spurious-only):", _debugCallerParams);
         });
 
         it("should reject call with spurious parameters", () => {
             baseWorkflow.addTemplate("testOptionalSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious property should be rejected
-                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", s => ({
+                    const step = g.addExternalStep("step1", optionalOnlyTemplate, "optionalOnly", (s, register) => register({
+                        // @ts-expect-error — spurious property should be rejected
                         spuriousField: "should error"
                     }));
                     return step;
@@ -282,7 +277,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all required parameters only", () => {
             baseWorkflow.addTemplate("testMixedRequiredOnly", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", s => ({
+                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", (s, register) => register({
                         reqStr: "validString",
                         reqBool: true
                         // optional parameters omitted
@@ -295,7 +290,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all parameters", () => {
             baseWorkflow.addTemplate("testMixedAll", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", s => ({
+                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", (s, register) => register({
                         reqStr: "validString",
                         reqBool: true,
                         optNum: 42,
@@ -310,7 +305,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testMixedMissingRequired", t => t
                 .addSteps(g => {
                     // @ts-expect-error — missing required parameter reqBool
-                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", s => ({
+                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", (s, register) => register({
                         reqStr: "validString",
                         optNum: 42
                         // reqBool is missing
@@ -323,7 +318,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with wrong types", () => {
             baseWorkflow.addTemplate("testMixedWrongTypes", t => t
                 .addSteps(g => {
-                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", s => ({
+                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", (s, register) => register({
                         // @ts-expect-error — wrong types for multiple parameters
                         reqStr: 123, // should be string
                         // @ts-expect-error — wrong types for multiple parameters
@@ -339,10 +334,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with spurious parameters", () => {
             baseWorkflow.addTemplate("testMixedSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious property should be rejected
-                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", s => ({
+                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", (s, register) => register({
                         reqStr: "validString",
                         reqBool: true,
+                        // @ts-expect-error — spurious property should be rejected
                         spuriousField: "should error",
                         anotherBadField: 999
                     }));
@@ -362,12 +357,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 spuriousField: "should error",
                 anotherBadField: 999
             };
-            console.log("Debug caller params (External Mixed):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = {
                 reqStr: "validString",
                 reqBool: true
             };
-            console.log("Debug caller params (External Mixed):", _debugCallerParams);
         });
     });
 
@@ -376,7 +369,9 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with no parameters", () => {
             baseWorkflow.addTemplate("testInternalNoParamsValid", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalNoParams", s => ({}));
+                    const step = g.addInternalStep("step1", "internalNoParams",
+                        // @ts-expect-error — spurious property should be rejected
+                        (s, register) => register({}));
                     return step;
                 })
             );
@@ -386,23 +381,12 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalNoParamsSpurious", t => t
                 .addSteps(g => {
                     // @ts-expect-error — spurious property should be rejected
-                    const step = g.addInternalStep("step1", "internalNoParams", s => ({
+                    const step = g.addInternalStep("step1", "internalNoParams", (s, register) => register({
                         spuriousField: "should error"
                     }));
                     return step;
                 })
             );
-        });
-
-        it("debug CallerParams: Internal NoParams spurious", () => {
-            type Inputs = typeof baseWorkflow.templateSigScope.internalNoParams.inputs;
-            const _debugInputsCheck: Inputs = {} as any;
-            type TestCallerParams = CallerParams<Inputs>;
-            // @ts-expect-error — spurious CallerParams property should be rejected
-            const _debugCallerParamsBad: TestCallerParams = { spuriousField: "should error" };
-            console.log("Debug caller params (Internal NoParams):", _debugCallerParamsBad);
-            const _debugCallerParams: TestCallerParams = { };
-            console.log("Debug caller params (Internal NoParams):", _debugCallerParams);
         });
     });
 
@@ -411,7 +395,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all required parameters", () => {
             baseWorkflow.addTemplate("testInternalRequiredValid", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalRequiredOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalRequiredOnly", (s, register) => register({
                         reqStr: "validString",
                         reqNum: 456
                     }));
@@ -424,7 +408,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalRequiredMissing", t => t
                 .addSteps(g => {
                     // @ts-expect-error — missing required parameter reqStr
-                    const step = g.addInternalStep("step1", "internalRequiredOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalRequiredOnly", (s, register) => register({
                         reqNum: 456
                         // reqStr is missing
                     }));
@@ -436,7 +420,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with wrong parameter types", () => {
             baseWorkflow.addTemplate("testInternalRequiredWrongType", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalRequiredOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalRequiredOnly", (s, register) => register({
                         // @ts-expect-error — wrong type for reqStr
                         reqStr: 123, // should be string
                         reqNum: 456
@@ -449,10 +433,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with spurious parameters", () => {
             baseWorkflow.addTemplate("testInternalRequiredSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious property should be rejected
-                    const step = g.addInternalStep("step1", "internalRequiredOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalRequiredOnly", (s, register) => register({
                         reqStr: "validString",
                         reqNum: 456,
+                        // @ts-expect-error — spurious property should be rejected
                         spuriousField: "should error"
                     }));
                     return step;
@@ -461,23 +445,32 @@ describe("paramsFns runtime validation - comprehensive", () => {
         });
 
         it("debug CallerParams: Internal RequiredOnly spurious", () => {
-            type Inputs = typeof baseWorkflow.templateSigScope.internalRequiredOnly.inputs;
+            type T = typeof baseWorkflow.templateFullScope.internalMixedParams.context.templates.internalRequiredOnly.inputs;
+            type Inputs = T;//typeof baseWorkflow.templateSigScope.internalRequiredOnly.inputs;
             const _debugInputsCheck: Inputs = {} as any;
             type TestCallerParams = CallerParams<Inputs>;
             // @ts-expect-error — spurious CallerParams property should be rejected
             const _debugCallerParamsBad: TestCallerParams = { reqStr: "validString", reqNum: 456, spuriousField: "should error" };
-            console.log("Debug caller params (Internal RequiredOnly):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = { reqStr: "validString", reqNum: 456 };
-            console.log("Debug caller params (Internal RequiredOnly):", _debugCallerParams);
         });
     });
 
     // Tests for Internal Templates - Optional Only Parameters
     describe("Internal Templates - Optional Only Parameters", () => {
+        it("should accept valid call with no paramsFn", () => {
+            baseWorkflow.addTemplate("testInternalOptionalNoParamsFn", t => t
+                .addSteps(g => {
+                    // paramsFn omitted entirely
+                    const step = g.addInternalStep("stepNoParamsFn", "internalOptionalOnly");
+                    return step;
+                })
+            );
+        });
+
         it("should accept valid call with no parameters", () => {
             baseWorkflow.addTemplate("testInternalOptionalEmpty", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalOptionalOnly", s => ({}));
+                    const step = g.addInternalStep("step1", "internalOptionalOnly", (s, register) => register({}));
                     return step;
                 })
             );
@@ -486,7 +479,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with some optional parameters", () => {
             baseWorkflow.addTemplate("testInternalOptionalPartial", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalOptionalOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalOptionalOnly", (s, register) => register({
                         optNum: 789
                         // optStr omitted
                     }));
@@ -498,7 +491,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with wrong parameter types", () => {
             baseWorkflow.addTemplate("testInternalOptionalWrongType", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalOptionalOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalOptionalOnly", (s, register) => register({
                         // @ts-expect-error — wrong type for optStr
                         optStr: 999, // should be string
                         optNum: 789
@@ -511,9 +504,9 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with spurious parameters", () => {
             baseWorkflow.addTemplate("testInternalOptionalSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious property should be rejected
-                    const step = g.addInternalStep("step1", "internalOptionalOnly", s => ({
+                    const step = g.addInternalStep("step1", "internalOptionalOnly", (s, register) => register({
                         optStr: "validString",
+                        // @ts-expect-error — spurious property should be rejected
                         spuriousField: "should error"
                     }));
                     return step;
@@ -527,9 +520,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             type TestCallerParams = CallerParams<Inputs>;
             // @ts-expect-error — spurious CallerParams property should be rejected
             const _debugCallerParamsBad: TestCallerParams = { optStr: "validString", spuriousField: "should error" };
-            console.log("Debug caller params (Internal OptionalOnly):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = { optStr: "validString" };
-            console.log("Debug caller params (Internal OptionalOnly):", _debugCallerParams);
         });
     });
 
@@ -538,7 +529,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all required parameters only", () => {
             baseWorkflow.addTemplate("testInternalMixedRequiredOnly", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalMixedParams", s => ({
+                    const step = g.addInternalStep("step1", "internalMixedParams", (s, register) => register({
                         reqStr: "validString",
                         reqBool: false
                         // optional parameters omitted
@@ -551,7 +542,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with all parameters", () => {
             baseWorkflow.addTemplate("testInternalMixedAll", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalMixedParams", s => ({
+                    const step = g.addInternalStep("step1", "internalMixedParams", (s, register) => register({
                         reqStr: "validString",
                         reqBool: false,
                         optNum: 123,
@@ -566,7 +557,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalMixedMissingRequired", t => t
                 .addSteps(g => {
                     // @ts-expect-error — missing required parameter reqStr
-                    const step = g.addInternalStep("step1", "internalMixedParams", s => ({
+                    const step = g.addInternalStep("step1", "internalMixedParams", (s, register) => register({
                         reqBool: false,
                         optStr: "optional"
                         // reqStr is missing
@@ -579,7 +570,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject call with wrong types", () => {
             baseWorkflow.addTemplate("testInternalMixedWrongTypes", t => t
                 .addSteps(g => {
-                    const step = g.addInternalStep("step1", "internalMixedParams", s => ({
+                    const step = g.addInternalStep("step1", "internalMixedParams", (s, register) => register({
                         // @ts-expect-error — wrong types for parameters
                         reqStr: ["array"], // should be string
                         // @ts-expect-error — wrong types for parameters
@@ -592,16 +583,54 @@ describe("paramsFns runtime validation - comprehensive", () => {
             );
         });
 
+        // it("CLEAN TEST - should accept proper callback pattern", () => {
+        //     baseWorkflow.addTemplate("testInternalMixedCallbackPattern", t => t
+        //         .addSteps(g => g
+        //             .addInternalStep("step1", "internalMixedParams",
+        //                 (steps, register) => register({reqBool: true, reqStr: ""}))
+        //             .addInternalStep("step2", "internalMixedParams",
+        //                 (steps, register) =>
+        //                     register({reqBool: true, reqStr: steps.tasks.step1.}))
+        //             .addInternalStep("step3", "internalNoParams",
+        //                 (s, register) => register({}))
+        //             .addInternalStep("eStep0", "internalMixedParams", (s, register) => register({
+        //                 reqBool: true, reqStr: ""
+        //             }))
+        //         ));
+        // });
+
+        it("should reject invalid callback usage patterns", () => {
+            baseWorkflow.addTemplate("testInternalMixedInvalidCallbacks", t => t
+                .addSteps(g => {
+                    // Valid usage for comparison
+                    const validStep = g.addInternalStep("validStep", "internalMixedParams",
+                        (steps, register) => register({reqStr: "valid", reqBool: true}));
+
+                    // Test various invalid patterns in comments to document expected errors:
+                    // (steps, register) => register({reqBool: true, reqStr: "", spurious: 1})  // spurious field
+                    // (steps, register) => register({})  // missing required fields
+                    // (steps, register) => Symbol('fake')  // not calling register
+                    // (steps, register) => {}  // not returning symbol
+                    // (steps, register) => undefined  // not returning symbol
+                    // (steps, register) => 9  // wrong return type
+
+                    return validStep;
+                })
+            );
+        });
+
         it("should reject call with spurious parameters", () => {
             baseWorkflow.addTemplate("testInternalMixedSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious property should be rejected
-                    const step = g.addInternalStep("step1", "internalMixedParams", s => ({
-                        reqStr: "validString",
-                        reqBool: false,
-                        spuriousField: "should error",
-                        anotherInvalidField: true
-                    }));
+                    const step = g.addInternalStep("step1", "internalMixedParams",
+                        (steps, register) => register({
+                            reqStr: "validString",
+                            reqBool: false,
+                            // @ts-expect-error — spurious property should be rejected
+                            spuriousField: "should error",
+                            anotherInvalidField: true
+                        })
+                    );
                     return step;
                 })
             );
@@ -618,12 +647,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 spuriousField: "should error",
                 anotherInvalidField: true
             };
-            console.log("Debug caller params (Internal Mixed):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = {
                 reqStr: "validString",
                 reqBool: false
             };
-            console.log("Debug caller params (Internal Mixed):", _debugCallerParams);
         });
     });
 
@@ -632,13 +659,13 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should handle chaining steps with parameter dependencies", () => {
             baseWorkflow.addTemplate("testChaining", t => t
                 .addSteps(g => {
-                    const step1 = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", s => ({
+                    const step1 = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", (s, register) => register({
                         reqStr: "initial",
                         reqNum: 1
                     }));
 
-                    const step2 = step1.addInternalStep("step2", "internalRequiredOnly", d => ({
-                        reqStr: d.tasks.step1.result, // using output from previous step
+                    const step2 = step1.addInternalStep("step2", "internalRequiredOnly", (steps, register) => register({
+                        reqStr: steps.tasks.step1.result, // using output from previous step
                         reqNum: 2
                     }));
 
@@ -650,15 +677,15 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should reject chaining with wrong output reference types", () => {
             baseWorkflow.addTemplate("testChainingWrongType", t => t
                 .addSteps(g => {
-                    const step1 = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", s => ({
+                    const step1 = g.addExternalStep("step1", requiredOnlyTemplate, "requiredOnly", (s, register) => register({
                         reqStr: "initial",
                         reqNum: 1
                     }));
 
-                    const step2 = step1.addInternalStep("step2", "internalRequiredOnly", d => ({
+                    const step2 = step1.addInternalStep("step2", "internalRequiredOnly", (steps, register) => register({
                         reqStr: "valid",
                         // @ts-expect-error — using string output where number is expected
-                        reqNum: d.tasks.step1.result // result is string, reqNum expects number
+                        reqNum: steps.tasks.step1.result // result is string, reqNum expects number
                     }));
 
                     return step2;
@@ -669,10 +696,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should handle multiple spurious fields", () => {
             baseWorkflow.addTemplate("testMultipleSpurious", t => t
                 .addSteps(g => {
-                    // @ts-expect-error — spurious properties should be rejected
-                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", s => ({
+                    const step = g.addExternalStep("step1", mixedParamsTemplate, "mixedParams", (s, register) => register({
                         reqStr: "valid",
                         reqBool: true,
+                        // @ts-expect-error — spurious properties should be rejected
                         spurious1: "error1",
                         spurious2: 42,
                         spurious3: { nested: "object" },
@@ -696,12 +723,10 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 spurious3: { nested: "object" },
                 spurious4: ["array", "values"]
             };
-            console.log("Debug caller params (Edge multiple spurious):", _debugCallerParamsBad);
             const _debugCallerParams: TestCallerParams = {
                 reqStr: "valid",
                 reqBool: true
             };
-            console.log("Debug caller params (Edge multiple spurious):", _debugCallerParams);
         });
     });
 });

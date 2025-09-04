@@ -5,7 +5,15 @@ import {
     LoopWithUnion, ParamsWithLiteralsOrExpressions, TasksOutputsScope,
     TasksScopeToTasksWithOutputs, TasksWithOutputs, WorkflowAndTemplatesScope,
 } from "@/schemas/workflowTypes";
-import {InputsOf, NamedTask, OutputsOf, TaskBuilder, TaskOpts, TaskRebinder} from "@/schemas/taskBuilder";
+import {
+    InputsOf,
+    NamedTask,
+    OutputsOf,
+    ParamsRegistrationFn,
+    TaskBuilder,
+    TaskOpts,
+    TaskRebinder
+} from "@/schemas/taskBuilder";
 import { TemplateBodyBuilder } from "@/schemas/templateBodyBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
@@ -66,8 +74,7 @@ export class DagBuilder<
         paramsFn: UniqueNameConstraintOutsideDeclaration<
             Name,
             TaskScope,
-            (tasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>
+            ParamsRegistrationFn<TaskScope, TWorkflow["templates"][TKey]["inputs"], LoopT>
         >,
         opts?: DagTaskOpts<TaskScope, LoopT>
     ): UniqueNameConstraintOutsideDeclaration<
@@ -97,8 +104,7 @@ export class DagBuilder<
         paramsFn: UniqueNameConstraintOutsideDeclaration<
             Name,
             TaskScope,
-            (tasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<InputsOf<TTemplate>>>
+            ParamsRegistrationFn<TaskScope, InputsOf<TTemplate>, LoopT>
         >,
         opts?: DagTaskOpts<TaskScope, LoopT>
     ): UniqueNameConstraintOutsideDeclaration<

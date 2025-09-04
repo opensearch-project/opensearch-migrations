@@ -15,6 +15,40 @@ export type TaskOpts<LoopT extends PlainObject> = {
     when?: SimpleExpression<boolean>
 }
 
+const PARAMS_PUSHED = Symbol('params_pushed');
+type ParamsPushedSymbol = typeof PARAMS_PUSHED;
+
+// ==== helpers for InputParamDef-based detection ====
+
+// A field is optional-at-callsite iff its value type has `_hasDefault: true`
+export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
+
+// Collect keys that are *required* at callsite (i.e., no _hasDefault: true)
+export type SomeRequiredKey<T> =
+    [keyof T] extends [never] ? never
+        : { [K in keyof T]-?: ValueHasDefault<T[K]> extends true ? never : K }[keyof T];
+
+export type HasRequiredByDef<T> = [SomeRequiredKey<T>] extends [never] ? false : true;
+
+// Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
+export type InputKind<T> =
+    [keyof T] extends [never] ? "empty"
+        : HasRequiredByDef<T> extends true ? "hasRequired"
+            : "allOptional";
+
+export type IsEmptyRecord<T> = keyof T extends never ? true : false;
+export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
+
+
+export type ParamsRegistrationFn<
+    TaskScope extends TasksOutputsScope,
+    Inputs extends InputParametersRecord,
+    LoopT extends PlainObject
+> = (
+    priorTasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>,
+    register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol
+) => ParamsPushedSymbol
+
 export type InputsOf<T> =
     T extends { inputs: infer I }
         ? I extends Record<string, any> ? I : never  // Keep it as Record<string, any> to preserve exact keys
@@ -43,14 +77,6 @@ export type NamedTask<
     LoopT extends PlainObject = never,
     Extra extends Record<string, any> = {}
 > = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
-
-export type ParamsFromContextFn<
-    S extends TasksOutputsScope,
-    TWorkflow extends Workflow<any, any, any>,
-    TKey extends Extract<keyof TWorkflow["templates"], string>,
-    LoopT extends PlainObject = never
-> = (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
-    ParamsWithLiteralsOrExpressions<CallerParams<TWorkflow["templates"][TKey]["inputs"]>>;
 
 /** ---- NEW: type-level “rebinder” (a type constructor at the value level) ---- */
 export type TaskRebinder<C extends WorkflowAndTemplatesScope> =
@@ -98,21 +124,44 @@ export class TaskBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         workflowIn: UniqueNameConstraintOutsideDeclaration<Name, S, TWorkflow>,
         key: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
-        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S, ParamsFromContextFn<S, TWorkflow, TKey, LoopT>>,
+        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S, ParamsRegistrationFn<S, TWorkflow["templates"][TKey]["inputs"], LoopT>>,
         opts?: TaskOpts<LoopT>
     ): ApplyRebinder<RB, C,
         ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }>
     > {
         const workflow = workflowIn as TWorkflow;
         const templateKey = key as TKey;
+        const taskContext =  this.buildTasksWithOutputs(opts?.loopWith);
         const templateCall = this.callExternalTemplate(
             name as string,
             workflow,
             templateKey,
-            (paramsFn as any)(this.buildTasksWithOutputs(opts?.loopWith))
+            this.getParamsFromCallback((paramsFn as any), taskContext),
         );
 
         return this.addTaskHelper(name, templateCall, workflow.templates[templateKey].outputs, opts?.when);
+    }
+
+    getParamsFromCallback<
+        Inputs extends InputParametersRecord,
+        LoopT extends PlainObject = never
+    >(fn: ParamsRegistrationFn<S, Inputs, LoopT>, context: TasksScopeToTasksWithOutputs<S, LoopT>):
+        ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>
+    {
+        let capturedParams: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>;
+
+        const register = (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>): ParamsPushedSymbol => {
+            capturedParams = params;
+            return PARAMS_PUSHED;
+        };
+
+        const result = fn(context, register);
+
+        if (result !== PARAMS_PUSHED) {
+            throw new Error('Params registration function must call register and return its result');
+        }
+
+        return capturedParams!;
     }
 
     addInternalTask<
@@ -124,8 +173,7 @@ export class TaskBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         templateKey: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
         paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S,
-            (tasks: TasksScopeToTasksWithOutputs<S, LoopT>) =>
-                ParamsWithLiteralsOrExpressions<CallerParams<InputsOf<TTemplate>>>
+            ParamsRegistrationFn<S, InputsOf<TTemplate>, LoopT>
         >,
         opts?: TaskOpts<LoopT>
     ): ApplyRebinder<RB, C,
@@ -134,10 +182,11 @@ export class TaskBuilder<
         const template = this.contextualScope.templates?.[templateKey as string];
         const outputs = (template && "outputs" in template ? template.outputs : {}) as OutputsOf<TTemplate>;
 
+        const taskContext = this.buildTasksWithOutputs(opts?.loopWith);
         const templateCall = this.callTemplate(
             name as string,
             templateKey as string,
-            (paramsFn as any)(this.buildTasksWithOutputs(opts?.loopWith)),
+            this.getParamsFromCallback((paramsFn as any), taskContext),
             opts?.loopWith
         );
 
@@ -219,12 +268,13 @@ export class TaskBuilder<
     protected callExternalTemplate<
         WF extends Workflow<any, any, any>,
         TKey extends Extract<keyof WF["templates"], string>,
+        ParamsType,
         LoopT extends PlainObject = never
     >(
         name: string,
         wf: WF,
         templateKey: TKey,
-        params: CallerParams<WF["templates"][TKey]["inputs"]>,
+        params: ParamsType,
         loopWith?: LoopWithUnion<LoopT>
     ): NamedTask<
         WF["templates"][TKey]["inputs"],
