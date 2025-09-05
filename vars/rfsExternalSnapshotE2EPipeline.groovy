@@ -210,7 +210,9 @@ def call(Map config = [:]) {
                     echo "  Phase 4: Performance Metrics Calculation"
                     
                     dir('test') {
-                        // Script command with environment variables
+                        // Use standard pytest command following defaultIntegPipeline pattern
+                        def testDir = "/root/lib/integ_test/integ_test"
+                        def test_result_file = "${testDir}/reports/${params.testUniqueId}/report.xml"
                         def command = "bash -c \"source /.venv/bin/activate && " +
                             "export CONFIG_FILE_PATH='/config/migration_services.yaml' && " +
                             "export SNAPSHOT_S3_URI='${params.snapshotS3Uri}' && " +
@@ -218,34 +220,17 @@ def call(Map config = [:]) {
                             "export BACKFILL_SCALE='${params.backfillScale}' && " +
                             "export UNIQUE_ID='${params.testUniqueId}' && " +
                             "cd /root/lib/integ_test && " +
-                            "python -m integ_test.external_backfill_test\""
+                            "pipenv run pytest --log-file=${testDir}/reports/${params.testUniqueId}/pytest.log " +
+                            "--junitxml=${test_result_file} integ_test/external_backfill_test.py " +
+                            "--unique_id ${params.testUniqueId} " +
+                            "--stage ${params.stage} " +
+                            "-s\""
                         
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                // Execute the test command and capture the result
-                                def testResult = sh(script: "./awsRunIntegTests.sh --command '${command}' --stage ${params.stage}", returnStatus: true)
-                                
-                                // Check if the failure is due to the JUnit XML file issue
-                                if (testResult != 0) {
-                                    echo "Test script returned non-zero exit code: ${testResult}"
-                                    echo "Checking if this is the expected JUnit XML file issue..."
-                                    
-                                    // Check if the Python test actually completed successfully by looking for the success message
-                                    def task_arn = sh(script: "aws ecs list-tasks --cluster migration-${params.stage}-ecs-cluster --family 'migration-${params.stage}-migration-console' | jq --raw-output '.taskArns[0]'", returnStdout: true).trim()
-                                    def testOutput = sh(script: "aws ecs execute-command --cluster 'migration-${params.stage}-ecs-cluster' --task '${task_arn}' --container 'migration-console' --interactive --command 'tail -20 /root/lib/integ_test/integ_test/reports/${params.testUniqueId}/pytest.log 2>/dev/null || echo \"Log file not found\"'", returnStdout: true)
-                                    
-                                    if (testOutput.contains("External backfill test completed successfully") ||
-                                        testOutput.contains("=== METRICS SUMMARY ===")) {
-                                        echo "Python backfill test completed successfully - JUnit XML file issue is expected"
-                                        echo "Proceeding to metrics collection stage"
-                                    } else {
-                                        echo "Test appears to have failed for reasons other than JUnit XML file"
-                                        echo "Test output: ${testOutput}"
-                                        error("Integration test failed")
-                                    }
-                                } else {
-                                    echo "Test completed successfully"
-                                }
+                                sh "./awsRunIntegTests.sh --command '${command}' " +
+                                   "--test-result-file ${test_result_file} " +
+                                   "--stage ${params.stage}"
                             }
                         }
                     }

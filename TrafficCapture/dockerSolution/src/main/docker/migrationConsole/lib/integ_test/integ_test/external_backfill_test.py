@@ -2,14 +2,14 @@
 """
 External Backfill Test
 
-This script performs a complete 4-phase migration test:
+This pytest performs a complete 4-phase migration test:
 1. Read Catalog File for Expected Metrics
 2. Metadata Migration (using correct engine version from catalog)
 3. Backfill with Document Count Monitoring
 4. Performance Metrics Calculation
 
 Usage:
-    cd /root/lib/integ_test && python -m integ_test.external_backfill_test
+    cd /root/lib/integ_test && pytest integ_test/external_backfill_test.py --unique_id test_run --stage dev
 
 Environment Variables Required:
     SNAPSHOT_S3_URI - S3 URI of the snapshot to migrate from
@@ -25,6 +25,7 @@ import subprocess
 import time
 import logging
 import yaml
+import pytest
 from datetime import datetime
 from console_link.middleware.clusters import connection_check, clear_cluster, clear_indices, ConnectionResult
 from console_link.models.cluster import Cluster
@@ -654,9 +655,106 @@ def cleanup_resources(console_env, temp_config_path):
         logger.warning(f"Cleanup encountered error: {e}")
 
 
+# Pytest fixtures and test class
+@pytest.fixture(scope="session", autouse=True)
+def migration_test_setup():
+    """Session-scoped fixture for test setup and teardown."""
+    logger.info("=== EXTERNAL BACKFILL TEST STARTING ===")
+    
+    console_env = None
+    temp_config_path = None
+    start_timestamp = datetime.now()
+    
+    try:
+        env_values = parse_environment()
+        logger.info("=== DEBUG: CURRENT CONFIG FILE ===")
+        try:
+            run_console_command(["cat", "/config/migration_services.yaml"])
+        except Exception as e:
+            logger.warning(f"Could not read config file: {e}")
+        
+        # Read Catalog File for Expected Metrics (MOVED TO FIRST)
+        snapshot_info = fetch_snapshot_catalog_info(env_values)
+        
+        # Initialize console environment with correct engine version from catalog
+        console_env, temp_config_path = initialize_console_environment(snapshot_info['engine_version'], env_values)
+        
+        # Prepare target cluster
+        prepare_target_cluster(console_env.target_cluster)
+        
+        logger.info(f"Test started at: {start_timestamp}")
+
+        # Debug: Print current config file again
+        logger.info("=== DEBUG: UPDATED CONFIG FILE ===")
+        try:
+            run_console_command(["cat", "/config/migration_services.yaml"])
+        except Exception as e:
+            logger.warning(f"Could not read config file: {e}")
+        
+        # Store test data for the test method
+        test_data = {
+            'console_env': console_env,
+            'temp_config_path': temp_config_path,
+            'start_timestamp': start_timestamp,
+            'env_values': env_values,
+            'snapshot_info': snapshot_info
+        }
+        
+        yield test_data
+        
+    except Exception as e:
+        logger.error(f"Test setup failed: {e}")
+        raise
+        
+    finally:
+        # Always cleanup resources
+        cleanup_resources(console_env, temp_config_path)
+
+
+class TestExternalBackfill:
+    """Test class for external backfill migration."""
+    
+    def test_external_backfill_migration(self, migration_test_setup):
+        """Test the complete external backfill migration process."""
+        logger.info("=== STARTING EXTERNAL BACKFILL MIGRATION TEST ===")
+        
+        # Get test data from fixture
+        test_data = migration_test_setup
+        console_env = test_data['console_env']
+        start_timestamp = test_data['start_timestamp']
+        env_values = test_data['env_values']
+        snapshot_info = test_data['snapshot_info']
+        
+        # Metadata Migration
+        perform_metadata_migration(console_env)
+        
+        # Step 3: Backfill with Document Count Monitoring
+        actual_docs = perform_backfill_with_monitoring(console_env, snapshot_info, env_values)
+        
+        # Refresh target cluster
+        logger.info("Refreshing target cluster")
+        console_env.target_cluster.call_api("/_refresh")
+        logger.info("Target cluster refreshed")
+        
+        # Step 4: Performance Metrics Calculation
+        calculate_and_save_metrics(snapshot_info, env_values, console_env, start_timestamp, actual_docs)
+        
+        # Assertions for test validation
+        expected_docs = snapshot_info['document_count']
+        migration_completeness = (actual_docs / expected_docs * 100) if expected_docs > 0 else 0
+        
+        # Assert that migration was successful
+        assert actual_docs > 0, f"No documents were migrated. Expected: {expected_docs:,}"
+        assert migration_completeness >= 95.0, f"Migration completeness too low: {migration_completeness:.1f}%. Expected >= 95%"
+        
+        logger.info("External backfill test completed successfully")
+        logger.info(f"Final results: {actual_docs:,}/{expected_docs:,} documents ({migration_completeness:.1f}% complete)")
+
+
+# For backward compatibility with standalone execution
 def main():
     """Main execution function for standalone backfill test."""
-    logger.info("=== EXTERNAL BACKFILL TEST STARTING ===")
+    logger.info("=== EXTERNAL BACKFILL TEST STARTING (STANDALONE MODE) ===")
     
     console_env = None
     temp_config_path = None
