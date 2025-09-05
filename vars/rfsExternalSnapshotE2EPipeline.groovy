@@ -6,10 +6,9 @@ def call(Map config = [:]) {
     def params = config.params ?: [:]
     def workerAgent = config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host'
     
-    // Parse contexts from the config
+    // Parse migration context from the config
     def contexts = [:]
-    if (config.sourceContext && config.migrationContext) {
-        contexts.source = readJSON text: config.sourceContext
+    if (config.migrationContext) {
         contexts.migration = readJSON text: config.migrationContext
     }
     

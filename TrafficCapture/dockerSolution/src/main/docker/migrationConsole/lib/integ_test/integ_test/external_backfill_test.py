@@ -86,6 +86,23 @@ def run_console_command(command_args, timeout=DEFAULT_COMMAND_TIMEOUT):
         raise TimeoutError(error_msg)
 
 
+def extract_account_id_from_s3_uri(s3_uri):
+    """Extract AWS account ID from S3 URI."""
+    # Pattern: s3://migrations-jenkins-snapshot-{ACCOUNT_ID}-{REGION}/...
+    bucket_name = s3_uri.split('/')[2]  # Get bucket name
+    parts = bucket_name.split('-')
+    # Find the part that looks like an account ID (12 digits)
+    for part in parts:
+        if part.isdigit() and len(part) == 12:
+            return part
+    return None
+
+
+def generate_snapshot_role_arn(account_id, stage, region):
+    """Generate snapshot role ARN using the standard pattern."""
+    return f"arn:aws:iam::{account_id}:role/OSMigrations-{stage}-{region}-default-SnapshotRole"
+
+
 def parse_environment():
     """Parse environment variables and derive catalog info."""
     logger.info("=== PARSING ENVIRONMENT VARIABLES ===")
@@ -113,15 +130,25 @@ def parse_environment():
     else:
         cluster_version = snapshot_dir
     
+    # Extract account ID from S3 URI
+    account_id = extract_account_id_from_s3_uri(snapshot_s3_uri)
+    if not account_id:
+        raise ValueError(f"Could not extract account ID from S3 URI: {snapshot_s3_uri}")
+    
     # Extract account and region from bucket name
     # Expected format: migrations-jenkins-snapshot-{account}-{region}
     bucket_parts = bucket.split('-')
     if len(bucket_parts) >= 6:
-        _ = bucket_parts[3]
         region = '-'.join(bucket_parts[4:])  # us-west-2
     else:
         # Fallback: try to extract from environment or use defaults
         region = os.environ.get('AWS_DEFAULT_REGION', 'us-west-2')
+    
+    # Get stage from environment
+    stage = os.environ.get('STAGE', 'dev')
+    
+    # Generate snapshot role ARN
+    snapshot_role_arn = generate_snapshot_role_arn(account_id, stage, region)
     
     env_values = {
         'snapshot_s3_uri': snapshot_s3_uri,
@@ -132,7 +159,9 @@ def parse_environment():
         'catalog_key': 'large-snapshot-catalog.csv',
         'backfill_scale': int(os.environ.get('BACKFILL_SCALE', str(DEFAULT_BACKFILL_SCALE))),
         'unique_id': os.environ.get('UNIQUE_ID', 'test_run'),
-        'stage': os.environ.get('STAGE', 'dev')
+        'stage': stage,
+        'account_id': account_id,
+        'snapshot_role_arn': snapshot_role_arn
     }
     
     logger.info("Environment values parsed:")
@@ -142,10 +171,10 @@ def parse_environment():
     return env_values
 
 
-def update_original_config_with_source_version(original_config_path: str, engine_version: str):
+def update_original_config_with_source_version(original_config_path: str, engine_version: str, env_values: dict):
     """
     Update the original config file with source_cluster_version if not present.
-    Also updates source_cluster.version for RFS backfill command.
+    Also updates source_cluster.version for RFS backfill command and fixes snapshot configuration.
     """
     logger.info(f"Loading original config from: {original_config_path}")
     
@@ -163,7 +192,7 @@ def update_original_config_with_source_version(original_config_path: str, engine
     
     config_updated = False
     
-    # Update metadata_migration.source_cluster_version
+    # Update metadata_migration.source_cluster_version and fix from_snapshot
     if current_metadata_version != engine_version:
         logger.info(f"Updating metadata_migration.source_cluster_version from "
                     f"'{current_metadata_version}' to '{engine_version}'")
@@ -176,37 +205,77 @@ def update_original_config_with_source_version(original_config_path: str, engine
     else:
         logger.info(f"Config already has correct metadata_migration.source_cluster_version: {engine_version}")
     
-    # Update source_cluster.version for RFS backfill
+    # Fix metadata_migration.from_snapshot to be empty instead of null
+    if 'metadata_migration' in config:
+        if config['metadata_migration'].get('from_snapshot') is None:
+            # Remove the key entirely so it appears as empty in YAML
+            if 'from_snapshot' in config['metadata_migration']:
+                del config['metadata_migration']['from_snapshot']
+            # Add it back as empty
+            config['metadata_migration']['from_snapshot'] = None
+            config_updated = True
+    
+    # Update source_cluster.version for RFS backfill with allow_insecure
     if current_source_version != engine_version:
         logger.info(f"Updating source_cluster.version from '{current_source_version}' to '{engine_version}'")
         
         config['source_cluster'] = {
-            'version': engine_version,
             'endpoint': 'http://localhost:9200',
-            'no_auth': {}
+            'no_auth': {},
+            'version': engine_version,
+            'allow_insecure': True
         }
         config_updated = True
     else:
         logger.info(f"Config already has correct source_cluster.version: {engine_version}")
     
+    # Update snapshot configuration with proper ordering and role
+    if 'snapshot' in config:
+        snapshot_config = config['snapshot']
+        
+        # Create properly ordered snapshot configuration
+        ordered_snapshot = {
+            'snapshot_name': snapshot_config.get('snapshot_name', 'large-snapshot'),
+            'otel_endpoint': snapshot_config.get('otel_endpoint', 'http://localhost:4317'),
+            'snapshot_repo_name': snapshot_config.get('snapshot_repo_name', 'migration_assistant_repo'),
+            's3': {
+                'repo_uri': env_values['snapshot_s3_uri'],
+                'aws_region': env_values['snapshot_region'],
+                'role': env_values['snapshot_role_arn']
+            }
+        }
+        
+        # Check if snapshot config needs updating
+        if config['snapshot'] != ordered_snapshot:
+            logger.info("Updating snapshot configuration with proper ordering and role")
+            config['snapshot'] = ordered_snapshot
+            config_updated = True
+    
     # Write back to original file if any updates were made
     if config_updated:
+        # Custom YAML dumper to handle empty values correctly
+        class CustomDumper(yaml.SafeDumper):
+            def represent_none(self, data):
+                return self.represent_scalar('tag:yaml.org,2002:null', '')
+        
+        CustomDumper.add_representer(type(None), CustomDumper.represent_none)
+        
         with open(original_config_path, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False)
+            yaml.dump(config, f, default_flow_style=False, Dumper=CustomDumper)
         
         logger.info(f"Updated original config with engine version: {engine_version}")
     else:
         logger.info(f"No config updates needed - all versions already set to: {engine_version}")
 
 
-def initialize_console_environment(engine_version: str):
+def initialize_console_environment(engine_version: str, env_values: dict):
     """Initialize console environment with updated original config."""
     logger.info("=== INITIALIZING CONSOLE ENVIRONMENT ===")
     
     original_config_path = os.environ.get('CONFIG_FILE_PATH', '/config/migration_services.yaml')
     
     # Update original config instead of creating temporary file
-    update_original_config_with_source_version(original_config_path, engine_version)
+    update_original_config_with_source_version(original_config_path, engine_version, env_values)
     
     # Initialize console environment with original config
     console_env = Context(original_config_path).env
@@ -594,7 +663,7 @@ def main():
         snapshot_info = fetch_snapshot_catalog_info(env_values)
         
         # Initialize console environment with correct engine version from catalog
-        console_env, temp_config_path = initialize_console_environment(snapshot_info['engine_version'])
+        console_env, temp_config_path = initialize_console_environment(snapshot_info['engine_version'], env_values)
         
         # Prepare target cluster
         prepare_target_cluster(console_env.target_cluster)

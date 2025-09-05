@@ -1,6 +1,22 @@
 // RFS External Snapshot E2E Test Configuration
 // This file contains the configuration, context definitions, and plot callback for the external snapshot performance test
 
+// Helper function to extract source version from S3 URI
+def extractSourceVersionFromS3Uri(s3Uri) {
+    // Remove trailing slash and get last 4 characters
+    def cleanUri = s3Uri.replaceAll(/\/$/, '')
+    def versionSuffix = cleanUri.substring(cleanUri.length() - 4)
+    
+    switch(versionSuffix) {
+        case 'es5x': return 'ES_5.6'
+        case 'es6x': return 'ES_6.8'
+        case 'es7x': return 'ES_7.10'
+        case 'os1x': return 'OS_1.3'
+        case 'os2x': return 'OS_2.19'
+        default: return 'ES_7.10' // fallback
+    }
+}
+
 def call(Map config = [:]) {
     def migrationContextId = 'migration-rfs-external-snapshot'
     def stageId = config.STAGE ?: 'rfs-external-snapshot-integ'
@@ -95,30 +111,10 @@ def call(Map config = [:]) {
         }
     }
     
-    // Empty source context to satisfy pipeline requirements (no actual source cluster)
-    def source_cdk_context = """
-        {
-          "source-empty": {
-            "suffix": "ec2-source-<STAGE>",
-            "networkStackSuffix": "ec2-source-<STAGE>",
-            "distVersion": "7.10.2",
-            "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
-            "captureProxyEnabled": false,
-            "securityDisabled": true,
-            "minDistribution": false,
-            "cpuArch": "x64",
-            "isInternal": true,
-            "singleNodeCluster": true,
-            "networkAvailabilityZones": 2,
-            "dataNodeCount": 1,
-            "managerNodeCount": 0,
-            "serverAccessType": "ipv4",
-            "restrictServerAccessTo": "0.0.0.0/0"
-          }
-        }
-    """
+    // Get the source version from the S3 URI
+    def sourceVersion = extractSourceVersionFromS3Uri(config.SNAPSHOT_S3_URI ?: 's3://bucket/large-snapshot-es7x/')
     
-    // Migration context with target cluster and snapshot configuration
+    // Migration context with target cluster and external snapshot configuration
     def migration_cdk_context = """
         {
           "migration-rfs-external-snapshot": {
@@ -137,7 +133,6 @@ def call(Map config = [:]) {
             "artifactBucketRemovalPolicy": "DESTROY",
             "trafficReplayerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": true,
-            "sourceClusterEndpoint": "snapshot://<SNAPSHOT_REPO_NAME>/<SNAPSHOT_NAME>",
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,
             "nodeToNodeEncryptionEnabled": true,
@@ -153,13 +148,15 @@ def call(Map config = [:]) {
             "targetClusterProxyServiceEnabled": false,
             "captureProxyDesiredCount": 0,
             "targetClusterProxyDesiredCount": 0,
+            "sourceCluster": {
+              "disabled": true,
+              "version": "${sourceVersion}"
+            },
             "snapshot": {
               "snapshotName": "<SNAPSHOT_NAME>",
               "snapshotRepoName": "<SNAPSHOT_REPO_NAME>",
-              "s3": {
-                "repo_uri": "<SNAPSHOT_S3_URI>",
-                "aws_region": "<SNAPSHOT_REGION>"
-              }
+              "s3Uri": "<SNAPSHOT_S3_URI>",
+              "s3Region": "<SNAPSHOT_REGION>"
             }
           }
         }
@@ -167,9 +164,7 @@ def call(Map config = [:]) {
 
     // Call the main pipeline with configuration and parameters
     rfsExternalSnapshotE2EPipeline([
-        sourceContext: source_cdk_context,
         migrationContext: migration_cdk_context,
-        sourceContextId: sourceContextId,
         migrationContextId: migrationContextId,
         stageId: stageId,
         lockResourceName: lockResourceName,

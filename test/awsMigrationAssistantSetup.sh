@@ -24,6 +24,22 @@ STAGE="rfs-metrics"
 REGION="us-west-2"
 CLEANUP=false
 
+# Extract source version from S3 URI for proper snapshot parsing
+extract_source_version_from_s3_uri() {
+    local s3_uri="$1"
+    # Remove trailing slash and get last 4 characters
+    local version_suffix=$(echo "$s3_uri" | sed 's|/$||' | tail -c 5)
+    
+    case "$version_suffix" in
+        "es5x") echo "ES_5.6" ;;
+        "es6x") echo "ES_6.8" ;;
+        "es7x") echo "ES_7.10" ;;
+        "os1x") echo "OS_1.3" ;;
+        "os2x") echo "OS_2.19" ;;
+        *) echo "ES_7.10" ;; # fallback
+    esac
+}
+
 # Create required service-linked roles
 create_service_linked_roles() {
     echo "Creating required service-linked roles..."
@@ -45,6 +61,9 @@ generate_migration_context() {
     local s3_bucket=$(echo "$SNAPSHOT_S3_URI" | sed 's|s3://||' | cut -d'/' -f1)
     local s3_path=$(echo "$SNAPSHOT_S3_URI" | sed 's|s3://[^/]*/||')
     
+    # Extract source version from S3 URI for proper snapshot parsing
+    local source_version=$(extract_source_version_from_s3_uri "$SNAPSHOT_S3_URI")
+    
     echo "Generating migration context with:"
     echo "  Stage: $STAGE"
     echo "  Target Endpoint: $TARGET_ENDPOINT"
@@ -54,6 +73,7 @@ generate_migration_context() {
     echo "  Snapshot Name: $SNAPSHOT_NAME"
     echo "  Snapshot Repo: $SNAPSHOT_REPO_NAME"
     echo "  Region: $REGION"
+    echo "  Source Version: $source_version (extracted from S3 URI)"
     
     cat > "$context_file" << EOF
 {
@@ -70,7 +90,7 @@ generate_migration_context() {
     },
     "sourceCluster": {
       "disabled": true,
-      "version": "ES 7.10"
+      "version": "${source_version}"
     },
     "snapshot": {
       "snapshotName": "${SNAPSHOT_NAME}",
@@ -99,7 +119,7 @@ EOF
     echo "Migration context created at: $context_file"
     echo "Context configured for external snapshot migration with:"
     echo "  - Target cluster: ${TARGET_ENDPOINT}"
-    echo "  - Source cluster: disabled (external snapshot mode)"
+    echo "  - Source cluster: disabled (external snapshot mode) with version ${source_version}"
     echo "  - Snapshot S3 URI: ${SNAPSHOT_S3_URI}"
     echo "  - Migration services: console + RFS enabled, traffic replay disabled"
 }
@@ -175,10 +195,26 @@ deploy_migration_infrastructure() {
         exit 1
     fi
     
-    # Deploy CDK stacks with generated context
+    # Backup existing CDK context file and replace with generated context
+    echo "Backing up existing CDK context file and using generated context..."
+    if [ -f "cdk.context.json" ]; then
+        cp "cdk.context.json" "cdk.context.json.backup"
+        echo "Existing CDK context backed up to cdk.context.json.backup"
+    fi
+    
+    # Show the generated migration context before copying
+    echo "=== GENERATED MIGRATION CONTEXT ==="
+    echo "Generated migration context contents:"
+    cat "$TMP_DIR_PATH/migrationContext.json"
+    echo "===================================="
+    
+    # Copy generated migration context to CDK context file
+    cp "$TMP_DIR_PATH/migrationContext.json" "cdk.context.json"
+    echo "Generated migration context copied to cdk.context.json"
+    
+    # Deploy CDK stacks with the updated context
     echo "Deploying CDK stacks with migration context..."
     cdk deploy "*" \
-        --c contextFile="$TMP_DIR_PATH/migrationContext.json" \
         --c contextId="default" \
         --require-approval never \
         --concurrency 3
@@ -189,6 +225,21 @@ deploy_migration_infrastructure() {
     fi
     
     echo "Migration infrastructure deployed successfully"
+    
+    # Show the generated CDK context file
+    echo "=== CDK CONTEXT FILE GENERATED ==="
+    if [ -f "cdk.context.json" ]; then
+        echo "CDK Context file contents:"
+        cat cdk.context.json
+        echo ""
+        echo "CDK Context file size: $(du -h cdk.context.json | cut -f1)"
+    else
+        echo "CDK Context file not found in current directory"
+        echo "Searching for cdk.context.json files..."
+        find . -name "cdk.context.json" -exec echo "Found at: {}" \; -exec cat {} \;
+    fi
+    echo "=================================="
+    
     cd "$TEST_DIR_PATH"
 }
 
