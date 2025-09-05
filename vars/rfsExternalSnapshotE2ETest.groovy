@@ -32,10 +32,10 @@ def call(Map config = [:]) {
     
     // Define metrics to plot
     def metricsToPlot = [
-        [field: 'Duration (min)', title: 'Migration Duration Trend', yaxis: 'Duration (minutes)', style: 'line', logarithmic: false],
-        [field: 'Reindexing Throughput Total (MiB/s)', title: 'Total Throughput Trend', yaxis: 'Total Throughput (MiB/s)', style: 'line', logarithmic: false],
-        [field: 'Reindexing Throughput Per Worker (MiB/s)', title: 'Per-Worker Throughput Trend', yaxis: 'Throughput (MiB/s)', style: 'line', logarithmic: false],
-        [field: 'Size Transferred (GB)', title: 'Data Size Transferred Trend', yaxis: 'Size (GB)', style: 'line', logarithmic: false],
+        [field: 'Duration (min)', title: 'Duration', yaxis: 'minutes', style: 'line', logarithmic: false],
+        [field: 'Reindexing Throughput Total (MiB/s)', title: 'Reindexing Throughput Total', yaxis: 'MiB/s', style: 'line', logarithmic: false],
+        [field: 'Reindexing Throughput Per Worker (MiB/s)', title: 'Reindexing Throughput Per Worker', yaxis: 'MiB/s', style: 'line', logarithmic: false],
+        [field: 'Size Transferred (GB)', title: 'Primary Shard Size Transferred', yaxis: 'GiB', style: 'line', logarithmic: false],
     ]
     
     // Plot metrics callback
@@ -84,14 +84,14 @@ def call(Map config = [:]) {
                     
                     plot csvFileName: uniqueCsvName,
                          csvSeries: [[file: localMetricsPath, exclusionValues: metric.field, displayTableFlag: false, inclusionFlag: 'INCLUDE_BY_STRING', url: '']],
-                         group: 'Migration Performance Metrics',
+                         group: 'Backfill Metrics',
                          title: metric.title,
                          style: metric.style,
                          exclZero: false,
-                         keepRecords: true,
+                         keepRecords: false,
                          logarithmic: metric.logarithmic,
                          yaxis: metric.yaxis,
-                         hasLegend: true
+                         hasLegend: false
                 }
                 echo "Performance metrics plotting completed successfully"
             } else {
@@ -169,10 +169,16 @@ def call(Map config = [:]) {
         stageId: stageId,
         lockResourceName: lockResourceName,
         testUniqueId: testUniqueId,
-        remoteMetricsPath: remoteMetricsPath,
-        localMetricsPath: localMetricsPath,
         metricsOutputDir: metricsOutputDir,
-        plotMetricsCallback: plotMetricsCallback,
+        retrieveFiles: [
+            [
+                remotePath: remoteMetricsPath,
+                localPath: localMetricsPath,
+                clusterName: null
+            ]
+        ],
+        fileRetrievalCallback: plotMetricsCallback,
+        archiveRetrievedFiles: true,
         // Fix: Pass parameters in the params map that the pipeline expects
         params: [
             gitRepoUrl: config.GIT_REPO_URL,

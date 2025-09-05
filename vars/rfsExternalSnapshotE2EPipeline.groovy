@@ -241,35 +241,115 @@ def call(Map config = [:]) {
             
             stage('7. Metrics Collection and Plotting') {
                 timeout(time: 15, unit: 'MINUTES') {
-                    echo "Stage 7: Metrics Collection and Plotting"
-                    echo "Starting metrics collection for test: ${params.testUniqueId}"
+                    echo "Stage 7: File Retrieval and Callbacks"
+                    echo "Processing file retrieval requests for test: ${params.testUniqueId}"
                     
                     dir('test') {
-                        // Create metrics output directory
-                        sh "mkdir -p ${config.metricsOutputDir}"
+                        def retrievalResults = []
                         
-                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                // Retrieve metrics file from ECS container
-                                echo "Retrieving metrics file from container: ${config.remoteMetricsPath}"
-                                def task_arn = sh(script: "aws ecs list-tasks --cluster migration-${params.stage}-ecs-cluster --family 'migration-${params.stage}-migration-console' | jq --raw-output '.taskArns[0]'", returnStdout: true).trim()
-                                
-                                sh """
-                                    mkdir -p \$(dirname ${config.localMetricsPath})
-                                    aws ecs execute-command --cluster "migration-${params.stage}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "cat ${config.remoteMetricsPath}" > ${config.localMetricsPath}
-                                """
+                        // Process each file in the retrieveFiles array
+                        if (config.retrieveFiles) {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-file-retrieval-session') {
+                                    
+                                    config.retrieveFiles.each { fileConfig ->
+                                        try {
+                                            echo "Retrieving file: ${fileConfig.remotePath} to ${fileConfig.localPath}"
+                                            
+                                            // Create output directory
+                                            sh "mkdir -p \$(dirname ${fileConfig.localPath})"
+                                            
+                                            // Determine cluster and service names
+                                            def clusterName = fileConfig.clusterName ?: "migration-${params.stage}-ecs-cluster"
+                                            def serviceName = "migration-${params.stage}-migration-console"
+                                            
+                                            echo "Using cluster: ${clusterName}, service: ${serviceName}"
+                                            
+                                            // Execute file retrieval with filtering
+                                            sh """
+                                                remotePath="${fileConfig.remotePath}"
+                                                localPath="${fileConfig.localPath}"
+                                                
+                                                echo "Finding ECS task in cluster: ${clusterName}"
+                                                TASK_ARN=\$(aws ecs list-tasks --cluster "${clusterName}" --service-name "${serviceName}" --query 'taskArns[0]' --output text)
+                                                
+                                                if [[ -z "\${TASK_ARN}" ]] || [[ "\${TASK_ARN}" == "None" ]]; then
+                                                    echo "No task found for service ${serviceName}"
+                                                    exit 1
+                                                fi
+                                                
+                                                echo "Found task: \${TASK_ARN}"
+                                                
+                                                echo "Checking remote path: \$(dirname \${remotePath})"
+                                                aws ecs execute-command --cluster "${clusterName}" --task "\${TASK_ARN}" --container "migration-console" --interactive --command "ls -la \$(dirname \${remotePath})"
+                                                
+                                                echo "Downloading file: \${remotePath}"
+                                                
+                                                aws ecs execute-command --cluster "${clusterName}" --task "\${TASK_ARN}" --container "migration-console" --interactive --command "cat \${remotePath}" | \\
+                                                    awk 'BEGIN { skip=1 }
+                                                         /[Ss]tarting session with.*/ { skip=0; next }
+                                                         /[Ee]xiting session with.*/ { exit }
+                                                         !skip { print }' | \\
+                                                    grep -v 'Session Manager plugin' | \\
+                                                    grep -v 'session with SessionId' | \\
+                                                    grep -v 'Cannot perform' | \\
+                                                    grep -v '^[[:space:]]*\$' > "\${localPath}"
+                                                
+                                                if [[ ! -s "\${localPath}" ]]; then
+                                                    echo "File download failed or file is empty"
+                                                    exit 1
+                                                fi
+                                                
+                                                echo "File downloaded: \${localPath}"
+                                                echo "Size: \$(du -h \${localPath} | cut -f1)"
+                                                echo "Preview:"
+                                                head -n 5 "\${localPath}"
+                                            """
+                                            
+                                            retrievalResults << [file: fileConfig, success: true]
+                                            echo "Successfully retrieved: ${fileConfig.localPath}"
+                                            
+                                        } catch (Exception e) {
+                                            echo "Failed to retrieve ${fileConfig.remotePath}: ${e.message}"
+                                            retrievalResults << [file: fileConfig, success: false, error: e.message]
+                                        }
+                                    }
+                                }
                             }
+                        } else {
+                            echo "No files specified for retrieval"
                         }
                         
-                        // Archive metrics file
-                        archiveArtifacts artifacts: "${config.metricsOutputDir}/*", allowEmptyArchive: true
+                        // Archive retrieved files if requested
+                        if (config.archiveRetrievedFiles && config.metricsOutputDir) {
+                            echo "Archiving retrieved files from: ${config.metricsOutputDir}"
+                            archiveArtifacts artifacts: "${config.metricsOutputDir}/*", allowEmptyArchive: true
+                        }
                         
-                        // Execute plotting callback
-                        echo "Executing plotting callback..."
-                        if (config.plotMetricsCallback) {
-                            config.plotMetricsCallback()
+                        // Execute callback if provided
+                        if (config.fileRetrievalCallback) {
+                            echo "Executing file retrieval callback..."
+                            config.fileRetrievalCallback()
                         } else {
-                            echo "No plotting callback provided"
+                            echo "No file retrieval callback provided"
+                        }
+                        
+                        // Determine stage success - succeed if metrics file was retrieved
+                        def metricsRetrieved = retrievalResults.any { result ->
+                            result.success && result.file.localPath.contains('backfill_metrics.csv')
+                        }
+                        
+                        if (config.retrieveFiles && !metricsRetrieved) {
+                            error("Critical file retrieval failed - metrics file not retrieved")
+                        }
+                        
+                        echo "File retrieval summary:"
+                        retrievalResults.each { result ->
+                            if (result.success) {
+                                echo "  ✓ ${result.file.localPath}"
+                            } else {
+                                echo "  ✗ ${result.file.localPath} - ${result.error}"
+                            }
                         }
                     }
                     
