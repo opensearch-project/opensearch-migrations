@@ -59,7 +59,7 @@ def call(Map config = [:]) {
           "full-migration": {
             "stage": "<STAGE>",
             "vpcId": "<VPC_ID>",
-            "engineVersion": "OS_2.11",
+            "engineVersion": "OS_2.19",
             "domainName": "os-cluster-<STAGE>",
             "dataNodeCount": 2,
             "openAccessPolicyEnabled": true,
