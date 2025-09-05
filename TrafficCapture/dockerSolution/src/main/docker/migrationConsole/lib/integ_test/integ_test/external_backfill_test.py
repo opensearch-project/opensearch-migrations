@@ -296,7 +296,18 @@ def ensure_cluster_is_clean(cluster: Cluster):
     clear_output = clear_indices(cluster)
     if isinstance(clear_output, str) and "Error" in clear_output:
         raise Exception(f"Cluster Clear Indices Failed: {clear_output}")
-    logger.info("Cluster cleared successfully")
+    logger.info("Cleaning up target cluster with console commands")
+    try:
+        run_console_command(["console", "clusters", "curl", "target_cluster", "-XDELETE", "/basic_index"])
+        logger.info("Successfully deleted basic_index")
+    except Exception as e:
+        logger.info(f"basic_index deletion result (may not exist): {e}")
+    
+    try:
+        run_console_command(["console", "clusters", "curl", "target_cluster", "-XDELETE", "/.migrations_working_state"])
+        logger.info("Successfully deleted .migrations_working_state")
+    except Exception as e:
+        logger.info(f".migrations_working_state deletion result (may not exist): {e}")
 
 
 def prepare_target_cluster(target_cluster: Cluster):
@@ -308,7 +319,7 @@ def prepare_target_cluster(target_cluster: Cluster):
     assert target_con_result.connection_established is True, f"Target cluster connection failed: {target_con_result}"
     logger.info(f"Target cluster connection verified: {target_cluster.endpoint}")
     
-    # Clear any existing data
+    # Clear any remaining data using existing method
     ensure_cluster_is_clean(target_cluster)
     logger.info("Target cluster preparation completed")
 
