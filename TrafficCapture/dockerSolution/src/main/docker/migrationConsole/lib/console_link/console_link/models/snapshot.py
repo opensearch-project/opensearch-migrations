@@ -1,3 +1,4 @@
+from enum import Enum
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -5,7 +6,7 @@ from cerberus import Validator
 from datetime import datetime
 from pydantic import BaseModel, Field, field_serializer
 from requests.exceptions import HTTPError
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, TypeAlias
 
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, NoSourceClusterDefinedError
 from console_link.models.command_result import CommandResult
@@ -15,6 +16,29 @@ from console_link.models.step_state import StepState
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
 logger = logging.getLogger(__name__)
+
+
+# Define the models first to avoid forward reference issues
+class SnapshotIndex(BaseModel):
+    name: str
+    document_count: Optional[int]
+    size_bytes: int
+    shard_count: int = 0
+
+
+class SnapshotIndexState(str, Enum):
+    not_started = "not_started"
+    in_progress = "in_progress"
+    completed = "completed"
+
+
+class SnapshotIndexStatus(SnapshotIndex):
+    status: SnapshotIndexState
+
+
+class SnapshotIndexes(BaseModel):
+    indexes: List[SnapshotIndex]
+
 
 SNAPSHOT_SCHEMA = {
     'snapshot': {
@@ -59,7 +83,7 @@ class Snapshot(ABC):
         self.otel_endpoint = config.get("otel_endpoint", None)
 
     @abstractmethod
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> str:
         """Create a snapshot."""
         pass
 
@@ -69,19 +93,42 @@ class Snapshot(ABC):
         pass
 
     @abstractmethod
-    def delete(self, *args, **kwargs) -> CommandResult:
+    def delete(self, *args, **kwargs) -> str:
         """Delete a snapshot."""
         pass
 
     @abstractmethod
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
         """Delete all snapshots in the snapshot repository."""
         pass
 
     @abstractmethod
-    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
         """Delete a snapshot repository."""
         pass
+
+    def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
+        """
+        Fetch all indexes that will be included in the snapshot with accurate document count and size information.
+        
+        Args:
+            index_patterns: Optional list of index patterns to filter the indexes. If None,
+                          all indexes in the cluster will be considered.
+        
+        Returns:
+            SnapshotIndexes containing information about all indexes that will be included in the snapshot.
+        
+        Raises:
+            NoSourceClusterDefinedError: If no source cluster is defined.
+        """
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        
+        try:
+            return get_cluster_indexes(self.source_cluster, index_patterns)
+        except Exception as e:
+            logger.error(f"Failed to get snapshot indexes: {str(e)}")
+            raise
 
     def _collect_universal_command_args(self) -> Dict:
         if not self.source_cluster:
@@ -128,7 +175,7 @@ class S3Snapshot(Snapshot):
         self.s3_region = config['s3']['aws_region']
         self.s3_endpoint = config['s3'].get('endpoint')
 
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
@@ -161,11 +208,12 @@ class S3Snapshot(Snapshot):
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
-            return CommandResult(success=True,
-                                 value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return f"Snapshot {self.config['snapshot_name']} creation initiated successfully"
         except CommandRunnerError as e:
             logger.debug(f"Failed to create snapshot: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+            ex = FailedToCreateSnapshot()
+            ex.add_note(f"Failure from {str(e)}")
+            raise ex
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -173,19 +221,19 @@ class S3Snapshot(Snapshot):
 
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
-    def delete(self, *args, **kwargs) -> CommandResult:
+    def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
-    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
@@ -197,7 +245,7 @@ class FileSystemSnapshot(Snapshot):
         super().__init__(config, source_cluster)
         self.repo_path = config['fs']['repo_path']
 
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
@@ -218,11 +266,12 @@ class FileSystemSnapshot(Snapshot):
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
-            return CommandResult(success=True,
-                                 value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return f"Snapshot {self.config['snapshot_name']} creation initiated successfully"
         except CommandRunnerError as e:
             logger.debug(f"Failed to create snapshot: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+            ex = FailedToCreateSnapshot()
+            ex.add_note(f"Failure from {str(e)}")
+            raise ex
 
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
@@ -230,19 +279,19 @@ class FileSystemSnapshot(Snapshot):
 
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
-    def delete(self, *args, **kwargs) -> CommandResult:
+    def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
-    def delete_all_snapshots(self, *args, **kwargs) -> CommandResult:
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
-    def delete_snapshot_repo(self, *args, **kwargs) -> CommandResult:
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
 
@@ -295,6 +344,7 @@ class SnapshotStatus(BaseModel):
     data_throughput_bytes_avg_sec: Optional[float] = None
     shard_total: Optional[int] = None
     shard_complete: Optional[int] = None
+    indexes: Optional[List[SnapshotIndexStatus]] = None
     model_config = {
         'from_attributes': True,
     }
@@ -305,10 +355,46 @@ class SnapshotStatus(BaseModel):
 
     @classmethod
     def from_snapshot_info(cls, snapshot_info: dict) -> "SnapshotStatus":
-        # 1) Extract progress metrics
+        """
+        Create a SnapshotStatus object from snapshot information.
+        """
+        progress_metrics = cls._extract_progress_metrics(snapshot_info)
+        
+        percentage, eta_ms = cls._calculate_progress_metrics(
+            progress_metrics["processed_units"],
+            progress_metrics["total_units"],
+            progress_metrics["elapsed_ms"],
+            progress_metrics["state"]
+        )
+        
+        indexes = cls._extract_index_statuses(snapshot_info, progress_metrics["state"])
+        
+        return cls(
+            status=progress_metrics["state"],
+            percentage_completed=percentage,
+            eta_ms=eta_ms,
+            started=datetime.fromtimestamp(progress_metrics["start_ms"] / 1000)
+            if progress_metrics["start_ms"] else None,
+            finished=datetime.fromtimestamp(progress_metrics["finished_ms"] / 1000)
+            if progress_metrics["finished_ms"] else None,
+            data_total_bytes=progress_metrics["total_bytes"],
+            data_processed_bytes=progress_metrics["processed_bytes"],
+            data_throughput_bytes_avg_sec=progress_metrics["throughput_bytes"],
+            shard_total=progress_metrics["total_shards"],
+            shard_complete=progress_metrics["completed_shards"],
+            indexes=indexes
+        )
+        
+    @classmethod
+    def _extract_progress_metrics(cls, snapshot_info: dict) -> dict:
+        """
+        Extract progress metrics from the snapshot information.
+        """
         total_bytes = processed_bytes = throughput_bytes = None
         total_shards = completed_shards = failed_shards = None
         total_units = processed_units = 0
+        start_ms = elapsed_ms = 0
+        
         if shards_stats := snapshot_info.get("shards_stats"):
             # ES ≥7.8 / OS: shard-level stats
             total_units = total_shards = shards_stats.get("total", 0)
@@ -342,39 +428,103 @@ class SnapshotStatus(BaseModel):
                 (processed_bytes / (1024 ** 2)) / (duration_ms / 1000)
                 if duration_ms > 0 else 0
             )
-
-        # 2) Compute percentage complete
+        
+        raw_state = snapshot_info.get("state", "")
+        state = convert_snapshot_state_to_step_state(raw_state)
+        
+        return {
+            "total_bytes": total_bytes,
+            "processed_bytes": processed_bytes,
+            "throughput_bytes": throughput_bytes,
+            "total_shards": total_shards,
+            "completed_shards": completed_shards,
+            "failed_shards": failed_shards,
+            "total_units": total_units,
+            "processed_units": processed_units,
+            "start_ms": start_ms,
+            "elapsed_ms": elapsed_ms,
+            "finished_ms": start_ms + elapsed_ms,
+            "state": state
+        }
+    
+    @classmethod
+    def _calculate_progress_metrics(
+        cls,
+        processed_units: int,
+        total_units: int,
+        elapsed_ms: int,
+        state: StepState
+    ) -> tuple:
+        """
+        Calculate percentage complete and estimated time to completion.
+        """
+        # Compute percentage complete
         percentage = (processed_units / total_units * 100) if total_units else 0.0
-
-        # 3) Compute ETA in ms (only once we've made some progress)
+        
+        # Compute ETA in ms (only once we've made some progress)
         eta_ms: Optional[float] = None
         if 0 < percentage < 100:
             eta_ms = (elapsed_ms / percentage) * (100 - percentage)
-
-        # 4) Normalize finished time
-        finished_ms = start_ms + elapsed_ms
-
-        # 5) Map snapshot state to your status string
-        raw_state = snapshot_info.get("state", "")
-        state = convert_snapshot_state_to_step_state(raw_state)
-
-        # 6) If it's already done, clamp to 100%
+        
+        # If it's already done, clamp to 100%
         if state == StepState.COMPLETED:
             percentage = 100.0
             eta_ms = 0.0
+            
+        return percentage, eta_ms
+    
+    @classmethod
+    def _extract_index_statuses(cls, snapshot_info: dict, overall_state: StepState) -> List[SnapshotIndexStatus]:
+        """
+        Extract status information for individual indexes in the snapshot.
+        """
+        indexes = []
+        indices = snapshot_info.get("indices", {})
+        
+        if not indices:
+            return indexes
+            
+        for index_name, index_info in indices.items():
+            # Extract basic index info
+            shards_info = index_info.get("shards", 0)
 
-        return cls(
-            status=state,
-            percentage_completed=percentage,
-            eta_ms=eta_ms,
-            started=datetime.fromtimestamp(start_ms / 1000) if start_ms else None,
-            finished=datetime.fromtimestamp(finished_ms / 1000) if finished_ms else None,
-            data_total_bytes=total_bytes,
-            data_processed_bytes=processed_bytes,
-            data_throughput_bytes_avg_sec=throughput_bytes,
-            shard_total=total_shards,
-            shard_complete=completed_shards,
-        )
+            # Ensure shard_count is an integer, not a dictionary
+            if isinstance(shards_info, dict):
+                # If it's a dictionary of shard data, just use the count of keys
+                shard_count = len(shards_info)
+            else:
+                shard_count = shards_info
+
+            doc_count = index_info.get("docs", 0)
+            size_bytes = index_info.get("size_in_bytes", 0)
+            
+            # Determine index status
+            index_status = cls._determine_index_status(index_info.get("state", ""), overall_state)
+            
+            # Create and add SnapshotIndexStatus
+            indexes.append(
+                SnapshotIndexStatus(
+                    name=index_name,
+                    document_count=doc_count,
+                    size_bytes=size_bytes,
+                    shard_count=shard_count,
+                    status=index_status
+                )
+            )
+
+        return indexes
+    
+    @staticmethod
+    def _determine_index_status(index_state: str, overall_state: StepState) -> SnapshotIndexState:
+        """
+        Determine the status of an individual index based on its state and the overall snapshot state.
+        """
+        if index_state == "SUCCESS" or overall_state == StepState.COMPLETED:
+            return SnapshotIndexState.completed
+        elif index_state in ["IN_PROGRESS", "STARTED"]:
+            return SnapshotIndexState.in_progress
+        else:
+            return SnapshotIndexState.not_started
 
 
 def convert_snapshot_state_to_step_state(snapshot_state: str) -> StepState:
@@ -477,28 +627,42 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_c
 
 
 def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str, wait_for_completion: bool = True,
-                    timeout_seconds: int = 120):
-    path = f"/_snapshot/{repository}/{snapshot_name}"
-    response = cluster.call_api(path, HttpMethod.DELETE)
-    logging.debug(f"Raw delete snapshot status response: {response.text}")
-    logger.info(f"Initiated deletion of snapshot: {snapshot_name} from repository '{repository}'.")
+                    timeout_seconds: int = 120) -> str:
+    try:
+        path = f"/_snapshot/{repository}/{snapshot_name}"
+        response = cluster.call_api(path, HttpMethod.DELETE)
+        logging.debug(f"Raw delete snapshot status response: {response.text}")
+        logger.info(f"Initiated deletion of snapshot: {snapshot_name} from repository '{repository}'.")
+    except Exception as e:
+        logger.debug(f"Error deleting snapshot '{snapshot_name}' from repository '{repository}': {e}")
+        # For HTTP errors, check if it's a 404 (snapshot not found), which means it's already deleted
+        if isinstance(e, HTTPError) and e.response.status_code == 404:
+            logger.info(f"Snapshot '{snapshot_name}' not found in repository '{repository}', "
+                        "considering it already deleted.")
+            return f"Deleted snapshot: {snapshot_name} from repository '{repository}'"
+        
+        ex = FailedToDeleteSnapshot()
+        ex.add_note(f"Unable to delete snapshot {snapshot_name} from repo {repository}, cause {str(e)}")
+        raise ex
 
     if wait_for_completion:
         logger.info(f"Waiting up to {timeout_seconds} seconds for deletion to complete...")
         end_time = time.time() + timeout_seconds
         while time.time() < end_time:
-            check_response = cluster.call_api(path, raise_error=False)
-            if check_response.status_code == 404:
-                logger.info(f"Snapshot {snapshot_name} successfully deleted.")
-                return
-            logger.debug(f"Waiting for snapshot {snapshot_name} to be deleted...")
-            time.sleep(2)
+            try:
+                check_response = cluster.call_api(path, raise_error=False)
+                if check_response.status_code == 404:
+                    return f"Snapshot {snapshot_name} successfully deleted."
+                logger.debug(f"Waiting for snapshot {snapshot_name} to be deleted...")
+                time.sleep(2)
+            except Exception as e:
+                logger.debug(f"Error checking snapshot deletion status: {e}")
+                time.sleep(2)
         raise TimeoutError(f"Snapshot '{snapshot_name}' in repository '{repository}' was not deleted "
                            f"after {timeout_seconds} seconds.")
 
 
-def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
-    logger.info(f"Clearing snapshots from repository '{repository}'")
+def delete_all_snapshots(cluster: Cluster, repository: str) -> str:
     """
     Clears all snapshots from the specified repository.
 
@@ -506,6 +670,7 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
     :param repository: Name of the snapshot repository to clear snapshots from.
     :raises Exception: For general errors during snapshot clearing, except when the repository is missing.
     """
+    logger.info(f"Clearing snapshots from repository '{repository}'")
     try:
         # List all snapshots in the repository
         snapshots_path = f"/_snapshot/{repository}/_all"
@@ -516,12 +681,18 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
 
         if not snapshots:
             logger.info(f"No snapshots found in repository '{repository}'.")
-            return
+            return f"No snapshots found in repository '{repository}'."
 
-        # Delete each snapshot
+        # Delete each snapshot - continue even if individual deletions fail
         for snapshot in snapshots:
-            snapshot_name = snapshot["snapshot"]
-            delete_snapshot(cluster, snapshot_name, repository)
+            try:
+                snapshot_name = snapshot["snapshot"]
+                delete_snapshot(cluster, snapshot_name, repository)
+            except FailedToDeleteSnapshot:
+                # Ignore expected exceptions, the inner message will log
+                pass
+            except Exception as e:
+                logger.warning(f"Error deleting snapshot '{snapshot_name}': {str(e)}")
 
     except Exception as e:
         # Handle 404 errors specifically for missing repository
@@ -529,13 +700,17 @@ def delete_all_snapshots(cluster: Cluster, repository: str) -> None:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
-                return
-        # Re-raise other errors
-        logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
-        raise e
+                return f"Repository '{repository}' does not exist, all snapshots are deleted."
+
+        logger.debug(f"Error clearing snapshots from repository '{repository}': {e}")
+        ex = FailedToDeleteSnapshot()
+        ex.add_note(f"Cause {str(e)}")
+        raise ex
+    
+    return f"All snapshots cleared from repository '{repository}'"
 
 
-def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
+def delete_snapshot_repo(cluster: Cluster, repository: str) -> str:
     logger.info(f"Deleting repository '{repository}'")
     """
     Delete repository. Should be empty before execution.
@@ -555,7 +730,186 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> None:
             error_details = e.response.json().get('error', {})
             if error_details.get('type') == 'repository_missing_exception':
                 logger.info(f"Repository '{repository}' is missing. Skipping delete.")
-                return
-        # Re-raise other errors
-        logger.error(f"Error deleting repository '{repository}': {e}")
-        raise e
+                return f"Repository '{repository}' does not exist"
+        logger.debug(f"Error deleting repository '{repository}': {e}")
+        ex = FailedToDeleteSnapshotRepo()
+        ex.add_note(f"Cause {str(e)}")
+        raise ex
+    
+    return f"Repository '{repository}' deleted"
+
+
+class SnapshotSourceType(str, Enum):
+    filesystem = "filesytem"
+    s3 = "s3"
+
+
+class SnapshotSource(BaseModel):
+    type: SnapshotSourceType
+
+
+class FileSystemSnapshotSource(SnapshotSource):
+    type: SnapshotSourceType = SnapshotSourceType.filesystem
+    path: str
+
+
+class S3SnapshotSource(SnapshotSource):
+    type: SnapshotSourceType = SnapshotSourceType.s3
+    uri: str
+    region: str
+
+
+SnapshotType: TypeAlias = FileSystemSnapshotSource | S3SnapshotSource
+
+
+class SnapshotConfig(BaseModel):
+    snapshot_name: str
+    repository_name: str
+    index_allow: List[str]
+    source: SnapshotType
+
+
+def _resolve_index_patterns(cluster: Cluster, index_patterns: Optional[List[str]]) -> Optional[str]:
+    """
+    Resolve index patterns to concrete indices including hidden/closed indices.
+    """
+    if not index_patterns:
+        return None
+
+    # Resolve via _resolve/index to capture indices + backing indices of data streams.
+    resolve = cluster.call_api(
+        "/_resolve/index",
+        params={
+            "name": ",".join(index_patterns),
+            "expand_wildcards": "all",
+        },
+    ).json()
+
+    concrete = [i["name"] for i in resolve.get("indices", [])]
+
+    # Include backing indices for any matched data streams
+    for ds in resolve.get("data_streams", []):
+        backing_indices = ds.get("backing_indices", [])
+        backing_index_names = [bi["name"] for bi in backing_indices]
+        concrete.extend(backing_index_names)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_indices = []
+    for x in concrete:
+        if x not in seen:
+            seen.add(x)
+            unique_indices.append(x)
+
+    return ",".join(unique_indices) if unique_indices else None
+
+
+def _get_index_stats(cluster: Cluster, targets: Optional[str]) -> Dict:
+    """
+    Fetch document count and size statistics for indices.
+    """
+    path = f"/{targets}/_stats" if targets else "/_stats"
+    params = {
+        "level": "indices",
+        "filter_path": (
+            "indices.*.primaries.docs.count,"
+            "indices.*.primaries.docs.deleted,"
+            "indices.*.primaries.store.size_in_bytes"
+        ),
+        "expand_wildcards": "all",
+        "metric": "docs,store",
+    }
+    
+    stats = cluster.call_api(path, params=params).json()
+    return stats.get("indices", {}) or {}
+
+
+def _get_shard_counts(cluster: Cluster, targets: Optional[str]) -> Dict[str, int]:
+    """
+    Retrieve shard counts for indices from the _settings endpoint.
+    """
+    settings_path = f"/{targets}/_settings" if targets else "/_settings"
+    settings_params = {
+        "filter_path": "*.settings.index.number_of_shards",
+        "expand_wildcards": "all",
+    }
+    
+    settings_response = cluster.call_api(settings_path, params=settings_params).json()
+
+    # Create a mapping of index name to shard count
+    shard_count_map = {}
+    for index_name, index_data in settings_response.items():
+        # The settings path might include the index name as a prefix
+        clean_name = index_name.split(".")[-1]
+        try:
+            num_shards = int(index_data.get("settings", {}).get("index", {}).get("number_of_shards", 0))
+            shard_count_map[clean_name] = num_shards
+        except (ValueError, AttributeError):
+            # In case of parsing issues, default to 0
+            shard_count_map[clean_name] = 0
+            
+    return shard_count_map
+
+
+def _build_index_list(indices: Dict, shard_count_map: Dict[str, int]) -> List[SnapshotIndex]:
+    """
+    Build and sort a list of SnapshotIndex objects.
+    """
+    index_list: List[SnapshotIndex] = []
+
+    for name, body in indices.items():
+        prim = body.get("primaries", {})
+        docs = prim.get("docs", {})
+        store = prim.get("store", {})
+
+        # Live docs (excludes deletions)
+        doc_count = int(docs.get("count", 0) or 0)
+        size_bytes = int(store.get("size_in_bytes", 0) or 0)
+        
+        shard_count = shard_count_map.get(name, 0)
+
+        index_list.append(SnapshotIndex(
+            name=name,
+            document_count=doc_count,
+            size_bytes=size_bytes,
+            shard_count=shard_count,
+        ))
+
+    # Stable ordering
+    index_list.sort(key=lambda x: x.name)
+    return index_list
+
+
+def get_cluster_indexes(cluster: Cluster, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
+    """
+    Programmatic, more reliable index sizing:
+    - Uses /_stats/docs,store (primary bytes & doc counts)
+    - Includes hidden/closed indices if patterns match
+    - Resolves data streams to backing indices
+    """
+    if not cluster:
+        raise NoSourceClusterDefinedError()
+
+    try:
+        targets = _resolve_index_patterns(cluster, index_patterns)
+        indices = _get_index_stats(cluster, targets)
+        shard_count_map = _get_shard_counts(cluster, targets)
+        index_list = _build_index_list(indices, shard_count_map)
+        
+        return SnapshotIndexes(indexes=index_list)
+
+    except Exception as e:
+        logger.error(f"Failed to fetch index information via _stats: {e}")
+        raise
+
+
+class FailedToCreateSnapshot(Exception):
+    pass
+
+
+class FailedToDeleteSnapshot(Exception):
+    pass
+
+
+class FailedToDeleteSnapshotRepo(Exception):
+    pass

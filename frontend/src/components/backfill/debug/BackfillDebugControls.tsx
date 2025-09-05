@@ -6,7 +6,9 @@ import DebugCommands from "@/components/debug/DebugCommands";
 import { BACKFILL_SCENARIOS } from "@/components/backfill/mockData/backfillScenarios";
 
 interface BackfillDebugControlsProps {
-  readonly onScenarioSelect: (scenario: keyof typeof BACKFILL_SCENARIOS) => void;
+  readonly onScenarioSelect: (
+    scenario: keyof typeof BACKFILL_SCENARIOS,
+  ) => void;
   readonly onReset: () => void;
 }
 
@@ -25,7 +27,7 @@ export function BackfillDebugControls({
             { id: "completed", text: "Completed (Success)" },
             { id: "completedWithFailures", text: "Completed (With Failures)" },
             { id: "failed", text: "Failed" },
-            { id: "pending", text: "Pending"}
+            { id: "pending", text: "Pending" },
           ]}
           onItemClick={({ detail }) =>
             onScenarioSelect(detail.id as keyof typeof BACKFILL_SCENARIOS)

@@ -71,7 +71,7 @@ class WorkingStateDoc:
     completed: bool
     expired: bool
     status: str
-    sucessors: str | None
+    successors: str | None
 
     def __init__(self,
                  index: str,
@@ -80,7 +80,7 @@ class WorkingStateDoc:
                  completed: bool,
                  expired: bool,
                  status: str,
-                 sucessors: str | None = None
+                 successors: str | None = None
                  ) -> None:
         self.index = index
         self.shard = shard
@@ -88,7 +88,7 @@ class WorkingStateDoc:
         self.completed = completed
         self.expired = expired
         self.status = status
-        self.sucessors = sucessors
+        self.successors = successors
 
     def get_id(self):
         return f"{self.index}__{self.shard}__{self.starting_doc_id}"
@@ -97,7 +97,7 @@ class WorkingStateDoc:
         return json.dumps({
             "expiration": past_time if self.expired else future_time,
             "completedAt": past_time if self.completed else None,
-            "successor_items": self.sucessors,
+            "successor_items": self.successors,
             "status": self.status
         })
 
@@ -182,7 +182,7 @@ def create_test_documents(cluster: Cluster):
         completed=True,
         expired=False,
         starting_doc_id=0,
-        sucessors="1",
+        successors="1",
         status="successor_completed"
     ))
 

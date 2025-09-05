@@ -1,6 +1,6 @@
 "use client";
 
-import { useTargetCluster } from "../../hooks/apiFetch";
+import { useTargetCluster } from "@/hooks/apiFetch";
 import RemoteCluster from "./RemoteCluster";
 
 interface TargetConfigureProps {

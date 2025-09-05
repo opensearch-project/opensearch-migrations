@@ -1,4 +1,4 @@
-import { SnapshotStatus, StepState } from '@/generated/api/types.gen';
+import { SnapshotStatus, StepState } from "@/generated/api/types.gen";
 
 // Debug scenario mock data
 export const SNAPSHOT_SCENARIOS: Record<string, SnapshotStatus> = {
@@ -36,5 +36,5 @@ export const SNAPSHOT_SCENARIOS: Record<string, SnapshotStatus> = {
     eta_ms: null,
     started: new Date(Date.now() - 1800000), // Started 30 minutes ago
     finished: new Date(Date.now() - 600000), // Failed 10 minutes ago
-  }
+  },
 };

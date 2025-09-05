@@ -1,10 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
-import { backfillStatus, clusterSource, clusterTarget, metadataStatus, sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
+import { useState, useEffect, useRef } from "react";
+import {
+  backfillStatus,
+  clusterSource,
+  clusterTarget,
+  metadataStatus,
+  sessionGet,
+  snapshotStatus,
+} from "@/generated/api/sdk.gen";
 
 function useFetchData<T>(
-  fetchFn: (sessionName: string) => Promise<{response: {status: number}, data: T}>,
+  fetchFn: (
+    sessionName: string,
+  ) => Promise<{ response: { status: number }; data: T }>,
   sessionName: string,
-  componentName: string = 'component'
+  componentName: string = "component",
 ) {
   const [isLoading, setIsLoading] = useState(true);
   const [data, setData] = useState<T | null>(null);
@@ -16,21 +25,25 @@ function useFetchData<T>(
   useEffect(() => {
     async function fetchData() {
       if (!sessionName) {
-        setError('No session name provided');
+        setError("No session name provided");
         setIsLoading(false);
         return;
       }
-      
+
       try {
         const response = await fetchFnRef.current(sessionName);
         if (response.response.status === 200) {
           setData(response.data);
         } else {
-          setError(`API Error: ${response.response.status} - Failed to fetch ${componentName} data`);
+          setError(
+            `API Error: ${response.response.status} - Failed to fetch ${componentName} data`,
+          );
         }
       } catch (err) {
         console.error(`Error fetching ${componentName} data:`, err);
-        setError(`${err instanceof Error ? err.message : 'Unknown error'}\n\n${err instanceof Error && err.stack ? err.stack : ''}`);
+        setError(
+          `${err instanceof Error ? err.message : "Unknown error"}\n\n${err instanceof Error && err.stack ? err.stack : ""}`,
+        );
       } finally {
         setIsLoading(false);
       }
@@ -45,16 +58,16 @@ function useFetchData<T>(
 
 export function useSourceCluster(sessionName: string) {
   const fetchSourceCluster = async (name: string) => {
-    return await clusterSource({ path: {session_name: name } });
-  }
-  return useFetchData(fetchSourceCluster, sessionName, 'source cluster');
+    return await clusterSource({ path: { session_name: name } });
+  };
+  return useFetchData(fetchSourceCluster, sessionName, "source cluster");
 }
 
 export function useTargetCluster(sessionName: string) {
   const fetchTargetCluster = async (name: string) => {
-    return await clusterTarget({ path: {session_name: name } });
-  }
-  return useFetchData(fetchTargetCluster, sessionName, 'target cluster');
+    return await clusterTarget({ path: { session_name: name } });
+  };
+  return useFetchData(fetchTargetCluster, sessionName, "target cluster");
 }
 
 export function useSessionOverview(sessionName: string) {
@@ -62,7 +75,7 @@ export function useSessionOverview(sessionName: string) {
     return await sessionGet({ path: { session_name: name } });
   };
 
-  return useFetchData(fetchSession, sessionName, 'session overview');
+  return useFetchData(fetchSession, sessionName, "session overview");
 }
 
 export function useSnapshotStatus(sessionName: string) {
@@ -70,15 +83,15 @@ export function useSnapshotStatus(sessionName: string) {
     return await snapshotStatus({ path: { session_name: name } });
   };
 
-  return useFetchData(fetchSnapshot, sessionName, 'snapshot status');
+  return useFetchData(fetchSnapshot, sessionName, "snapshot status");
 }
 
 export function useMetadataStatus(sessionName: string) {
   const fetchMetadata = async (name: string) => {
-    return await metadataStatus({ path: {session_name: name } });
+    return await metadataStatus({ path: { session_name: name } });
   };
 
-  return useFetchData(fetchMetadata, sessionName, 'metadata status');
+  return useFetchData(fetchMetadata, sessionName, "metadata status");
 }
 
 export function useBackfillStatus(sessionName: string) {
@@ -86,5 +99,5 @@ export function useBackfillStatus(sessionName: string) {
     return await backfillStatus({ path: { session_name: name } });
   };
 
-  return useFetchData(fetchBackfill, sessionName, 'backfill status');
+  return useFetchData(fetchBackfill, sessionName, "backfill status");
 }

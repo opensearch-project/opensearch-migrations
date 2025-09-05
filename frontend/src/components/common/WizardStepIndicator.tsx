@@ -7,9 +7,9 @@ export interface WizardStepIndicatorProps {
   readonly totalSteps: number;
 }
 
-export default function WizardStepIndicator({ 
-  stepIndex, 
-  totalSteps 
+export default function WizardStepIndicator({
+  stepIndex,
+  totalSteps,
 }: WizardStepIndicatorProps) {
   return (
     <Box padding="s">
