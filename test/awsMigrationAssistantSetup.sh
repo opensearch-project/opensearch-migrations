@@ -53,15 +53,13 @@ create_service_linked_roles() {
 generate_migration_context() {
     echo "Generating migration context for external snapshot migration..."
     
-    local context_file="$TMP_DIR_PATH/migrationContext.json"
-    
     mkdir -p "$TMP_DIR_PATH"
     
-    # Parse S3 URI components
+    local context_file="$TMP_DIR_PATH/migrationContext.json"
+    
+    # Extract S3 bucket name, snapshot folder path and source version
     local s3_bucket=$(echo "$SNAPSHOT_S3_URI" | sed 's|s3://||' | cut -d'/' -f1)
     local s3_path=$(echo "$SNAPSHOT_S3_URI" | sed 's|s3://[^/]*/||')
-    
-    # Extract source version from S3 URI for proper snapshot parsing
     local source_version=$(extract_source_version_from_s3_uri "$SNAPSHOT_S3_URI")
     
     echo "Generating migration context with:"
