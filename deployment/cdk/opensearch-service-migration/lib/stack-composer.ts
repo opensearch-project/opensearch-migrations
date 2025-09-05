@@ -228,10 +228,13 @@ export class StackComposer {
             }
         }
         const sourceClusterDisabled = (sourceClusterField?.disabled ?? sourceClusterDisabledField)
+        let sourceClusterVersion: string | undefined
         if (sourceClusterDisabled) {
             if (sourceClusterDisabledField) {
                 CdkLogger.warn("The `sourceClusterDisabled` field is being deprecated in favor of a `disabled: true` field in the `sourceCluster` object.")
             }
+            // Preserve the version information even when source cluster is disabled for RFS
+            sourceClusterVersion = sourceClusterField?.version
             sourceClusterDefinition = undefined
         }
 
@@ -467,7 +470,7 @@ export class StackComposer {
                 extraArgs: reindexFromSnapshotExtraArgs,
                 clusterAuthDetails: servicesYaml.target_cluster?.auth,
                 skipClusterCertCheck: servicesYaml.target_cluster?.allowInsecure,
-                sourceClusterVersion: servicesYaml.source_cluster?.version,
+                sourceClusterVersion: sourceClusterVersion ?? servicesYaml.source_cluster?.version,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
