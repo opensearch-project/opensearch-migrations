@@ -17,7 +17,6 @@ import {
 import { TemplateBodyBuilder } from "@/schemas/templateBodyBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import { SimpleExpression } from "@/schemas/expression";
 import {Workflow} from "@/schemas/workflowBuilder";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> = TaskOpts<LoopT> & {

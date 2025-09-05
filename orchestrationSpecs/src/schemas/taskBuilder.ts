@@ -39,7 +39,6 @@ export type InputKind<T> =
 export type IsEmptyRecord<T> = keyof T extends never ? true : false;
 export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 
-
 export type ParamsRegistrationFn<
     TaskScope extends TasksOutputsScope,
     Inputs extends InputParametersRecord,
@@ -48,6 +47,59 @@ export type ParamsRegistrationFn<
     priorTasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>,
     register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol
 ) => ParamsPushedSymbol
+
+export type NormalizeInputsOfCtxTemplate<
+    C extends WorkflowAndTemplatesScope,
+    K extends Extract<keyof C["templates"], string>
+> =
+    NormalizeInputs<InputsOf<C["templates"][K]>> extends InputParametersRecord
+        ? NormalizeInputs<InputsOf<C["templates"][K]>>
+        : {};
+
+export type NormalizeInputsOfWfTemplate<
+    W extends Workflow<any, any, any>,
+    K extends Extract<keyof W["templates"], string>
+> =
+    W["templates"][K] extends { inputs: infer X }
+        ? NormalizeInputs<X> extends InputParametersRecord ? NormalizeInputs<X> : {}
+        : {};
+
+export type ParamsTuple<
+    I extends InputParametersRecord,
+    Name extends string,
+    S extends TasksOutputsScope,
+    LoopT extends PlainObject
+> =
+    InputKind<I> extends "empty"
+        ? [opts?: TaskOpts<LoopT>]
+        : InputKind<I> extends "allOptional"
+            ? [
+                paramsFn?: UniqueNameConstraintOutsideDeclaration<
+                    Name, S, ParamsRegistrationFn<S, I, LoopT>
+                >,
+                opts?: TaskOpts<LoopT>
+            ]
+            : [
+                paramsFn: UniqueNameConstraintOutsideDeclaration<
+                    Name, S, ParamsRegistrationFn<S, I, LoopT>
+                >,
+                opts?: TaskOpts<LoopT>
+            ];
+
+export function unpackParams<I extends InputParametersRecord, LoopT extends PlainObject>(
+    args: readonly unknown[]
+): {
+    paramsFn: ParamsRegistrationFn<any, I, LoopT>;
+    opts: TaskOpts<LoopT> | undefined;
+} {
+    const [first, second] = args as [any, any];
+    const paramsFn =
+        typeof first === "function"
+            ? first
+            : ((_: unknown, register: (v: {}) => void) => register({}));
+    const opts = typeof first === "function" ? second : first;
+    return { paramsFn, opts };
+}
 
 export type InputsOf<T> =
     T extends { inputs: infer I }
@@ -78,7 +130,6 @@ export type NamedTask<
     Extra extends Record<string, any> = {}
 > = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
 
-/** ---- NEW: type-level “rebinder” (a type constructor at the value level) ---- */
 export type TaskRebinder<C extends WorkflowAndTemplatesScope> =
     <NS extends TasksOutputsScope>(context: C, scope: NS, tasks: NamedTask[]) => any;
 
