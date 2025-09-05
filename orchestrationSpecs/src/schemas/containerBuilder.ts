@@ -52,14 +52,18 @@ export class ContainerBuilder<
     ContainerScope extends GenericScope,
     EnvScope extends DataScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<ContextualScope, "container", InputParamsScope, ContainerScope, OutputParamsScope,
+> extends TemplateBodyBuilder<ContextualScope, InputParamsScope, ContainerScope, OutputParamsScope,
     ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope, any>> {
     constructor(contextualScope: ContextualScope,
                 inputsScope: InputParamsScope,
                 bodyScope: ContainerScope,
                 public readonly envScope: EnvScope,  // Add env scope to constructor
                 outputsScope: OutputParamsScope) {
-        super("container", contextualScope, inputsScope, bodyScope, outputsScope)
+        super(contextualScope, inputsScope, bodyScope, outputsScope)
+    }
+
+    protected getBody() {
+        return { container: this.bodyScope };
     }
 
     // Update existing methods to preserve EnvScope type parameter

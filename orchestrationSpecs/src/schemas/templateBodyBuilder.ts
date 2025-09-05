@@ -14,14 +14,12 @@ import {
 
 export abstract class TemplateBodyBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
-    BodyKey extends string,
     InputParamsScope extends InputParametersRecord,
     BodyScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord,
     // Key detail: Self is NOT fixed to a particular OutputParamsScope
     Self extends TemplateBodyBuilder<
         ContextualScope,
-        BodyKey,
         InputParamsScope,
         BodyScope,
         any,     // <-- decouple Self from OutputParamsScope
@@ -29,7 +27,6 @@ export abstract class TemplateBodyBuilder<
     >
 > {
     constructor(
-        protected readonly bodyKey: BodyKey,
         protected readonly contextualScope: ContextualScope,
         protected readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
@@ -42,7 +39,6 @@ export abstract class TemplateBodyBuilder<
             tb: Self
         ) => TemplateBodyBuilder<
             ContextualScope,
-            BodyKey,
             InputParamsScope,
             BodyScope,
             NewOutputScope,
@@ -52,7 +48,6 @@ export abstract class TemplateBodyBuilder<
     ): Self &
         TemplateBodyBuilder<
             ContextualScope,
-            BodyKey,
             InputParamsScope,
             BodyScope,
             NewOutputScope,
@@ -63,7 +58,6 @@ export abstract class TemplateBodyBuilder<
             Self &
             TemplateBodyBuilder<
                 ContextualScope,
-                BodyKey,
                 InputParamsScope,
                 BodyScope,
                 NewOutputScope,
@@ -83,21 +77,18 @@ export abstract class TemplateBodyBuilder<
 
     // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow
     // others to reach into the body anyway.  They should interface through the inputs and outputs exclusively
-    getBody(): { body: { [K in BodyKey]: Record<string, any> } } {
-        const impl = {[this.bodyKey]: this.bodyScope} as Record<BodyKey, BodyScope>;
-        return {body: {...impl}};
-    }
+    protected abstract getBody(): Record<string, any>;
 
     // used by the TemplateBuilder!
     getFullTemplateScope(): {
         inputs: InputParamsScope,
         outputs: OutputParamsScope,
-        body: Record<string, any> // implementation of the body is purposefully type-erased
+        body: Record<string, any> // implementation of the body's type is purposefully type-erased
     } {
         return {
             inputs: this.inputsScope,
             outputs: this.outputsScope,
-            ...this.getBody()
+            body: this.getBody()
         };
     }
 }

@@ -7,19 +7,19 @@ import {INTERNAL} from "@/schemas/taskBuilder";
 
 describe("paramsFns runtime validation", () => {
     const sharedNothingTemplate =
-        WorkflowBuilder.create({ k8sResourceName: "SharedDoNothing"})
-        .addTemplate("doNothing", b=> {
-            const result = b
-                .addOptionalInput("strParam", s=>"str")
-                .addOptionalInput("optNum", n=>42)
-                .addSteps(x=>x)
-                .addExpressionOutput("out1", "outputStr" as string)
-            ;
-            expectTypeOf(result.outputsScope).toEqualTypeOf<{out1: OutputParamDef<string>}>();
-            return result;
-        })
+        WorkflowBuilder.create({k8sResourceName: "SharedDoNothing"})
+            .addTemplate("doNothing", b => {
+                const result = b
+                    .addOptionalInput("strParam", s => "str")
+                    .addOptionalInput("optNum", n => 42)
+                    .addSteps(x => x)
+                    .addExpressionOutput("out1", "outputStr" as string)
+                ;
+                expectTypeOf(result.outputsScope).toEqualTypeOf<{ out1: OutputParamDef<string> }>();
+                return result;
+            })
             .getFullScope();
-    expectTypeOf(sharedNothingTemplate.templates.doNothing.outputs).toEqualTypeOf<{out1: OutputParamDef<string>}>();
+    expectTypeOf(sharedNothingTemplate.templates.doNothing.outputs).toEqualTypeOf<{ out1: OutputParamDef<string> }>();
     const templateBuilder = new TemplateBuilder({}, {}, {}, {});
 
     it("Creates empty dag template", () => {
@@ -28,7 +28,7 @@ describe("paramsFns runtime validation", () => {
                 .create({
                     k8sResourceName: "Test"
                 })
-                .addTemplate("emptyDag", b=> b
+                .addTemplate("emptyDag", b => b
                     .addDag(d => d)
                 )
                 .getFullScope();
@@ -41,7 +41,7 @@ describe("paramsFns runtime validation", () => {
             },
             "templates": {
                 "emptyDag": {
-                    "body": {"dag": {}},
+                    "body": {"dag": []},
                     "inputs": {},
                     "outputs": {}
                 },
@@ -52,13 +52,13 @@ describe("paramsFns runtime validation", () => {
 
     it("addTasks to dag template", () => {
         const d = templateBuilder.addDag(td => {
-            const result = td.addTask("init", sharedNothingTemplate, "doNothing",
-                (tasks,register) => register({
-                    strParam: "b"
-                }));
-            expectTypeOf(result).toExtend<DagBuilder<any,any,any,any>>();
-            expectTypeOf(result).not.toBeAny();
-            return result;
+                const result = td.addTask("init", sharedNothingTemplate, "doNothing",
+                    (tasks, register) => register({
+                        strParam: "b"
+                    }));
+                expectTypeOf(result).toExtend<DagBuilder<any, any, any, any>>();
+                expectTypeOf(result).not.toBeAny();
+                return result;
             }
         );
     })
@@ -70,22 +70,78 @@ describe("paramsFns runtime validation", () => {
             })
             .addTemplate("doNothing", t => t
                 //.addRequiredInput("str", typeToken<string>())
-                .addSteps(b=>b) // no steps necessary
+                .addSteps(b => b) // no steps necessary
             )
-            .addTemplate("dagWF", t=> t
+            .addTemplate("dagWF", t => t
                 .addRequiredInput("str1", typeToken<string>())
-                .addDag(b=>b
+                .addDag(b => b
                     .addTask("first", sharedNothingTemplate, "doNothing",
                         (tasks, register) => register({
                             strParam: ""
                         }))
-                    .addTask("nothing1", INTERNAL,"doNothing")
-                    .addTask("nothing2", INTERNAL,"doNothing")
+                    .addTask("second", INTERNAL, "doNothing", {dependencies: ["first"]})
+                    .addTask("third", INTERNAL, "doNothing", {dependencies: ["first", "second"]})
                 )
             )
             .getFullScope();
+
         expectTypeOf(wf).not.toBeAny();
-    })
-
-
+        expect(wf).toEqual({
+            "metadata": {
+                "k8sMetadata": {"name": "Test"},
+                "name": "",
+                "parallelism": undefined,
+                "serviceAccountName": undefined,
+            },
+            "templates": {
+                "dagWF": {
+                    "body": {
+                        "dag": [
+                            {
+                                "args": {
+                                    "strParam": "",
+                                },
+                                "name": "first",
+                                "templateRef": {
+                                    "name": "doNothing",
+                                    "template": "SharedDoNothing",
+                                },
+                            },
+                            {
+                                "args": {},
+                                "dependencies": [
+                                    "first",
+                                ],
+                                "name": "second",
+                                "template": "doNothing",
+                            },
+                            {
+                                "args": {},
+                                "dependencies": [
+                                    "first",
+                                    "second",
+                                ],
+                                "name": "third",
+                                "template": "doNothing",
+                            },
+                        ],
+                    },
+                    "inputs": {
+                        "str1": {
+                            "description": undefined,
+                        },
+                    },
+                    "outputs": {},
+                },
+                "doNothing": {
+                    "body": {
+                        "steps": [],
+                    },
+                    "inputs": {},
+                    "outputs": {}
+                },
+            },
+            "workflowParameters": {}
+        });
+    });
 })

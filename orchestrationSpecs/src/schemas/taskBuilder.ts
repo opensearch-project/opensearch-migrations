@@ -6,7 +6,7 @@ import {
 import { Workflow } from "@/schemas/workflowBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import { CallerParams, InputParametersRecord, OutputParametersRecord } from "@/schemas/parameterSchemas";
+import {CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import { SimpleExpression, stepOutput } from "@/schemas/expression";
 
 export type TaskOpts<LoopT extends PlainObject> = {
@@ -69,22 +69,23 @@ export type ParamsTuple<
     I extends InputParametersRecord,
     Name extends string,
     S extends TasksOutputsScope,
-    LoopT extends PlainObject
+    LoopT extends PlainObject,
+    OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
 > =
     InputKind<I> extends "empty"
-        ? [opts?: TaskOpts<LoopT>]
+        ? [opts?: OptsType]
         : InputKind<I> extends "allOptional"
             ? [
                 paramsFn?: UniqueNameConstraintOutsideDeclaration<
                     Name, S, ParamsRegistrationFn<S, I, LoopT>
                 >,
-                opts?: TaskOpts<LoopT>
+                opts?: OptsType
             ]
             : [
                 paramsFn: UniqueNameConstraintOutsideDeclaration<
                     Name, S, ParamsRegistrationFn<S, I, LoopT>
                 >,
-                opts?: TaskOpts<LoopT>
+                opts?: OptsType
             ];
 
 export function unpackParams<I extends InputParametersRecord, LoopT extends PlainObject>(
@@ -175,7 +176,7 @@ export type ApplyRebinder<
  *
  * IMPORTANT: every method that “extends the scope” now returns ApplyRebinder<RB, C, NewScope>.
  */
-export class TaskBuilder<
+export abstract class TaskBuilder<
     C extends WorkflowAndTemplatesScope,
     S extends TasksOutputsScope,
     RB extends TaskRebinder<C>
@@ -189,8 +190,8 @@ export class TaskBuilder<
     ) {}
 
     /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
-    protected onTaskPushed(task: NamedTask, when?: SimpleExpression<boolean>): NamedTask {
-        return when !== undefined ? { ...task, when } : task;
+    protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(task: NamedTask, opts?: OptsType): NamedTask {
+        return opts?.when !== undefined ? { ...task, when: opts?.when } : task;
     }
 
     getParamsFromCallback<
@@ -219,12 +220,13 @@ export class TaskBuilder<
         Name extends string,
         TemplateSource,                      // typeof INTERNAL | Workflow<...>
         K extends KeyFor<C, TemplateSource>, // tie K to S so key autocompletes
-        LoopT extends PlainObject
+        LoopT extends PlainObject,
+        OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         source: UniqueNameConstraintOutsideDeclaration<Name, S, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, S, K>,
-        ...args: ParamsTuple<InputsFrom<C, TemplateSource, K>, Name, S, LoopT>
+        ...args: ParamsTuple<InputsFrom<C, TemplateSource, K>, Name, S, LoopT, OptsType>
     ): ApplyRebinder<
         RB,
         C,
@@ -240,7 +242,7 @@ export class TaskBuilder<
             const outputs = (this.contextualScope.templates as any)?.[k]?.outputs as OutputsFrom<C, S, K>;
 
             const templateCall = this.callTemplate(name as string, k, params, opts?.loopWith);
-            return this.addTaskHelper(name, templateCall as any, outputs, opts?.when);
+            return this.addTaskHelper(name, templateCall as any, outputs, opts);
         } else {
             const wf = source as unknown as Workflow<any, any, any>;
             const k = key as unknown as string;
@@ -248,7 +250,7 @@ export class TaskBuilder<
 
             // keep your current external behavior (no loopWith to callExternalTemplate)
             const templateCall = this.callExternalTemplate(name as string, wf, k as any, params);
-            return this.addTaskHelper(name, templateCall as any, outputs, opts?.when);
+            return this.addTaskHelper(name, templateCall as any, outputs, opts);
         }
     }
 
@@ -257,25 +259,25 @@ export class TaskBuilder<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        LoopT extends PlainObject = never
+        LoopT extends PlainObject,
+        OptsType extends TaskOpts<LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<TKey, S>,
         templateCall: NamedTask<IN, OUT, LoopT>,
         outputs: OUT,
-        when?: SimpleExpression<boolean>
+        opts?: OptsType
     ): ApplyRebinder<RB, C, ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>> {
         const nameStr = name as string;
+        this.orderedTaskList.push(this.onTaskPushed(templateCall, opts));
 
-        this.orderedTaskList.push(this.onTaskPushed(templateCall, when));
-
-        const taskDef: TasksWithOutputs<TKey, OUT> = {
+        const taskSig: TasksWithOutputs<TKey, OUT> = {
             name: nameStr as TKey,
             outputTypes: outputs
         };
 
         const nextScope = {
             ...this.tasksScope,
-            [nameStr]: taskDef
+            [nameStr]: taskSig
         } as ExtendScope<S, { [K in TKey]: TasksWithOutputs<TKey, OUT> }>;
 
         // Use the rebinder to produce the precise next instance
@@ -290,7 +292,7 @@ export class TaskBuilder<
             if (taskDef.outputTypes) {
                 tasks[taskName] = {};
                 Object.entries(taskDef.outputTypes).forEach(([outputName, outputParamDef]: [string, any]) => {
-                    tasks[taskName][outputName] = stepOutput(taskName, outputName, outputParamDef);
+                    tasks[taskName][outputName] = this.getTaskOutputAsExpression(taskName, outputName, outputParamDef);
                 });
             }
         });
@@ -299,6 +301,8 @@ export class TaskBuilder<
             ...(loopWith ? { item: loopWith } : {})
         } as TasksScopeToTasksWithOutputs<S>;
     }
+
+    protected abstract getTaskOutputAsExpression<T extends PlainObject>(taskName: string, outputName: string, outputParamDef: OutputParamDef<any>): SimpleExpression<T>;
 
     public getTasks() {
         return { scope: this.tasksScope, taskList: this.orderedTaskList };

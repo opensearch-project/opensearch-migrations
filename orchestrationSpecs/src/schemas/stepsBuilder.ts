@@ -17,6 +17,7 @@ import {
     TaskBuilder,
     TaskRebinder,
 } from "@/schemas/taskBuilder";
+import {SimpleExpression, stepOutput} from "@/schemas/expression";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -41,6 +42,12 @@ class StepGroupBuilder<
 
         super(contextualScope, tasksScope, tasks, rebind);
     }
+
+    protected getTaskOutputAsExpression<T extends PlainObject>(
+        taskName: string, outputName: string, outputParamDef: OutputParamDef<any>
+    ): SimpleExpression<T> {
+        return stepOutput(taskName, outputName, outputParamDef);
+    }
 }
 
 type BuilderLike = { getTasks(): { scope: any; taskList: NamedTask[] } };
@@ -52,7 +59,6 @@ export class StepsBuilder<
     OutputParamsScope extends OutputParametersRecord
 > extends TemplateBodyBuilder<
     ContextualScope,
-    "steps",
     InputParamsScope,
     StepsScope,
     OutputParamsScope,
@@ -65,7 +71,7 @@ export class StepsBuilder<
         public readonly stepGroups: StepGroup[],
         public outputsScope: OutputParamsScope
     ) {
-        super("steps", contextualScope, inputsScope, bodyScope, outputsScope);
+        super(contextualScope, inputsScope, bodyScope, outputsScope);
     }
 
     /**
@@ -147,8 +153,7 @@ export class StepsBuilder<
         ) as any;
     }
 
-    getBody(): { body: { steps: StepGroup[] } } {
-        // Steps are an ordered list of StepGroups in the final manifest.
-        return {body: {steps: this.stepGroups}};
+    protected getBody() {
+        return {steps: this.stepGroups};
     }
 }

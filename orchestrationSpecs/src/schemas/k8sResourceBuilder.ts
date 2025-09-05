@@ -22,14 +22,18 @@ export class K8sResourceBuilder<
     InputParamsScope extends InputParametersRecord,
     ResourceScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<ContextualScope, "resource", InputParamsScope, ResourceScope, OutputParamsScope,
+> extends TemplateBodyBuilder<ContextualScope, InputParamsScope, ResourceScope, OutputParamsScope,
     K8sResourceBuilder<ContextualScope, InputParamsScope, ResourceScope, any>>
 {
     constructor(contextualScope: ContextualScope,
                 inputsScope: InputParamsScope,
                 bodyScope: ResourceScope,
                 outputsScope: OutputParamsScope) {
-        super("resource", contextualScope, inputsScope, bodyScope, outputsScope)
+        super(contextualScope, inputsScope, bodyScope, outputsScope)
+    }
+
+    protected getBody() {
+        return { resource: this.bodyScope };
     }
 
     setDefinition(workflowDefinition: ResourceWorkflowDefinition) {
