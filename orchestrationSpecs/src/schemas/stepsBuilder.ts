@@ -9,14 +9,13 @@ import {
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
-import {Workflow} from "@/schemas/workflowBuilder";
 import {
+    InputsFrom, KeyFor, KeyMustMatch,
     NamedTask,
-    NormalizeInputsOfCtxTemplate, NormalizeInputsOfWfTemplate,
-    OutputsOf,
+    OutputsFrom,
     ParamsTuple,
     TaskBuilder,
-    TaskRebinder, unpackParams
+    TaskRebinder,
 } from "@/schemas/taskBuilder";
 
 export interface StepGroup {
@@ -71,8 +70,6 @@ export class StepsBuilder<
 
     /**
      * Accept **any** builder-like result that has getTasks().
-     * If caller returns a TypescriptError<...>, it won't have getTasks and we propagate that error type back.
-     * If it succeeds, we infer the extended scope and return a new StepsBuilder with that scope.
      */
     public addStepGroup<R>(
         builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => R
@@ -92,70 +89,34 @@ export class StepsBuilder<
                 [...this.stepGroups, {steps: results.taskList}],
                 this.outputsScope
             ) as any;
+        } else {
+            return newGroup; // Propagate the error object to the callsite
         }
-
-        // Propagate the error/other type to the callsite
-        return newGroup;
     }
 
-    // Convenience method for single external step
-    public addExternalStep<
+    // Convenience method for single step
+    public addStep<
         Name extends string,
-        TWorkflow extends Workflow<any, any, any>,
-        TKey extends Extract<keyof TWorkflow["templates"], string>,
-        LoopT extends PlainObject = never,
-        IInputs extends InputParametersRecord = NormalizeInputsOfWfTemplate<TWorkflow, TKey>
+        TemplateSource,
+        K extends KeyFor<ContextualScope, TemplateSource>,
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        workflow: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TWorkflow>,
-        key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        ...args: ParamsTuple<IInputs, Name, StepsScope, LoopT>
-    ): UniqueNameConstraintOutsideDeclaration<
-        Name,
-        StepsScope,
-        StepsBuilder<
-            ContextualScope,
-            InputParamsScope,
-            ExtendScope<
-                StepsScope,
-                { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }
-            >,
-            OutputParamsScope
-        >
+        source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TemplateSource>,
+        key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, K>,
+        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, StepsScope, LoopT>
+    ): StepsBuilder<
+        ContextualScope,
+        InputParamsScope,
+        ExtendScope<
+            StepsScope,
+            { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ContextualScope, TemplateSource, K>> }
+        >,
+        OutputParamsScope
     > {
-        const { paramsFn, opts } = unpackParams<IInputs, LoopT>(args);
-        return this.addStepGroup(gb =>
-            gb.addExternalTask(name, workflow, key, paramsFn as any, opts)
-        ) as any;
-    }
-
-    // Convenience method for single internal step
-    public addInternalStep<
-        Name extends string,
-        TKey extends Extract<keyof ContextualScope["templates"], string>,
-        LoopT extends PlainObject = never,
-        IInputs extends InputParametersRecord = NormalizeInputsOfCtxTemplate<ContextualScope, TKey>
-    >(
-        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
-        templateKey: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TKey>,
-        ...args: ParamsTuple<IInputs, Name, StepsScope, LoopT>
-    ): UniqueNameConstraintOutsideDeclaration<
-        Name,
-        StepsScope,
-        StepsBuilder<
-            ContextualScope,
-            InputParamsScope,
-            ExtendScope<
-                StepsScope,
-                { [K in Name]: TasksWithOutputs<Name, OutputsOf<ContextualScope["templates"][TKey]>> }
-            >,
-            OutputParamsScope
-        >
-    > {
-        const { paramsFn, opts } = unpackParams<IInputs, LoopT>(args);
-        return this.addStepGroup(gb =>
-            gb.addInternalTask(name, templateKey, paramsFn as any, opts)
-        ) as any;
+        return this.addStepGroup(gb => {
+            return gb.addTask<Name, TemplateSource, K, LoopT>(name, source, key, ...args);
+        }) as any;
     }
 
     public addExpressionOutput<T extends PlainObject, Name extends string>(

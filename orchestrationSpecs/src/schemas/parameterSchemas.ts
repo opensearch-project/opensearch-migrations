@@ -10,13 +10,6 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-// parameterSchemas.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// Zero-runtime, strongly-typed parameter model for building Argo workflows.
-// No Zod, no runtime validation. The goal is to model everything *statically*
-// and simply serialize the in-memory model to YAML at runtime.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 import {inputParam, workflowParam} from "@/schemas/expression";
 
@@ -110,7 +103,8 @@ export type CallerParams<T extends InputParametersRecord> =
     // required keys (no defaults)
     { [K in keyof T as T[K] extends { _hasDefault: true } ? never : K]-?: InferParamType<T[K]> };
 
-/** Convenience: turn template input param defs into expression leaves.
+/**
+ * Convenience: turn template input param defs into expression leaves.
  * NOTE: These are *runtime* constructors of expression nodes, but remain
  * shape-preserving and side-effect free. Circular import with expression.ts
  * is intentional and safe as long as you don't execute these during module

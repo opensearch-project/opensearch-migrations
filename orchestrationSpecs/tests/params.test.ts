@@ -27,7 +27,7 @@ describe("paramsFns runtime validation", () => {
 
     it("optional and required are correct", () => {
         templateBuilder.addSteps(sb=> {
-            sb.addExternalStep("init", doNothingTemplate, "opStr", (steps, register) => register({optionalA: "hi"}));
+            sb.addStep("init", doNothingTemplate, "opStr", (steps, register) => register({optionalA: "hi"}));
             return sb;
         });
     });
@@ -35,19 +35,19 @@ describe("paramsFns runtime validation", () => {
     it("spurious parameters are rejected", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addExternalStep("init", doNothingTemplate, "opStr", (steps,register) => register({notReal: "1"}));
-            sb.addExternalStep("init", doNothingTemplate, "opStr", (steps,register) => register({}));
-            return sb;
+            sb.addStep("init", doNothingTemplate, "opStr", (steps,register) => register({notReal: "1"}));
+            const next = sb.addStep("init", doNothingTemplate, "opStr", (steps,register) => register({}));
+            return next;
         });
     });
 
     it("required param is required and must match type", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addExternalStep("init", doNothingTemplate, "reqNum", (steps,register) => register({}));
+            sb.addStep("init", doNothingTemplate, "reqNum", (steps,register) => register({}));
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addExternalStep("init", doNothingTemplate, "reqNum", (steps,register) => register({reqNum: "1"}));
-            sb.addExternalStep("init", doNothingTemplate, "reqNum", (steps,register) => register({reqNum: 1}));
+            sb.addStep("init", doNothingTemplate, "reqNum", (steps,register) => register({reqNum: "1"}));
+            sb.addStep("init", doNothingTemplate, "reqNum", (steps,register) => register({reqNum: 1}));
             return sb;
         });
     });
@@ -56,8 +56,8 @@ describe("paramsFns runtime validation", () => {
     it("optional enum param types work", () => {
         templateBuilder.addSteps(sb => {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addExternalStep("init", doNothingTemplate, "opEnum", (steps,register) => register({opEnum: "aaa"}));
-            sb.addExternalStep("init", doNothingTemplate, "opEnum", (steps,register) => register({opEnum: "a"} as cpo));
+            sb.addStep("init", doNothingTemplate, "opEnum", (steps,register) => register({opEnum: "aaa"}));
+            sb.addStep("init", doNothingTemplate, "opEnum", (steps,register) => register({opEnum: "a"} as cpo));
             return sb;
         });
     });
@@ -66,8 +66,8 @@ describe("paramsFns runtime validation", () => {
     it("required enum param types work", () => {
         templateBuilder.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addExternalStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: "aaa"}));
-            sb.addExternalStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: "a"}));
+            sb.addStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: "aaa"}));
+            sb.addStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: "a"}));
             return sb;
         });
     });
@@ -91,8 +91,8 @@ describe("paramsFns runtime validation", () => {
 
         wpsBuilder.addTemplate("test", sb=>sb.addSteps(sb=> {
             // @ts-expect-error — mixed scalar types should be rejected
-            sb.addExternalStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: sb.workflowInputs.wpStr}));
-            sb.addExternalStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: sb.workflowInputs.wpEnum}));
+            sb.addStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: sb.workflowInputs.wpStr}));
+            sb.addStep("init", doNothingTemplate, "reqEnum", (steps,register) => register({reqEnum: sb.workflowInputs.wpEnum}));
             return sb;
         }));
     });

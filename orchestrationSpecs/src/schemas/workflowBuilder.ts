@@ -15,7 +15,6 @@ import {
     ExtendScope,
     GenericScope,
     TemplateSigEntry,
-    TemplateSignaturesScope,
     TemplateSignaturesScopeTyped
 } from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";

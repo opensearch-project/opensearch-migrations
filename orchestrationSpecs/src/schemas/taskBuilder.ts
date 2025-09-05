@@ -1,4 +1,3 @@
-// taskBuilderBase.ts
 import {
     ExtendScope, IfNever, LoopWithUnion, ParamsWithLiteralsOrExpressions,
     TasksOutputsScope, TasksScopeToTasksWithOutputs, TasksWithOutputs,
@@ -15,8 +14,12 @@ export type TaskOpts<LoopT extends PlainObject> = {
     when?: SimpleExpression<boolean>
 }
 
+// Sentinel to try to guarantee that the parameters have been pushed back to the callback
 const PARAMS_PUSHED = Symbol('params_pushed');
 type ParamsPushedSymbol = typeof PARAMS_PUSHED;
+
+// Sentinel to indicate "use local template by key"
+export const INTERNAL: unique symbol = Symbol("INTERNAL_TEMPLATE");
 
 // ==== helpers for InputParamDef-based detection ====
 
@@ -27,7 +30,6 @@ export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
 export type SomeRequiredKey<T> =
     [keyof T] extends [never] ? never
         : { [K in keyof T]-?: ValueHasDefault<T[K]> extends true ? never : K }[keyof T];
-
 export type HasRequiredByDef<T> = [SomeRequiredKey<T>] extends [never] ? false : true;
 
 // Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
@@ -36,7 +38,6 @@ export type InputKind<T> =
         : HasRequiredByDef<T> extends true ? "hasRequired"
             : "allOptional";
 
-export type IsEmptyRecord<T> = keyof T extends never ? true : false;
 export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 
 export type ParamsRegistrationFn<
@@ -111,6 +112,32 @@ export type OutputsOf<T> =
         ? O extends OutputParametersRecord ? O : {}
         : {};
 
+export type IsInternal<Src> = Src extends typeof INTERNAL ? true : false;
+
+export type KeyFor<C extends WorkflowAndTemplatesScope, Src> =
+    IsInternal<Src> extends true
+        ? Extract<keyof C["templates"], string>
+        : Src extends Workflow<any, any, any>
+            ? Extract<keyof Src["templates"], string>
+            : never;
+
+export type KeyMustMatch<C extends WorkflowAndTemplatesScope, Src, K> =
+    K extends KeyFor<C, Src> ? K : never;
+
+export type InputsFrom<C extends WorkflowAndTemplatesScope, Src, K> =
+    IsInternal<Src> extends true
+        ? NormalizeInputsOfCtxTemplate<C, Extract<K, Extract<keyof C["templates"], string>>>
+        : Src extends Workflow<any, any, any>
+            ? NormalizeInputsOfWfTemplate<Src, Extract<K, Extract<keyof Src["templates"], string>>>
+            : never;
+
+export type OutputsFrom<C extends WorkflowAndTemplatesScope, Src, K> =
+    IsInternal<Src> extends true
+        ? OutputsOf<C["templates"][Extract<K, Extract<keyof C["templates"], string>>]>
+        : Src extends Workflow<any, any, any>
+            ? OutputsOf<Src["templates"][Extract<K, Extract<keyof Src["templates"], string>>]>
+            : never;
+
 export type WorkflowTask<
     IN extends InputParametersRecord,
     OUT extends OutputParametersRecord,
@@ -166,33 +193,6 @@ export class TaskBuilder<
         return when !== undefined ? { ...task, when } : task;
     }
 
-    addExternalTask<
-        Name extends string,
-        TWorkflow extends Workflow<any, any, any>,
-        TKey extends Extract<keyof TWorkflow["templates"], string>,
-        LoopT extends PlainObject = never
-    >(
-        name: UniqueNameConstraintAtDeclaration<Name, S>,
-        workflowIn: UniqueNameConstraintOutsideDeclaration<Name, S, TWorkflow>,
-        key: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
-        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S, ParamsRegistrationFn<S, TWorkflow["templates"][TKey]["inputs"], LoopT>>,
-        opts?: TaskOpts<LoopT>
-    ): ApplyRebinder<RB, C,
-        ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, TWorkflow["templates"][TKey]["outputs"]> }>
-    > {
-        const workflow = workflowIn as TWorkflow;
-        const templateKey = key as TKey;
-        const taskContext =  this.buildTasksWithOutputs(opts?.loopWith);
-        const templateCall = this.callExternalTemplate(
-            name as string,
-            workflow,
-            templateKey,
-            this.getParamsFromCallback((paramsFn as any), taskContext),
-        );
-
-        return this.addTaskHelper(name, templateCall, workflow.templates[templateKey].outputs, opts?.when);
-    }
-
     getParamsFromCallback<
         Inputs extends InputParametersRecord,
         LoopT extends PlainObject = never
@@ -215,33 +215,41 @@ export class TaskBuilder<
         return capturedParams!;
     }
 
-    addInternalTask<
+    public addTask<
         Name extends string,
-        TKey extends Extract<keyof C["templates"], string>,
-        TTemplate extends C["templates"][TKey],
-        LoopT extends PlainObject = never
+        TemplateSource,                      // typeof INTERNAL | Workflow<...>
+        K extends KeyFor<C, TemplateSource>, // tie K to S so key autocompletes
+        LoopT extends PlainObject
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
-        templateKey: UniqueNameConstraintOutsideDeclaration<Name, S, TKey>,
-        paramsFn: UniqueNameConstraintOutsideDeclaration<Name, S,
-            ParamsRegistrationFn<S, InputsOf<TTemplate>, LoopT>
-        >,
-        opts?: TaskOpts<LoopT>
-    ): ApplyRebinder<RB, C,
-        ExtendScope<S, { [K in Name]: TasksWithOutputs<Name, OutputsOf<TTemplate>> }>
+        source: UniqueNameConstraintOutsideDeclaration<Name, S, TemplateSource>,
+        key: UniqueNameConstraintOutsideDeclaration<Name, S, K>,
+        ...args: ParamsTuple<InputsFrom<C, TemplateSource, K>, Name, S, LoopT>
+    ): ApplyRebinder<
+        RB,
+        C,
+        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, S, K>> }>
     > {
-        const template = this.contextualScope.templates?.[templateKey as string];
-        const outputs = (template && "outputs" in template ? template.outputs : {}) as OutputsOf<TTemplate>;
-
+        const { paramsFn, opts } = unpackParams<InputsFrom<C, S, K>, LoopT>(args);
         const taskContext = this.buildTasksWithOutputs(opts?.loopWith);
-        const templateCall = this.callTemplate(
-            name as string,
-            templateKey as string,
-            this.getParamsFromCallback((paramsFn as any), taskContext),
-            opts?.loopWith
-        );
+        const params = this.getParamsFromCallback(paramsFn as any, taskContext);
 
-        return this.addTaskHelper(name, templateCall, outputs, opts?.when);
+        if (source === INTERNAL) {
+            // runtime: we just need a string; compile-time was already checked
+            const k = key as unknown as string;
+            const outputs = (this.contextualScope.templates as any)?.[k]?.outputs as OutputsFrom<C, S, K>;
+
+            const templateCall = this.callTemplate(name as string, k, params, opts?.loopWith);
+            return this.addTaskHelper(name, templateCall as any, outputs, opts?.when);
+        } else {
+            const wf = source as unknown as Workflow<any, any, any>;
+            const k = key as unknown as string;
+            const outputs = (wf.templates as any)?.[k]?.outputs as OutputsFrom<C, S, K>;
+
+            // keep your current external behavior (no loopWith to callExternalTemplate)
+            const templateCall = this.callExternalTemplate(name as string, wf, k as any, params);
+            return this.addTaskHelper(name, templateCall as any, outputs, opts?.when);
+        }
     }
 
     /** Core helper extends scope and returns the REBOUND type for the new scope. */

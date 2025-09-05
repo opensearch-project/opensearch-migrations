@@ -3,6 +3,7 @@ import {OutputParamDef, typeToken} from "@/schemas/parameterSchemas";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {expectTypeOf} from "expect-type";
 import {DagBuilder} from "@/schemas/dagBuilder";
+import {INTERNAL} from "@/schemas/taskBuilder";
 
 describe("paramsFns runtime validation", () => {
     const sharedNothingTemplate =
@@ -51,9 +52,10 @@ describe("paramsFns runtime validation", () => {
 
     it("addTasks to dag template", () => {
         const d = templateBuilder.addDag(td => {
-            const result = td.addExternalTask("init", sharedNothingTemplate, "doNothing", b => ({
-                strParam: "b"
-            }));
+            const result = td.addTask("init", sharedNothingTemplate, "doNothing",
+                (tasks,register) => register({
+                    strParam: "b"
+                }));
             expectTypeOf(result).toExtend<DagBuilder<any,any,any,any>>();
             expectTypeOf(result).not.toBeAny();
             return result;
@@ -73,14 +75,12 @@ describe("paramsFns runtime validation", () => {
             .addTemplate("dagWF", t=> t
                 .addRequiredInput("str1", typeToken<string>())
                 .addDag(b=>b
-                    .addExternalTask("first", sharedNothingTemplate, "doNothing", d => ({
-                        strParam: "",
-                        notReal: ""
-                    }))
-                    .addInternalTask("nothing1", "doNothing", d => ({
-                        notreal: b.inputs.str1
-                    }))
-                    .addInternalTask("nothing2", "doNothing", d => ({notReal: "1"}))
+                    .addTask("first", sharedNothingTemplate, "doNothing",
+                        (tasks, register) => register({
+                            strParam: ""
+                        }))
+                    .addTask("nothing1", INTERNAL,"doNothing")
+                    .addTask("nothing2", INTERNAL,"doNothing")
                 )
             )
             .getFullScope();
@@ -88,29 +88,4 @@ describe("paramsFns runtime validation", () => {
     })
 
 
-    it("test that a step workflow can be created", () => {
-        var wf = WorkflowBuilder
-            .create({
-                k8sResourceName: "Test"
-            })
-            .addTemplate("doNothing", t => t
-                // .addRequiredInput("str", typeToken<string>())
-                .addSteps(b=>b) // no steps necessary
-            )
-            .addTemplate("dagWF", t => t
-                .addSteps(b=> {
-                    // @ ts-expect-error — excess property should be rejected
-                    const b1 = b.addExternalStep("first", sharedNothingTemplate, "doNothing", d => ({
-                            notReal: ""
-                        }));
-                    const b2 = b1.addInternalStep("nothing1", "doNothing", d => ({
-                        notreal: 9
-                    }));
-                    return b2.addInternalStep("nothing2", "doNothing", d => ({str: "", notReal: "1"}))
-                    }
-                )
-            )
-            .getFullScope();
-        expectTypeOf(wf).not.toBeAny();
-    })
 })

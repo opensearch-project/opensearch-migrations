@@ -1,7 +1,6 @@
 import {z} from "zod";
 
 export const IMAGE_SPECIFIER = z.string();
-// Define everything in Zod
 export const HTTP_AUTH_BASIC = z.object({
     username: z.string(),
     password: z.string(),

@@ -6,6 +6,7 @@ import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {BaseExpression, equals, literal} from "@/schemas/expression";
 import {makeParameterLoop} from "@/schemas/workflowTypes";
 import {typeToken} from "@/schemas/parameterSchemas";
+import {INTERNAL} from "@/schemas/taskBuilder";
 
 const leftE: BaseExpression<string, "govaluate"> = literal("a");
 const rightE: BaseExpression<string, "govaluate"> = literal("a");
@@ -41,21 +42,24 @@ export const FullMigration = WorkflowBuilder.create({
             ),
             "OCI image locations and pull policies for required images")
         .addSteps(b => b
-            .addExternalStep("init", TargetLatchHelpers, "init", (steps,register) => register({
-                prefix: "w",
-                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
-                targets: [],
-                configuration: {
-                    indices: [],
-                    migrations: []
-                }
-            }))
-            .addInternalStep("split", "pipelineSourceMigration", (stepScope,register) => register({
+            .addStep("init", TargetLatchHelpers, "init",
+                (steps,register) => register({
+                    prefix: "w",
+                    etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
+                    targets: [],
+                    configuration: {
+                        indices: [],
+                        migrations: []
+                    }
+                }))
+            .addStep("split", INTERNAL, "pipelineSourceMigration",
+                (stepScope,register) => register({
                     sourceMigrationConfig: stepScope.item
                 }),
                 { loopWith: makeParameterLoop(b.inputs.sourceMigrationConfigs) }
             )
-            .addInternalStep("split2", "pipelineSourceMigration", (stepScope,register) => register({
+            .addStep("split2", INTERNAL, "pipelineSourceMigration",
+                (stepScope,register) => register({
                     sourceMigrationConfig: stepScope.item
                 }),
                 {
@@ -65,10 +69,11 @@ export const FullMigration = WorkflowBuilder.create({
                 //equals(literal("never"), concat(b.inputs.simpleString)) // compile error - as expected!
             )
 
-            .addExternalStep("cleanup", TargetLatchHelpers, "cleanup", (stepScope,register) => register({
-                prefix: stepScope.tasks.init.prefix,
-                etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
-            }))
+            .addStep("cleanup", TargetLatchHelpers, "cleanup",
+                (stepScope,register) => register({
+                    prefix: stepScope.tasks.init.prefix,
+                    etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
+                }))
         )
     )
     .addTemplate("cleanup", t => t

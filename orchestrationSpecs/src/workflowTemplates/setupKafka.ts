@@ -2,6 +2,7 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {typeToken} from "@/schemas/parameterSchemas";
 import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
+import {INTERNAL} from "@/schemas/taskBuilder";
 
 function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: AllowLiteralOrExpression<string> }) {
     return {
@@ -68,8 +69,9 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("kafkaName", typeToken<string>())
         .addOptionalInput("useKraft", s=>true)
         .addDag(b=>b
-            .addInternalTask("deployPool", "deployKafkaNodePool", (tasks, register) => register({
-                kafkaName: "NEVERNEVER",//b.inputs.kafkaName,
+            .addTask("deployPool", INTERNAL,"deployKafkaNodePool",
+                (tasks, register) => register({
+                    kafkaName: "NEVERNEVER",//b.inputs.kafkaName,
             })))
     )
     .getFullScope();
