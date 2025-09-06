@@ -9,20 +9,22 @@ export const CommonWorkflowParameters = {
     s3SnapshotConfigMap: defineParam({ defaultValue: "s3-snapshot-config" })
 } as const;
 
-const LogicalOciImages = [
+export const LogicalOciImages = [
     "CaptureProxy",
     "TrafficReplayer",
     "ReindexFromSnapshot",
     "MigrationConsole",
     "EtcdUtils",
 ] as const;
+export type LogicalOciImagesKeys = typeof LogicalOciImages[number];
 
-export const ImageParameters =
-    Object.fromEntries(
-        LogicalOciImages.flatMap(k => [
-            [`Image${k}Location`, defineParam({defaultValue: ""})],
-            [`Image${k}ImagePullPolicy`, defineParam({defaultValue: "IF_NOT_PRESENT" as IMAGE_PULL_POLICY})]
+export function makeImageParametersForKeys<K extends LogicalOciImagesKeys, T extends readonly K[]>(keys: T) {
+    return Object.fromEntries(
+        keys.flatMap(k => [
+            [`image${k}Location`, defineParam({defaultValue: ""})],
+            [`image${k}PullPolicy`, defineParam({defaultValue: "IF_NOT_PRESENT" as IMAGE_PULL_POLICY})]
         ])
-    ) as Record<`Image${typeof LogicalOciImages[number]}Location`, InputParamDef<string,false>> &
-        Record<`Image${typeof LogicalOciImages[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>;
-console.log(ImageParameters.ImageCaptureProxyLocation)
+    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string,false>> &
+        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>;
+}
+export const ImageParameters = makeImageParametersForKeys(LogicalOciImages);

@@ -19,22 +19,12 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {toEnvVarName, TypescriptError} from "@/utils";
+import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
 import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
 import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
 import {PlainObject} from "@/schemas/plainObject";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
-
-export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpression<string>>>(
-    inputs: T
-): { [K in keyof T as Uppercase<string & K>]: T[K] } {
-    const result: Record<string, AllowLiteralOrExpression<string>> = {};
-    Object.entries(inputs).forEach(([key, value]) => {
-        result[toEnvVarName(key)] = value;
-    });
-    return result as any;
-}
 
 export function inputsToEnvVarNames<T extends Record<string, AllowLiteralOrExpression<string>>>(
     inputs: T

@@ -30,7 +30,7 @@ export abstract class TemplateBodyBuilder<
         protected readonly contextualScope: ContextualScope,
         protected readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
-        protected readonly outputsScope: OutputParamsScope
+        public readonly outputsScope: OutputParamsScope
     ) {
     }
 

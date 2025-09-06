@@ -15,129 +15,138 @@ import {
     PathExpression,
     TernaryExpression
 } from "@/schemas/expression";
-import {PlainObject} from "@/schemas/plainObject";
+import { PlainObject } from "@/schemas/plainObject";
 
-export function toArgoExpression<T extends PlainObject>(expr: BaseExpression<T>): string {
-    // Use type guards instead of switch statements with type assertions
+/** Lightweight erased type to avoid deep generic instantiation */
+type AnyExpr = BaseExpression<any, any>;
 
+/* ───────────────── toArgoExpression ───────────────── */
+
+// Overload (nice for call sites — return stays string)
+export function toArgoExpression<E extends AnyExpr>(expr: E): string;
+
+// Implementation uses erased types to prevent TS2589
+export function toArgoExpression(expr: AnyExpr): string {
     if (isAsStringExpression(expr)) {
         return toArgoExpression(expr.source);
     }
 
     if (isLiteralExpression(expr)) {
-        if (typeof expr.value === 'string') {
-            return `"${expr.value}"`;
-        } else if (typeof expr.value === 'number' || typeof expr.value === 'boolean') {
-            return String(expr.value);
-        } else if (expr.value === null) {
-            return 'null';
-        } else {
-            // Objects and arrays - serialize as JSON
-            return JSON.stringify(expr.value);
-        }
+        const le = expr as LiteralExpression<any>;
+        if (typeof le.value === "string") return `"${le.value}"`;
+        if (typeof le.value === "number" || typeof le.value === "boolean") return String(le.value);
+        if (le.value === null) return "null";
+        return JSON.stringify(le.value); // objects / arrays
     }
 
     if (isParameterExpression(expr)) {
-        switch (expr.source.kind) {
-            case 'workflow':
-                return `{{workflow.parameters.${expr.source.parameterName}}}`;
-            case 'input':
-                return `{{inputs.parameters.${expr.source.parameterName}}}`;
-            case 'step_output':
-                return `{{steps.${expr.source.stepName}.outputs.parameters.${expr.source.parameterName}}}`;
-            case 'task_output':
-                return `{{tasks.${expr.source.taskName}.outputs.parameters.${expr.source.parameterName}}}`;
+        const pe = expr as FromParameterExpression<any>;
+        switch (pe.source.kind) {
+            case "workflow":
+                return `{{workflow.parameters.${pe.source.parameterName}}}`;
+            case "input":
+                return `{{inputs.parameters.${pe.source.parameterName}}}`;
+            case "step_output":
+                return `{{steps.${pe.source.stepName}.outputs.parameters.${pe.source.parameterName}}}`;
+            case "task_output":
+                return `{{tasks.${pe.source.taskName}.outputs.parameters.${pe.source.parameterName}}}`;
             default:
-                throw new Error(`Unknown parameter source: ${(expr.source as any).kind}`);
+                throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
         }
     }
 
     if (isConfigMapExpression(expr)) {
-        return `{{workflow.parameters.${expr.configMapName}-${expr.key}}}`;
+        const ce = expr as FromConfigMapExpression<any>;
+        // adjust to your real templating for configmaps if different
+        return `{{workflow.parameters.${ce.configMapName}-${ce.key}}}`;
     }
 
     if (isPathExpression(expr)) {
-        const sourceArgo = toArgoExpression(expr.source);
-        // Convert path to JSONPath format
-        const jsonPath = expr.path.replace(/\[(\d+)\]/g, '[$1]').replace(/^/, '$.');
+        const pe = expr as PathExpression<AnyExpr, any, string, any>;
+        const sourceArgo = toArgoExpression(pe.source);
+        // Convert path to JSONPath format (your paths already like a.b or [0].c)
+        const jsonPath = pe.path.replace(/\[(\d+)\]/g, "[$1]").replace(/^/, "$.");
         return `{{${sourceArgo} | jsonpath('${jsonPath}')}}`;
     }
 
     if (isConcatExpression(expr)) {
-        const parts = expr.expressions.map(toArgoExpression);
-        return expr.separator
-            ? parts.join(expr.separator)
-            : parts.join('');
+        const ce = expr as ConcatExpression<any>;
+        const parts = ce.expressions.map(toArgoExpression);
+        return ce.separator ? parts.join(ce.separator) : parts.join("");
     }
 
     if (isTernaryExpression(expr)) {
-        return `{{${toArgoExpression(expr.condition)} ? ${toArgoExpression(expr.whenTrue)} : ${toArgoExpression(expr.whenFalse)}}}`;
+        const te = expr as TernaryExpression<any, any, any, any>;
+        return `{{${toArgoExpression(te.condition)} ? ${toArgoExpression(te.whenTrue)} : ${toArgoExpression(te.whenFalse)}}}`;
     }
 
     if (isArithmeticExpression(expr)) {
-        return `{{${toArgoExpression(expr.left)} ${expr.operator} ${toArgoExpression(expr.right)}}}`;
+        const ae = expr as ArithmeticExpression<any, any>;
+        return `{{${toArgoExpression(ae.left)} ${ae.operator} ${toArgoExpression(ae.right)}}}`;
     }
 
     if (isComparisonExpression(expr)) {
-        return `{{${toArgoExpression(expr.left)} ${expr.operator} ${toArgoExpression(expr.right)}}}`;
+        const ce = expr as ComparisonExpression<any, any, any>;
+        return `{{${toArgoExpression(ce.left)} ${ce.operator} ${toArgoExpression(ce.right)}}}`;
     }
 
     if (isArrayLengthExpression(expr)) {
-        return `{{${toArgoExpression(expr.array)} | length}}`;
+        const le = expr as ArrayLengthExpression<any>;
+        return `{{${toArgoExpression(le.array)} | length}}`;
     }
 
     if (isArrayIndexExpression(expr)) {
-        return `{{${toArgoExpression(expr.array)}[${toArgoExpression(expr.index)}]}}`;
+        const ie = expr as ArrayIndexExpression<any, any>;
+        return `{{${toArgoExpression(ie.array)}[${toArgoExpression(ie.index)}]}}`;
     }
 
     throw new Error(`Unsupported expression kind: ${(expr as any).kind}`);
 }
 
-export function isAsStringExpression(expr: BaseExpression<any>): expr is AsStringExpression<any> {
-    return expr.kind === 'as_string';
+/* ───────────────── Lightweight type guards ─────────────────
+   Each guard narrows to a minimal, erased version of the node
+   to avoid recursive generic re-instantiation. */
+
+export function isAsStringExpression(e: AnyExpr): e is AsStringExpression<any> {
+    return e.kind === "as_string";
 }
 
-export function isLiteralExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is LiteralExpression<T> {
-    return expr.kind === 'literal';
+export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> {
+    return e.kind === "literal";
 }
 
-export function isParameterExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is FromParameterExpression<T> {
-    return expr.kind === 'parameter';
+export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> {
+    return e.kind === "parameter";
 }
 
-export function isConfigMapExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is FromConfigMapExpression<T> {
-    return expr.kind === 'configmap';
+export function isConfigMapExpression(e: AnyExpr): e is FromConfigMapExpression<any> {
+    return e.kind === "configmap";
 }
 
-export function isPathExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is PathExpression<any> {
-    return expr.kind === 'path';
+export function isPathExpression(e: AnyExpr): e is PathExpression<AnyExpr, any, string, any> {
+    return e.kind === "path";
 }
 
-export function isConcatExpression(expr: BaseExpression<any>): expr is ConcatExpression<any> {
-    return expr.kind === 'concat';
+export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> {
+    return e.kind === "concat";
 }
 
-export function isTernaryExpression<
-    T extends AnyExpression<boolean>,
-    L extends AnyExpression<OutT>,
-    R extends AnyExpression<OutT>,
-    OutT extends PlainObject,
-    C extends ExpressionType>(expr: BaseExpression<any>): expr is TernaryExpression<any, any, any, any> {
-    return expr.kind === 'ternary';
+export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> {
+    return e.kind === "ternary";
 }
 
-export function isArithmeticExpression(expr: BaseExpression<any>): expr is ArithmeticExpression<any, any> {
-    return expr.kind === 'arithmetic';
+export function isArithmeticExpression(e: AnyExpr): e is ArithmeticExpression<any, any> {
+    return e.kind === "arithmetic";
 }
 
-export function isComparisonExpression(expr: BaseExpression<any>): expr is ComparisonExpression<any, any, any> {
-    return expr.kind === 'comparison';
+export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> {
+    return e.kind === "comparison";
 }
 
-export function isArrayLengthExpression(expr: BaseExpression<any>): expr is ArrayLengthExpression<any> {
-    return expr.kind === 'array_length';
+export function isArrayLengthExpression(e: AnyExpr): e is ArrayLengthExpression<any> {
+    return e.kind === "array_length";
 }
 
-export function isArrayIndexExpression<T extends PlainObject>(expr: BaseExpression<T>): expr is ArrayIndexExpression<any, any, T, any> {
-    return expr.kind === 'array_index';
+export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any> {
+    return e.kind === "array_index";
 }

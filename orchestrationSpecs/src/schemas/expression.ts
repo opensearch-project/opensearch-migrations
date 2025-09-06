@@ -71,22 +71,80 @@ export class AsStringExpression<
     constructor(public readonly source: E) { super("as_string"); }
 }
 
-type PathValue<T, P extends string> =
-    P extends keyof T ? T[P]
-        : P extends `${infer K}.${infer Rest}` ? (K extends keyof T ? PathValue<T[K], Rest> : never)
-            : P extends `[${infer _Index}]${infer Rest}`
-                ? T extends readonly (infer U)[] ? PathValue<U, Rest extends "" ? never : Rest extends `.${infer R}` ? R : never> : never
+/* ── Valid path strings for a schema T ───────────────────────────────────── */
+
+type IndexSeg = `[${number}]`;
+
+type _KeyPathsObj<T> =
+// object-ish: K or K.Sub
+    {
+        [K in Extract<keyof T, string>]:
+        | K
+        | (KeyPaths<T[K]> extends never ? never : `${K}.${KeyPaths<T[K]>}`)
+    }[Extract<keyof T, string>];
+
+type _KeyPathsArray<T> =
+// allow "[i]" and "[i].Sub"
+    | IndexSeg
+    | (KeyPaths<T> extends never ? never : `${IndexSeg}.${KeyPaths<T>}`);
+
+export type KeyPaths<T> =
+    T extends readonly (infer U)[] ? _KeyPathsArray<U> :
+        T extends object               ? _KeyPathsObj<T>   :
+            never;
+
+/* ── Value at a given path P in schema T (preserves null/undefined exactly) ─ */
+
+export type PathValue<T, P extends string> =
+// direct key
+    P extends keyof T ? T[P] :
+
+        // dot step: "a.b"
+        P extends `${infer K}.${infer Rest}`
+            ? K extends keyof T
+                ? PathValue<T[K], Rest>
+                : never
+            : // array index: "[0]" or "[0].rest"
+            P extends `[${infer _Index}]${infer Rest}`
+                ? T extends readonly (infer U)[]
+                    ? Rest extends "" ? U
+                        : Rest extends `.${infer R}` ? PathValue<U, R> : never
+                    : never
                 : never;
+
+/* ── PathExpression now keeps the *exact* schema type, including nulls ───── */
 
 export class PathExpression<
     E extends BaseExpression<any, any>,
-    TSource extends PlainObject = ResultOf<E>,
-    TPath extends string = string,
-    TResult extends PlainObject = PathValue<TSource, TPath> & PlainObject
-> extends BaseExpression<TResult, "template"> {
+    TSource = ResultOf<E>,              // do not force PlainObject here
+    TPath extends KeyPaths<TSource> = KeyPaths<TSource>,
+    TResult = PathValue<TSource, TPath> // preserve null/undefined exactly
+> extends BaseExpression<TResult & PlainObject, "template"> {
     constructor(public readonly source: E, public readonly path: TPath) { super("path"); }
 }
 
+/* ── path() API: only accepts valid paths; returns exact type at that path ─ */
+
+export function path<
+    E extends BaseExpression<any, any>,
+    P extends KeyPaths<ResultOf<E>>
+>(
+    source: E,
+    p: P
+): BaseExpression<PathValue<ResultOf<E>, P>, "template">;
+
+export function path(
+    source: BaseExpression<any, any>,
+    p: string
+): BaseExpression<any, "template"> {
+    // Tell TS the ctor is non-generic for the impl
+    const Ctor = PathExpression as unknown as new (
+        source: BaseExpression<any, any>,
+        path: string
+    ) => BaseExpression<any, "template">;
+
+    return new Ctor(source, p) as any;
+}
 export class ConcatExpression<
     ES extends readonly BaseExpression<string, any>[]
 > extends BaseExpression<string, "template"> {
@@ -172,12 +230,6 @@ export const literal = <T extends PlainObject>(v: T): SimpleExpression<DeepWiden
 
 export const asString = <E extends BaseExpression<any, any>>(e: E): BaseExpression<string, ExprC<E>> =>
     new AsStringExpression(e);
-
-export const path = <
-    E extends BaseExpression<any, any>,
-    TPath extends string
->(source: E, p: TPath) =>
-    new PathExpression(source, p);
 
 export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "template"> =>
     new ConcatExpression(es);

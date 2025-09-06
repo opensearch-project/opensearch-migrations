@@ -1,6 +1,5 @@
 import {z} from "zod";
 
-export const IMAGE_SPECIFIER = z.string();
 export const HTTP_AUTH_BASIC = z.object({
     username: z.string(),
     password: z.string(),
@@ -22,6 +21,8 @@ export const CLUSTER_CONFIG = z.object({
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint: z.string(), // override to required
 });
+
+export const UNKNOWN = z.object({});
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     indices: z.array(z.string()),
@@ -51,6 +52,13 @@ export const SOURCE_MIGRATION_CONFIG = z.object({
     snapshotAndMigrationConfigs: z.array(SNAPSHOT_MIGRATION_CONFIG),
     replayerConfig: REPLAYER_CONFIG,
 });
+
+export const S3_CONFIG = z.object({
+    aws_region: z.string(),
+    endpoint: z.string(),
+    repo_uri: z.string()
+});
+
 //
 // export  = z.object({
 //     sessionName: z.string(),

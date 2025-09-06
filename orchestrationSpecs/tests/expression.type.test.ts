@@ -2,11 +2,10 @@ import {expectTypeOf, IsAny} from "expect-type";
 import {
     BaseExpression,
     literal,
+    path,
     equals,
     ternary, SimpleExpression, NoAny,
 } from "../src/schemas/expression";
-import {expectNever, expectNotType} from "tsd"; // adjust path if needed
-import { fi } from "zod/locales";
 import {DeepWiden} from "../src/schemas/plainObject";
 
 describe("expression type contracts", () => {
@@ -56,5 +55,15 @@ describe("expression type contracts", () => {
         const t = ternary(equals(five, ten), yes, no);
         // value type is string; complexity depends on children
         expectTypeOf(t).toMatchTypeOf<BaseExpression<string, any>>();
+    });
+
+    it("path works", () => {
+        const obj = literal({
+           a: {hello: "world"},
+            b: {good: "night"}
+        });
+        const result = path(obj, "a");
+        expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
+        console.log(result);
     });
 });

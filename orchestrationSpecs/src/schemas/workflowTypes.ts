@@ -132,13 +132,13 @@ export function makeItemsLoop<T extends PlainObject>(items: T[]) {
 
 export type LoopWithParams<T extends PlainObject> = {
     loopWith: "params",
-    value: FromParameterExpression<T[]>
+    value: BaseExpression<T[]>
 }
 
-export function makeParameterLoop<T extends PlainObject>(param: FromParameterExpression<T[]>) {
+export function makeParameterLoop<T extends PlainObject>(e: BaseExpression<T[]>) {
     return {
         "loopWith": "params",
-        "value": param
+        "value": e
     } as LoopWithParams<T>;
 }
 

@@ -66,10 +66,10 @@ export class StepsBuilder<
 > {
     constructor(
         contextualScope: ContextualScope,
-        public inputsScope: InputParamsScope,
+        inputsScope: InputParamsScope,
         bodyScope: StepsScope,
-        public readonly stepGroups: StepGroup[],
-        public outputsScope: OutputParamsScope
+        readonly stepGroups: StepGroup[],
+        outputsScope: OutputParamsScope
     ) {
         super(contextualScope, inputsScope, bodyScope, outputsScope);
     }
