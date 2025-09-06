@@ -49,6 +49,38 @@ function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: AllowLiter
     };
 }
 
+function makeDeployKafkaNodePool(inputs: { kafkaName: AllowLiteralOrExpression<string> }) {
+    return {
+        "apiVersion": "kafka.strimzi.io/v1beta2",
+        "kind": "KafkaNodePool",
+        "metadata": {
+            "name": "dual-role",
+            "labels": {
+                "strimzi.io/cluster": inputs.kafkaName
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "roles": [
+                "controller",
+                "broker"
+            ],
+            "storage": {
+                "type": "jbod",
+                "volumes": [
+                    {
+                        "id": 0,
+                        "type": "persistent-claim",
+                        "size": "5Gi",
+                        "deleteClaim": false,
+                        "kraftMetadata": "shared"
+                    }
+                ]
+            }
+        }
+    };
+}
+
 export const SetupKafka = WorkflowBuilder.create({
     k8sResourceName: "SetupKafka",
     serviceAccountName: "argo-workflow-executor",
@@ -57,6 +89,15 @@ export const SetupKafka = WorkflowBuilder.create({
 })
     .addParams(CommonWorkflowParameters)
     .addTemplate("deployKafkaNodePool", t => t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: makeDeployKafkaNodePool(b.inputs)
+            }))
+    )
+    .addTemplate("deployKafkaClusterZookeeper", t => t
         .addRequiredInput("kafkaName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -71,7 +112,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addDag(b=>b
             .addTask("deployPool", INTERNAL,"deployKafkaNodePool",
                 (tasks, register) => register({
-                    kafkaName: "NEVERNEVER",//b.inputs.kafkaName,
-            })))
+                    kafkaName: b.inputs.kafkaName,
+            }), {when: b.inputs.useKraft}))
     )
     .getFullScope();
