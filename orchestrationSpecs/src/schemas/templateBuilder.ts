@@ -22,16 +22,13 @@ import {
 import {
     AllowLiteralOrExpression,
     ExtendScope,
-    FieldGroupConstraint,
-    FieldSpecs,
-    FieldSpecsToInputParams,
     GenericScope,
     InputParamsToExpressions, WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
 } from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 import {
-    extendScope,
+    extendScope, FieldGroupConstraint,
     ScopeIsEmptyConstraint,
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
@@ -135,31 +132,26 @@ export class TemplateBuilder<
         return this.extendWithParam(name as any, param) as any;
     }
 
-    /**
-     * Add multiple fields at once from a field specification object.
-     * Provides type safety by checking for name conflicts with existing fields.
-     */
-    addMultipleRequiredInputs_withoutStrongTypesYet<T extends FieldSpecs>(
-        fieldSpecs: FieldGroupConstraint<T, InputParamsScope, T>,
-        checkTypes: keyof InputParamsScope & keyof T extends never
-            ? any
-            : TypescriptError<`Cannot add field group: '${keyof InputParamsScope & keyof T & string}' already exists`>
-    ): ScopeIsEmptyConstraint<BodyScope,
+    addInputsFromRecord<
+        R extends InputParametersRecord
+    >(
+        inputs: ScopeIsEmptyConstraint<BodyScope, FieldGroupConstraint<InputParamsScope, R>>
+    ): ScopeIsEmptyConstraint<
+        BodyScope,
         TemplateBuilder<
             ContextualScope,
             BodyScope,
-            ExtendScope<InputParamsScope, FieldSpecsToInputParams<T>>,
+            ExtendScope<InputParamsScope, R>,
             OutputParamsScope
         >
     > {
-        const specs = fieldSpecs as T;
-
-        // Iterate over the field specs and add each one
-        let result = this as any;
-        for (const [fieldName, schema] of Object.entries(specs)) {
-            result = result.addRequiredInput(fieldName, schema);
-        }
-        return result as any;
+        const newScope = extendScope(this.inputScope, () => inputs as R);
+        return new TemplateBuilder(
+            this.contextualScope,
+            this.bodyScope,
+            newScope,
+            this.outputScope
+        ) as any;
     }
 
     /**

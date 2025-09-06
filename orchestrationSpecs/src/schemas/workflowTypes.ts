@@ -49,21 +49,6 @@ export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
     outputs?: T extends { outputs: infer O } ? O : never;
 };
 
-// shared-types.ts - Export these types from a shared file
-export type FieldSpecs = Record<string, string | number | boolean>;
-
-export type FieldSpecsToInputParams<T extends FieldSpecs> = {
-    [K in keyof T]: InputParamDef<any, true>;
-};
-
-// Constraint type for checking field group conflicts
-export type FieldGroupConstraint<T extends FieldSpecs, S extends Record<string, any>, TypeWhenValid> =
-    typeof __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__ extends true
-        ? keyof T & keyof S extends never
-            ? TypeWhenValid
-            : TypescriptError<`Field group contains conflicting names: '${keyof T & keyof S & string}' already exists`>
-        : TypeWhenValid;
-
 // Helper types for extracting output types and creating step references
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
 type PlainRecord = { [key: string]: PlainObject };

@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {CLUSTER_CONFIG, SOURCE_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
-import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
+import {CommonWorkflowParameters, ImageParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {BaseExpression, equals, literal} from "@/schemas/expression";
@@ -30,17 +30,7 @@ export const FullMigration = WorkflowBuilder.create({
             "List of server configurations to direct migrated traffic toward")
         .addRequiredInput("targets", typeToken<z.infer<typeof CLUSTER_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
-        .addOptionalInput("doSecondWhenTest", s => true)
-        .addOptionalInput("imageParams",
-            scope => literal(
-                Object.fromEntries(["captureProxy", "trafficReplayer", "reindexFromSnapshot", "migrationConsole", "etcdUtils"]
-                    .flatMap((k) => [
-                        [`${k}Image`, ""],
-                        [`${k}ImagePullPolicy`, "IF_NOT_PRESENT"]
-                    ])
-                )
-            ),
-            "OCI image locations and pull policies for required images")
+        .addInputsFromRecord(ImageParameters)
         .addSteps(b => b
             .addStep("init", TargetLatchHelpers, "init",
                 (steps,register) => register({
