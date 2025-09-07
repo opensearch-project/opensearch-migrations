@@ -93,19 +93,6 @@ export type TasksWithOutputs<
 
 export type IfNever<T, Then, Else> = [T] extends [never] ? Then : Else;
 
-export type TasksScopeToTasksWithOutputs<
-    TasksScope extends Record<string, TasksWithOutputs<any, any>>,
-    LoopItemsType extends PlainObject = never
-> = {
-    tasks: {
-        [StepName in keyof TasksScope]:
-        TasksScope[StepName] extends TasksWithOutputs<
-            infer Name,
-            infer Outputs
-        > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
-    }
-} & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
-
 export type LoopWithSequence = {
     loopWith: "sequence",
     count: number

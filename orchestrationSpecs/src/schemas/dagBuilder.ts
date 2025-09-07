@@ -35,7 +35,8 @@ function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainO
 class DagTaskBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     TaskScope extends TasksOutputsScope
-> extends TaskBuilder<ContextualScope, TaskScope, TaskRebinder<ContextualScope>> {
+> extends TaskBuilder<ContextualScope, TaskScope, "tasks", TaskRebinder<ContextualScope>> {
+    protected readonly label = "tasks";
     protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(
         task: NamedTask, opts?: OptsType
     ): NamedTask {
@@ -95,7 +96,7 @@ export class DagBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, K>,
-        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, TaskScope, LoopT, DagTaskOpts<TaskScope, LoopT>>
+        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, TaskScope, "tasks", LoopT, DagTaskOpts<TaskScope, LoopT>>
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         TaskScope,

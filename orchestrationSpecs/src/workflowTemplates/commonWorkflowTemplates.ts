@@ -1,5 +1,7 @@
-import {defineParam, InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {defineParam, defineRequiredParam, InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
+import {z} from "zod/index";
+import {CLUSTER_CONFIG, S3_CONFIG} from "@/workflowTemplates/userSchemas";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints:       defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
@@ -28,3 +30,8 @@ export function makeImageParametersForKeys<K extends LogicalOciImagesKeys, T ext
         Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>;
 }
 export const ImageParameters = makeImageParametersForKeys(LogicalOciImages);
+
+export const s3ConfigParam = {
+    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>[]>({
+        description: "S3 connection info (region, endpoint, etc)"})
+};

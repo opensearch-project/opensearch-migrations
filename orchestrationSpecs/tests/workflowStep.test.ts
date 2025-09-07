@@ -684,7 +684,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
 
                     const step2 = step1.addStep("step2", INTERNAL, "internalRequiredOnly",
                         (steps, register) => register({
-                            reqStr: steps.tasks.step1.result, // using output from previous step
+                            reqStr: steps.steps.step1.result, // using output from previous step
                             reqNum: 2
                         }));
 
@@ -706,7 +706,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                         (steps, register) => register({
                             reqStr: "valid",
                             // @ts-expect-error — using string output where number is expected
-                            reqNum: steps.tasks.step1.result // result is string, reqNum expects number
+                            reqNum: steps.steps.step1.result // result is string, reqNum expects number
                         }));
 
                     return step2;

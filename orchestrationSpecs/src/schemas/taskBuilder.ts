@@ -1,6 +1,7 @@
 import {
-    ExtendScope, IfNever, LoopWithUnion, ParamsWithLiteralsOrExpressions,
-    TasksOutputsScope, TasksScopeToTasksWithOutputs, TasksWithOutputs,
+    AllowLiteralOrExpression,
+    ExtendScope, IfNever, LoopWithUnion, OutputParamsToExpressions, ParamsWithLiteralsOrExpressions,
+    TasksOutputsScope, TasksWithOutputs,
     TemplateSignaturesScope, WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
 import { Workflow } from "@/schemas/workflowBuilder";
@@ -40,12 +41,29 @@ export type InputKind<T> =
 
 export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 
+export type TaskType = "tasks" | "steps";
+
+export type TasksScopeToTasksWithOutputs<
+    TasksScope extends Record<string, TasksWithOutputs<any, any>>,
+    Label extends TaskType,
+    LoopItemsType extends PlainObject = never
+> = {
+    [K in Label]: {
+        [StepName in keyof TasksScope]:
+        TasksScope[StepName] extends TasksWithOutputs<
+            infer Name,
+            infer Outputs
+        > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
+    }
+} & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
+
 export type ParamsRegistrationFn<
     TaskScope extends TasksOutputsScope,
     Inputs extends InputParametersRecord,
+    Label extends TaskType,
     LoopT extends PlainObject
 > = (
-    priorTasks: TasksScopeToTasksWithOutputs<TaskScope, LoopT>,
+    priorTasks: TasksScopeToTasksWithOutputs<TaskScope, Label, LoopT>,
     register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol
 ) => ParamsPushedSymbol
 
@@ -65,10 +83,33 @@ export type NormalizeInputsOfWfTemplate<
         ? NormalizeInputs<X> extends InputParametersRecord ? NormalizeInputs<X> : {}
         : {};
 
+// Is K optional in T?
+export type IsOptionalKey<T, K extends keyof T> =
+    {} extends Pick<T, K> ? true : false;
+
+// Union of the *required* (non-optional) keys of T
+export type RequiredKeys<T> =
+    T extends object
+        ? { [K in keyof T]-?: IsOptionalKey<T, K> extends true ? never : K }[keyof T]
+        : never;
+
+// Required keys of the first parameter of R (if it’s an object)
+export type RequiredKeysOfRegister<R extends (arg: any, ...rest: any[]) => any> =
+    Parameters<R>[0] extends object
+        ? RequiredKeys<Parameters<R>[0]>
+        : never;
+
+// From inputs I, keep only the keys that register requires
+export type SelectInputsForRegister<
+    I extends object,
+    R extends (arg: any, ...rest: any[]) => any
+> = Pick<I, Extract<keyof I, RequiredKeysOfRegister<R>>>;
+
 export type ParamsTuple<
     I extends InputParametersRecord,
     Name extends string,
     S extends TasksOutputsScope,
+    Label extends TaskType,
     LoopT extends PlainObject,
     OptsType extends TaskOpts<LoopT> = TaskOpts<LoopT>
 > =
@@ -77,21 +118,25 @@ export type ParamsTuple<
         : InputKind<I> extends "allOptional"
             ? [
                 paramsFn?: UniqueNameConstraintOutsideDeclaration<
-                    Name, S, ParamsRegistrationFn<S, I, LoopT>
+                    Name, S, ParamsRegistrationFn<S, I, Label, LoopT>
                 >,
                 opts?: OptsType
             ]
             : [
                 paramsFn: UniqueNameConstraintOutsideDeclaration<
-                    Name, S, ParamsRegistrationFn<S, I, LoopT>
+                    Name, S, ParamsRegistrationFn<S, I, Label, LoopT>
                 >,
                 opts?: OptsType
             ];
 
-export function unpackParams<I extends InputParametersRecord, LoopT extends PlainObject>(
+export function unpackParams<
+    I extends InputParametersRecord,
+    Label extends TaskType,
+    LoopT extends PlainObject
+>(
     args: readonly unknown[]
 ): {
-    paramsFn: ParamsRegistrationFn<any, I, LoopT>;
+    paramsFn: ParamsRegistrationFn<any, I, Label, LoopT>;
     opts: TaskOpts<LoopT> | undefined;
 } {
     const [first, second] = args as [any, any];
@@ -179,8 +224,10 @@ export type ApplyRebinder<
 export abstract class TaskBuilder<
     C extends WorkflowAndTemplatesScope,
     S extends TasksOutputsScope,
+    Label extends TaskType,
     RB extends TaskRebinder<C>
 > {
+    protected abstract readonly label: Label;
     constructor(
         protected readonly contextualScope: C,
         protected readonly tasksScope: S,
@@ -197,7 +244,7 @@ export abstract class TaskBuilder<
     getParamsFromCallback<
         Inputs extends InputParametersRecord,
         LoopT extends PlainObject = never
-    >(fn: ParamsRegistrationFn<S, Inputs, LoopT>, context: TasksScopeToTasksWithOutputs<S, LoopT>):
+    >(fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>, context: TasksScopeToTasksWithOutputs<S, Label, LoopT>):
         ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>
     {
         let capturedParams: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>;
@@ -226,14 +273,14 @@ export abstract class TaskBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, S>,
         source: UniqueNameConstraintOutsideDeclaration<Name, S, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, S, K>,
-        ...args: ParamsTuple<InputsFrom<C, TemplateSource, K>, Name, S, LoopT, OptsType>
+        ...args: ParamsTuple<InputsFrom<C, TemplateSource, K>, Name, S, Label, LoopT, OptsType>
     ): ApplyRebinder<
         RB,
         C,
         ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, S, K>> }>
     > {
-        const { paramsFn, opts } = unpackParams<InputsFrom<C, S, K>, LoopT>(args);
-        const taskContext = this.buildTasksWithOutputs(opts?.loopWith);
+        const { paramsFn, opts } = unpackParams<InputsFrom<C, S, K>, Label, LoopT>(args);
+        const taskContext = this.buildTasksWithOutputs(this.label, opts?.loopWith);
         const params = this.getParamsFromCallback(paramsFn as any, taskContext);
 
         if (source === INTERNAL) {
@@ -285,8 +332,9 @@ export abstract class TaskBuilder<
     }
 
     protected buildTasksWithOutputs<LoopT extends PlainObject = never>(
+        key: TaskType,
         loopWith?: LoopWithUnion<LoopT>
-    ): TasksScopeToTasksWithOutputs<S> {
+    ): TasksScopeToTasksWithOutputs<S, Label> {
         const tasks: any = {};
         Object.entries(this.tasksScope).forEach(([taskName, taskDef]: [string, any]) => {
             if (taskDef.outputTypes) {
@@ -297,9 +345,9 @@ export abstract class TaskBuilder<
             }
         });
         return {
-            tasks,
+            [key]: tasks,
             ...(loopWith ? { item: loopWith } : {})
-        } as TasksScopeToTasksWithOutputs<S>;
+        } as TasksScopeToTasksWithOutputs<S, Label>;
     }
 
     protected abstract getTaskOutputAsExpression<T extends PlainObject>(taskName: string, outputName: string, outputParamDef: OutputParamDef<any>): SimpleExpression<T>;

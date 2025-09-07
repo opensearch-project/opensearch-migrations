@@ -15,7 +15,7 @@ import {
     OutputsFrom,
     ParamsTuple,
     TaskBuilder,
-    TaskRebinder,
+    TaskRebinder, TaskType,
 } from "@/schemas/taskBuilder";
 import {SimpleExpression, stepOutput} from "@/schemas/expression";
 
@@ -29,8 +29,11 @@ class StepGroupBuilder<
 > extends TaskBuilder<
     ContextualScope,
     TasksScope,
+    "steps",
     TaskRebinder<ContextualScope>
 > {
+    protected readonly label = "steps";
+
     constructor(
         contextualScope: ContextualScope,
         tasksScope: TasksScope,
@@ -110,7 +113,7 @@ export class StepsBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, K>,
-        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, StepsScope, LoopT>
+        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, StepsScope, "steps", LoopT>
     ): StepsBuilder<
         ContextualScope,
         InputParamsScope,
