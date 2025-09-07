@@ -53,7 +53,7 @@ describe("paramsFns runtime validation", () => {
     it("addTasks to dag template", () => {
         const d = templateBuilder.addDag(td => {
                 const result = td.addTask("init", sharedNothingTemplate, "doNothing",
-                    (tasks, register) => register({
+                    c => c.register({
                         strParam: "b"
                     }));
                 expectTypeOf(result).toExtend<DagBuilder<any, any, any, any>>();
@@ -76,7 +76,7 @@ describe("paramsFns runtime validation", () => {
                 .addRequiredInput("str1", typeToken<string>())
                 .addDag(b => b
                     .addTask("first", sharedNothingTemplate, "doNothing",
-                        (tasks, register) => register({
+                        c => c.register({
                             strParam: ""
                         }))
                     .addTask("second", INTERNAL, "doNothing", {dependencies: ["first"]})

@@ -7,16 +7,16 @@ import {
 import { Workflow } from "@/schemas/workflowBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import {CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import { SimpleExpression, stepOutput } from "@/schemas/expression";
+import { CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
+import { SimpleExpression } from "@/schemas/expression";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
     when?: SimpleExpression<boolean>
-}
+};
 
-// Sentinel to try to guarantee that the parameters have been pushed back to the callback
-const PARAMS_PUSHED = Symbol('params_pushed');
+// Sentinel to guarantee that the parameters have been pushed back to the callback
+const PARAMS_PUSHED = Symbol("params_pushed");
 type ParamsPushedSymbol = typeof PARAMS_PUSHED;
 
 // Sentinel to indicate "use local template by key"
@@ -43,29 +43,46 @@ export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 
 export type TaskType = "tasks" | "steps";
 
-export type TasksScopeToTasksWithOutputs<
+/**
+ * ParamProviderCallbackObject now:
+ *  - carries a top-level `register` function that accepts ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>
+ *  - nests each step under `<Label>.<StepName>.{ id, outputs }`
+ *  - preserves `item` when looping
+ */
+export type ParamProviderCallbackObject<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType,
+    Inputs extends InputParametersRecord,
     LoopItemsType extends PlainObject = never
-> = {
+> =
+    {
+        register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol;
+    } & {
     [K in Label]: {
         [StepName in keyof TasksScope]:
-        TasksScope[StepName] extends TasksWithOutputs<
-            infer Name,
-            infer Outputs
-        > ? (Outputs extends OutputParametersRecord ? OutputParamsToExpressions<Outputs> : {}) : {}
+        TasksScope[StepName] extends TasksWithOutputs<infer _Name, infer Outputs>
+            ? {
+                id: string;
+                outputs: Outputs extends OutputParametersRecord
+                    ? OutputParamsToExpressions<Outputs>
+                    : {};
+            }
+            : {
+                id: string;
+                outputs: {};
+            };
     }
 } & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
 
+/**
+ * ParamsRegistrationFn is an alias placeholder that defines the callback that addTasks uses.
+ */
 export type ParamsRegistrationFn<
     TaskScope extends TasksOutputsScope,
     Inputs extends InputParametersRecord,
     Label extends TaskType,
     LoopT extends PlainObject
-> = (
-    priorTasks: TasksScopeToTasksWithOutputs<TaskScope, Label, LoopT>,
-    register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol
-) => ParamsPushedSymbol
+> = (ctx: ParamProviderCallbackObject<TaskScope, Label, Inputs, LoopT>) => ParamsPushedSymbol;
 
 export type NormalizeInputsOfCtxTemplate<
     C extends WorkflowAndTemplatesScope,
@@ -143,7 +160,7 @@ export function unpackParams<
     const paramsFn =
         typeof first === "function"
             ? first
-            : ((_: unknown, register: (v: {}) => void) => register({}));
+            : ((ctx: { register: (v: {}) => ParamsPushedSymbol }) => ctx.register({})) as any;
     const opts = typeof first === "function" ? second : first;
     return { paramsFn, opts };
 }
@@ -228,6 +245,7 @@ export abstract class TaskBuilder<
     RB extends TaskRebinder<C>
 > {
     protected abstract readonly label: Label;
+
     constructor(
         protected readonly contextualScope: C,
         protected readonly tasksScope: S,
@@ -241,26 +259,26 @@ export abstract class TaskBuilder<
         return opts?.when !== undefined ? { ...task, when: opts?.when } : task;
     }
 
-    getParamsFromCallback<
+    protected getParamsFromCallback<
         Inputs extends InputParametersRecord,
         LoopT extends PlainObject = never
-    >(fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>, context: TasksScopeToTasksWithOutputs<S, Label, LoopT>):
-        ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>
-    {
-        let capturedParams: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>;
+    >(
+        fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>,
+        loopWith?: LoopWithUnion<LoopT>
+    ): ParamsWithLiteralsOrExpressions<CallerParams<Inputs>> {
+        let capturedParams!: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>;
 
-        const register = (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>): ParamsPushedSymbol => {
-            capturedParams = params;
-            return PARAMS_PUSHED;
-        };
-
-        const result = fn(context, register);
+        const result = fn(this.buildParamProviderCallbackObject<Inputs, LoopT>(this.label,
+            (p=>{
+                capturedParams = p;
+                return PARAMS_PUSHED;
+            }), loopWith));
 
         if (result !== PARAMS_PUSHED) {
-            throw new Error('Params registration function must call register and return its result');
+            throw new Error("Params registration function must call ctx.register(...) and return its result");
         }
 
-        return capturedParams!;
+        return capturedParams;
     }
 
     public addTask<
@@ -277,23 +295,22 @@ export abstract class TaskBuilder<
     ): ApplyRebinder<
         RB,
         C,
-        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, S, K>> }>
+        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, TemplateSource, K>> }>
     > {
-        const { paramsFn, opts } = unpackParams<InputsFrom<C, S, K>, Label, LoopT>(args);
-        const taskContext = this.buildTasksWithOutputs(this.label, opts?.loopWith);
-        const params = this.getParamsFromCallback(paramsFn as any, taskContext);
+        const { paramsFn, opts } = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
+        const params = this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(paramsFn as any, opts?.loopWith);
 
         if (source === INTERNAL) {
             // runtime: we just need a string; compile-time was already checked
             const k = key as unknown as string;
-            const outputs = (this.contextualScope.templates as any)?.[k]?.outputs as OutputsFrom<C, S, K>;
+            const outputs = (this.contextualScope.templates as any)?.[k]?.outputs as OutputsFrom<C, TemplateSource, K>;
 
             const templateCall = this.callTemplate(name as string, k, params, opts?.loopWith);
             return this.addTaskHelper(name, templateCall as any, outputs, opts);
         } else {
             const wf = source as unknown as Workflow<any, any, any>;
             const k = key as unknown as string;
-            const outputs = (wf.templates as any)?.[k]?.outputs as OutputsFrom<C, S, K>;
+            const outputs = (wf.templates as any)?.[k]?.outputs as OutputsFrom<C, TemplateSource, K>;
 
             // keep your current external behavior (no loopWith to callExternalTemplate)
             const templateCall = this.callExternalTemplate(name as string, wf, k as any, params);
@@ -331,26 +348,40 @@ export abstract class TaskBuilder<
         return this.rebind(this.contextualScope, nextScope, this.orderedTaskList) as any;
     }
 
-    protected buildTasksWithOutputs<LoopT extends PlainObject = never>(
+    protected buildParamProviderCallbackObject<
+        Inputs extends InputParametersRecord,
+        LoopT extends PlainObject = never
+    >(
         key: TaskType,
+        register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol,
         loopWith?: LoopWithUnion<LoopT>
-    ): TasksScopeToTasksWithOutputs<S, Label> {
-        const tasks: any = {};
+    ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
+        const tasksByName: Record<string, { id: string; outputs: Record<string, any> }> = {};
+
         Object.entries(this.tasksScope).forEach(([taskName, taskDef]: [string, any]) => {
+            const outputs: Record<string, any> = {};
             if (taskDef.outputTypes) {
-                tasks[taskName] = {};
                 Object.entries(taskDef.outputTypes).forEach(([outputName, outputParamDef]: [string, any]) => {
-                    tasks[taskName][outputName] = this.getTaskOutputAsExpression(taskName, outputName, outputParamDef);
+                    outputs[outputName] = this.getTaskOutputAsExpression(taskName, outputName, outputParamDef);
                 });
             }
+            tasksByName[taskName] = { id: taskName, outputs };
         });
-        return {
-            [key]: tasks,
+
+        const ctx = {
+            register,
+            [key]: tasksByName,
             ...(loopWith ? { item: loopWith } : {})
-        } as TasksScopeToTasksWithOutputs<S, Label>;
+        } as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;
+
+        return ctx;
     }
 
-    protected abstract getTaskOutputAsExpression<T extends PlainObject>(taskName: string, outputName: string, outputParamDef: OutputParamDef<any>): SimpleExpression<T>;
+    protected abstract getTaskOutputAsExpression<T extends PlainObject>(
+        taskName: string,
+        outputName: string,
+        outputParamDef: OutputParamDef<any>
+    ): SimpleExpression<T>;
 
     public getTasks() {
         return { scope: this.tasksScope, taskList: this.orderedTaskList };

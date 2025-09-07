@@ -110,8 +110,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("kafkaName", typeToken<string>())
         .addOptionalInput("useKraft", s=>true)
         .addDag(b=>b
-            .addTask("deployPool", INTERNAL,"deployKafkaNodePool",
-                (tasks, register) => register({
+            .addTask("deployPool", INTERNAL,"deployKafkaNodePool", c => c.register({
                     kafkaName: b.inputs.kafkaName,
             }), {when: b.inputs.useKraft}))
     )

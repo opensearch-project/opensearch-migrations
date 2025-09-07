@@ -76,17 +76,16 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addSteps(b=>b
             .addStep("doNothing", INTERNAL, "doNothing")
-            .addStep("metadataMigrate", INTERNAL, "migrateMetaData", (steps,register) =>
-                register(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof register>))
-            .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoadFromConfig", (steps,register)=>
-            register({
-                ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof register>),
-                sessionName: "",//steps.steps.doNothing,
+            .addStep("metadataMigrate", INTERNAL, "migrateMetaData", c =>
+                c.register(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>))
+            .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoadFromConfig", c =>
+                c.register({
+                ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
+                sessionName: c.steps.doNothing.id,
                 targetConfig: b.inputs.target
             }))
         )
     )
-
 
     .addTemplate("pipelineSnapshotToTarget", t=>t
         .addSteps(sb=>sb))
@@ -100,8 +99,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(latchCoordinationPrefixParam)
         .addSteps(b=> b
                 .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
-                    (steps,register)=>register({
-                        ...(b.inputs as Omit<typeof b.inputs,("sourcePipelineName") > ),
+                    c=>c.register({
+                        ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
                         sourceName: b.inputs.sourcePipelineName
                     }))
                 // .addStep("migrateMetadata", INTERNAL, "migrateMetaData",
@@ -110,7 +109,8 @@ export const FullMigration = WorkflowBuilder.create({
                 //             // ...b.inputs as Omit<typeof b.inputs, "sourceMigrationConfig">,
                 //             // snapshotConfig:
                 //         }))
-        ))
+        )
+    )
 
     .addTemplate("pipelineSourceMigration", t => t
 
@@ -121,11 +121,10 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
-            .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot",
-                (steps,register)=>
-                    register({
+            .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot", c =>
+                    c.register({
                         sourceConfig: path(b.inputs.sourceMigrationConfig, "source"),
-                        snapshotAndMigrationConfig: steps.item,
+                        snapshotAndMigrationConfig: c.item,
                         ...(b.inputs as Pick<typeof b.inputs,("targets" | "s3Config" | "latchCoordinationPrefix") > ),
                         sourcePipelineName: '' // value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
                     }),
@@ -144,8 +143,8 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addSteps(b => b
             .addStep("generateId", INTERNAL, "doNothing")
-            .addStep("init", TargetLatchHelpers, "init",
-                (steps,register) => register({
+            .addStep("init", TargetLatchHelpers, "init", c =>
+                c.register({
                     prefix: "w",
                     etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                     targets: [],
@@ -168,8 +167,8 @@ export const FullMigration = WorkflowBuilder.create({
             // )
 
             .addStep("cleanup", TargetLatchHelpers, "cleanup",
-                (stepScope,register) => register({
-                    prefix: stepScope.steps.init.prefix,
+                c => c.register({
+                    prefix: c.steps.init.outputs.prefix,
                     etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
                 }))
         )

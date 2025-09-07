@@ -88,7 +88,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", noParamsTemplate, "noParams",
                         // @ts-expect-error — spurious property registration should be rejected
-                        (s, register) => register({})
+                        c => c.register({})
                     );
                     return step;
                 })
@@ -100,7 +100,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", noParamsTemplate, "noParams",
                         // @ts-expect-error — spurious property registration should be rejected
-                        (s, register) => register({spuriousField: "should error"})
+                        c => c.register({spuriousField: "should error"})
                     );
                     return step;
                 })
@@ -114,7 +114,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testRequiredValid", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", requiredOnlyTemplate, "requiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqNum: 123
                         }));
@@ -128,7 +128,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", requiredOnlyTemplate, "requiredOnly",
                         // @ts-expect-error — missing required parameter reqNum
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString"
                             // reqNum is missing
                         }));
@@ -141,7 +141,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testRequiredWrongType", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", requiredOnlyTemplate, "requiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             // @ts-expect-error — wrong type for reqNum
                             reqNum: "shouldBeNumber"
@@ -155,7 +155,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testRequiredSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", requiredOnlyTemplate, "requiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqNum: 123,
                             // @ts-expect-error — spurious property should be rejected
@@ -192,7 +192,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testOptionalEmpty", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
-                        (s, register) => register({}));
+                        c=>c.register({}));
                     return step;
                 })
             );
@@ -202,7 +202,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testOptionalPartial", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             optStr: "customString"
                             // optNum omitted, should use default
                         }));
@@ -215,7 +215,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testOptionalAll", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             optStr: "customString",
                             optNum: 999
                         }));
@@ -228,7 +228,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testOptionalWrongType", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             optStr: "validString",
                             // @ts-expect-error — wrong type for optNum
                             optNum: "shouldBeNumber"
@@ -243,7 +243,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testOptionalSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             optStr: "validString",
                             // @ts-expect-error — spurious property should be rejected
                             spuriousField: "should error"
@@ -258,7 +258,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testOptionalSpurious_2", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", optionalOnlyTemplate, "optionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             // @ts-expect-error — spurious property should be rejected
                             spuriousField: "should error"
                         })
@@ -293,7 +293,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testMixedRequiredOnly", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", mixedParamsTemplate, "mixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqBool: true
                             // optional parameters omitted
@@ -307,7 +307,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testMixedAll", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", mixedParamsTemplate, "mixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqBool: true,
                             optNum: 42,
@@ -323,7 +323,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", mixedParamsTemplate, "mixedParams",
                         // @ts-expect-error — missing required parameter reqBool
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             optNum: 42
                             // reqBool is missing
@@ -337,7 +337,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testMixedWrongTypes", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", mixedParamsTemplate, "mixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             // @ts-expect-error — wrong types for multiple parameters
                             reqStr: 123, // should be string
                             // @ts-expect-error — wrong types for multiple parameters
@@ -355,7 +355,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testMixedSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", mixedParamsTemplate, "mixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqBool: true,
                             // @ts-expect-error — spurious property should be rejected
@@ -392,7 +392,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalNoParams",
                         // @ts-expect-error — spurious property should be rejected
-                        (s, register) => register({}));
+                        c => c.register({}));
                     return step;
                 })
             );
@@ -403,7 +403,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalNoParams",
                         // @ts-expect-error — spurious property should be rejected
-                        (s, register) => register({
+                        c => c.register({
                             spuriousField: "should error"
                         }));
                     return step;
@@ -418,7 +418,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalRequiredValid", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalRequiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqNum: 456
                         }));
@@ -433,7 +433,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                     const step = g.addStep("step1",
                         INTERNAL, "internalRequiredOnly",
                         // @ts-expect-error — missing required parameter reqStr
-                        (s, register) => register({
+                        c => c.register({
                             reqNum: 456
                             // reqStr is missing
                         }));
@@ -446,7 +446,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalRequiredWrongType", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalRequiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             // @ts-expect-error — wrong type for reqStr
                             reqStr: 123,
                             reqNum: 456
@@ -460,7 +460,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalRequiredSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalRequiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqNum: 456,
                             // @ts-expect-error — spurious property should be rejected
@@ -496,7 +496,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         it("should accept valid call with no parameters", () => {
             baseWorkflow.addTemplate("testInternalOptionalEmpty", t => t
                 .addSteps(g => {
-                    const step = g.addStep("step1", INTERNAL, "internalOptionalOnly", (s, register) => register({}));
+                    const step = g.addStep("step1", INTERNAL, "internalOptionalOnly", c => c.register({}));
                     return step;
                 })
             );
@@ -506,7 +506,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalOptionalPartial", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalOptionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             optNum: 789
                             // optStr omitted
                         }));
@@ -519,7 +519,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalOptionalWrongType", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalOptionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             // @ts-expect-error — wrong type for optStr
                             optStr: 999,
                             optNum: 789
@@ -533,7 +533,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalOptionalSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalOptionalOnly",
-                        (s, register) => register({
+                        c => c.register({
                             optStr: "validString",
                             // @ts-expect-error — spurious property should be rejected
                             spuriousField: "should error"
@@ -559,7 +559,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalMixedRequiredOnly", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalMixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqBool: false
                             // optional parameters omitted
@@ -573,7 +573,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalMixedAll", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalMixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqBool: false,
                             optNum: 123,
@@ -589,7 +589,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalMixedParams",
                         // @ts-expect-error — missing required parameter reqStr
-                        (s, register) => register({
+                        c => c.register({
                             reqBool: false,
                             optStr: "optional"
                             // reqStr is missing
@@ -603,7 +603,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalMixedWrongTypes", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalMixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             // @ts-expect-error — wrong types for parameters
                             reqStr: ["array"],
                             // @ts-expect-error — wrong types for parameters
@@ -621,7 +621,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
                 .addSteps(g => {
                     // Valid usage for comparison
                     const validStep = g.addStep("validStep", INTERNAL, "internalMixedParams",
-                        (steps, register) => register({reqStr: "valid", reqBool: true}));
+                        c => c.register({reqStr: "valid", reqBool: true}));
                     // TODO - add all of these other negative tests
                     // Invalid patterns are documented here for reference (not executed):
                     // (steps, register) => register({reqBool: true, reqStr: "", spurious: 1})
@@ -640,7 +640,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testInternalMixedSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", INTERNAL, "internalMixedParams",
-                        (steps, register) => register({
+                        c => c.register({
                             reqStr: "validString",
                             reqBool: false,
                             // @ts-expect-error — spurious property should be rejected
@@ -677,14 +677,14 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testChaining", t => t
                 .addSteps(g => {
                     const step1 = g.addStep("step1", requiredOnlyTemplate, "requiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "initial",
                             reqNum: 1
                         }));
 
                     const step2 = step1.addStep("step2", INTERNAL, "internalRequiredOnly",
-                        (steps, register) => register({
-                            reqStr: steps.steps.step1.result, // using output from previous step
+                        c => c.register({
+                            reqStr: c.steps.step1.outputs.result, // using output from previous step
                             reqNum: 2
                         }));
 
@@ -697,16 +697,15 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testChainingWrongType", t => t
                 .addSteps(g => {
                     const step1 = g.addStep("step1", requiredOnlyTemplate, "requiredOnly",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "initial",
                             reqNum: 1
                         }));
-
                     const step2 = step1.addStep("step2", INTERNAL, "internalRequiredOnly",
-                        (steps, register) => register({
+                        c => c.register({
                             reqStr: "valid",
                             // @ts-expect-error — using string output where number is expected
-                            reqNum: steps.steps.step1.result // result is string, reqNum expects number
+                            reqNum: c.steps.step1.result // result is string, reqNum expects number
                         }));
 
                     return step2;
@@ -718,7 +717,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             baseWorkflow.addTemplate("testMultipleSpurious", t => t
                 .addSteps(g => {
                     const step = g.addStep("step1", mixedParamsTemplate, "mixedParams",
-                        (s, register) => register({
+                        c => c.register({
                             reqStr: "valid",
                             reqBool: true,
                             // @ts-expect-error — spurious properties should be rejected
