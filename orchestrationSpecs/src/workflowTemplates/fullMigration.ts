@@ -55,7 +55,7 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     .addTemplate("runReplayerForTarget", t => t
-        .addRequiredInput("targetConfig", typeToken<string>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addInputsFromRecord(makeImageParametersForKeys(["EtcdUtils"]))
         .addContainer(cb=>cb
             .addImageInfo(cb.inputs.imageEtcdUtilsLocation, cb.inputs.imageEtcdUtilsPullPolicy)
@@ -75,15 +75,24 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
-            .addStep("doNothing", INTERNAL, "doNothing")
+            .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", INTERNAL, "migrateMetaData", c =>
                 c.register(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoadFromConfig", c =>
                 c.register({
                 ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
-                sessionName: c.steps.doNothing.id,
+                sessionName: c.steps.idGenerator.id,
                 targetConfig: b.inputs.target
             }))
+            .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c=>
+                c.register({
+                    prefix: b.inputs.latchCoordinationPrefix,
+                    etcdUtilsImagePullPolicy: b.inputs.imageEtcdUtilsPullPolicy,
+                    targetName: path(b.inputs.target, "name"),
+                    processorId: c.steps.idGenerator.id
+                }))
+            .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c=>
+                c.register({targetConfig: b.inputs.target}))
         )
     )
 
