@@ -64,7 +64,7 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     } else if (loopWith.loopWith == "sequence") {
         return {withSequence: loopWith.count};
     } else if (loopWith.loopWith == "params") {
-        return {withParams: toArgoExpression(loopWith.value)};
+        return {withParams: `${toArgoExpression(loopWith.value)}`};
     } else {
         throw new Error(`Expected loopWith value; got ${loopWith}`);
     }
@@ -182,7 +182,7 @@ type ReplaceExpressions<T> =
 export function transformExpressionsDeep<T>(input: T): ReplaceExpressions<T> {
     function visit<U>(node: U): ReplaceExpressions<U> {
         if (node instanceof BaseExpression) {
-            return toArgoExpression(node) as ReplaceExpressions<U>;
+            return `${toArgoExpression(node)}` as ReplaceExpressions<U>;
         }
 
         if (isPrimitiveLiteral(node)) {

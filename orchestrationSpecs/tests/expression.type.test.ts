@@ -2,11 +2,12 @@ import {expectTypeOf, IsAny} from "expect-type";
 import {
     BaseExpression,
     literal,
-    path,
+    selectField,
     equals,
-    ternary, SimpleExpression, NoAny,
+    ternary, SimpleExpression, NoAny, expr as EXPR,
 } from "../src/schemas/expression";
 import {DeepWiden} from "../src/schemas/plainObject";
+import {selectInputsForRegister} from "@/schemas/taskBuilder";
 
 describe("expression type contracts", () => {
     it("literal() produces the correct value/complexity types", () => {
@@ -59,10 +60,18 @@ describe("expression type contracts", () => {
 
     it("path works", () => {
         const obj = literal({
-           a: {hello: "world"},
-            b: {good: "night"}
+            a: {hello: "world"},
+            b: {good: "night"},
+            c: [{ c2: { c3: "foundIt" }}]
         });
-        const result = path(obj, "a");
+
+        const v1 = EXPR.selectField(obj, "c");
+        const v2 = EXPR.index(v1, EXPR.literal(0));
+        const v3 = EXPR.selectField(EXPR.selectField(v2, "c2"), "c3");
+        expectTypeOf(v3).toExtend<BaseExpression<string>>();
+        expectTypeOf(v3).not.toBeAny();
+
+        const result = selectField(obj, "a");
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
         console.log(result);
     });

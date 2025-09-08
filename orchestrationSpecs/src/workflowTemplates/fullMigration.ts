@@ -1,9 +1,8 @@
-import {z, ZodAny, ZodObject} from 'zod';
+import {z} from 'zod';
 import {
     CLUSTER_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
-    SOURCE_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG,
-    UNKNOWN
+    SOURCE_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG
 } from '@/workflowTemplates/userSchemas'
 import {
     CommonWorkflowParameters,
@@ -12,8 +11,8 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {BaseExpression, concat, configMap, equals, getWorkflowUuid, literal, path} from "@/schemas/expression";
-import {LoopWithParams, makeParameterLoop} from "@/schemas/workflowTypes";
+import {expr as EXPR} from "@/schemas/expression";
+import {makeParameterLoop} from "@/schemas/workflowTypes";
 import {defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
 import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
@@ -88,7 +87,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     prefix: b.inputs.latchCoordinationPrefix,
-                    targetName: path(b.inputs.target, "name"),
+                    targetName: EXPR.selectField(b.inputs.target, "name"),
                     processorId: c.steps.idGenerator.id
                 }))
             .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c=>
@@ -125,15 +124,16 @@ export const FullMigration = WorkflowBuilder.create({
                     }))
 
                 .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
-                    c=>c.register({
+                    c=> c.register({
                         ...selectInputsForRegister(b, c),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        migrationConfig: path(b.inputs.snapshotAndMigrationConfig, "migrations"),
+                        migrationConfig: EXPR.selectField(b.inputs.snapshotAndMigrationConfig, "migrations"),
                         target: c.item
                     }),
                     {loopWith: makeParameterLoop(b.inputs.targets)})
-        )
+                )
     )
+
 
     .addTemplate("pipelineSourceMigration", t => t
         .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
@@ -146,12 +146,13 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot", c =>
                     c.register({
                         ...selectInputsForRegister(b,c),
-                        sourceConfig: path(b.inputs.sourceMigrationConfig, "source"),
+                        sourceConfig: EXPR.selectField(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        // TODO
-                        sourcePipelineName: 'TODO' // value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
+                        // value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
+                        sourcePipelineName: EXPR.toBase64(EXPR.jsonToString(EXPR.selectField(b.inputs.sourceMigrationConfig, "source")))
                     }),
-                {loopWith: makeParameterLoop(path(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs"))})
+                {loopWith: makeParameterLoop(EXPR.selectField(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs") //as BaseExpression<z.infer<typeof SOURCE_MIGRATION_CONFIG>['snapshotAndMigrationConfigs'], "template">[])
+                    )})
         )
     )
 
@@ -163,8 +164,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(s3ConfigParam)
         .addInputsFromRecord( // These image configurations have defaults from the ConfigMap
             Object.fromEntries(LogicalOciImages.flatMap(k => [
-                [`image${k}Location`, defineParam({defaultValue: configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)})],
-                [`image${k}PullPolicy`, defineParam({defaultValue: configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)})]
+                [`image${k}Location`, defineParam({defaultValue: EXPR.configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)})],
+                [`image${k}PullPolicy`, defineParam({defaultValue: EXPR.configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)})]
             ])
             ) as Record<`image${typeof LogicalOciImages[number]}Location`, InputParamDef<string,false>> &
                 Record<`image${typeof LogicalOciImages[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>
@@ -174,7 +175,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("init", TargetLatchHelpers, "init", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
-                    prefix: concat(literal("workflow-"), getWorkflowUuid()),
+                    prefix: EXPR.concat(EXPR.literal("workflow-"), EXPR.getWorkflowUuid()),
                     configuration: b.inputs.sourceMigrationConfigs
                 }))
             .addStep("pipelineSourceMigration", INTERNAL, "pipelineSourceMigration",

@@ -1,8 +1,7 @@
 import {defineParam, defineRequiredParam, InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {z} from "zod/index";
-import {CLUSTER_CONFIG, S3_CONFIG} from "@/workflowTemplates/userSchemas";
-import {BaseExpression, configMap} from "@/schemas/expression";
+import {S3_CONFIG} from "@/workflowTemplates/userSchemas";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints:        defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
