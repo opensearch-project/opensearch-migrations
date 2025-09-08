@@ -80,7 +80,7 @@ jobs:
           docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
           docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:latest
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
           aws-region: us-east-1
