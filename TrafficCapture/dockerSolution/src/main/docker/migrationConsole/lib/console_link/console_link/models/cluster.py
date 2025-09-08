@@ -97,6 +97,7 @@ class Cluster:
     An elasticcsearch or opensearch cluster.
     """
 
+    config: Dict
     endpoint: str = ""
     version: Optional[str] = None
     aws_secret_arn: Optional[str] = None
@@ -111,6 +112,7 @@ class Cluster:
         if not v.validate({'cluster': config}):
             raise ValueError("Invalid config file for cluster", v.errors)
 
+        self.config = config
         self.endpoint = config["endpoint"]
         self.version = config.get("version", None)
         self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(

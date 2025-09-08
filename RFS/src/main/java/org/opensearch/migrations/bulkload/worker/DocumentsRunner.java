@@ -64,7 +64,7 @@ public class DocumentsRunner {
                 }
 
                 @Override
-                public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
+                public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
                     log.info("Acquired work item: {}", workItem.getWorkItem());
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
@@ -136,7 +136,7 @@ public class DocumentsRunner {
     private Flux<WorkItemCursor> setupDocMigration(
         IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
         IDocumentMigrationContexts.IDocumentReindexContext context
-    ) {
+    ) throws IOException {
         log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
 
         var unpacker = documentReaderEngine.createUnpacker(

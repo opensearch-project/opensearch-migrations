@@ -50,7 +50,7 @@ describe("LoadingPage", () => {
     );
 
     render(<LoadingPage />);
-    expect(screen.getByText(/CloudFormation Setup in progress/i)).toBeInTheDocument();
+    expect(screen.getByText("Setup is in progress")).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByTestId("start-migration-button")).toBeInTheDocument()
     );
@@ -90,10 +90,11 @@ describe("LoadingPage", () => {
     );
 
     render(<LoadingPage />);
-    expect(screen.getByText(/CloudFormation Setup in Progress/i)).toBeInTheDocument();
+    await screen.findByText(/Details/i);
+    expect(screen.getByText(/Error Message/i)).toBeInTheDocument();
     await waitFor(
       () =>
-        expect(screen.getByTestId("start-migration-button")).toBeInTheDocument(),
+        expect(screen.getByTestId("start-migration-button")).toBeEnabled(),
       { timeout: 11_000 }
     );
     expect(callCount).toBe(3);

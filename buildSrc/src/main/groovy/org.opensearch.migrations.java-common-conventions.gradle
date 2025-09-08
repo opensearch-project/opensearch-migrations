@@ -16,22 +16,52 @@ def bomAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith(
 // Exclude lucene aliases since multiple versions are used in this project
 def luceneAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('lucene.') }
 def depAliases = libVersions.libraryAliases - bomAliases - luceneAliases
-def forced = depAliases.collect { String alias ->
-    libVersions.findLibrary(alias).get().get()
-}.findAll { it -> it.version != null }
+
 configurations.configureEach {
-    resolutionStrategy.force(*forced)
-    resolutionStrategy {
-        preferProjectModules()
+    resolutionStrategy.preferProjectModules()
+}
+
+// Extend resolvable *classpath* configs (excluding lucene ones)
+configurations {
+    // Define configuration that will be tied to all locked versions
+    enforcedAlignment {
+        canBeResolved = false
+        canBeConsumed = false
+        visible = false
+    }
+
+    configureEach {
+        if (
+            // Avoid infinite loop with enforcedAlignment configuration
+            name != "enforcedAlignment" &&
+            canBeResolved &&
+            // Exclude configurations involved with shadow lucene jar
+            !name.toLowerCase().contains("lucene") &&
+            !name.toLowerCase().contains("shadow")
+         ) {
+            extendsFrom(enforcedAlignment)
+        }
     }
 }
 
 dependencies {
     bomAliases.each { alias ->
-        // Using compileOnly for standard and testFixtures to avoid
-        compileOnly(enforcedPlatform(libVersions.findLibrary(alias).get()))
-        testImplementation(enforcedPlatform(libVersions.findLibrary(alias).get()))
-        testFixturesCompileOnly(enforcedPlatform(libVersions.findLibrary(alias).get()))
+        def lib = libVersions.findLibrary(alias).get().get()
+        enforcedAlignment(enforcedPlatform(lib)) {
+            because("Align versions using BOM from alias '$alias'")
+        }
+    }
+    constraints {
+        depAliases.each { alias ->
+            def lib = libVersions.findLibrary(alias).get().get()
+            def g = lib.module.group
+            def a = lib.module.name
+            def v = lib.versionConstraint.requiredVersion ?: lib.version
+            add("enforcedAlignment", "${g}:${a}:${v}") {
+                version { strictly(v) }   // ← this is the “forced” flavor for constraints
+                because("Pinned from version catalog alias '${alias}'")
+            }
+        }
     }
 
     // JUnit Jupiter

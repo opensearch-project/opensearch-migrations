@@ -244,7 +244,7 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--experimental-delta-mode" },
             converter = DeltaModeConverter.class,
-            description = "Experimental delta snapshot migration mode (UPDATES_ONLY). Requires --base-snapshot-name",
+            description = "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
             hidden = true
         )
         public DeltaMode experimentalDeltaMode = null;
@@ -499,7 +499,7 @@ public class RfsMigrateDocuments {
                 workItemTimeProvider);
             cleanShutdownCompleted.set(true);
         } catch (NoWorkLeftException e) {
-            log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+            log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {

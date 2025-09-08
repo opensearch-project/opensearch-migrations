@@ -6,6 +6,47 @@
 export type AuthModelType = "no_auth" | "basic_auth_arn" | "sig_v4_auth";
 
 /**
+ * BackfillOverallStatus
+ */
+export type BackfillOverallStatus = {
+  status: StepStateWithPause;
+  /**
+   * Percentage Completed
+   */
+  percentage_completed: number;
+  /**
+   * Eta Ms
+   */
+  eta_ms?: number | null;
+  /**
+   * Started
+   * Start time in ISO 8601 format
+   */
+  started?: Date | null;
+  /**
+   * Finished
+   * Start time in ISO 8601 format
+   */
+  finished?: Date | null;
+  /**
+   * Shard Total
+   */
+  shard_total?: number | null;
+  /**
+   * Shard Complete
+   */
+  shard_complete?: number | null;
+  /**
+   * Shard In Progress
+   */
+  shard_in_progress?: number | null;
+  /**
+   * Shard Waiting
+   */
+  shard_waiting?: number | null;
+};
+
+/**
  * BasicAuthArn
  */
 export type BasicAuthArn = {
@@ -348,16 +389,22 @@ export type SnapshotStatus = {
    * Shard Complete
    */
   shard_complete?: number | null;
-  /**
-   * Shard Failed
-   */
-  shard_failed?: number | null;
 };
 
 /**
  * StepState
  */
 export type StepState = "Pending" | "Running" | "Completed" | "Failed";
+
+/**
+ * StepStateWithPause
+ */
+export type StepStateWithPause =
+  | "Pending"
+  | "Running"
+  | "Paused"
+  | "Completed"
+  | "Failed";
 
 /**
  * TransformationInfo
@@ -669,6 +716,38 @@ export type MetadataStatusResponses = {
 
 export type MetadataStatusResponse =
   MetadataStatusResponses[keyof MetadataStatusResponses];
+
+export type BackfillStatusData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/status";
+};
+
+export type BackfillStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillStatusError =
+  BackfillStatusErrors[keyof BackfillStatusErrors];
+
+export type BackfillStatusResponses = {
+  /**
+   * Successful Response
+   */
+  200: BackfillOverallStatus;
+};
+
+export type BackfillStatusResponse =
+  BackfillStatusResponses[keyof BackfillStatusResponses];
 
 export type ClusterSourceData = {
   body?: never;
