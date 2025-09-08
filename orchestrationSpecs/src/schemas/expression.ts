@@ -61,6 +61,12 @@ export class FromConfigMapExpression<T extends PlainObject>
     }
 }
 
+export class FromWorkflowUuid extends BaseExpression<string,  "govaluate"> {
+    constructor() {
+        super("workflow_uuid");
+    }
+}
+
 export class LoopItemExpression<T extends PlainObject>
     extends BaseExpression<T, "template"> {
     constructor() { super("loop_item"); }
@@ -152,7 +158,7 @@ export function path(
 }
 export class ConcatExpression<
     ES extends readonly BaseExpression<string, any>[]
-> extends BaseExpression<string, "template"> {
+> extends BaseExpression<string, "govaluate"> {
     constructor(public readonly expressions: ES, public readonly separator?: string) {
         super("concat");
     }
@@ -236,10 +242,10 @@ export const literal = <T extends PlainObject>(v: T): SimpleExpression<DeepWiden
 export const asString = <E extends BaseExpression<any, any>>(e: E): BaseExpression<string, ExprC<E>> =>
     new AsStringExpression(e);
 
-export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "template"> =>
+export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> =>
     new ConcatExpression(es);
 
-export const concatWith = <ES extends readonly BaseExpression<string, any>[]>(sep: string, ...es: ES): BaseExpression<string, "template"> =>
+export const concatWith = <ES extends readonly BaseExpression<string, any>[]>(sep: string, ...es: ES): BaseExpression<string, "govaluate"> =>
     new ConcatExpression(es, sep);
 
 /* ───────── ternary: symmetrical overloads (outputs can be any PlainObject) ───────── */
@@ -379,3 +385,7 @@ export const loopItem = <T extends PlainObject>(): TemplateExpression<T> =>
 
 export const configMap = <T extends PlainObject>(name: BaseExpression<string>, key: string): TemplateExpression<T> =>
     new FromConfigMapExpression(name, key);
+
+export function getWorkflowUuid() {
+    return new FromWorkflowUuid();
+}

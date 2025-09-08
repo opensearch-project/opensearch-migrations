@@ -12,7 +12,7 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {BaseExpression, configMap, equals, literal, path} from "@/schemas/expression";
+import {BaseExpression, concat, configMap, equals, getWorkflowUuid, literal, path} from "@/schemas/expression";
 import {LoopWithParams, makeParameterLoop} from "@/schemas/workflowTypes";
 import {defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
 import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
@@ -36,7 +36,7 @@ const s3ImageTargetParams = { // s3ConfigParam, targets, ImageParameters
 const sourceMigrationParams = { // sourceMigrationConfig, snapshotConfig, migrationConfig
     sourceConfig: defineRequiredParam<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>(),
     snapshotConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>(),
-    migrationConfig: defineRequiredParam<z.infer<typeof UNKNOWN>>(),
+    migrationConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>(),
     target: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>>(
         {description: "Server configuration to direct migrated traffic toward" })
 }
@@ -116,6 +116,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotAndMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("sourcePipelineName", typeToken<string>())
         .addInputsFromRecord(s3ImageTargetParams) // s3ConfigParam, targets, ImageParameters
+        .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
         .addSteps(b=> b
                 .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                     c=>c.register({
@@ -123,21 +124,18 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceName: b.inputs.sourcePipelineName
                     }))
 
-                // .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
-                //     c=>c.register({
-                //         ...b.inputs as Omit<typeof b.inputs, "sourceMigrationConfig">,
-                //         target: c.item,
-                //         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                //         migrationConfig: literal({}),
-                //         imageCaptureProxyLocation: b.inputs.imageCaptureProxyLocation
-                //
-                //         }),
-                //     {loopWith: makeParameterLoop(b.inputs.targets)})
+                .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
+                    c=>c.register({
+                        ...selectInputsForRegister(b, c),
+                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
+                        migrationConfig: path(b.inputs.snapshotAndMigrationConfig, "migrations"),
+                        target: c.item
+                    }),
+                    {loopWith: makeParameterLoop(b.inputs.targets)})
         )
     )
 
     .addTemplate("pipelineSourceMigration", t => t
-
         .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
         .addInputsFromRecord(targetsArrayParam) // "targetConfig"
         .addInputsFromRecord(s3ConfigParam) // s3Config
@@ -150,8 +148,8 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b,c),
                         sourceConfig: path(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        ...(b.inputs as Pick<typeof b.inputs,("targets" | "s3Config" | "latchCoordinationPrefix") > ),
-                        sourcePipelineName: '' // value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
+                        // TODO
+                        sourcePipelineName: 'TODO' // value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
                     }),
                 {loopWith: makeParameterLoop(path(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs"))})
         )
@@ -159,12 +157,11 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     .addTemplate("main", t => t
-        .addRequiredInput("sourceMigrationConfigs", // LOOP OVER THESE
-            typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>(),
+        .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
         .addInputsFromRecord(targetsArrayParam)
         .addInputsFromRecord(s3ConfigParam)
-        .addInputsFromRecord(
+        .addInputsFromRecord( // These image configurations have defaults from the ConfigMap
             Object.fromEntries(LogicalOciImages.flatMap(k => [
                 [`image${k}Location`, defineParam({defaultValue: configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)})],
                 [`image${k}PullPolicy`, defineParam({defaultValue: configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)})]
@@ -174,17 +171,19 @@ export const FullMigration = WorkflowBuilder.create({
         )
 
         .addSteps(b => b
-            .addStep("generateId", INTERNAL, "doNothing")
             .addStep("init", TargetLatchHelpers, "init", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
-                    prefix: "w",
-                    targets: [],
-                    configuration: {
-                        indices: [],
-                        migrations: []
-                    }
+                    prefix: concat(literal("workflow-"), getWorkflowUuid()),
+                    configuration: b.inputs.sourceMigrationConfigs
                 }))
+            .addStep("pipelineSourceMigration", INTERNAL, "pipelineSourceMigration",
+                c=>c.register({
+                    ...selectInputsForRegister(b, c),
+                    sourceMigrationConfig: c.item,
+                    latchCoordinationPrefix: c.steps.init.outputs.prefix
+                }),
+                {loopWith: makeParameterLoop(b.inputs.sourceMigrationConfigs)})
             .addStep("cleanup", TargetLatchHelpers, "cleanup",
                 c => c.register({
                     ...selectInputsForRegister(b, c),

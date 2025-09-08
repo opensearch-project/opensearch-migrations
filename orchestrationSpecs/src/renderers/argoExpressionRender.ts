@@ -10,7 +10,7 @@ import {
     ConcatExpression,
     ExpressionType,
     FromConfigMapExpression,
-    FromParameterExpression,
+    FromParameterExpression, FromWorkflowUuid,
     LiteralExpression,
     PathExpression,
     TernaryExpression
@@ -58,6 +58,10 @@ export function toArgoExpression(expr: AnyExpr): string {
 
     if (isLoopItem(expr)) {
         return "{{item}}"
+    }
+
+    if (isWorkflowUuid(expr)) {
+        return '{{workflow.uuid}}';
     }
 
     if (isConfigMapExpression(expr)) {
@@ -126,6 +130,10 @@ export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<
 
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> {
     return e.kind === "loop_item";
+}
+
+export function isWorkflowUuid(e: AnyExpr): e is FromWorkflowUuid {
+    return e.kind === "workflow_uuid";
 }
 
 export function isConfigMapExpression(e: AnyExpr): e is FromConfigMapExpression<any> {
