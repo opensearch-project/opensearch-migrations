@@ -2,12 +2,12 @@
 
 import { StatusIndicator } from '@cloudscape-design/components';
 import { mapStatus, durationFromTimes } from './statusUtils';
-import { StepState } from '@/generated/api/types.gen';
+import { StepState, StepStateWithPause } from '@/generated/api/types.gen';
 
 /**
  * Displays a status indicator based on the status state
  */
-export function StatusDisplay({ status }: Readonly<{ status?: StepState | null }>) {
+export function StatusDisplay({ status }: Readonly<{ status?: StepState | StepStateWithPause | null }>) {
   return status ? <StatusIndicator type={mapStatus(status)}></StatusIndicator> : <span>-</span>;
 }
 

@@ -173,6 +173,67 @@ class ArgoService:
     def get_target_cluster_from_workflow(self, workflow_name: str) -> Cluster:
         return self._get_cluster_config_from_workflow(workflow_name, "target")
 
+    def get_cluster_from_configmap(self, configmap_name_prefix: str,
+                                   config_key: str = "cluster-config") -> Optional[Cluster]:
+        # First, find ConfigMaps with the given prefix
+        kubectl_args = {
+            "get": FlagOnlyArgument,
+            "configmaps": FlagOnlyArgument,
+            "--namespace": self.namespace,
+            "-o": "jsonpath={.items[*].metadata.name}"
+        }
+
+        result = self._run_kubectl_command(kubectl_args)
+        if not result.success or not result.output.stdout.strip():
+            logger.info(f"No ConfigMaps found in namespace {self.namespace}")
+            return None
+
+        configmap_names = result.output.stdout.strip().split()
+        matching_configmaps = [cm for cm in configmap_names if cm.startswith(configmap_name_prefix) and
+                               cm.endswith("migration-config")]
+
+        if not matching_configmaps:
+            logger.info(f"Unable to find existing cluster ConfigMap found with prefix '{configmap_name_prefix}' "
+                        f"in namespace {self.namespace}")
+            return None
+
+        # If multiple ConfigMaps are found, pick the last one
+        if len(matching_configmaps) > 1:
+            logger.warning(f"Multiple ConfigMaps found with prefix '{configmap_name_prefix}': {matching_configmaps}. "
+                           f"Picking last one: {matching_configmaps[-1]}.")
+        configmap_name = matching_configmaps[-1]
+
+        logger.info(f"Found ConfigMap '{configmap_name}' matching prefix '{configmap_name_prefix}'")
+
+        # Get the cluster config from the ConfigMap
+        kubectl_args = {
+            "get": FlagOnlyArgument,
+            "configmap": configmap_name,
+            "--namespace": self.namespace,
+            "-o": f'jsonpath={{.data.{config_key}}}'
+        }
+
+        try:
+            result = self._run_kubectl_command(kubectl_args)
+            if not result.success:
+                raise ValueError(f"Failed to read ConfigMap '{configmap_name}'")
+
+            config_contents = result.output.stdout.strip()
+            if not config_contents:
+                raise ValueError(f"ConfigMap '{configmap_name}' does not contain key '{config_key}' or it is empty")
+
+            try:
+                parsed_contents = json.loads(config_contents)
+                logger.info(f"Successfully retrieved cluster configuration from ConfigMap '{configmap_name}'")
+                return Cluster(config=parsed_contents)
+            except json.JSONDecodeError as jsonDecodeError:
+                raise ValueError(f"Failed to parse ConfigMap '{configmap_name}' key '{config_key}' "
+                                 f"as JSON: {jsonDecodeError}")
+
+        except CommandRunnerError as e:
+            logger.error(f"Failed to execute kubectl command: {e}")
+            raise ValueError(f"Failed to read ConfigMap '{configmap_name}': {e}")
+
     def _run_argo_command(self, pod_action: str, argo_args: Dict, print_output: bool = False,
                           stream_output: bool = False) -> CommandResult:
         pod_name = f"argo-{pod_action}-{uuid.uuid4().hex[:6]}"

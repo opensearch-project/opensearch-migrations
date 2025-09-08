@@ -25,3 +25,5 @@ spec:
       - name: replayer-config
         value: |
           {"batchSize": 1000, "concurrency": 4}
+      - name: skip-cleanup
+        value: "false"

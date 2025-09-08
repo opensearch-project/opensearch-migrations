@@ -4,9 +4,10 @@ from kubernetes import client, config, stream
 from kubernetes.client import V1Pod
 from kubernetes.stream.ws_client import WSClient
 import logging
+import shlex
 import subprocess
 import time
-from typing import List
+from typing import Dict, List
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ class K8sService:
         return self.run_command(command)
 
     def helm_install(self, chart_path: str, release_name: str,
-                     values_file: str = None) -> CompletedProcess | bool:
+                     values_file: str = None, values: Dict[str, str] = None) -> CompletedProcess | bool:
         helm_release_exists = self.check_helm_release_exists(release_name=release_name)
         if helm_release_exists:
             logger.info(f"Helm release {release_name} already exists, skipping install")
@@ -190,6 +191,9 @@ class K8sService:
         command = ["helm", "install", release_name, chart_path, "-n", self.namespace, "--create-namespace"]
         if values_file:
             command.extend(["-f", values_file])
+        if values:
+            for key, value in values.items():
+                command.extend(["--set", f"{key}={shlex.quote(str(value))}"])
         return self.run_command(command)
 
     def helm_uninstall(self, release_name: str) -> CompletedProcess | bool:
@@ -200,3 +204,60 @@ class K8sService:
 
         logger.info(f"Uninstalling {release_name}...")
         return self.run_command(["helm", "uninstall", release_name, "-n", self.namespace])
+
+    def get_helm_installations(self) -> List[str]:
+        target_namespace = self.namespace
+        # Use helm list with short output format to get just the release names
+        command = ["helm", "list", "-n", target_namespace, "--short"]
+        
+        try:
+            result = self.run_command(command)
+            if result and result.stdout:
+                # Split the output by lines and filter out empty lines
+                release_names = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+                logger.info(f"Found {len(release_names)} helm installations in "
+                            f"namespace '{target_namespace}': {release_names}")
+                return release_names
+            else:
+                logger.info(f"No helm installations found in namespace '{target_namespace}'")
+                return []
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to list helm installations in namespace '{target_namespace}': {e.stderr}")
+            raise HelmCommandFailed(f"Helm list command failed: {e.stderr}")
+
+    def get_configmaps(self) -> List[str]:
+        target_namespace = self.namespace
+        # Use kubectl get configmaps to get just the ConfigMap names
+        command = ["kubectl", "get", "configmaps", "-n", target_namespace, "--no-headers", "-o",
+                   "custom-columns=:metadata.name"]
+        
+        try:
+            result = self.run_command(command)
+            if result and result.stdout:
+                # Split the output by lines and filter out empty lines
+                configmap_names = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+                logger.info(f"Found {len(configmap_names)} ConfigMaps in "
+                            f"namespace '{target_namespace}': {configmap_names}")
+                return configmap_names
+            else:
+                logger.info(f"No ConfigMaps found in namespace '{target_namespace}'")
+                return []
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to list ConfigMaps in namespace '{target_namespace}': {e.stderr}")
+            raise subprocess.CalledProcessError(e.returncode, e.cmd, e.stderr)
+
+    def delete_configmap(self, configmap_name: str) -> CompletedProcess | bool:
+        target_namespace = self.namespace
+        
+        # Check if ConfigMap exists first
+        check_command = ["kubectl", "get", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"]
+        check_result = self.run_command(check_command, ignore_errors=True)
+        
+        if not check_result or not check_result.stdout.strip():
+            logger.info(f"ConfigMap '{configmap_name}' doesn't exist in namespace '{target_namespace}', "
+                        f"skipping delete")
+            return True
+        
+        logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
+        delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace]
+        return self.run_command(delete_command)

@@ -2,8 +2,8 @@
 
 import { Button, ButtonDropdown } from '@cloudscape-design/components';
 import SpaceBetween from '@cloudscape-design/components/space-between';
-import DebugCommands from '@/components/playground/debug/DebugCommands';
-import { SNAPSHOT_SCENARIOS } from '../mockData/snapshotScenarios';
+import { SNAPSHOT_SCENARIOS } from '@/components/snapshot/mockData/snapshotScenarios';
+import DebugCommands from '@/components/debug/DebugCommands';
 
 interface SnapshotDebugControlsProps {
   readonly onScenarioSelect: (scenario: keyof typeof SNAPSHOT_SCENARIOS) => void;

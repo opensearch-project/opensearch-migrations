@@ -2,7 +2,7 @@
 
 import { Button, ButtonDropdown } from '@cloudscape-design/components';
 import SpaceBetween from '@cloudscape-design/components/space-between';
-import DebugCommands from '@/components/playground/debug/DebugCommands';
+import DebugCommands from '@/components/debug/DebugCommands';
 import { CLUSTER_SCENARIOS } from '../mockData/clusterScenarios';
 
 interface ClusterDebugControlsProps {

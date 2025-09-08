@@ -1,7 +1,7 @@
 'use client';
 
 import { SessionStatusProps } from './types';
-import { useSessionOverview } from './apiHooks';
+import { useSessionOverview } from '../../hooks/apiFetch';
 import StatusContainer from './StatusContainer';
 import { StatusFieldDefinition } from './statusUtils';
 import { DateDisplay, TextDisplay } from './statusComponents';

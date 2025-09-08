@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { clusterSource, clusterTarget, metadataStatus, sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
+import { backfillStatus, clusterSource, clusterTarget, metadataStatus, sessionGet, snapshotStatus } from '@/generated/api/sdk.gen';
 
 function useFetchData<T>(
   fetchFn: (sessionName: string) => Promise<{response: {status: number}, data: T}>,
@@ -79,4 +79,12 @@ export function useMetadataStatus(sessionName: string) {
   };
 
   return useFetchData(fetchMetadata, sessionName, 'metadata status');
+}
+
+export function useBackfillStatus(sessionName: string) {
+  const fetchBackfill = async (name: string) => {
+    return await backfillStatus({ path: { session_name: name } });
+  };
+
+  return useFetchData(fetchBackfill, sessionName, 'backfill status');
 }
