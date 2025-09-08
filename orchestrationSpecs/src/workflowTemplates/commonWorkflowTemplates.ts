@@ -27,8 +27,8 @@ export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKey
             [`image${k}Location`, defineRequiredParam<string>()],
             [`image${k}PullPolicy`, defineRequiredParam<IMAGE_PULL_POLICY>()]
         ])
-    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string,false>> &
-        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>;
+    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string,true>> &
+        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,true>>;
 }
 export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
 

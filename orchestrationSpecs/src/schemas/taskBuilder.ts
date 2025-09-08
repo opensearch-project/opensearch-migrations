@@ -58,6 +58,8 @@ export type ParamProviderCallbackObject<
 > =
     {
         register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol;
+        /** runtime copy of the keys to make it possible to narrow values, not just types */
+        parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
     } & {
     [K in Label]: {
         [StepName in keyof TasksScope]:
@@ -68,10 +70,7 @@ export type ParamProviderCallbackObject<
                     ? OutputParamsToExpressions<Outputs>
                     : {};
             }
-            : {
-                id: string;
-                outputs: {};
-            };
+            : { id: string; outputs: {} };
     }
 } & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
 
@@ -117,10 +116,16 @@ export type RequiredKeysOfRegister<R extends (arg: any, ...rest: any[]) => any> 
         ? RequiredKeys<Parameters<R>[0]>
         : never;
 
-// ---- runtime helper ----
 // Convention: an input is optional-at-callsite iff value._hasDefault === true
 function isRequiredAtCallsite(v: any): boolean {
     return !(v && v._hasDefault === true);
+}
+
+// read an optional runtime allow-list of keys from the callback object
+function getAcceptedRegisterKeys(cb: any): string[] | undefined {
+    if (cb && Array.isArray(cb.parameterKeys)) return cb.parameterKeys as string[];
+    if (cb?.register && Array.isArray(cb.register.parameterKeys)) return cb.register.parameterKeys as string[];
+    return undefined;
 }
 
 /**
@@ -131,48 +136,23 @@ function isRequiredAtCallsite(v: any): boolean {
  * C: any object with a `register` function of shape (arg: {...}) => any
  */
 export function selectInputsForRegister<
-    TemplateBuilderT extends { inputs: Record<string, any> },
+    BuilderT extends { inputs: Record<string, any> },
     ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any }
 >(
-    builder: TemplateBuilderT,
-    paramsCallback: ParamsCallbackT
-): Pick<TemplateBuilderT["inputs"], Extract<keyof TemplateBuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>;
-
-export function selectInputsForRegister<
-    TemplateBuilderT extends { inputs: Record<string, any> },
-    ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any },
-    Ks extends readonly (keyof TemplateBuilderT["inputs"])[]
->(
-    builder: TemplateBuilderT,
-    paramsCallback: ParamsCallbackT,
-    requiredKeys: Ks
-): Pick<TemplateBuilderT["inputs"], Extract<Ks[number], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>;
-
-// ---------- implementation ----------
-export function selectInputsForRegister<
-    TemplateBuilderT extends { inputs: Record<string, any> },
-    ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any }
->(
-    builder: TemplateBuilderT,
-    paramsCallback: ParamsCallbackT,
-    requiredKeys?: readonly (keyof TemplateBuilderT["inputs"])[]
-) {
+    builder: BuilderT,
+    callback: ParamsCallbackT
+): Pick<BuilderT["inputs"], Extract<keyof BuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>
+{
     const src = builder.inputs as Record<string, any>;
+    const keysToKeep = getAcceptedRegisterKeys(callback) as readonly (keyof BuilderT["inputs"])[];
 
-    // Decide which keys to keep at runtime
-    const keysToKeep: readonly (keyof TemplateBuilderT["inputs"])[] =
-        requiredKeys ??
-        (Object.keys(src).filter(k => isRequiredAtCallsite(src[k])) as (keyof TemplateBuilderT["inputs"])[]);
-
-    // Active pick: build a *new* object with only the selected keys
-    const out: Partial<Record<keyof TemplateBuilderT["inputs"], any>> = {};
+    const out: Partial<Record<keyof BuilderT["inputs"], any>> = {};
     for (const k of keysToKeep) {
         if (Object.prototype.hasOwnProperty.call(src, k as string)) {
             out[k] = src[k as string];
         }
     }
-
-    return out;
+    return out as any;
 }
 
 export type ParamsTuple<
@@ -316,16 +296,17 @@ export abstract class TaskBuilder<
         Inputs extends InputParametersRecord,
         LoopT extends PlainObject = never
     >(
+        inputs: Inputs,
         fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>,
         loopWith?: LoopWithUnion<LoopT>
     ): ParamsWithLiteralsOrExpressions<CallerParams<Inputs>> {
         let capturedParams!: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>;
 
-        const result = fn(this.buildParamProviderCallbackObject<Inputs, LoopT>(this.label,
-            (p=>{
+        const result = fn(this.buildParamProviderCallbackObject<Inputs, LoopT>(inputs,
+            (p: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => {
                 capturedParams = p;
                 return PARAMS_PUSHED;
-            }), loopWith));
+            }, loopWith));
 
         if (result !== PARAMS_PUSHED) {
             throw new Error("Params registration function must call ctx.register(...) and return its result");
@@ -350,23 +331,22 @@ export abstract class TaskBuilder<
         C,
         ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, TemplateSource, K>> }>
     > {
+        const keyStr = key as unknown as string;
+        const inputs = (source === INTERNAL) ?
+             (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
+             (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
         const { paramsFn, opts } = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
-        const params = this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(paramsFn as any, opts?.loopWith);
+        const params =
+            this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, opts?.loopWith);
 
         if (source === INTERNAL) {
-            // runtime: we just need a string; compile-time was already checked
-            const k = key as unknown as string;
-            const outputs = (this.contextualScope.templates as any)?.[k]?.outputs as OutputsFrom<C, TemplateSource, K>;
-
-            const templateCall = this.callTemplate(name as string, k, params, opts?.loopWith);
+            const outputs = (this.contextualScope.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
+            const templateCall = this.callTemplate(name as string, keyStr, params, opts?.loopWith);
             return this.addTaskHelper(name, templateCall as any, outputs, opts);
         } else {
             const wf = source as unknown as Workflow<any, any, any>;
-            const k = key as unknown as string;
-            const outputs = (wf.templates as any)?.[k]?.outputs as OutputsFrom<C, TemplateSource, K>;
-
-            // keep your current external behavior (no loopWith to callExternalTemplate)
-            const templateCall = this.callExternalTemplate(name as string, wf, k as any, params);
+            const outputs = (wf.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
+            const templateCall = this.callExternalTemplate(name as string, source as any, keyStr as any, params);
             return this.addTaskHelper(name, templateCall as any, outputs, opts);
         }
     }
@@ -405,7 +385,7 @@ export abstract class TaskBuilder<
         Inputs extends InputParametersRecord,
         LoopT extends PlainObject = never
     >(
-        key: TaskType,
+        inputs: Inputs,
         register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol,
         loopWith?: LoopWithUnion<LoopT>
     ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
@@ -421,13 +401,12 @@ export abstract class TaskBuilder<
             tasksByName[taskName] = { id: taskName, outputs };
         });
 
-        const ctx = {
+        return {
             register,
-            [key]: tasksByName,
+            parameterKeys: Object.keys(inputs) as Extract<keyof Inputs, string>[],
+            [this.label]: tasksByName,
             ...(loopWith ? { item: loopItem<LoopT>() } : {})
-        } as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;
-
-        return ctx;
+        } as unknown as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;
     }
 
     protected abstract getTaskOutputAsExpression<T extends PlainObject>(

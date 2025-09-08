@@ -92,7 +92,10 @@ export const FullMigration = WorkflowBuilder.create({
                     processorId: c.steps.idGenerator.id
                 }))
             .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c=>
-                c.register({targetConfig: b.inputs.target}))
+                c.register({
+                    ...selectInputsForRegister(b,c),
+                    targetConfig: b.inputs.target
+                }))
         )
     )
 
@@ -114,11 +117,11 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourcePipelineName", typeToken<string>())
         .addInputsFromRecord(s3ImageTargetParams) // s3ConfigParam, targets, ImageParameters
         .addSteps(b=> b
-                // .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
-                //     c=>c.register({
-                //         ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
-                //         sourceName: b.inputs.sourcePipelineName
-                //     }))
+                .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
+                    c=>c.register({
+                        ...selectInputsForRegister(b,c),
+                        sourceName: b.inputs.sourcePipelineName
+                    }))
 
                 // .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
                 //     c=>c.register({
@@ -144,6 +147,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b=>b
             .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot", c =>
                     c.register({
+                        ...selectInputsForRegister(b,c),
                         sourceConfig: path(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
                         ...(b.inputs as Pick<typeof b.inputs,("targets" | "s3Config" | "latchCoordinationPrefix") > ),
@@ -181,23 +185,9 @@ export const FullMigration = WorkflowBuilder.create({
                         migrations: []
                     }
                 }))
-            // .addStep("split", INTERNAL, "pipelineSourceMigration",
-            //     (stepScope,register) => register({
-            //         sourceMigrationConfig: stepScope.item
-            //         snapshotConfig: {
-            //
-            //         },
-            //         migrationConfig: undefined,
-            //         targets: [],
-            //         latchCoordinationPrefix: stepScope.steps.init.prefix
-            //     }),
-            //     { loopWith: makeParameterLoop(b.inputs.sourceMigrationConfigs) }
-            // )
-
             .addStep("cleanup", TargetLatchHelpers, "cleanup",
                 c => c.register({
                     ...selectInputsForRegister(b, c),
-                    // ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
                     prefix: c.steps.init.outputs.prefix
                 }))
         )
