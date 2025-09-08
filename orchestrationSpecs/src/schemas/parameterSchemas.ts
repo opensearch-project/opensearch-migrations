@@ -12,6 +12,7 @@
 
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 import {inputParam, workflowParam} from "@/schemas/expression";
+import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
 
 // Zero-runtime “type witness” object that carries a generic T.
 export declare const __type_token__: unique symbol;
@@ -37,7 +38,7 @@ export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
     : {});                                   // required at callsite
 
 export function defineParam<T extends PlainObject>(opts: {
-    defaultValue: T;
+    defaultValue: AllowLiteralOrExpression<T>;
     description?: string;
 }): InputParamDef<DeepWiden<T>, false> {
     return {

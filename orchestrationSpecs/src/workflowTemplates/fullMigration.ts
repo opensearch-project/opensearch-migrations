@@ -7,28 +7,29 @@ import {
 } from '@/workflowTemplates/userSchemas'
 import {
     CommonWorkflowParameters,
-    ImageParameters,
-    makeImageParametersForKeys, s3ConfigParam
+    ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys,
+    s3ConfigParam
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {BaseExpression, equals, literal, path} from "@/schemas/expression";
+import {BaseExpression, configMap, equals, literal, path} from "@/schemas/expression";
 import {LoopWithParams, makeParameterLoop} from "@/schemas/workflowTypes";
-import {defineRequiredParam, typeToken} from "@/schemas/parameterSchemas";
-import {INTERNAL, SelectInputsForRegister} from "@/schemas/taskBuilder";
+import {defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
+import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
+import { IMAGE_PULL_POLICY } from '@/schemas/containerBuilder';
 
 const latchCoordinationPrefixParam = {
     latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})
 };
 
 const targetsArrayParam = {
-    targets: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>[]>({
+    targets: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>[]>({
         description: "List of server configurations to direct migrated traffic toward"})
 };
 
-const s3ImageTargetParams = {
+const s3ImageTargetParams = { // s3ConfigParam, targets, ImageParameters
     ...s3ConfigParam, ...targetsArrayParam, ...ImageParameters
 }
 
@@ -56,7 +57,7 @@ export const FullMigration = WorkflowBuilder.create({
 
     .addTemplate("runReplayerForTarget", t => t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
-        .addInputsFromRecord(makeImageParametersForKeys(["EtcdUtils"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]))
         .addContainer(cb=>cb
             .addImageInfo(cb.inputs.imageEtcdUtilsLocation, cb.inputs.imageEtcdUtilsPullPolicy)
             .addCommand(["sh", "-c"])
@@ -69,25 +70,24 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     .addTemplate("pipelineMigrateFromSnapshot", t=>t
-        .addInputsFromRecord(sourceMigrationParams) // // sourceConfig, snapshotConfig, migrationConfig, target
-        .addRequiredInput("sourcePipelineName", typeToken<string>())
+        .addInputsFromRecord(sourceMigrationParams) // sourceConfig, snapshotConfig, migrationConfig, target
         .addInputsFromRecord(latchCoordinationPrefixParam)
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
             .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", INTERNAL, "migrateMetaData", c =>
-                c.register(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>))
+                c.register(selectInputsForRegister(b, c)))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoadFromConfig", c =>
                 c.register({
-                ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
-                sessionName: c.steps.idGenerator.id,
-                targetConfig: b.inputs.target
-            }))
+                    ...(selectInputsForRegister(b, c)),
+                    sessionName: c.steps.idGenerator.id,
+                    targetConfig: b.inputs.target
+                }))
             .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c=>
                 c.register({
+                    ...(selectInputsForRegister(b, c)),
                     prefix: b.inputs.latchCoordinationPrefix,
-                    etcdUtilsImagePullPolicy: b.inputs.imageEtcdUtilsPullPolicy,
                     targetName: path(b.inputs.target, "name"),
                     processorId: c.steps.idGenerator.id
                 }))
@@ -96,28 +96,40 @@ export const FullMigration = WorkflowBuilder.create({
         )
     )
 
-    .addTemplate("pipelineSnapshotToTarget", t=>t
-        .addSteps(sb=>sb))
 
+    .addTemplate("pipelineSnapshotToTarget", t=>t
+        .addInputsFromRecord(sourceMigrationParams) // sourceConfig, snapshotConfig, migrationConfig, target
+        .addInputsFromRecord(latchCoordinationPrefixParam)
+        .addInputsFromRecord(ImageParameters)
+
+        .addSteps(b=>b
+            .addStep("pipelineMigrateFromSnapshot", INTERNAL, "pipelineMigrateFromSnapshot",
+                c=>c.register(selectInputsForRegister(b, c)))
+        )
+    )
 
     .addTemplate("pipelineSnapshot", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotAndMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("sourcePipelineName", typeToken<string>())
-        .addInputsFromRecord(s3ImageTargetParams)
-        .addInputsFromRecord(latchCoordinationPrefixParam)
+        .addInputsFromRecord(s3ImageTargetParams) // s3ConfigParam, targets, ImageParameters
         .addSteps(b=> b
-                .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
-                    c=>c.register({
-                        ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
-                        sourceName: b.inputs.sourcePipelineName
-                    }))
-                // .addStep("migrateMetadata", INTERNAL, "migrateMetaData",
-                //     (steps,register)=>
-                //         register({
-                //             // ...b.inputs as Omit<typeof b.inputs, "sourceMigrationConfig">,
-                //             // snapshotConfig:
-                //         }))
+                // .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
+                //     c=>c.register({
+                //         ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
+                //         sourceName: b.inputs.sourcePipelineName
+                //     }))
+
+                // .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
+                //     c=>c.register({
+                //         ...b.inputs as Omit<typeof b.inputs, "sourceMigrationConfig">,
+                //         target: c.item,
+                //         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
+                //         migrationConfig: literal({}),
+                //         imageCaptureProxyLocation: b.inputs.imageCaptureProxyLocation
+                //
+                //         }),
+                //     {loopWith: makeParameterLoop(b.inputs.targets)})
         )
     )
 
@@ -148,14 +160,21 @@ export const FullMigration = WorkflowBuilder.create({
             "List of server configurations to direct migrated traffic toward")
         .addInputsFromRecord(targetsArrayParam)
         .addInputsFromRecord(s3ConfigParam)
-        .addInputsFromRecord(ImageParameters)
+        .addInputsFromRecord(
+            Object.fromEntries(LogicalOciImages.flatMap(k => [
+                [`image${k}Location`, defineParam({defaultValue: configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)})],
+                [`image${k}PullPolicy`, defineParam({defaultValue: configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)})]
+            ])
+            ) as Record<`image${typeof LogicalOciImages[number]}Location`, InputParamDef<string,false>> &
+                Record<`image${typeof LogicalOciImages[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>
+        )
 
         .addSteps(b => b
             .addStep("generateId", INTERNAL, "doNothing")
             .addStep("init", TargetLatchHelpers, "init", c =>
                 c.register({
+                    ...(selectInputsForRegister(b, c)),
                     prefix: "w",
-                    etcdUtilsImagePullPolicy: "IF_NOT_PRESENT",
                     targets: [],
                     configuration: {
                         indices: [],
@@ -177,8 +196,9 @@ export const FullMigration = WorkflowBuilder.create({
 
             .addStep("cleanup", TargetLatchHelpers, "cleanup",
                 c => c.register({
-                    prefix: c.steps.init.outputs.prefix,
-                    etcdUtilsImagePullPolicy: "IF_NOT_PRESENT"
+                    ...selectInputsForRegister(b, c),
+                    // ...(b.inputs as SelectInputsForRegister<typeof b.inputs, typeof c.register>),
+                    prefix: c.steps.init.outputs.prefix
                 }))
         )
     )

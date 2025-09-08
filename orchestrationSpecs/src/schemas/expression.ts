@@ -56,9 +56,14 @@ export class FromParameterExpression<T extends PlainObject>
 
 export class FromConfigMapExpression<T extends PlainObject>
     extends BaseExpression<T, "template"> {
-    constructor(public readonly configMapName: string, public readonly key: string) {
+    constructor(public readonly configMapName: BaseExpression<string>, public readonly key: string) {
         super("configmap");
     }
+}
+
+export class LoopItemExpression<T extends PlainObject>
+    extends BaseExpression<T, "template"> {
+    constructor() { super("loop_item"); }
 }
 
 /** ───────────────────────────────────────────────────────────────────────────
@@ -369,5 +374,8 @@ export const taskOutput = <T extends PlainObject>(
         def as any
     );
 
-// export const configMap = <T extends PlainObject>(name: string, key: string): TemplateExpression<T> =>
-//     new FromConfigMapExpression(name, key);
+export const loopItem = <T extends PlainObject>(): TemplateExpression<T> =>
+    new LoopItemExpression<T>();
+
+export const configMap = <T extends PlainObject>(name: BaseExpression<string>, key: string): TemplateExpression<T> =>
+    new FromConfigMapExpression(name, key);

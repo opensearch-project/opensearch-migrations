@@ -2,13 +2,14 @@ import {defineParam, defineRequiredParam, InputParamDef, InputParametersRecord} 
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {z} from "zod/index";
 import {CLUSTER_CONFIG, S3_CONFIG} from "@/workflowTemplates/userSchemas";
+import {BaseExpression, configMap} from "@/schemas/expression";
 
 export const CommonWorkflowParameters = {
-    etcdEndpoints:       defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
-    etcdUser:            defineParam({ defaultValue: "root" }),
-    etcdPassword:        defineParam({ defaultValue: "password" }),
-    etcdImage:           defineParam({ defaultValue: "migrations/migration_console:latest" }),
-    s3SnapshotConfigMap: defineParam({ defaultValue: "s3-snapshot-config" })
+    etcdEndpoints:        defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
+    etcdUser:             defineParam({ defaultValue: "root" }),
+    etcdPassword:         defineParam({ defaultValue: "password" }),
+    s3SnapshotConfigMap:  defineParam({ defaultValue: "s3-snapshot-config" }),
+    imageConfigMapName:   defineParam({ defaultValue: "migration-image-config"})
 } as const;
 
 export const LogicalOciImages = [
@@ -20,16 +21,16 @@ export const LogicalOciImages = [
 ] as const;
 export type LogicalOciImagesKeys = typeof LogicalOciImages[number];
 
-export function makeImageParametersForKeys<K extends LogicalOciImagesKeys, T extends readonly K[]>(keys: T) {
+export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKeys, T extends readonly K[]>(keys: T) {
     return Object.fromEntries(
         keys.flatMap(k => [
-            [`image${k}Location`, defineParam({defaultValue: ""})],
-            [`image${k}PullPolicy`, defineParam({defaultValue: "IF_NOT_PRESENT" as IMAGE_PULL_POLICY})]
+            [`image${k}Location`, defineRequiredParam<string>()],
+            [`image${k}PullPolicy`, defineRequiredParam<IMAGE_PULL_POLICY>()]
         ])
     ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string,false>> &
         Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>;
 }
-export const ImageParameters = makeImageParametersForKeys(LogicalOciImages);
+export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
 
 export const s3ConfigParam = {
     s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>[]>({

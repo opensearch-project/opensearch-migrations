@@ -70,16 +70,11 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     }
 }
 
-function convertArgumentValue(value: any) {
-    return (value && typeof value === 'object' && 'loopWith' in value) ?
-        "{{item}}" : transformExpressionsDeep(value);
-}
-
 function formatArguments(passedParameters: {parameters?: Record<string, any> | undefined} | undefined) {
     if (passedParameters == undefined) { return {}};
     return Object.entries(passedParameters).map(([key, value]) => ({
         name: key,
-        value: convertArgumentValue(value)
+        value: transformExpressionsDeep(value)
     }));
 }
 

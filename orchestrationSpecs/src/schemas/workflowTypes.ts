@@ -122,10 +122,10 @@ export type LoopWithParams<T extends PlainObject> = {
     value: BaseExpression<T[]>
 }
 
-export function makeParameterLoop<T extends PlainObject>(e: BaseExpression<T[]>) {
+export function makeParameterLoop<T extends PlainObject>(expr: BaseExpression<T[]>) {
     return {
-        "loopWith": "params",
-        "value": e
+        loopWith: "params",
+        value: expr
     } as LoopWithParams<T>;
 }
 

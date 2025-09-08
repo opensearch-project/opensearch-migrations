@@ -8,7 +8,7 @@ import { Workflow } from "@/schemas/workflowBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
-import { SimpleExpression } from "@/schemas/expression";
+import { SimpleExpression, loopItem } from "@/schemas/expression";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
@@ -42,6 +42,7 @@ export type InputKind<T> =
 export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 
 export type TaskType = "tasks" | "steps";
+type LoopItemType<L extends PlainObject> = [L] extends [never] ? never : AllowLiteralOrExpression<L>;
 
 /**
  * ParamProviderCallbackObject now:
@@ -116,11 +117,63 @@ export type RequiredKeysOfRegister<R extends (arg: any, ...rest: any[]) => any> 
         ? RequiredKeys<Parameters<R>[0]>
         : never;
 
-// From inputs I, keep only the keys that register requires
-export type SelectInputsForRegister<
-    I extends object,
-    R extends (arg: any, ...rest: any[]) => any
-> = Pick<I, Extract<keyof I, RequiredKeysOfRegister<R>>>;
+// ---- runtime helper ----
+// Convention: an input is optional-at-callsite iff value._hasDefault === true
+function isRequiredAtCallsite(v: any): boolean {
+    return !(v && v._hasDefault === true);
+}
+
+/**
+ * Infers the correct Pick<...> from (b.inputs, c.register) at compile time,
+ * and at runtime returns only those inputs considered "required at callsite".
+ *
+ * B: any object with an `inputs` record
+ * C: any object with a `register` function of shape (arg: {...}) => any
+ */
+export function selectInputsForRegister<
+    TemplateBuilderT extends { inputs: Record<string, any> },
+    ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any }
+>(
+    builder: TemplateBuilderT,
+    paramsCallback: ParamsCallbackT
+): Pick<TemplateBuilderT["inputs"], Extract<keyof TemplateBuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>;
+
+export function selectInputsForRegister<
+    TemplateBuilderT extends { inputs: Record<string, any> },
+    ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any },
+    Ks extends readonly (keyof TemplateBuilderT["inputs"])[]
+>(
+    builder: TemplateBuilderT,
+    paramsCallback: ParamsCallbackT,
+    requiredKeys: Ks
+): Pick<TemplateBuilderT["inputs"], Extract<Ks[number], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>;
+
+// ---------- implementation ----------
+export function selectInputsForRegister<
+    TemplateBuilderT extends { inputs: Record<string, any> },
+    ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any }
+>(
+    builder: TemplateBuilderT,
+    paramsCallback: ParamsCallbackT,
+    requiredKeys?: readonly (keyof TemplateBuilderT["inputs"])[]
+) {
+    const src = builder.inputs as Record<string, any>;
+
+    // Decide which keys to keep at runtime
+    const keysToKeep: readonly (keyof TemplateBuilderT["inputs"])[] =
+        requiredKeys ??
+        (Object.keys(src).filter(k => isRequiredAtCallsite(src[k])) as (keyof TemplateBuilderT["inputs"])[]);
+
+    // Active pick: build a *new* object with only the selected keys
+    const out: Partial<Record<keyof TemplateBuilderT["inputs"], any>> = {};
+    for (const k of keysToKeep) {
+        if (Object.prototype.hasOwnProperty.call(src, k as string)) {
+            out[k] = src[k as string];
+        }
+    }
+
+    return out;
+}
 
 export type ParamsTuple<
     I extends InputParametersRecord,
@@ -371,7 +424,7 @@ export abstract class TaskBuilder<
         const ctx = {
             register,
             [key]: tasksByName,
-            ...(loopWith ? { item: loopWith } : {})
+            ...(loopWith ? { item: loopItem<LoopT>() } : {})
         } as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;
 
         return ctx;

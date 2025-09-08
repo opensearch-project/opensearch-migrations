@@ -99,22 +99,26 @@ export class TemplateBuilder<
             inputParameters: InputParamsToExpressions<InputParamsScope>,
             rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
         }) => T;
-        const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
-        const inputParams = templateInputParametersAsExpressions(this.inputScope);
-
         const param = defineParam({
-            defaultValue: fn({
-                workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
-                inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
-                rawParameters: {
-                    workflow: this.contextualScope,
-                    currentTemplate: this.getTemplateSignatureScope()
-                }
-            }) as T,
+            defaultValue: fn(this.inputs) as T,
             description
         });
 
         return this.extendWithParam(name as string, param) as any;
+    }
+
+    public get inputs() {
+        const workflowParams = workflowParametersAsExpressions(this.contextualScope.workflowParameters || {});
+        const inputParams = templateInputParametersAsExpressions(this.inputScope);
+
+        return {
+            workflowParameters: workflowParams as WorkflowInputsToExpressions<ContextualScope>,
+            inputParameters: inputParams as InputParamsToExpressions<InputParamsScope>,
+            rawParameters: { // just for debugging
+                workflow: this.contextualScope,
+                currentTemplate: this.getTemplateSignatureScope()
+            }
+        };
     }
 
     addRequiredInput<Name extends string, T extends PlainObject>(

@@ -16,6 +16,7 @@ import {
     TernaryExpression
 } from "@/schemas/expression";
 import { PlainObject } from "@/schemas/plainObject";
+import {LoopWithUnion} from "@/schemas/workflowTypes";
 
 /** Lightweight erased type to avoid deep generic instantiation */
 type AnyExpr = BaseExpression<any, any>;
@@ -53,6 +54,10 @@ export function toArgoExpression(expr: AnyExpr): string {
             default:
                 throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
         }
+    }
+
+    if (isLoopItem(expr)) {
+        return "{{item}}"
     }
 
     if (isConfigMapExpression(expr)) {
@@ -117,6 +122,10 @@ export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> {
 
 export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> {
     return e.kind === "parameter";
+}
+
+export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> {
+    return e.kind === "loop_item";
 }
 
 export function isConfigMapExpression(e: AnyExpr): e is FromConfigMapExpression<any> {

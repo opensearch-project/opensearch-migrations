@@ -3,6 +3,8 @@ import {CommonWorkflowParameters, s3ConfigParam} from "@/workflowTemplates/commo
 import {typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
 import {CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
+import { literal } from "@/schemas/expression";
+import {SNAPSHOT_MIGRATION_CONFIG} from "@/workflowTemplates/userSchemas"
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "CreateOrGetSnapshot",
@@ -16,6 +18,9 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceName", typeToken<string>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addInputsFromRecord(s3ConfigParam)
-        .addSteps(sb=>sb))
+        .addSteps(sb=>sb)
+         .addExpressionOutput("snapshotConfig", literal({
+            
+         } as z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>)))
 
     .getFullScope();

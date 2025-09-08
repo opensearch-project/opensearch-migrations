@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
-import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
+import {CommonWorkflowParameters, makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
@@ -19,8 +19,7 @@ function addCommonTargetLatchInputs<
         .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
         .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
         .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
-        .addOptionalInput("etcdUtilsImage", s => s.workflowParameters.etcdImage)
-        .addRequiredInput("etcdUtilsImagePullPolicy", typeToken<IMAGE_PULL_POLICY>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]))
         ;
 }
 
@@ -36,7 +35,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         .addRequiredInput("targets", typeToken<z.infer<typeof CLUSTER_CONFIG>[]>())
         .addRequiredInput("configuration", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addContainer(b => b
-            .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
+            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
@@ -51,7 +50,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         .addRequiredInput("targetName", typeToken<string>())
         .addRequiredInput("processorId", typeToken<string>())
         .addContainer(b => b
-            .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
+            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
@@ -62,7 +61,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
     .addTemplate("cleanup", t => t
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b => b
-            .addImageInfo(b.inputs.etcdUtilsImage, b.inputs.etcdUtilsImagePullPolicy)
+            .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
             .addInputsAsEnvVars()
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])
