@@ -37,7 +37,15 @@ def call(Map config = [:]) {
                 
                 git branch: "${params.gitBranch}", url: "${params.gitRepoUrl}"
                 
+                // Capture commit information for X-axis labeling
+                env.TEST_COMMIT_HASH = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                env.TEST_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                env.COMMIT_DATE = sh(script: 'git log -1 --format=%cd --date=short', returnStdout: true).trim()
+                
                 echo "Repository checked out successfully"
+                echo "Commit: ${env.TEST_COMMIT_HASH}"
+                echo "Short commit: ${env.TEST_COMMIT_SHORT}"
+                echo "Date: ${env.COMMIT_DATE}"
             }
             
             stage('2. Test Caller Identity') {

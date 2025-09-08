@@ -69,12 +69,16 @@ def call(Map config = [:]) {
                 echo "First data row: ${lines[1]}"
                 
                 // Add commit info to CSV for x-axis labeling
-                def commitLabel = "${env.TEST_COMMIT_SHORT} (${env.COMMIT_DATE})"
+                def commitLabel = "${env.TEST_COMMIT_SHORT}"
                 def enhancedContent = fileContent.replaceFirst('\n', ",Commit\n")
                 if (lines.size() > 1) {
                     enhancedContent = enhancedContent.replaceFirst('(?m)^([^\\n]+)$', '$1,' + commitLabel)
                 }
                 writeFile file: localMetricsPath, text: enhancedContent
+                
+                echo "Enhanced CSV with commit hash for X-axis:"
+                echo "Commit: ${commitLabel}"
+                sh "head -n 3 ${localMetricsPath}"
                 
                 // Plot each metric from the static list
                 metricsToPlot.each { metric ->
@@ -91,7 +95,8 @@ def call(Map config = [:]) {
                          keepRecords: false,
                          logarithmic: metric.logarithmic,
                          yaxis: metric.yaxis,
-                         hasLegend: false
+                         useDescr: true,
+                         csvSeriesX: 'Commit'
                 }
                 echo "Performance metrics plotting completed successfully"
             } else {
