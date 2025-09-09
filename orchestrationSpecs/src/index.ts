@@ -10,12 +10,12 @@ import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
 console.log("OUTPUT: ");
 const templates = [
     // [CaptureReplay]
-    // [CreateOrGetSnapshot],
-    // [DocumentBulkLoad],
-    // [FullMigration],
+    [CreateOrGetSnapshot],
+    [DocumentBulkLoad],
+    [FullMigration],
     [MigrationConsole],
-    // [SetupKafka],
-    // [TargetLatchHelpers],
+    [SetupKafka],
+    [TargetLatchHelpers],
 ];
 
 for (const [wf] of templates) {

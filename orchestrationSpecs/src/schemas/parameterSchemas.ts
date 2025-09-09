@@ -11,7 +11,7 @@
  */
 
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
-import {inputParam, workflowParam} from "@/schemas/expression";
+import {BaseExpression, FromParameterExpression, inputParam, workflowParam} from "@/schemas/expression";
 import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
 
 // Zero-runtime “type witness” object that carries a generic T.
@@ -98,14 +98,14 @@ export type OutputParamDef<T extends PlainObject> = {
     description?: string;
 } & (
     | { fromWhere: "path"; path: string }
-    | { fromWhere: "expression"; expression: string }
-    | { fromWhere: "parameter"; parameter: string }
+    | { fromWhere: "expression"; expression: BaseExpression<T> }
+    | { fromWhere: "parameter"; parameter: FromParameterExpression<T> }
     | { fromWhere: "jsonPath"; jsonPath: string }
     | { fromWhere: "jqFilter"; jqFilter: string }
     | { fromWhere: "event"; event: string }
     | { fromWhere: "configMapKeyRef"; configMapKeyRef: ConfigMapKeySelector }
     | { fromWhere: "supplied"; supplied: SuppliedValueFrom }
-    | { fromWhere: "default"; default: string }
+    | { fromWhere: "default"; default: BaseExpression<T> }
     );
 
 /** Canonical maps for inputs/outputs (values are type-only descriptors). */

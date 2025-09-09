@@ -124,9 +124,9 @@ function formatOutputSource(def: OutputParamDef<any>) {
         case "path":
             return {path: def.path};
         case "expression":
-            return {expression: def.expression};
+            return {expression: toArgoExpression(def.expression)};
         case "parameter":
-            return {parameter: def.parameter};
+            return {parameter: toArgoExpression(def.parameter)};
         case "jsonPath":
             return {jsonPath: def.jsonPath};
         case "jqFilter":
@@ -138,7 +138,7 @@ function formatOutputSource(def: OutputParamDef<any>) {
         case "supplied":
             return {supplied: def.supplied};
         case "default":
-            return {default: def.default};
+            return {default: toArgoExpression(def.default)};
         default:
             throw new Error(`Unsupported output parameter type: ${(def as any).fromWhere}`);
     }

@@ -26,7 +26,7 @@ export const MigrationConsole = WorkflowBuilder.create({
     serviceAccountName: "argo-workflow-executor"
 })
 
-    .addParams(CommonWorkflowParameters)
+    // .addParams(CommonWorkflowParameters)
 
 
     .addTemplate("getConsoleConfig", b=>b

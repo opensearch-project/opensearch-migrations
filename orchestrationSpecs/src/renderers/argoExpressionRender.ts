@@ -35,14 +35,14 @@ const formattedResult = (text: string, compound = false): ArgoFormatted => ({ te
 /* ───────────────── toArgoExpression ───────────────── */
 
 export function toArgoExpression<E extends AnyExpr>(expr: E): string {
-    const rval = toArgoExpressionInner(expr);
+    const rval = formatExpression(expr);
     return "{{" + (rval.compound ? "=" : "") + rval.text + "}}";
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
-export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted {
+function formatExpression<E extends AnyExpr>(expr: E): ArgoFormatted {
     if (isAsStringExpression(expr)) {
-        return toArgoExpressionInner(expr.source);
+        return formatExpression(expr.source);
     }
 
     if (isLiteralExpression(expr)) {
@@ -60,10 +60,9 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
 
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
-        const parts = ce.expressions.map(toArgoExpressionInner);
-        const text = ce.separator
-            ? parts.map(p => p.text).join(ce.separator)
-            : parts.map(p => p.text).join("");
+        const parts = ce.expressions.map(formatExpression);
+        const text = parts.map(p => p.text)
+            .join(ce.separator ? " + " + ce.separator + " + " : "+");
         const compound =
             (ce.expressions.length > 1) ||
             !!ce.separator ||
@@ -73,35 +72,35 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
 
     if (isTernaryExpression(expr)) {
         const te = expr as TernaryExpression<any, any, any, any>;
-        const c = toArgoExpressionInner(te.condition);
-        const t = toArgoExpressionInner(te.whenTrue);
-        const f = toArgoExpressionInner(te.whenFalse);
+        const c = formatExpression(te.condition);
+        const t = formatExpression(te.whenTrue);
+        const f = formatExpression(te.whenFalse);
         return formattedResult(`${c.text} ? ${t.text} : ${f.text}`, true);
     }
 
     if (isComparisonExpression(expr)) {
         const ce = expr as ComparisonExpression<any, any, any>;
-        const l = toArgoExpressionInner(ce.left);
-        const r = toArgoExpressionInner(ce.right);
+        const l = formatExpression(ce.left);
+        const r = formatExpression(ce.right);
         return formattedResult(`${l.text} ${ce.operator} ${r.text}`, true);
     }
 
     if (isNotExpression(expr)) {
         const n = expr as NotExpression<any>;
-        const f = toArgoExpressionInner(n.boolValue);
+        const f = formatExpression(n.boolValue);
         return formattedResult(`!(${f.text})`, f.compound);
     }
 
     if (isArithmeticExpression(expr)) {
         const ae = expr as ArithmeticExpression<any, any>;
-        const l = toArgoExpressionInner(ae.left);
-        const r = toArgoExpressionInner(ae.right);
+        const l = formatExpression(ae.left);
+        const r = formatExpression(ae.right);
         return formattedResult(`${l.text} ${ae.operator} ${r.text}`, true);
     }
 
     if (isPathExpression(expr)) {
         const pe = expr as RecordFieldSelectExpression<any, any, any>;
-        const inner = toArgoExpressionInner(pe.source);
+        const inner = formatExpression(pe.source);
         const needsFromJson = isParameterExpression(pe.source as unknown as AnyExpr);
         const source = needsFromJson ? `fromJSON(${inner.text})` : inner.text;
         const jsonPath = pe.path.replace(/\[(\d+)\]/g, "[$1]").replace(/^/, "$.");
@@ -111,7 +110,7 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
 
     if (isJsonSerialize(expr)) {
         const se = expr as SerializeJson;
-        const inner = toArgoExpressionInner(se.data);
+        const inner = formatExpression(se.data);
         const finalText = isParameterExpression(se.data as unknown as AnyExpr)
             ? inner.text : `toJSON(${inner.text})`;
         return formattedResult(finalText, true);
@@ -119,15 +118,15 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
 
     if (isArrayLengthExpression(expr)) {
         const le = expr as ArrayLengthExpression<any>;
-        const arr = toArgoExpressionInner(le.array);
+        const arr = formatExpression(le.array);
         // `(X | length)` is a jq-style transform => compound
         return formattedResult(`(${arr.text} | length)`, true);
     }
 
     if (isArrayIndexExpression(expr)) {
         const ie = expr as ArrayIndexExpression<any, any, any>;
-        const arr = toArgoExpressionInner(ie.array);
-        const idx = toArgoExpressionInner(ie.index);
+        const arr = formatExpression(ie.array);
+        const idx = formatExpression(ie.index);
         // indexing is non-trivial in Argo expression context => compound
         return formattedResult(`${arr.text}[${idx.text}]`, true);
     }
@@ -158,13 +157,13 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
 
     if (isFromBase64(expr)) {
         const e = expr as FromBase64Expression;
-        const d = toArgoExpressionInner(e.data);
+        const d = formatExpression(e.data);
         return formattedResult(`fromBase64(${d.text})`, true);
     }
 
     if (isToBase64(expr)) {
         const e = expr as ToBase64Expression;
-        const d = toArgoExpressionInner(e.data);
+        const d = formatExpression(e.data);
         return formattedResult(`toBase64(${d.text})`, true);
     }
 
