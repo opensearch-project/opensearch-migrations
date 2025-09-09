@@ -38,8 +38,8 @@ Resources for making testing/development easier
 For quick startup of Kafka, you can run it inside a docker container.  Pull the Apache Kafka image and run it.
 
 ```
-docker pull apache/kafka:3.7.0
-docker run -p 9092:9092 apache/kafka:3.7.0
+docker pull apache/kafka:3.9.1
+docker run -p 9092:9092 apache/kafka:3.9.1
 ```
 
 More information can be found at https://kafka.apache.org/quickstart, including commands to test and query a running

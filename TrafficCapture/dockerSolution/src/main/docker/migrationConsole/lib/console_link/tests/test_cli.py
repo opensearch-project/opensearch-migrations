@@ -18,6 +18,7 @@ from console_link.models.ecs_service import ECSService
 from console_link.models.kafka import StandardKafka
 from console_link.models.metrics_source import Component
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.snapshot import FileSystemSnapshot
 from console_link.models.utils import DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -458,8 +459,7 @@ def test_cli_snapshot_status(runner, mocker):
 
 
 def test_cli_snapshot_delete_with_acknowledgement(runner, mocker):
-    mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
-    mock.return_value.text = "Successfully deleted"
+    mock = mocker.patch.object(FileSystemSnapshot, 'delete', autospec=True)
 
     # Test snapshot status
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'delete', '--acknowledge-risk'],

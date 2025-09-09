@@ -14,7 +14,7 @@ configurations {
 }
 
 dependencies {
-    def openSearch = '2.11.1'
+    def openSearch = '2.19.3'
     implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
     implementation "org.opensearch:opensearch-common:${openSearch}"
     implementation "org.opensearch:opensearch-core:${openSearch}"
@@ -24,6 +24,7 @@ dependencies {
         include "*.jar"
         exclude "slf*.jar"
         exclude "netty*.jar"
+        exclude "google-java-format-*.jar"
     })
 
     implementation project(':TrafficCapture:captureOffloader')
