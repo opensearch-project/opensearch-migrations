@@ -6,8 +6,9 @@ import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {BaseExpression} from "@/schemas/expression";
 import {NamedTask} from "@/schemas/taskBuilder";
+import {optional} from "zod";
 
-function hasDefault<T extends PlainObject>(
+function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
 ): p is InputParamDef<T, false> & { _hasDefault: true; defaultValue: T } {
     return (p as any)._hasDefault === true;
@@ -40,8 +41,21 @@ function formatParameterDefinition<T extends PlainObject, P extends InputParamDe
     if (inputs.description != null) {
         out.description = inputs.description;
     }
-    if (hasDefault(inputs)) {
-        out.value = transformExpressionsDeep(inputs.defaultValue);
+    if (isDefault(inputs)) {
+        if (inputs.defaultValue.expression) {
+            out.value = transformExpressionsDeep(inputs.defaultValue.expression);
+        } else if (inputs.defaultValue.from) {
+            const f = inputs.defaultValue.from;
+            out.valueFrom = {
+                configMapKeyRef: {
+                    name: transformExpressionsDeep(f.name),
+                    key: f.key,
+                    optional: f.optional
+                }
+            }
+        } else {
+            throw new Error("Invalid DefaultSpec: neither expression nor from provided");
+        }
     }
     return out;
 }

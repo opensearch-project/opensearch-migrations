@@ -99,12 +99,7 @@ export class TemplateBuilder<
             inputParameters: InputParamsToExpressions<InputParamsScope>,
             rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
         }) => T;
-        const param = defineParam({
-            defaultValue: fn(this.inputs) as T,
-            description
-        });
-
-        return this.extendWithParam(name as string, param) as any;
+        return this.extendWithParam(name as string, defineParam({expression: fn(this.inputs) as T, description})) as any;
     }
 
     public get inputs() {

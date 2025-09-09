@@ -1,5 +1,5 @@
 // PlainObject type system for constraining values to serializable plain objects
-export type Primitive = string | number | boolean | null;
+export type Primitive = string | number | boolean;
 export type PlainObject = Primitive | readonly PlainObject[] | { [key: string]: PlainObject };
 
 export type WidenPrimitive<T> =

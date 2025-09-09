@@ -189,13 +189,6 @@ export class LoopItemExpression<T extends PlainObject>
     constructor() { super("loop_item"); }
 }
 
-export class FromConfigMapExpression<T extends PlainObject>
-    extends BaseExpression<T, "template"> {
-    constructor(public readonly configMapName: BaseExpression<string>, public readonly key: string) {
-        super("configmap");
-    }
-}
-
 export class FromBase64Expression extends BaseExpression<string, "template"> {
     constructor(public readonly data: BaseExpression<string>) {
         super("from_base64");
@@ -344,9 +337,6 @@ export const taskOutput = <T extends PlainObject>(
 export const loopItem = <T extends PlainObject>(): TemplateExpression<T> =>
     new LoopItemExpression<T>();
 
-export const configMap = <T extends PlainObject>(name: BaseExpression<string>, key: string): TemplateExpression<T> =>
-    new FromConfigMapExpression(name, key);
-
 export function getWorkflowUuid() {
     return new WorkflowUuidExpression();
 }
@@ -391,7 +381,6 @@ export const expr = {
     stepOutput,
     taskOutput,
     loopItem,
-    configMap,
 
     // utility
     getWorkflowUuid,

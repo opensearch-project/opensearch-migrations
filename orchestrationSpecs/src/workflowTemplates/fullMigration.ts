@@ -13,7 +13,7 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {expr as EXPR} from "@/schemas/expression";
 import {makeParameterLoop} from "@/schemas/workflowTypes";
-import {defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
+import {configMapKey, defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
 import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
@@ -148,10 +148,9 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b,c),
                         sourceConfig: EXPR.selectField(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        // value: "{{=let jscfg=fromJSON(inputs.parameters['source-migration-config']); lower(toBase64(toJSON(jscfg['source'])))}}"
                         sourcePipelineName: EXPR.toBase64(EXPR.jsonToString(EXPR.selectField(b.inputs.sourceMigrationConfig, "source")))
                     }),
-                {loopWith: makeParameterLoop(EXPR.selectField(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs") //as BaseExpression<z.infer<typeof SOURCE_MIGRATION_CONFIG>['snapshotAndMigrationConfigs'], "template">[])
+                {loopWith: makeParameterLoop(EXPR.selectField(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
                     )})
         )
     )
@@ -164,8 +163,14 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(s3ConfigParam)
         .addInputsFromRecord( // These image configurations have defaults from the ConfigMap
             Object.fromEntries(LogicalOciImages.flatMap(k => [
-                [`image${k}Location`, defineParam({defaultValue: EXPR.configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)})],
-                [`image${k}PullPolicy`, defineParam({defaultValue: EXPR.configMap(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)})]
+                [`image${k}Location`, defineParam({
+                    type: typeToken<string>(),
+                    from: configMapKey(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)
+                })],
+                [`image${k}Location`, defineParam({
+                    type: typeToken<string>(),
+                    from: configMapKey(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)
+                })]
             ])
             ) as Record<`image${typeof LogicalOciImages[number]}Location`, InputParamDef<string,false>> &
                 Record<`image${typeof LogicalOciImages[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,false>>

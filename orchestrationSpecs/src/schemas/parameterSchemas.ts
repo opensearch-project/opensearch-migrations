@@ -22,6 +22,18 @@ export type TypeToken<T> = {
 };
 export const typeToken = <T>(): TypeToken<T> => ({}) as TypeToken<T>;
 
+type DefaultSpec<T extends PlainObject> =
+    | {
+    expression: AllowLiteralOrExpression<T>;
+    type?: never;
+    from?: never
+}
+    | {
+    from: ConfigMapKeySelector;
+    type: TypeToken<T>;
+    expression?: never
+};
+
 /** A param definition for inputs.
  *
  * NOTE: This is *type-only*. There is intentionally no runtime validation.
@@ -34,18 +46,19 @@ export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
     /** Optional doc string */
     description?: string;
 } & (REQ extends false
-    ? { _hasDefault: true; defaultValue: T } // optional at callsite
-    : {});                                   // required at callsite
+    ? { _hasDefault: true; defaultValue: DefaultSpec<T> } // if this param is omitted by the caller, default is used
+    : {});                                           // param is required by caller
 
 export function defineParam<T extends PlainObject>(opts: {
-    defaultValue: AllowLiteralOrExpression<T>;
-    description?: string;
-}): InputParamDef<DeepWiden<T>, false> {
+    description?: string
+} & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false> {
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
-        defaultValue: opts.defaultValue as DeepWiden<T>,
         description: opts.description,
+        defaultValue: (opts.expression ? {expression: opts.expression as DeepWiden<T>} :
+            (opts.from ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
+                (() => { throw new Error("Invalid DefaultSpec: neither expression nor from provided") })()))
     };
 }
 
@@ -63,10 +76,18 @@ export function defineRequiredParam<T extends PlainObject>(opts?: {
  * No runtime checks; extraction is performed by Argo, not by our code.
  */
 export type ConfigMapKeySelector = {
-    name: string;
+    name: AllowLiteralOrExpression<string>;
     key: string;
     optional?: boolean;
 };
+
+export function configMapKey(
+  name: AllowLiteralOrExpression<string>,
+  key: string,
+  optional?: boolean
+): ConfigMapKeySelector {
+    return {'name': name, 'key': key, 'optional': optional};
+}
 
 export type SuppliedValueFrom = { [key: string]: any };
 

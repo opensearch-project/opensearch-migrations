@@ -10,7 +10,6 @@ import expression, {
     ConcatExpression,
     ExpressionType,
     FromBase64Expression,
-    FromConfigMapExpression,
     FromParameterExpression,
     WorkflowUuidExpression,
     LiteralExpression,
@@ -148,12 +147,6 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
         return formattedResult("item");
     }
 
-    if (isConfigMapExpression(expr)) {
-        const ce = expr as FromConfigMapExpression<any>;
-        // adjust to your real templating for configmaps if different
-        return formattedResult(`workflow.parameters.${ce.configMapName}-${ce.key}`);
-    }
-
     if (isWorkflowUuid(expr)) {
         return formattedResult("workflow.uuid");
     }
@@ -210,9 +203,6 @@ export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<
 }
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> {
     return e.kind === "loop_item";
-}
-export function isConfigMapExpression(e: AnyExpr): e is FromConfigMapExpression<any> {
-    return e.kind === "configmap";
 }
 export function isWorkflowUuid(e: AnyExpr): e is WorkflowUuidExpression {
     return e.kind === "workflow_uuid";

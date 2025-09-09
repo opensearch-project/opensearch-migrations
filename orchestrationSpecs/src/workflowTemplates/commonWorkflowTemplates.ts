@@ -4,11 +4,11 @@ import {z} from "zod/index";
 import {S3_CONFIG} from "@/workflowTemplates/userSchemas";
 
 export const CommonWorkflowParameters = {
-    etcdEndpoints:        defineParam({ defaultValue: "http://etcd.ma.svc.cluster.local:2379" }),
-    etcdUser:             defineParam({ defaultValue: "root" }),
-    etcdPassword:         defineParam({ defaultValue: "password" }),
-    s3SnapshotConfigMap:  defineParam({ defaultValue: "s3-snapshot-config" }),
-    imageConfigMapName:   defineParam({ defaultValue: "migration-image-config"})
+    etcdEndpoints:        defineParam({ expression: "http://etcd.ma.svc.cluster.local:2379" }),
+    etcdUser:             defineParam({ expression: "root" }),
+    etcdPassword:         defineParam({ expression: "password" }),
+    s3SnapshotConfigMap:  defineParam({ expression: "s3-snapshot-config" }),
+    imageConfigMapName:   defineParam({ expression: "migration-image-config"})
 } as const;
 
 export const LogicalOciImages = [
