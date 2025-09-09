@@ -171,7 +171,7 @@ def call(Map config = [:]) {
             
             // Stage 6: CleanUpAndPrepare
             stage('6. CleanUpAndPrepare') {
-                timeout(time: 30, unit: 'MINUTES') {
+                timeout(time: 3, unit: 'HOURS') {
                     echo "Stage 6: CleanUpAndPrepare - Setting up initial test data"
                     echo "Index Name: ${params.indexName}"
                     echo "Number of Shards: ${params.numShards}"
@@ -207,7 +207,7 @@ def call(Map config = [:]) {
             
             // Stage 7: MultiplyDocuments
             stage('7. MultiplyDocuments') {
-                timeout(time: 3, unit: 'HOURS') {
+                timeout(time: 12, unit: 'HOURS') {
                     echo "Stage 7: MultiplyDocuments - Creating large dataset"
                     echo "CORE STAGE: This creates the big dataset for the snapshot"
                     echo "Batch Count: ${params.batchCount}"
