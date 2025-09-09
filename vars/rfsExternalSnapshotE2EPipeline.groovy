@@ -1,5 +1,4 @@
 // RFS External Snapshot E2E Pipeline Implementation
-// Restructured to match the working reference pattern for reliability
 // This pipeline deploys a target cluster, runs snapshot-based migration tests, and generates performance metrics
 
 def call(Map config = [:]) {
@@ -376,73 +375,109 @@ def call(Map config = [:]) {
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
                                 
+                                def cleanupResults = [:]
+                                
                                 // First: Clean up Migration Assistant infrastructure using full context
                                 echo "Cleaning up Migration Assistant infrastructure using CDK destroy..."
                                 dir('test') {
-                                    sh """
-                                        echo "Destroying Migration Assistant CDK stacks with context..."
-                                        echo "This will destroy in proper dependency order:"
-                                        echo "  - MigrationConsole"
-                                        echo "  - ReindexFromSnapshot" 
-                                        echo "  - MigrationInfra"
-                                        echo "  - NetworkInfra"
-                                        
-                                        # Use the migration assistant script's cleanup function with full context
-                                        # This generates context with actual values instead of placeholders
-                                        ./awsMigrationAssistantSetup.sh --cleanup \\
-                                            --target-endpoint "${env.TARGET_CLUSTER_ENDPOINT}" \\
-                                            --target-version "${params.targetVersion}" \\
-                                            --vpc-id "${env.TARGET_VPC_ID}" \\
-                                            --snapshot-s3-uri "${params.snapshotS3Uri}" \\
-                                            --snapshot-name "${params.snapshotName}" \\
-                                            --snapshot-repo "${params.snapshotRepoName}" \\
-                                            --stage "${params.stage}" \\
-                                            --region "${params.region}"
-                                        
-                                        if [ \$? -eq 0 ]; then
-                                            echo "Migration Assistant infrastructure cleaned up successfully"
-                                        else
-                                            echo "CDK destroy completed with warnings (some resources may have been already deleted)"
-                                        fi
-                                    """
+                                    try {
+                                        sh """
+                                            echo "Destroying Migration Assistant CDK stacks with context..."
+                                            echo "This will destroy in proper dependency order:"
+                                            echo "  - MigrationConsole"
+                                            echo "  - ReindexFromSnapshot" 
+                                            echo "  - MigrationInfra"
+                                            echo "  - NetworkInfra"
+                                            
+                                            # Use the migration assistant script's cleanup function with full context
+                                            # This generates context with actual values instead of placeholders
+                                            ./awsMigrationAssistantSetup.sh --cleanup \\
+                                                --target-endpoint "${env.TARGET_CLUSTER_ENDPOINT}" \\
+                                                --target-version "${params.targetVersion}" \\
+                                                --vpc-id "${env.TARGET_VPC_ID}" \\
+                                                --snapshot-s3-uri "${params.snapshotS3Uri}" \\
+                                                --snapshot-name "${params.snapshotName}" \\
+                                                --snapshot-repo "${params.snapshotRepoName}" \\
+                                                --stage "${params.stage}" \\
+                                                --region "${params.region}"
+                                        """
+                                        cleanupResults.migrationAssistant = "SUCCESS"
+                                        echo "Migration Assistant infrastructure cleaned up successfully"
+                                    } catch (Exception e) {
+                                        cleanupResults.migrationAssistant = "FAILED: ${e.message}"
+                                        echo "Warning: Migration Assistant cleanup failed: ${e.message}"
+                                        echo "Continuing with target cluster cleanup..."
+                                    }
                                 }
                                 
-                                // Second: Clean up target cluster (AWS Samples CDK) - ACTUALLY EXECUTE CLEANUP
+                                // Second: Clean up target cluster (AWS Samples CDK)
                                 echo "Cleaning up target cluster infrastructure..."
                                 dir('test') {
-                                    sh """
-                                        echo "Destroying target cluster CDK stacks..."
-                                        echo "This will destroy:"
-                                        echo "  - OpenSearchDomain-target-os2x-${params.stage}-${params.region}"
-                                        echo "  - NetworkInfra-${params.stage}-${params.region}"
-                                        echo ""
-                                        
-                                        # Execute target cluster cleanup with full context
-                                        ./awsTargetClusterSetup.sh --cleanup \\
-                                            --cluster-version ${params.targetVersion} \\
-                                            --stage ${params.stage} \\
-                                            --region ${params.region}
-                                        
-                                        if [ \$? -eq 0 ]; then
-                                            echo "Target cluster infrastructure cleaned up successfully"
-                                        else
-                                            echo "Target cluster cleanup completed with warnings (some resources may have been already deleted)"
-                                        fi
-                                    """
+                                    try {
+                                        sh """
+                                            echo "Destroying target cluster CDK stacks with proper dependency waiting..."
+                                            echo "This will destroy:"
+                                            echo "  - OpenSearchDomain-target-os2x-${params.stage}-${params.region}"
+                                            echo "  - NetworkInfra-${params.stage}-${params.region}"
+                                            echo ""
+                                            
+                                            # Execute target cluster cleanup
+                                            ./awsTargetClusterSetup.sh --cleanup \\
+                                                --cluster-version ${params.targetVersion} \\
+                                                --stage ${params.stage} \\
+                                                --region ${params.region}
+                                        """
+                                        cleanupResults.targetCluster = "SUCCESS"
+                                        echo "Target cluster infrastructure cleaned up successfully"
+                                    } catch (Exception e) {
+                                        cleanupResults.targetCluster = "FAILED: ${e.message}"
+                                        echo "Warning: Target cluster cleanup failed: ${e.message}"
+                                        echo "Some resources may require manual cleanup"
+                                    }
                                 }
                                 
                                 // Third: Clean up any orphaned bootstrap stacks if they exist
                                 echo "Checking for orphaned bootstrap stacks..."
-                                sh """
-                                    echo "Checking for MigrationBootstrap stack..."
-                                    if aws cloudformation describe-stacks --stack-name "MigrationBootstrap" --region ${params.region} >/dev/null 2>&1; then
-                                        echo "Found MigrationBootstrap stack, cleaning up..."
-                                        aws cloudformation delete-stack --stack-name "MigrationBootstrap" --region ${params.region}
-                                        echo "MigrationBootstrap stack deletion initiated"
-                                    else
-                                        echo "No MigrationBootstrap stack found"
-                                    fi
-                                """
+                                try {
+                                    sh """
+                                        echo "Checking for MigrationBootstrap stack..."
+                                        if aws cloudformation describe-stacks --stack-name "MigrationBootstrap" --region ${params.region} >/dev/null 2>&1; then
+                                            echo "Found MigrationBootstrap stack, cleaning up..."
+                                            aws cloudformation delete-stack --stack-name "MigrationBootstrap" --region ${params.region}
+                                            echo "MigrationBootstrap stack deletion initiated"
+                                        else
+                                            echo "No MigrationBootstrap stack found"
+                                        fi
+                                    """
+                                    cleanupResults.bootstrapStack = "SUCCESS"
+                                } catch (Exception e) {
+                                    cleanupResults.bootstrapStack = "FAILED: ${e.message}"
+                                    echo "Warning: Bootstrap stack cleanup failed: ${e.message}"
+                                }
+                                
+                                // Report cleanup summary
+                                echo ""
+                                echo "=== CLEANUP SUMMARY ==="
+                                echo "Migration Assistant: ${cleanupResults.migrationAssistant ?: 'NOT ATTEMPTED'}"
+                                echo "Target Cluster: ${cleanupResults.targetCluster ?: 'NOT ATTEMPTED'}"
+                                echo "Bootstrap Stack: ${cleanupResults.bootstrapStack ?: 'NOT ATTEMPTED'}"
+                                echo "======================="
+                                
+                                // Provide manual cleanup commands if any failures occurred
+                                def hasFailures = cleanupResults.values().any { it.startsWith('FAILED') }
+                                if (hasFailures) {
+                                    echo ""
+                                    echo "=== MANUAL CLEANUP COMMANDS (if needed) ==="
+                                    echo "# Clean up Migration Assistant infrastructure"
+                                    echo "cd test && ./awsMigrationAssistantSetup.sh --cleanup --stage ${params.stage} --region ${params.region}"
+                                    echo ""
+                                    echo "# Clean up Target Cluster"
+                                    echo "cd test && ./awsTargetClusterSetup.sh --cleanup --cluster-version ${params.targetVersion} --stage ${params.stage} --region ${params.region}"
+                                    echo ""
+                                    echo "# Check for failed CloudFormation stacks"
+                                    echo "aws cloudformation list-stacks --region ${params.region} --stack-status-filter DELETE_FAILED"
+                                    echo "============================================"
+                                }
                             }
                         }
                         

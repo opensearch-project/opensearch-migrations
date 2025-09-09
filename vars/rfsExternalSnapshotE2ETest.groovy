@@ -36,6 +36,7 @@ def call(Map config = [:]) {
         [field: 'Reindexing Throughput Total (MiB/s)', title: 'Reindexing Throughput Total', yaxis: 'MiB/s', style: 'line', logarithmic: false],
         [field: 'Reindexing Throughput Per Worker (MiB/s)', title: 'Reindexing Throughput Per Worker', yaxis: 'MiB/s', style: 'line', logarithmic: false],
         [field: 'Size Transferred (GB)', title: 'Primary Shard Size Transferred', yaxis: 'GiB', style: 'line', logarithmic: false],
+        [field: 'Backfill Workers (count)', title: 'RFS Workers Count', yaxis: 'Workers', style: 'line', logarithmic: false],
     ]
     
     // Plot metrics callback

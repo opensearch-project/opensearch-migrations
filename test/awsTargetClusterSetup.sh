@@ -370,6 +370,7 @@ cleanup_resources() {
     echo "Cleaning up target cluster resources..."
     
     local cluster_id="target-os2x"
+    local domain_name="cluster-${STAGE}-${cluster_id}"
     
     # Based on AWS Solutions CDK structure and your actual stack names:
     local opensearch_stack_name="OpenSearchDomain-${cluster_id}-${STAGE}-${REGION}"
@@ -395,12 +396,44 @@ cleanup_resources() {
         aws cloudformation delete-stack --stack-name "$opensearch_stack_name" --region "$REGION"
     fi
     
-    echo "Waiting for OpenSearch stack deletion to complete..."
-    aws cloudformation wait stack-delete-complete --stack-name "$opensearch_stack_name" --region "$REGION" 2>/dev/null || {
-        echo "Stack deletion wait timed out or failed, but continuing with cleanup"
-    }
+    # Wait for OpenSearch domain to be completely deleted
+    echo "Waiting for OpenSearch domain deletion to complete..."
+    local max_wait_time=1800  # 30 minutes max wait
+    local wait_interval=30    # Check every 30 seconds
+    local elapsed_time=0
     
-    # Destroy network stack
+    while [ $elapsed_time -lt $max_wait_time ]; do
+        # Check if OpenSearch domain still exists
+        local domain_status=$(aws opensearch describe-domain --domain-name "$domain_name" --region "$REGION" --query 'DomainStatus.Processing' --output text 2>/dev/null)
+        
+        if [ $? -ne 0 ]; then
+            echo "OpenSearch domain no longer exists - deletion complete"
+            break
+        fi
+        
+        # Check CloudFormation stack status
+        local stack_status=$(aws cloudformation describe-stacks --stack-name "$opensearch_stack_name" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+        
+        if [ $? -ne 0 ] || [ "$stack_status" = "DELETE_COMPLETE" ]; then
+            echo "OpenSearch stack deletion complete"
+            break
+        fi
+        
+        if [ "$stack_status" = "DELETE_FAILED" ]; then
+            echo "Warning: OpenSearch stack deletion failed, but proceeding with network cleanup"
+            break
+        fi
+        
+        echo "OpenSearch domain still deleting... (${elapsed_time}s elapsed, stack status: $stack_status)"
+        sleep $wait_interval
+        elapsed_time=$((elapsed_time + wait_interval))
+    done
+    
+    if [ $elapsed_time -ge $max_wait_time ]; then
+        echo "Warning: OpenSearch deletion wait timed out after ${max_wait_time}s, proceeding with network cleanup"
+    fi
+    
+    # Destroy network stack (only after OpenSearch is deleted)
     echo "Destroying network stack: $network_stack_name"
     if command -v cdk &> /dev/null && [ -d "$AWS_SOLUTIONS_CDK_DIR" ]; then
         cd "$AWS_SOLUTIONS_CDK_DIR"
@@ -412,9 +445,22 @@ cleanup_resources() {
         aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
     fi
     
+    # Wait for network stack deletion with retry logic
     echo "Waiting for network stack deletion to complete..."
     aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION" 2>/dev/null || {
-        echo "Stack deletion wait timed out or failed, but cleanup initiated"
+        echo "Network stack deletion wait failed, checking status..."
+        local network_status=$(aws cloudformation describe-stacks --stack-name "$network_stack_name" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+        
+        if [ "$network_status" = "DELETE_FAILED" ]; then
+            echo "Network stack deletion failed, retrying once..."
+            aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
+            aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION" 2>/dev/null || {
+                echo "Warning: Network stack deletion failed after retry"
+                echo "Manual cleanup may be required for stack: $network_stack_name"
+            }
+        else
+            echo "Network stack deletion completed or in progress"
+        fi
     }
     
     cd "$TEST_DIR_PATH"
