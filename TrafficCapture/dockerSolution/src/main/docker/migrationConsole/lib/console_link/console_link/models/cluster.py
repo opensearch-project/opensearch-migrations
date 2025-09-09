@@ -1,8 +1,9 @@
-from typing import Any, Dict, Generator, NamedTuple, Optional
+from typing import Any, Dict, Generator, NamedTuple, Optional, TypeAlias
 from enum import Enum
 import json
 import logging
 import subprocess
+from pydantic import BaseModel
 
 import boto3
 from cerberus import Validator
@@ -96,6 +97,7 @@ class Cluster:
     An elasticcsearch or opensearch cluster.
     """
 
+    config: Dict
     endpoint: str = ""
     version: Optional[str] = None
     aws_secret_arn: Optional[str] = None
@@ -110,6 +112,7 @@ class Cluster:
         if not v.validate({'cluster': config}):
             raise ValueError("Invalid config file for cluster", v.errors)
 
+        self.config = config
         self.endpoint = config["endpoint"]
         self.version = config.get("version", None)
         self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
@@ -304,3 +307,39 @@ class NoSourceClusterDefinedError(Exception):
 class NoTargetClusterDefinedError(Exception):
     def __init__(self):
         super().__init__("Unable to continue without a target cluster specified")
+
+
+class AuthModelType(str, Enum):
+    no_auth = "no_auth"
+    basic_auth_arn = "basic_auth_arn"
+    sig_v4_auth = "sig_v4_auth"
+
+
+class AuthBase(BaseModel):
+    type: AuthModelType
+
+
+class NoAuth(AuthBase):
+    type: AuthModelType = AuthModelType.no_auth
+
+
+class BasicAuthArn(AuthBase):
+    type: AuthModelType = AuthModelType.basic_auth_arn
+    user_secret_arn: str
+
+
+class SigV4Auth(AuthBase):
+    type: AuthModelType = AuthModelType.sig_v4_auth
+    region: str
+    service: str
+
+
+AuthType: TypeAlias = NoAuth | BasicAuthArn | SigV4Auth
+
+
+class ClusterInfo(BaseModel):
+    endpoint: str
+    protocol: str
+    enable_tls_verification: bool
+    auth: AuthType
+    version_override: Optional[str] = None

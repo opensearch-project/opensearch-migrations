@@ -1,19 +1,20 @@
 [versions]
-aws-crt = "0.38.9"
+aws-crt = "0.38.11"
 aws-msk-iam-auth = "2.3.2"
-aws-sdk = "2.32.24"
+aws-sdk = "2.33.0"
 bouncycastle = "1.81"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
 disruptor = "4.0.0"
-dockerapi = "3.5.3"
+dockerapi = "3.6.0"
 errorprone = "2.41.0"
 graalvm = "24.2.2"
 groovy = "3.0.25"
 guava = "33.4.8-jre"
 hamcrest = "3.0"
 httpclient5 = "5.5"
-jackson = "2.19.2"
+jackson = "2.20.0"
+jackson-annotations = "2.20"
 jcommander = "2.0"
 jenkins-pipeline-unit = "1.23"
 jmespath-core = "0.6.0"
@@ -41,7 +42,7 @@ reactor-test = "3.7.9"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
-toxiproxy = "2.1.7"
+toxiproxy = "2.1.11"
 zstd-jni = "1.5.7-4"
 
 [libraries]
@@ -75,7 +76,7 @@ hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 
 httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpclient5" }
 
-jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
+jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson-annotations" }
 jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-dataformat-smile = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-smile", version.ref = "jackson" }
@@ -182,7 +183,7 @@ transitive-dnsjava           = { module = "dnsjava:dnsjava",                    
 transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "3.1.11"   }
 transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "2.9.0"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
-transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.1"   }
+transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.2"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
 transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.2"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }

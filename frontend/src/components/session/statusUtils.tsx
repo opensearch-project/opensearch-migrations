@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { StatusIndicatorProps } from '@cloudscape-design/components';
-import { StepState } from '@/generated/api/types.gen';
+import { StepState, StepStateWithPause } from '@/generated/api/types.gen';
 import Spinner from '@cloudscape-design/components/spinner';
 import Box from '@cloudscape-design/components/box';
 
@@ -22,9 +22,10 @@ function formatDuration(seconds: number): string {
   return `${h}h ${m}m ${s.toFixed(0)}s`;
 }
 
-export function mapStatus(state: StepState): StatusIndicatorProps.Type {
+export function mapStatus(state: StepState | StepStateWithPause): StatusIndicatorProps.Type {
   switch(state) {
     case "Pending":
+    case "Paused":
       return "pending";
     case "Running":
       return "in-progress";

@@ -1,11 +1,9 @@
 def call(Map config = [:]) {
-    ['jobName', 'sourceVersion', 'targetVersion', 'gitUrl', 'gitBranch'].each { key ->
+    ['jobName', 'sourceVersion', 'targetVersion'].each { key ->
         if (!config[key]) {
             throw new RuntimeException("The ${key} argument must be provided to k8sLocalDeployment()")
         }
     }
-    def gitDefaultUrl = config.gitUrl
-    def gitDefaultBranch = config.gitBranch
     def jobName = config.jobName
     def sourceVersion = config.sourceVersion
     def targetVersion = config.targetVersion
@@ -15,8 +13,8 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: "${gitDefaultUrl}", description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: "${gitDefaultBranch}", description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
         }
 
         options {
