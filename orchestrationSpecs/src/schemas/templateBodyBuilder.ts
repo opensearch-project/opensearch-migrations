@@ -2,37 +2,76 @@ import {
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
-    WorkflowInputsToExpressions
+    WorkflowInputsToExpressions,
+    ExtendScope,
 } from "@/schemas/workflowTypes";
-import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
+import { ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import {
     InputParametersRecord,
+    OutputParamDef,
     OutputParametersRecord,
     templateInputParametersAsExpressions,
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
+import { AllowLiteralOrExpression } from "@/schemas/workflowTypes";
+import { PlainObject } from "@/schemas/plainObject";
+
+/** Rebinder type the concrete subclass provides to the base. */
+export type TemplateRebinder<
+    ContextualScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyBound extends GenericScope
+> = <
+    NewBodyScope extends BodyBound,
+    NewOutputScope extends OutputParametersRecord,
+    Self extends TemplateBodyBuilder<
+        ContextualScope,
+        InputParamsScope,
+        NewBodyScope,
+        NewOutputScope,
+        Self,
+        BodyBound
+    >
+>(
+    ctx: ContextualScope,
+    inputs: InputParamsScope,
+    body: NewBodyScope,
+    outputs: NewOutputScope
+) => Self;
+
+type ReplaceOutputTypedMembers<
+    ContextualScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyScope extends BodyBound,
+    OutputParamsScope extends OutputParametersRecord,
+    Self extends TemplateBodyBuilder<any, any, any, any, any>,
+    BodyBound extends GenericScope = GenericScope
+> =
+    Omit<Self, "outputsScope" | "getFullTemplateScope"> &
+    TemplateBodyBuilder<ContextualScope, InputParamsScope, BodyScope, OutputParamsScope, Self, BodyBound>;
 
 export abstract class TemplateBodyBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
-    BodyScope extends GenericScope,
+    BodyScope extends BodyBound,
     OutputParamsScope extends OutputParametersRecord,
-    // Key detail: Self is NOT fixed to a particular OutputParamsScope
     Self extends TemplateBodyBuilder<
         ContextualScope,
         InputParamsScope,
         BodyScope,
-        any,     // <-- decouple Self from OutputParamsScope
-        Self
-    >
+        any,
+        Self,
+        BodyBound
+    >,
+    BodyBound extends GenericScope = GenericScope
 > {
     constructor(
         protected readonly contextualScope: ContextualScope,
-        protected readonly inputsScope: InputParamsScope,
+        public readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
-        public readonly outputsScope: OutputParamsScope
-    ) {
-    }
+        public readonly outputsScope: OutputParamsScope,
+        protected readonly rebind: TemplateRebinder<ContextualScope, InputParamsScope, BodyBound>
+    ) {}
 
     addOutputs<NewOutputScope extends OutputParametersRecord>(
         builderFn: (
@@ -42,27 +81,52 @@ export abstract class TemplateBodyBuilder<
             InputParamsScope,
             BodyScope,
             NewOutputScope,
-            Self
+            Self,
+            BodyBound
         >,
-        check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
-    ): Self &
-        TemplateBodyBuilder<
+        _check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
+    ): ReplaceOutputTypedMembers<
+        ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound
+    > {
+        return builderFn(this as unknown as Self) as unknown as ReplaceOutputTypedMembers<
+            ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound
+        >;
+    }
+
+    public addExpressionOutput<T extends PlainObject, Name extends string>(
+        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
+        expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, AllowLiteralOrExpression<T>>,
+        descriptionValue?: string
+    ): ReplaceOutputTypedMembers<
+        ContextualScope,
+        InputParamsScope,
+        BodyScope,
+        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>,
+        Self,
+        BodyBound
+    > {
+        const newOutputs = {
+            ...this.outputsScope,
+            [name as string]: {
+                fromWhere: "expression" as const,
+                expression,
+                description: descriptionValue
+            }
+        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
+
+        return this.rebind(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            newOutputs
+        ) as unknown as ReplaceOutputTypedMembers<
             ContextualScope,
             InputParamsScope,
             BodyScope,
-            NewOutputScope,
-            Self
-        > {
-        // Keep the concrete subclass instance, but overlay the updated output scope type
-        return builderFn(this as unknown as Self) as unknown as
-            Self &
-            TemplateBodyBuilder<
-                ContextualScope,
-                InputParamsScope,
-                BodyScope,
-                NewOutputScope,
-                Self
-            >;
+            typeof newOutputs,
+            Self,
+            BodyBound
+        >;
     }
 
     get inputs(): InputParamsToExpressions<InputParamsScope> {
@@ -71,7 +135,7 @@ export abstract class TemplateBodyBuilder<
     }
 
     get workflowInputs(): WorkflowInputsToExpressions<ContextualScope> {
-        const rval = workflowParametersAsExpressions(this.contextualScope.workflowParameters ?? {})
+        const rval = workflowParametersAsExpressions(this.contextualScope.workflowParameters ?? {});
         return rval as WorkflowInputsToExpressions<ContextualScope>;
     }
 

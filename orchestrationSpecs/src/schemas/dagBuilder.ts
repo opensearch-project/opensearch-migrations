@@ -1,8 +1,21 @@
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+/**
+ * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
+ *
+ * This schema system is designed to provide an intuitive, ergonomic developer experience.
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or
+ * cumbersome workarounds to make the type system work. If the API requires such casts,
+ * the type system implementation needs to be improved, not the caller code.
+ *
+ * The goal is to make template building feel natural and safe, with proper type inference
+ * working automatically without forcing developers to manually specify types.
+ */
+
+import { InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
     TasksOutputsScope,
-    TasksWithOutputs, WorkflowAndTemplatesScope,
+    TasksWithOutputs,
+    WorkflowAndTemplatesScope,
 } from "@/schemas/workflowTypes";
 import {
     InputsFrom,
@@ -14,14 +27,13 @@ import {
     TaskOpts,
     TaskRebinder
 } from "@/schemas/taskBuilder";
-import { TemplateBodyBuilder } from "@/schemas/templateBodyBuilder";
+import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import {SimpleExpression, stepOutput, taskOutput} from "@/schemas/expression";
+import { SimpleExpression, taskOutput } from "@/schemas/expression";
 
-export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> = TaskOpts<LoopT> & {
-    dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>>
-}
+export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
+    TaskOpts<LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };
 
 function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject>(
     v: unknown
@@ -37,6 +49,7 @@ class DagTaskBuilder<
     TaskScope extends TasksOutputsScope
 > extends TaskBuilder<ContextualScope, TaskScope, "tasks", TaskRebinder<ContextualScope>> {
     protected readonly label = "tasks";
+
     protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(
         task: NamedTask, opts?: OptsType
     ): NamedTask {
@@ -64,7 +77,8 @@ export class DagBuilder<
     InputParamsScope,
     TaskScope,
     OutputParamsScope,
-    any
+    DagBuilder<ContextualScope, InputParamsScope, TaskScope, any>, // Self
+    TasksOutputsScope // BodyBound
 > {
     private readonly taskBuilder: DagTaskBuilder<ContextualScope, TaskScope>;
 
@@ -75,16 +89,53 @@ export class DagBuilder<
         orderedTasks: NamedTask[],
         outputs: OutputParamsScope
     ) {
-        super(contextualScope, inputs, bodyScope, outputs);
+        // Trick: capture a mutable selfRef within a closure for use inside the rebinder
+        let selfRef: DagBuilder<ContextualScope, InputParamsScope, any, any> | undefined;
 
-        // This rebinder produces a NEW DagBuilder with the NEW scope NS
-        const rebind: TaskRebinder<ContextualScope> =
+        const templateRebind: TemplateRebinder<
+            ContextualScope,
+            InputParamsScope,
+            TasksOutputsScope
+        > = <
+            NewBodyScope extends TasksOutputsScope,
+            NewOutputScope extends OutputParametersRecord,
+            Self extends TemplateBodyBuilder<
+                ContextualScope,
+                InputParamsScope,
+                NewBodyScope,
+                NewOutputScope,
+                any,
+                TasksOutputsScope
+            >
+        >(
+            ctx: ContextualScope,
+            inScope: InputParamsScope,
+            body: NewBodyScope,
+            outScope: NewOutputScope
+        ) => {
+            const currentTasks =
+                selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
+            return new DagBuilder<
+                ContextualScope,
+                InputParamsScope,
+                NewBodyScope,
+                NewOutputScope
+            >(ctx, inScope, body, currentTasks, outScope) as unknown as Self;
+        };
+
+        super(contextualScope, inputs, bodyScope, outputs, templateRebind);
+
+        // This rebinder produces a NEW DagBuilder with the NEW task scope when tasks change
+        const tasksRebind: TaskRebinder<ContextualScope> =
             <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, tasks: NamedTask[]) =>
                 new DagBuilder<ContextualScope, InputParamsScope, NS, OutputParamsScope>(
                     ctx, this.inputsScope, scope, tasks, this.outputsScope
                 );
 
-        this.taskBuilder = new DagTaskBuilder(contextualScope, bodyScope, orderedTasks, rebind);
+        this.taskBuilder = new DagTaskBuilder(contextualScope, bodyScope, orderedTasks, tasksRebind);
+
+        // finalize selfRef after fields are initialized
+        selfRef = this;
     }
 
     public addTask<
@@ -96,7 +147,14 @@ export class DagBuilder<
         name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, TaskScope, K>,
-        ...args: ParamsTuple<InputsFrom<ContextualScope, TemplateSource, K>, Name, TaskScope, "tasks", LoopT, DagTaskOpts<TaskScope, LoopT>>
+        ...args: ParamsTuple<
+            InputsFrom<ContextualScope, TemplateSource, K>,
+            Name,
+            TaskScope,
+            "tasks",
+            LoopT,
+            DagTaskOpts<TaskScope, LoopT>
+        >
     ): UniqueNameConstraintOutsideDeclaration<
         Name,
         TaskScope,
@@ -110,7 +168,9 @@ export class DagBuilder<
             OutputParamsScope
         >
     > {
-        return this.taskBuilder.addTask<Name, TemplateSource, K, LoopT>(name, source, key, ...args);
+        return this.taskBuilder.addTask<Name, TemplateSource, K, LoopT>(
+            name, source, key, ...args
+        );
     }
 
     protected getBody() {

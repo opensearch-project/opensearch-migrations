@@ -1,4 +1,16 @@
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord,} from "@/schemas/parameterSchemas";
+/**
+ * DESIGN PRINCIPLE: ERGONOMIC AND INTUITIVE API
+ *
+ * This schema system is designed to provide an intuitive, ergonomic developer experience.
+ * Users should NEVER need to use explicit type casts (as any, as string, etc.) or
+ * cumbersome workarounds to make the type system work. If the API requires such casts,
+ * the type system implementation needs to be improved, not the caller code.
+ *
+ * The goal is to make template building feel natural and safe, with proper type inference
+ * working automatically without forcing developers to manually specify types.
+ */
+
+import { InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
 import {
     AllowLiteralOrExpression,
     ExtendScope,
@@ -6,18 +18,14 @@ import {
     TasksWithOutputs,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {PlainObject} from "@/schemas/plainObject";
+import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder";
+import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
+import { PlainObject } from "@/schemas/plainObject";
 import {
-    InputsFrom, KeyFor, KeyMustMatch,
-    NamedTask,
-    OutputsFrom,
-    ParamsTuple,
-    TaskBuilder,
-    TaskRebinder, TaskType,
+    InputsFrom, KeyFor, NamedTask, OutputsFrom, ParamsTuple,
+    TaskBuilder, TaskRebinder
 } from "@/schemas/taskBuilder";
-import {SimpleExpression, stepOutput} from "@/schemas/expression";
+import { SimpleExpression, stepOutput } from "@/schemas/expression";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -42,7 +50,6 @@ class StepGroupBuilder<
         const rebind: TaskRebinder<ContextualScope> =
             <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, t: NamedTask[]) =>
                 new StepGroupBuilder<ContextualScope, NS>(ctx, scope, t);
-
         super(contextualScope, tasksScope, tasks, rebind);
     }
 
@@ -65,7 +72,8 @@ export class StepsBuilder<
     InputParamsScope,
     StepsScope,
     OutputParamsScope,
-    StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>
+    StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>,
+    TasksOutputsScope // <-- BodyBound for this subclass
 > {
     constructor(
         contextualScope: ContextualScope,
@@ -74,7 +82,35 @@ export class StepsBuilder<
         readonly stepGroups: StepGroup[],
         outputsScope: OutputParamsScope
     ) {
-        super(contextualScope, inputsScope, bodyScope, outputsScope);
+        const rebind: TemplateRebinder<
+            ContextualScope,
+            InputParamsScope,
+            TasksOutputsScope // <-- match BodyBound
+        > = <
+            NewBodyScope extends TasksOutputsScope,
+            NewOutputScope extends OutputParametersRecord,
+            Self extends TemplateBodyBuilder<
+                ContextualScope,
+                InputParamsScope,
+                NewBodyScope,
+                NewOutputScope,
+                any,
+                TasksOutputsScope
+            >
+        >(
+            ctx: ContextualScope,
+            inputs: InputParamsScope,
+            body: NewBodyScope,
+            outputs: NewOutputScope
+        ) =>
+            new StepsBuilder<
+                ContextualScope,
+                InputParamsScope,
+                NewBodyScope,
+                NewOutputScope
+            >(ctx, inputs, body, this.stepGroups, outputs) as unknown as Self;
+
+        super(contextualScope, inputsScope, bodyScope, outputsScope, rebind);
     }
 
     /**
@@ -82,8 +118,9 @@ export class StepsBuilder<
      */
     public addStepGroup<R>(
         builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => R
-    ): R extends BuilderLike ?
-        StepsBuilder<ContextualScope, InputParamsScope, ReturnType<R["getTasks"]>["scope"], OutputParamsScope> : R
+    ): R extends BuilderLike
+        ? StepsBuilder<ContextualScope, InputParamsScope, ReturnType<R["getTasks"]>["scope"], OutputParamsScope>
+        : R
     {
         const newGroup = builderFn(
             new StepGroupBuilder(this.contextualScope, this.bodyScope, [])
@@ -127,35 +164,6 @@ export class StepsBuilder<
             return gb.addTask<Name, TemplateSource, K, LoopT>(name, source, key, ...args);
         }) as any;
     }
-
-    public addExpressionOutput<T extends PlainObject, Name extends string>(
-        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
-        expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, AllowLiteralOrExpression<T>>,
-        descriptionValue?: string
-    ):
-        UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
-            StepsBuilder<
-                ContextualScope,
-                InputParamsScope,
-                StepsScope,
-                ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>>>
-    {
-        return new StepsBuilder(
-            this.contextualScope,
-            this.inputsScope,
-            this.bodyScope,
-            this.stepGroups,
-            {
-                ...this.outputsScope,
-                [name as string]: {
-                    fromWhere: "expression" as const,
-                    expression,
-                    description: descriptionValue
-                }
-            }
-        ) as any;
-    }
-
     protected getBody() {
         return {steps: this.stepGroups};
     }

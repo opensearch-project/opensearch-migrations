@@ -19,10 +19,10 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
-import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
-import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
-import {PlainObject} from "@/schemas/plainObject";
+import { inputsToEnvVars, toEnvVarName, TypescriptError } from "@/utils";
+import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
+import { ScopeIsEmptyConstraint } from "@/schemas/scopeConstraints";
+import { PlainObject } from "@/schemas/plainObject";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 
@@ -42,14 +42,52 @@ export class ContainerBuilder<
     ContainerScope extends GenericScope,
     EnvScope extends DataScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<ContextualScope, InputParamsScope, ContainerScope, OutputParamsScope,
-    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope, any>> {
-    constructor(contextualScope: ContextualScope,
-                inputsScope: InputParamsScope,
-                bodyScope: ContainerScope,
-                public readonly envScope: EnvScope,  // Add env scope to constructor
-                outputsScope: OutputParamsScope) {
-        super(contextualScope, inputsScope, bodyScope, outputsScope)
+> extends TemplateBodyBuilder<
+    ContextualScope,
+    InputParamsScope,
+    ContainerScope,
+    OutputParamsScope,
+    ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope, any>,
+    GenericScope
+> {
+    constructor(
+        contextualScope: ContextualScope,
+        inputsScope: InputParamsScope,
+        bodyScope: ContainerScope,
+        public readonly envScope: EnvScope,
+        outputsScope: OutputParamsScope
+    ) {
+        // REBINDER: must accept any NewBodyScope extends GenericScope and return ContainerBuilder
+        const rebind: TemplateRebinder<
+            ContextualScope,
+            InputParamsScope,
+            GenericScope
+        > = <
+            NewBodyScope extends GenericScope,
+            NewOutputScope extends OutputParametersRecord,
+            Self extends TemplateBodyBuilder<
+                ContextualScope,
+                InputParamsScope,
+                NewBodyScope,
+                NewOutputScope,
+                any,
+                GenericScope
+            >
+        >(
+            ctx: ContextualScope,
+            inputs: InputParamsScope,
+            body: NewBodyScope,
+            outputs: NewOutputScope
+        ) =>
+            new ContainerBuilder<
+                ContextualScope,
+                InputParamsScope,
+                NewBodyScope,
+                EnvScope,
+                NewOutputScope
+            >(ctx, inputs, body, this.envScope, outputs) as unknown as Self;
+
+        super(contextualScope, inputsScope, bodyScope, outputsScope, rebind);
     }
 
     protected getBody() {
@@ -67,13 +105,16 @@ export class ContainerBuilder<
                 image: AllowLiteralOrExpression<string>,
                 pullPolicy: AllowLiteralOrExpression<string>
             }>,
-            EnvScope,  // Preserve env scope
-            OutputParamsScope> {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.bodyScope,
-            'image': image,
-            'pullPolicy': pullPolicy
-        }, this.envScope, this.outputsScope);
+            EnvScope,
+            OutputParamsScope
+        > {
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            { ...this.bodyScope, image, pullPolicy },
+            this.envScope,
+            this.outputsScope
+        );
     }
 
     addCommand(s: string[]):
@@ -103,29 +144,30 @@ export class ContainerBuilder<
     addPathOutput<T extends PlainObject, Name extends string>(
         name: Name, pathValue: string, t: TypeToken<T>, descriptionValue?: string
     ):
-        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, {
+        ContainerBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ContainerScope,
+            EnvScope,
+            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>
+        > {
+        type NewOut = ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
+        const newOutputs = {
             ...this.outputsScope,
             [name as string]: {
                 fromWhere: "path" as const,
                 path: pathValue,
                 description: descriptionValue
             }
-        });
-    }
+        } as NewOut;
 
-    addExpressionOutput<T extends PlainObject, Name extends string>(name: Name, expression: string, t: TypeToken<T>, descriptionValue?: string):
-        ContainerBuilder<ContextualScope, InputParamsScope, ContainerScope, EnvScope,
-            ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>> {
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, {
-            ...this.outputsScope,
-            [name as string]: {
-                fromWhere: "expression" as const,
-                expression: expression,
-                description: descriptionValue
-            }
-        });
+        return new ContainerBuilder<
+            ContextualScope,
+            InputParamsScope,
+            ContainerScope,
+            EnvScope,
+            NewOut
+        >(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, newOutputs);
     }
 
     addEnvVar<Name extends string>(
@@ -159,11 +201,12 @@ export class ContainerBuilder<
             {},
             this.outputsScope
         );
-
         return builderFn(emptyEnvBuilder) as any;
     }
 
-    // Internal method without constraint checking for use by other methods
+    /**
+     * Internal method without constraint checking for use by other methods
+     */
     private addEnvVarUnchecked<Name extends string>(
         name: Name,
         value: AllowLiteralOrExpression<string>
@@ -180,13 +223,18 @@ export class ContainerBuilder<
             [name as string]: value
         } as ExtendScope<EnvScope, { [K in Name]: AllowLiteralOrExpression<string> }>;
 
-        return new ContainerBuilder(this.contextualScope, this.inputsScope, {
-            ...this.bodyScope,
-            env: {...currentEnv, [name as string]: value}
-        }, newEnvScope, this.outputsScope);
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            { ...this.bodyScope, env: { ...currentEnv, [name as string]: value } },
+            newEnvScope,
+            this.outputsScope
+        );
     }
 
-    // Convenience method to map input parameters to environment variables
+    /**
+     * Convenience method to map input parameters to environment variables
+     */
     addInputsAsEnvVars<
         ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> =
             { [K in keyof InputParamsScope as Uppercase<string & K>]: AllowLiteralOrExpression<string> }
@@ -214,5 +262,4 @@ export class ContainerBuilder<
             this.outputsScope
         ) as any;
     }
-
 }

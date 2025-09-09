@@ -56,8 +56,8 @@ export function defineParam<T extends PlainObject>(opts: {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
         description: opts.description,
-        defaultValue: (opts.expression ? {expression: opts.expression as DeepWiden<T>} :
-            (opts.from ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
+        defaultValue: (opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} :
+            (opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
                 (() => { throw new Error("Invalid DefaultSpec: neither expression nor from provided") })()))
     };
 }
