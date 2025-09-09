@@ -380,12 +380,39 @@ cleanup_resources() {
     echo "  OpenSearch Stack: $opensearch_stack_name"
     echo "  Network Stack: $network_stack_name"
     
+    # Debug: List actual stacks to find the correct names
+    echo "DEBUG: Listing actual CloudFormation stacks to identify correct names..."
+    aws cloudformation list-stacks --region "$REGION" --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'target') || contains(StackName, 'cluster') || contains(StackName, 'OpenSearch')].{Name:StackName,Status:StackStatus}" --output table 2>/dev/null || echo "Could not list stacks"
+    
+    # Try to find the actual OpenSearch stack name dynamically
+    echo "DEBUG: Searching for actual OpenSearch stack name..."
+    local actual_opensearch_stack=$(aws cloudformation list-stacks --region "$REGION" --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'OpenSearch') && (contains(StackName, 'target') || contains(StackName, 'cluster'))].StackName" --output text 2>/dev/null)
+    
+    if [ -n "$actual_opensearch_stack" ] && [ "$actual_opensearch_stack" != "None" ]; then
+        echo "Found actual OpenSearch stack: $actual_opensearch_stack"
+        opensearch_stack_name="$actual_opensearch_stack"
+    else
+        echo "Could not find OpenSearch stack dynamically, using constructed name: $opensearch_stack_name"
+    fi
+    
+    # Also check for the domain name that actually exists
+    echo "DEBUG: Checking for actual domain name..."
+    local actual_domain_name=$(aws opensearch list-domain-names --region "$REGION" --query "DomainNames[?contains(DomainName, 'cluster') && contains(DomainName, '${STAGE}')].DomainName" --output text 2>/dev/null)
+    
+    if [ -n "$actual_domain_name" ] && [ "$actual_domain_name" != "None" ]; then
+        echo "Found actual domain name: $actual_domain_name"
+        domain_name="$actual_domain_name"
+    else
+        echo "Could not find domain dynamically, using constructed name: $domain_name"
+    fi
+    
     cd "$AWS_SOLUTIONS_CDK_DIR" 2>/dev/null || {
         echo "Warning: CDK directory not found, attempting cleanup via AWS CLI"
     }
     
     # Destroy OpenSearch domain stack first (has dependency on network stack)
     echo "Destroying OpenSearch domain stack: $opensearch_stack_name"
+    echo "Using domain name for monitoring: $domain_name"
     if command -v cdk &> /dev/null && [ -d "$AWS_SOLUTIONS_CDK_DIR" ]; then
         cd "$AWS_SOLUTIONS_CDK_DIR"
         cdk destroy "$opensearch_stack_name" --force 2>/dev/null || {
