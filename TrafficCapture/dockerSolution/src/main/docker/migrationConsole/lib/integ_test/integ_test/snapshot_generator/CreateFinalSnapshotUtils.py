@@ -234,16 +234,31 @@ def update_snapshot_catalog(config_file_path, bucket_info, temp_config_file_path
     env_values = get_environment_values()
     version_info = get_version_info_from_config(config_file_path)
 
-    # Calculate snapshot metadata
+    # Calculate original count and get index name first
     original_count = env_values['batch_count'] * env_values['docs_per_batch']
-    final_count = original_count * env_values['multiplication_factor']
+    index_name = env_values['index_name']
+    
+    # Query actual document count from cluster instead of calculating
+    logger.info("Querying actual document count from cluster...")
+    try:
+        result = run_console_command([
+            "console", "clusters", "curl", "source_cluster",
+            "-XGET", f"/{index_name}/_count"
+        ])
+        count_data = json.loads(result.stdout)
+        actual_document_count = count_data['count']
+        logger.info(f"Actual document count: {actual_document_count}")
+    except Exception as e:
+        logger.warning(f"Failed to get actual document count: {e}")
+        # Fallback to calculated value if API fails
+        actual_document_count = original_count * env_values['multiplication_factor']
+        logger.info(f"Using calculated fallback count: {actual_document_count}")
 
     # Catalog file details
     catalog_bucket = bucket_info['final_snapshot_bucket_name']
     catalog_key = "large-snapshot-catalog.csv"
     catalog_s3_uri = f"s3://{catalog_bucket}/{catalog_key}"
     base_path = bucket_info['final_snapshot_folder']  # e.g., "large-snapshot-es6x"
-    index_name = env_values['index_name']
 
     logger.info(f"Updating snapshot catalog: {catalog_s3_uri}")
     logger.info(f"Target base_path: {base_path}")
@@ -317,7 +332,7 @@ def update_snapshot_catalog(config_file_path, bucket_info, temp_config_file_path
         'snapshot_name': 'large-snapshot',
         'cluster_version': version_info['cluster_version'],
         'engine_version': version_info['engine_version'],
-        'document_count': final_count,
+        'document_count': actual_document_count,
         'original_count': original_count,
         'multiplication_factor': env_values['multiplication_factor'],
         'batch_count': env_values['batch_count'],
