@@ -368,129 +368,29 @@ extract_cluster_info() {
 # Cleanup deployed resources
 cleanup_resources() {
     echo "Cleaning up target cluster resources..."
-    
+
     local cluster_id="target-os2x"
-    local domain_name="cluster-${STAGE}-${cluster_id}"
-    
-    # Based on AWS Solutions CDK structure and your actual stack names:
+
+    # Based on AWS Solutions CDK structure:
+    # - OpenSearch Domain Stack: OpenSearchDomain-{clusterId}-{stage}-{region}
+    # - Network Stack: NetworkInfra-{stage}-{region}
     local opensearch_stack_name="OpenSearchDomain-${cluster_id}-${STAGE}-${REGION}"
     local network_stack_name="NetworkInfra-${STAGE}-${REGION}"
-    
+
     echo "Destroying stacks:"
     echo "  OpenSearch Stack: $opensearch_stack_name"
     echo "  Network Stack: $network_stack_name"
-    
-    # Debug: List actual stacks to find the correct names
-    echo "DEBUG: Listing actual CloudFormation stacks to identify correct names..."
-    aws cloudformation list-stacks --region "$REGION" --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'target') || contains(StackName, 'cluster') || contains(StackName, 'OpenSearch')].{Name:StackName,Status:StackStatus}" --output table 2>/dev/null || echo "Could not list stacks"
-    
-    # Try to find the actual OpenSearch stack name dynamically
-    echo "DEBUG: Searching for actual OpenSearch stack name..."
-    local actual_opensearch_stack=$(aws cloudformation list-stacks --region "$REGION" --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'OpenSearch') && (contains(StackName, 'target') || contains(StackName, 'cluster'))].StackName" --output text 2>/dev/null)
-    
-    if [ -n "$actual_opensearch_stack" ] && [ "$actual_opensearch_stack" != "None" ]; then
-        echo "Found actual OpenSearch stack: $actual_opensearch_stack"
-        opensearch_stack_name="$actual_opensearch_stack"
-    else
-        echo "Could not find OpenSearch stack dynamically, using constructed name: $opensearch_stack_name"
-    fi
-    
-    # Also check for the domain name that actually exists
-    echo "DEBUG: Checking for actual domain name..."
-    local actual_domain_name=$(aws opensearch list-domain-names --region "$REGION" --query "DomainNames[?contains(DomainName, 'cluster') && contains(DomainName, '${STAGE}')].DomainName" --output text 2>/dev/null)
-    
-    if [ -n "$actual_domain_name" ] && [ "$actual_domain_name" != "None" ]; then
-        echo "Found actual domain name: $actual_domain_name"
-        domain_name="$actual_domain_name"
-    else
-        echo "Could not find domain dynamically, using constructed name: $domain_name"
-    fi
-    
-    cd "$AWS_SOLUTIONS_CDK_DIR" 2>/dev/null || {
-        echo "Warning: CDK directory not found, attempting cleanup via AWS CLI"
-    }
-    
+
     # Destroy OpenSearch domain stack first (has dependency on network stack)
     echo "Destroying OpenSearch domain stack: $opensearch_stack_name"
-    echo "Using domain name for monitoring: $domain_name"
-    if command -v cdk &> /dev/null && [ -d "$AWS_SOLUTIONS_CDK_DIR" ]; then
-        cd "$AWS_SOLUTIONS_CDK_DIR"
-        cdk destroy "$opensearch_stack_name" --force 2>/dev/null || {
-            echo "CDK destroy failed, falling back to CloudFormation CLI"
-            aws cloudformation delete-stack --stack-name "$opensearch_stack_name" --region "$REGION"
-        }
-    else
-        aws cloudformation delete-stack --stack-name "$opensearch_stack_name" --region "$REGION"
-    fi
-    
-    # Wait for OpenSearch domain to be completely deleted
-    echo "Waiting for OpenSearch domain deletion to complete..."
-    local max_wait_time=1800  # 30 minutes max wait
-    local wait_interval=30    # Check every 30 seconds
-    local elapsed_time=0
-    
-    while [ $elapsed_time -lt $max_wait_time ]; do
-        # Check if OpenSearch domain still exists
-        local domain_status=$(aws opensearch describe-domain --domain-name "$domain_name" --region "$REGION" --query 'DomainStatus.Processing' --output text 2>/dev/null)
-        
-        if [ $? -ne 0 ]; then
-            echo "OpenSearch domain no longer exists - deletion complete"
-            break
-        fi
-        
-        # Check CloudFormation stack status
-        local stack_status=$(aws cloudformation describe-stacks --stack-name "$opensearch_stack_name" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-        
-        if [ $? -ne 0 ] || [ "$stack_status" = "DELETE_COMPLETE" ]; then
-            echo "OpenSearch stack deletion complete"
-            break
-        fi
-        
-        if [ "$stack_status" = "DELETE_FAILED" ]; then
-            echo "Warning: OpenSearch stack deletion failed, but proceeding with network cleanup"
-            break
-        fi
-        
-        echo "OpenSearch domain still deleting... (${elapsed_time}s elapsed, stack status: $stack_status)"
-        sleep $wait_interval
-        elapsed_time=$((elapsed_time + wait_interval))
-    done
-    
-    if [ $elapsed_time -ge $max_wait_time ]; then
-        echo "Warning: OpenSearch deletion wait timed out after ${max_wait_time}s, proceeding with network cleanup"
-    fi
-    
-    # Destroy network stack (only after OpenSearch is deleted)
+    aws cloudformation delete-stack --stack-name "$opensearch_stack_name" --region "$REGION"
+    aws cloudformation wait stack-delete-complete --stack-name "$opensearch_stack_name" --region "$REGION"
+
+    # Destroy network stack
     echo "Destroying network stack: $network_stack_name"
-    if command -v cdk &> /dev/null && [ -d "$AWS_SOLUTIONS_CDK_DIR" ]; then
-        cd "$AWS_SOLUTIONS_CDK_DIR"
-        cdk destroy "$network_stack_name" --force 2>/dev/null || {
-            echo "CDK destroy failed, falling back to CloudFormation CLI"
-            aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
-        }
-    else
-        aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
-    fi
-    
-    # Wait for network stack deletion with retry logic
-    echo "Waiting for network stack deletion to complete..."
-    aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION" 2>/dev/null || {
-        echo "Network stack deletion wait failed, checking status..."
-        local network_status=$(aws cloudformation describe-stacks --stack-name "$network_stack_name" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-        
-        if [ "$network_status" = "DELETE_FAILED" ]; then
-            echo "Network stack deletion failed, retrying once..."
-            aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
-            aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION" 2>/dev/null || {
-                echo "Warning: Network stack deletion failed after retry"
-                echo "Manual cleanup may be required for stack: $network_stack_name"
-            }
-        else
-            echo "Network stack deletion completed or in progress"
-        fi
-    }
-    
-    cd "$TEST_DIR_PATH"
+    aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
+    aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION"
+
     echo "Target cluster cleanup completed"
 }
 

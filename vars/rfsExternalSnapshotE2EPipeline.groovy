@@ -226,6 +226,7 @@ def call(Map config = [:]) {
                             "export STAGE='${params.stage}' && " +
                             "export BACKFILL_SCALE='${params.backfillScale}' && " +
                             "export UNIQUE_ID='${params.testUniqueId}' && " +
+                            "export TEST_COMMIT_SHORT='${env.TEST_COMMIT_SHORT}' && " +
                             "cd /root/lib/integ_test && " +
                             "pipenv run pytest --log-file=${testDir}/reports/${params.testUniqueId}/pytest.log " +
                             "--junitxml=${test_result_file} integ_test/external_backfill_test.py " +
@@ -413,8 +414,7 @@ def call(Map config = [:]) {
                                 // Second: Clean up target cluster (AWS Samples CDK)
                                 echo "Cleaning up target cluster infrastructure..."
                                 dir('test') {
-                                    try {
-                                        sh """
+                                    sh """
                                             echo "Destroying target cluster CDK stacks with proper dependency waiting..."
                                             echo "This will destroy:"
                                             echo "  - OpenSearchDomain-target-os2x-${params.stage}-${params.region}"
@@ -426,14 +426,9 @@ def call(Map config = [:]) {
                                                 --cluster-version ${params.targetVersion} \\
                                                 --stage ${params.stage} \\
                                                 --region ${params.region}
-                                        """
-                                        cleanupResults.targetCluster = "SUCCESS"
-                                        echo "Target cluster infrastructure cleaned up successfully"
-                                    } catch (Exception e) {
-                                        cleanupResults.targetCluster = "FAILED: ${e.message}"
-                                        echo "Warning: Target cluster cleanup failed: ${e.message}"
-                                        echo "Some resources may require manual cleanup"
-                                    }
+                                    """
+                                    cleanupResults.targetCluster = "SUCCESS"
+                                    echo "Target cluster infrastructure cleaned up successfully"
                                 }
                                 
                                 // Third: Clean up any orphaned bootstrap stacks if they exist

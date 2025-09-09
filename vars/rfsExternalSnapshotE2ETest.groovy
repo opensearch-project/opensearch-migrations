@@ -117,21 +117,28 @@ def call(Map config = [:]) {
                     def uniqueCsvName = "cumulative_backfill_metrics_" + metric.field.replaceAll(/[^A-Za-z0-9]/, '') + ".csv"
                     
                     plot csvFileName: uniqueCsvName,
-                         csvSeries: [[file: cumulativeCsvPath, exclusionValues: metric.field, displayTableFlag: false, inclusionFlag: 'INCLUDE_BY_STRING', url: '']],
+                         csvSeries: [[file: cumulativeCsvPath, exclusionValues: metric.field, displayTableFlag: true, inclusionFlag: 'INCLUDE_BY_STRING', url: '']],
                          group: 'Backfill Metrics',
-                         title: metric.title,
+                         title: "${metric.title} - Latest: ${env.TEST_COMMIT_SHORT}",
                          style: metric.style,
                          exclZero: false,
                          keepRecords: false,
                          logarithmic: metric.logarithmic,
                          yaxis: metric.yaxis,
-                         useDescr: true,
-                         csvSeriesX: 'Commit (hash)'
+                         xAxisLabel: 'Build Number (see table for commit hashes)',
+                         useDescr: true
                 }
                 echo "Cumulative performance metrics plotting completed successfully"
                 
-                // Archive both single-run and cumulative CSV files
+                // Archive both single-run and cumulative CSV files explicitly
                 echo "Archiving both single-run and cumulative CSV files"
+                archiveArtifacts artifacts: "${localMetricsPath}", allowEmptyArchive: true
+                if (fileExists(cumulativeCsvPath)) {
+                    archiveArtifacts artifacts: "${cumulativeCsvPath}", allowEmptyArchive: true
+                    echo "Successfully archived cumulative CSV: ${cumulativeCsvPath}"
+                } else {
+                    echo "Warning: Cumulative CSV not found for archiving: ${cumulativeCsvPath}"
+                }
                 
             } else {
                 echo "ERROR: Single-run metrics file not found at ${localMetricsPath}, skipping plot"
