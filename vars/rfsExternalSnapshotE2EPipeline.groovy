@@ -328,18 +328,22 @@ def call(Map config = [:]) {
                             echo "No files specified for retrieval"
                         }
                         
-                        // Archive retrieved files if requested
-                        if (config.archiveRetrievedFiles && config.metricsOutputDir) {
-                            echo "Archiving retrieved files from: ${config.metricsOutputDir}"
-                            archiveArtifacts artifacts: "${config.metricsOutputDir}/*", allowEmptyArchive: true
-                        }
-                        
-                        // Execute callback if provided
+                        // Execute callback (and update the cumulative file)
                         if (config.fileRetrievalCallback) {
                             echo "Executing file retrieval callback..."
                             config.fileRetrievalCallback()
                         } else {
                             echo "No file retrieval callback provided"
+                        }
+                        
+                        // Archive AFTER the callback so both CSVs are included
+                        if (config.metricsOutputDir) {
+                            echo "Archiving retrieved & generated files from: ${config.metricsOutputDir}"
+                            sh "ls -la ${config.metricsOutputDir} || true"
+                            archiveArtifacts artifacts: "${config.metricsOutputDir}/*.csv",
+                                             fingerprint: true,
+                                             onlyIfSuccessful: false,
+                                             allowEmptyArchive: true
                         }
                         
                         // Determine stage success - succeed if metrics file was retrieved
