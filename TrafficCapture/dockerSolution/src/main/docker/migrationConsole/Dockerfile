@@ -17,7 +17,7 @@ ARG KAFKA_VERSION="3.9.1"
 RUN mkdir -p /root/kafka-tools/kafka && \
     url_cdn="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
     url_archive="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_2.13-${KAFKA_VERSION}.tgz" && \
-    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_cdn" -o /tmp/kafka.tgz || curl  --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_archive" -o /tmp/kafka.tgz && \
+    curl --retry 2 --retry-delay 5 --retry-connrefused -fSL "$url_cdn" -o /tmp/kafka.tgz || curl  --retry 5 --retry-delay 5 --retry-connrefused -fSL "$url_archive" -o /tmp/kafka.tgz && \
     tar -xzf /tmp/kafka.tgz -C /root/kafka-tools/kafka --strip-components=1 && \
     rm -f /tmp/kafka.tgz
 RUN mkdir -p /root/kafka-tools/aws && \
