@@ -33,23 +33,26 @@ def call(Map config = [:]) {
     // Define metrics to plot
     def metricsToPlot = [
         [field: 'Duration (min)', title: 'Duration', yaxis: 'minutes', style: 'line', logarithmic: false],
-        [field: 'Reindexing Throughput Total (MiB/s)', title: 'Reindexing Throughput Total', yaxis: 'MiB/s', style: 'line', logarithmic: false],
+        [field: 'Primary Size Transferred (GiB)', title: 'Primary Size Transferred', yaxis: 'GiB', style: 'line', logarithmic: false],
         [field: 'Reindexing Throughput Per Worker (MiB/s)', title: 'Reindexing Throughput Per Worker', yaxis: 'MiB/s', style: 'line', logarithmic: false],
-        [field: 'Size Transferred (GB)', title: 'Primary Shard Size Transferred', yaxis: 'GiB', style: 'line', logarithmic: false],
+        [field: 'Reindexing Throughput Total (MiB/s)', title: 'Reindexing Throughput Total', yaxis: 'MiB/s', style: 'line', logarithmic: false],
         [field: 'Backfill Workers (count)', title: 'RFS Workers Count', yaxis: 'Workers', style: 'line', logarithmic: false],
+        [field: 'Backfill Completion (%)', title: 'Backfill Completion', yaxis: 'Percentage', style: 'line', logarithmic: false],
     ]
     
-    // Plot metrics callback
+    // Plot metrics callback with cumulative CSV support
     def plotMetricsCallback = { ->
-        echo "Starting metrics plotting callback"
+        echo "Starting metrics plotting callback with cumulative CSV support"
+        
+        def cumulativeCsvPath = "${metricsOutputDir}/cumulative_backfill_metrics.csv"
         
         try {
             if (fileExists(localMetricsPath)) {
-                echo "Metrics file found at ${localMetricsPath}"
+                echo "Single-run metrics file found at ${localMetricsPath}"
                 
                 sh """
-                    echo "File size: \$(du -h ${localMetricsPath} | cut -f1)"
-                    echo "File contents:"
+                    echo "Single-run file size: \$(du -h ${localMetricsPath} | cut -f1)"
+                    echo "Single-run file contents:"
                     cat ${localMetricsPath}
                 """
                 
@@ -60,35 +63,61 @@ def call(Map config = [:]) {
                 }
                 
                 def lines = fileContent.split('\n')
-                echo "Number of lines in CSV: ${lines.size()}"
+                echo "Number of lines in single-run CSV: ${lines.size()}"
                 if (lines.size() < 2) {
                     echo "ERROR: CSV file does not have enough data (header + at least one data row)"
                     return
                 }
                 
                 echo "CSV header: ${lines[0]}"
-                echo "First data row: ${lines[1]}"
+                echo "Current data row: ${lines[1]}"
                 
-                // Add commit info to CSV for x-axis labeling
-                def commitLabel = "${env.TEST_COMMIT_SHORT}"
-                def enhancedContent = fileContent.replaceFirst('\n', ",Commit\n")
-                if (lines.size() > 1) {
-                    enhancedContent = enhancedContent.replaceFirst('(?m)^([^\\n]+)$', '$1,' + commitLabel)
-                }
-                writeFile file: localMetricsPath, text: enhancedContent
-                
-                echo "Enhanced CSV with commit hash for X-axis:"
-                echo "Commit: ${commitLabel}"
+                // CSV already includes commit hash from Python script
+                echo "CSV already includes commit hash from Python script:"
+                echo "Commit from environment: ${env.TEST_COMMIT_SHORT}"
                 sh "head -n 3 ${localMetricsPath}"
                 
-                // Plot each metric from the static list
+                // Create or update cumulative CSV
+                echo "Processing cumulative CSV at ${cumulativeCsvPath}"
+                
+                if (fileExists(cumulativeCsvPath)) {
+                    echo "Cumulative CSV exists - appending new data row"
+                    
+                    // Read existing cumulative content
+                    def existingContent = readFile(cumulativeCsvPath)
+                    def currentLines = fileContent.split('\n')
+                    
+                    if (currentLines.size() >= 2) {
+                        def newDataRow = currentLines[1] // Get the data row (skip header)
+                        def updatedContent = existingContent.trim() + '\n' + newDataRow
+                        writeFile file: cumulativeCsvPath, text: updatedContent
+                        echo "Successfully appended new row to cumulative CSV"
+                    } else {
+                        echo "ERROR: Current CSV doesn't have data row to append"
+                        return
+                    }
+                } else {
+                    echo "Cumulative CSV doesn't exist - creating new cumulative file"
+                    sh "cp ${localMetricsPath} ${cumulativeCsvPath}"
+                    echo "Successfully created new cumulative CSV"
+                }
+                
+                // Display cumulative CSV info
+                sh """
+                    echo "Cumulative CSV file size: \$(du -h ${cumulativeCsvPath} | cut -f1)"
+                    echo "Cumulative CSV contents:"
+                    cat ${cumulativeCsvPath}
+                    echo "Number of data rows in cumulative CSV: \$((\$(wc -l < ${cumulativeCsvPath}) - 1))"
+                """
+                
+                // Plot each metric using cumulative CSV data
                 metricsToPlot.each { metric ->
-                    echo "Plotting ${metric.title} (Field: ${metric.field})"
+                    echo "Plotting ${metric.title} (Field: ${metric.field}) using cumulative data"
 
-                    def uniqueCsvName = "backfill_metrics_" + metric.field.replaceAll(/[^A-Za-z0-9]/, '') + ".csv"
+                    def uniqueCsvName = "cumulative_backfill_metrics_" + metric.field.replaceAll(/[^A-Za-z0-9]/, '') + ".csv"
                     
                     plot csvFileName: uniqueCsvName,
-                         csvSeries: [[file: localMetricsPath, exclusionValues: metric.field, displayTableFlag: false, inclusionFlag: 'INCLUDE_BY_STRING', url: '']],
+                         csvSeries: [[file: cumulativeCsvPath, exclusionValues: metric.field, displayTableFlag: false, inclusionFlag: 'INCLUDE_BY_STRING', url: '']],
                          group: 'Backfill Metrics',
                          title: metric.title,
                          style: metric.style,
@@ -97,11 +126,15 @@ def call(Map config = [:]) {
                          logarithmic: metric.logarithmic,
                          yaxis: metric.yaxis,
                          useDescr: true,
-                         csvSeriesX: 'Commit'
+                         csvSeriesX: 'Commit (hash)'
                 }
-                echo "Performance metrics plotting completed successfully"
+                echo "Cumulative performance metrics plotting completed successfully"
+                
+                // Archive both single-run and cumulative CSV files
+                echo "Archiving both single-run and cumulative CSV files"
+                
             } else {
-                echo "ERROR: Metrics file not found at ${localMetricsPath}, skipping plot"
+                echo "ERROR: Single-run metrics file not found at ${localMetricsPath}, skipping plot"
                 sh """
                     if [ -d "\$(dirname ${localMetricsPath})" ]; then
                         echo "Directory exists, listing contents:"
@@ -112,7 +145,7 @@ def call(Map config = [:]) {
                 """
             }
         } catch (Exception e) {
-            echo "ERROR: Exception occurred during plotting: ${e.message}"
+            echo "ERROR: Exception occurred during cumulative plotting: ${e.message}"
             e.printStackTrace()
         }
     }
@@ -182,6 +215,9 @@ def call(Map config = [:]) {
                 localPath: localMetricsPath,
                 clusterName: null
             ]
+        ],
+        additionalArchiveFiles: [
+            "${metricsOutputDir}/cumulative_backfill_metrics.csv"
         ],
         fileRetrievalCallback: plotMetricsCallback,
         archiveRetrievedFiles: true,

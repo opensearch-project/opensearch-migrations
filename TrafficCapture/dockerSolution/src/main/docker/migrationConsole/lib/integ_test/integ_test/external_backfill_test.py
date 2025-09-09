@@ -439,17 +439,17 @@ def perform_backfill_with_monitoring(console_env, snapshot_info, env_values):
     if not backfill_start_result.success:
         raise RuntimeError(f"Backfill start failed: {backfill_start_result.value}")
     
+    # Capture START timestamp immediately after backfill start
+    backfill_start_time = datetime.now()
+    logger.info(f"Backfill START timestamp: {backfill_start_time.isoformat()}")
+    
     # Scale to specified workers
     logger.info(f"Scaling backfill to {backfill_scale} workers")
     backfill_scale_result: CommandResult = backfill.scale(units=backfill_scale)
     if not backfill_scale_result.success:
         raise RuntimeError(f"Backfill scaling failed: {backfill_scale_result.value}")
     
-    # Wait for initialization
-    logger.info(f"Waiting for backfill initialization ({BACKFILL_INITIALIZATION_WAIT_SECONDS} seconds)")
-    time.sleep(BACKFILL_INITIALIZATION_WAIT_SECONDS)
-    
-    # Monitor document count until completion
+    # Start monitoring immediately (no wait)
     logger.info(f"Monitoring document migration progress (target: {expected_docs:,} documents)")
     start_time = time.time()
     check_count = 0
@@ -518,64 +518,58 @@ def perform_backfill_with_monitoring(console_env, snapshot_info, env_values):
     except Exception as e:
         logger.warning(f"Failed to completely stop backfill: {e}")
     
-    return current_docs
+    # Capture END timestamp after backfill stop
+    backfill_end_time = datetime.now()
+    logger.info(f"Backfill END timestamp: {backfill_end_time.isoformat()}")
+    
+    return current_docs, backfill_start_time, backfill_end_time
 
 
-def get_total_cluster_size(cluster: Cluster) -> float:
-    """Get total cluster size in TiB."""
+def get_index_primary_size_in_bytes(cluster: Cluster) -> int:
+    """Get basic_index primary size in bytes."""
     try:
-        response = cluster.call_api("/_stats/store?level=cluster", raise_error=False)
+        response = cluster.call_api("/basic_index/_stats/store?filter_path=indices.basic_index.primaries.store.size_in_bytes", raise_error=False)
         data = response.json()
-        primary_size_bytes = data['_all']['primaries']['store']['size_in_bytes']
+        primary_size_bytes = data['indices']['basic_index']['primaries']['store']['size_in_bytes']
 
-        # Convert bytes to tebibytes (TiB)
-        primary_size_tib = float(primary_size_bytes) / (1024**4)
-
-        logger.debug(f"Cluster primary store size: {primary_size_bytes} bytes = {primary_size_tib:.6f} TiB")
-        return primary_size_tib
+        logger.info(f"basic_index primary store size: {primary_size_bytes} bytes")
+        return primary_size_bytes
         
     except Exception as e:
-        logger.warning(f"Error getting cluster size: {e}")
-        return 0.0
+        logger.warning(f"Error getting basic_index primary size: {e}")
+        return 0
 
 
-def generate_csv_data(start_timestamp: datetime, final_size_tib: float, actual_docs: int,
+def generate_csv_data(start_timestamp: datetime, end_timestamp: datetime, index_pri_size_in_bytes: int, actual_docs: int,
                       expected_docs: int, backfill_scale: int):
     """Generate CSV data for metrics."""
-    # Current time as the end timestamp
-    end_timestamp = datetime.now()
-    
-    # Calculate elapsed duration in seconds
+    # Calculate elapsed duration in seconds using provided timestamps
     duration_seconds = (end_timestamp - start_timestamp).total_seconds()
     duration_minutes = duration_seconds / 60.0
     
-    # Convert data sizes:
-    # 1 TiB = 1024 GiB; 1 GiB = 1024 MiB
-    size_in_mib = final_size_tib * 1024 * 1024
-    size_in_gb = final_size_tib * 1024
+    # Convert bytes to GiB and MiB
+    size_in_gb = index_pri_size_in_bytes / (1024**3)  # Bytes to GiB
+    size_in_mib = index_pri_size_in_bytes / (1024**2)  # Bytes to MiB
 
     # Calculate throughput (MiB/s). Avoid division by zero
     throughput_mib_s = size_in_mib / duration_seconds if duration_seconds > 0 else 0
     throughput_mib_s_per_worker = throughput_mib_s / backfill_scale if backfill_scale > 0 else 0
     
-    # Calculate document throughput
-    doc_throughput_per_sec = actual_docs / duration_seconds if duration_seconds > 0 else 0
-    doc_throughput_per_worker = doc_throughput_per_sec / backfill_scale if backfill_scale > 0 else 0
+    # Calculate completion percentage
+    completion_percentage = round((actual_docs / expected_docs * 100) if expected_docs > 0 else 0, 1)
     
-    # Define the metrics
+    # Get commit hash from environment (set by Jenkins pipeline)
+    commit_hash = os.environ.get('TEST_COMMIT_SHORT', 'unknown')
+    
+    # Define the final metrics for plotting (including commit for X-axis)
     metrics = [
-        Metric("End Timestamp", end_timestamp.isoformat(), "ISO-8601"),
         Metric("Duration", round(duration_minutes, 2), "min"),
-        Metric("Size Transferred", round(size_in_gb, 2), "GB"),
-        Metric("Documents Migrated", actual_docs, "count"),
-        Metric("Expected Documents", expected_docs, "count"),
-        Metric("Migration Completeness",
-               round((actual_docs / expected_docs * 100) if expected_docs > 0 else 0, 1), "%"),
-        Metric("Reindexing Throughput Total", round(throughput_mib_s, 4), "MiB/s"),
+        Metric("Primary Size Transferred", round(size_in_gb, 2), "GiB"),
         Metric("Reindexing Throughput Per Worker", round(throughput_mib_s_per_worker, 4), "MiB/s"),
-        Metric("Document Throughput Total", round(doc_throughput_per_sec, 2), "docs/s"),
-        Metric("Document Throughput Per Worker", round(doc_throughput_per_worker, 4), "docs/s"),
-        Metric("Backfill Workers", backfill_scale, "count")
+        Metric("Reindexing Throughput Total", round(throughput_mib_s, 4), "MiB/s"),
+        Metric("Backfill Workers", backfill_scale, "count"),
+        Metric("Backfill Completion", completion_percentage, "%"),
+        Metric("Commit", commit_hash, "hash")
     ]
 
     # Prepare the CSV header and row
@@ -591,18 +585,24 @@ def write_csv(filename, data):
         writer.writerows(data)
 
 
-def calculate_and_save_metrics(snapshot_info, env_values, console_env, start_timestamp, actual_docs):
+def calculate_and_save_metrics(snapshot_info, env_values, console_env, start_timestamp, end_timestamp):
     """Calculate and save performance metrics."""
     logger.info("=== STEP 4: PERFORMANCE METRICS CALCULATION ===")
     
-    # Get final cluster size
-    final_size = get_total_cluster_size(console_env.target_cluster)
+    # Get fresh document count from target cluster
+    logger.info("Getting final document count from target cluster")
+    doc_count_on_target = get_document_count(console_env.target_cluster)
+    logger.info(f"Final document count on target: {doc_count_on_target:,}")
     
-    # Generate metrics data
+    # Get basic_index primary size in bytes
+    index_pri_size_in_bytes_on_target = get_index_primary_size_in_bytes(console_env.target_cluster)
+    
+    # Generate metrics data with fresh values
     data = generate_csv_data(
         start_timestamp,
-        final_size,
-        actual_docs,
+        end_timestamp,
+        index_pri_size_in_bytes_on_target,
+        doc_count_on_target,
         snapshot_info['document_count'],
         env_values['backfill_scale']
     )
@@ -619,8 +619,11 @@ def calculate_and_save_metrics(snapshot_info, env_values, console_env, start_tim
         write_csv(metrics_file, data)
         logger.info(f"Successfully wrote metrics to: {metrics_file}")
         
-        # Log metrics summary
+        # Enhanced metrics summary with backfill-specific timestamps
         logger.info("=== METRICS SUMMARY ===")
+        logger.info(f"Backfill Start Timestamp (ISO-8601): {start_timestamp.isoformat()}")
+        logger.info(f"Backfill End Timestamp (ISO-8601): {end_timestamp.isoformat()}")
+        
         if len(data) >= 2:
             headers = data[0]
             values = data[1]
@@ -729,7 +732,7 @@ class TestExternalBackfill:
         perform_metadata_migration(console_env)
         
         # Step 3: Backfill with Document Count Monitoring
-        actual_docs = perform_backfill_with_monitoring(console_env, snapshot_info, env_values)
+        actual_docs, backfill_start_time, backfill_end_time = perform_backfill_with_monitoring(console_env, snapshot_info, env_values)
         
         # Refresh target cluster
         logger.info("Refreshing target cluster")
@@ -737,7 +740,7 @@ class TestExternalBackfill:
         logger.info("Target cluster refreshed")
         
         # Step 4: Performance Metrics Calculation
-        calculate_and_save_metrics(snapshot_info, env_values, console_env, start_timestamp, actual_docs)
+        calculate_and_save_metrics(snapshot_info, env_values, console_env, backfill_start_time, backfill_end_time)
         
         # Assertions for test validation
         expected_docs = snapshot_info['document_count']
@@ -790,7 +793,7 @@ def main():
         perform_metadata_migration(console_env)
         
         # Step 3: Backfill with Document Count Monitoring
-        actual_docs = perform_backfill_with_monitoring(console_env, snapshot_info, env_values)
+        actual_docs, backfill_start_time, backfill_end_time = perform_backfill_with_monitoring(console_env, snapshot_info, env_values)
         
         # Refresh target cluster
         logger.info("Refreshing target cluster")
@@ -798,7 +801,7 @@ def main():
         logger.info("Target cluster refreshed")
         
         # Step 4: Performance Metrics Calculation
-        calculate_and_save_metrics(snapshot_info, env_values, console_env, start_timestamp, actual_docs)
+        calculate_and_save_metrics(snapshot_info, env_values, console_env, backfill_start_time, backfill_end_time)
         
         logger.info("External backfill test completed successfully")
         return 0
