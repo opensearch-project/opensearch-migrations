@@ -73,19 +73,19 @@ describe("paramsFns runtime validation", () => {
     });
 
     it("defineParam widens appropriately", () => {
-        expectTypeOf(defineParam({defaultValue: "hi"})).toEqualTypeOf<InputParamDef<string, false>>();
+        expectTypeOf(defineParam({expression: "hi"})).toEqualTypeOf<InputParamDef<string, false>>();
         type e1 = ("hi" | "world");
         // @ts-expect-error — mixed scalar types should be rejected
-        expectTypeOf(defineParam({defaultValue: "hi" as e1})).toEqualTypeOf<InputParamDef<string, false>>();
-        expectTypeOf(defineParam({defaultValue: "hi" as e1})).toEqualTypeOf<InputParamDef<e1, false>>();
+        expectTypeOf(defineParam({expression: "hi" as e1})).toEqualTypeOf<InputParamDef<string, false>>();
+        expectTypeOf(defineParam({expression: "hi" as e1})).toEqualTypeOf<InputParamDef<e1, false>>();
     });
 
     it("workflow param types can be used with input params", () => {
-        const standaloneParam = defineParam({defaultValue: "str"});
+        const standaloneParam = defineParam({expression: "str"});
         const wpsBuilder = WorkflowBuilder.create({ k8sResourceName: "WorkflowParamSample"})
             .addParams({
-                wpStr: defineParam({defaultValue: "str"}),
-                wpEnum: defineParam({defaultValue: "b" as SIMPLE_ENUM}),
+                wpStr: defineParam({expression: "str"}),
+                wpEnum: defineParam({expression: "b" as SIMPLE_ENUM}),
                 wpStandalone: standaloneParam
             });
 

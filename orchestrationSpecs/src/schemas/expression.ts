@@ -80,6 +80,12 @@ export class ComparisonExpression<
     ) { super("comparison"); }
 }
 
+export class NotExpression<C extends ExpressionType> extends BaseExpression<boolean, C> {
+    constructor(public readonly boolValue: BaseExpression<boolean, C>) {
+        super("not");
+    }
+}
+
 export class ArithmeticExpression<
     L extends BaseExpression<number, CL>,
     R extends BaseExpression<number, CR>,
@@ -261,6 +267,10 @@ export function greaterThan<
     return new ComparisonExpression<number,L,R>(">", l, r);
 }
 
+export function not<C extends ExpressionType>(data: BaseExpression<boolean, C>): BaseExpression<boolean, C> {
+    return new NotExpression(data);
+}
+
 export const add = <
     L extends BaseExpression<number, any>,
     R extends BaseExpression<number, any>
@@ -362,6 +372,7 @@ export const expr = {
     equals,
     lessThan,
     greaterThan,
+    not,
 
     // Arithmetic
     add,

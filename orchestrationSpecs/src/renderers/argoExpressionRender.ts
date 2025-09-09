@@ -16,7 +16,7 @@ import expression, {
     RecordFieldSelectExpression,
     TernaryExpression,
     ToBase64Expression,
-    SerializeJson
+    SerializeJson, NotExpression
 } from "@/schemas/expression";
 import { PlainObject } from "@/schemas/plainObject";
 import { LoopWithUnion } from "@/schemas/workflowTypes";
@@ -86,6 +86,12 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
         return formattedResult(`${l.text} ${ce.operator} ${r.text}`, true);
     }
 
+    if (isNotExpression(expr)) {
+        const n = expr as NotExpression<any>;
+        const f = toArgoExpressionInner(n.boolValue);
+        return formattedResult(`!(${f.text})`, f.compound);
+    }
+
     if (isArithmeticExpression(expr)) {
         const ae = expr as ArithmeticExpression<any, any>;
         const l = toArgoExpressionInner(ae.left);
@@ -106,10 +112,9 @@ export function toArgoExpressionInner<E extends AnyExpr>(expr: E): ArgoFormatted
     if (isJsonSerialize(expr)) {
         const se = expr as SerializeJson;
         const inner = toArgoExpressionInner(se.data);
-        const needsFromJson = isParameterExpression(se.data as unknown as AnyExpr);
-        const data = needsFromJson ? `fromJSON(${inner.text})` : inner.text;
-        // toJSON(...) is non-trivial => compound
-        return formattedResult(`toJSON(${data})`, true);
+        const finalText = isParameterExpression(se.data as unknown as AnyExpr)
+            ? inner.text : `toJSON(${inner.text})`;
+        return formattedResult(finalText, true);
     }
 
     if (isArrayLengthExpression(expr)) {
@@ -191,6 +196,9 @@ export function isArithmeticExpression(e: AnyExpr): e is ArithmeticExpression<an
 }
 export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> {
     return e.kind === "comparison";
+}
+export function isNotExpression(e: AnyExpr): e is NotExpression<any> {
+    return e.kind === "not";
 }
 export function isArrayLengthExpression(e: AnyExpr): e is ArrayLengthExpression<any> {
     return e.kind === "array_length";

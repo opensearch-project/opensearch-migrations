@@ -14,7 +14,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
     const noParamsTemplate = WorkflowBuilder.create({ k8sResourceName: "NoParams"})
         .addTemplate("noParams", b=> b
             .addSteps(x=>x)
-            .addExpressionOutput("result", "success" as string)
+            .addExpressionOutput("result", inputs=>"success" as string)
         )
         .getFullScope();
 
@@ -24,7 +24,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             .addRequiredInput("reqStr", typeToken<string>())
             .addRequiredInput("reqNum", typeToken<number>())
             .addSteps(x=>x)
-            .addExpressionOutput("result", "success" as string)
+            .addExpressionOutput("result", inputs=>"success" as string)
         )
         .getFullScope();
 
@@ -34,7 +34,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             .addOptionalInput("optStr", s=>"defaultStr")
             .addOptionalInput("optNum", n=>42)
             .addSteps(x=>x)
-            .addExpressionOutput("result", "success" as string)
+            .addExpressionOutput("result", inputs=>"success" as string)
         )
         .getFullScope();
 
@@ -46,7 +46,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             .addRequiredInput("reqBool", typeToken<boolean>())
             .addOptionalInput("optStr", s=>"default")
             .addSteps(x=>x)
-            .addExpressionOutput("result", "success" as string)
+            .addExpressionOutput("result", inputs=>"success" as string)
         )
         .getFullScope();
 
@@ -55,21 +55,21 @@ describe("paramsFns runtime validation - comprehensive", () => {
         // Internal template with no parameters
         .addTemplate("internalNoParams", t => t
             .addSteps(b=>b)
-            .addExpressionOutput("result", "internal_success" as string)
+            .addExpressionOutput("result", inputs=>"internal_success" as string)
         )
         // Internal template with only required parameters
         .addTemplate("internalRequiredOnly", t => t
             .addRequiredInput("reqStr", typeToken<string>())
             .addRequiredInput("reqNum", typeToken<number>())
             .addSteps(b=>b)
-            .addExpressionOutput("result", "internal_success" as string)
+            .addExpressionOutput("result", inputs=>"internal_success" as string)
         )
         // Internal template with only optional parameters
         .addTemplate("internalOptionalOnly", t => t
             .addOptionalInput("optStr", s=>"defaultStr")
             .addOptionalInput("optNum", n=>42)
             .addSteps(b=>b)
-            .addExpressionOutput("result", "internal_success" as string)
+            .addExpressionOutput("result", inputs=>"internal_success" as string)
         )
         // Internal template with mixed parameters
         .addTemplate("internalMixedParams", t => t
@@ -78,7 +78,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
             .addRequiredInput("reqBool", typeToken<boolean>())
             .addOptionalInput("optStr", s=>"default")
             .addSteps(b=>b)
-            .addExpressionOutput("result", "internal_success" as string)
+            .addExpressionOutput("result", inputs=>"internal_success" as string)
         );
 
     // Tests for External Templates - No Parameters

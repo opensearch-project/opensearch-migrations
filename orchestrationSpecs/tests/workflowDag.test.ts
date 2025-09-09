@@ -13,7 +13,7 @@ describe("paramsFns runtime validation", () => {
                     .addOptionalInput("strParam", s => "str")
                     .addOptionalInput("optNum", n => 42)
                     .addSteps(x => x)
-                    .addExpressionOutput("out1", "outputStr" as string)
+                    .addExpressionOutput("out1", inputs=>"outputStr" as string)
                 ;
                 expectTypeOf(result.outputsScope).toEqualTypeOf<{ out1: OutputParamDef<string> }>();
                 return result;

@@ -93,9 +93,13 @@ export abstract class TemplateBodyBuilder<
         >;
     }
 
-    public addExpressionOutput<T extends PlainObject, Name extends string>(
+    public addExpressionOutput<
+        T extends PlainObject,
+        Name extends string
+    >(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
-        expression: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope, AllowLiteralOrExpression<T>>,
+        expressionBuilder: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
+            (b: InputParamsToExpressions<InputParamsScope>) => AllowLiteralOrExpression<T>>,
         descriptionValue?: string
     ): ReplaceOutputTypedMembers<
         ContextualScope,
@@ -105,11 +109,12 @@ export abstract class TemplateBodyBuilder<
         Self,
         BodyBound
     > {
+        const fn = expressionBuilder as (b: InputParamsToExpressions<InputParamsScope>) => AllowLiteralOrExpression<T>;
         const newOutputs = {
             ...this.outputsScope,
             [name as string]: {
                 fromWhere: "expression" as const,
-                expression,
+                expression: fn(this.inputs),
                 description: descriptionValue
             }
         } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
