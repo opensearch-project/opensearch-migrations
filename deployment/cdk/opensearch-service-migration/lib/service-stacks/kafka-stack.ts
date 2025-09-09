@@ -43,7 +43,7 @@ export class KafkaStack extends MigrationServiceCore {
         });
         this.createService({
             serviceName: "kafka",
-            dockerImageName: "docker.io/apache/kafka:3.7.0",
+            dockerImageName: "docker.io/apache/kafka:3.9.1",
             securityGroups: securityGroups,
             // see https://github.com/apache/kafka/blob/3.7/docker/examples/jvm/single-node/plaintext/docker-compose.yml
             environment: {
