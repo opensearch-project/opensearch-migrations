@@ -15,12 +15,14 @@ import {
     ExtendScope,
     TasksOutputsScope,
     TasksWithOutputs,
-    WorkflowAndTemplatesScope
+    WorkflowAndTemplatesScope,
+    InputParamsToExpressions
 } from "@/schemas/workflowTypes";
 import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { PlainObject } from "@/schemas/plainObject";
 import {
+    AllTasksAsOutputReferenceable, getTaskOutputsByTaskName,
     InputsFrom, KeyFor, NamedTask, OutputsFrom, ParamsTuple,
     TaskBuilder, TaskRebinder
 } from "@/schemas/taskBuilder";
@@ -61,6 +63,14 @@ class StepGroupBuilder<
 
 type BuilderLike = { getTasks(): { scope: any; taskList: NamedTask[] } };
 
+// Define the expression context type for StepsBuilder
+type StepsExpressionContext<
+    InputParamsScope extends InputParametersRecord,
+    StepsScope extends TasksOutputsScope
+> = {
+    inputs: InputParamsToExpressions<InputParamsScope>;
+} & AllTasksAsOutputReferenceable<StepsScope, "steps">;
+
 export class StepsBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
@@ -72,44 +82,37 @@ export class StepsBuilder<
     StepsScope,
     OutputParamsScope,
     StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>,
-    TasksOutputsScope // <-- BodyBound for this subclass
+    TasksOutputsScope, // <-- BodyBound for this subclass
+    StepsExpressionContext<InputParamsScope, StepsScope>
 > {
     constructor(
-        contextualScope: ContextualScope,
+        public readonly contextualScope: ContextualScope,
         inputsScope: InputParamsScope,
-        bodyScope: StepsScope,
+        public readonly bodyScope: StepsScope,
         readonly stepGroups: StepGroup[],
-        outputsScope: OutputParamsScope
+        public readonly outputsScope: OutputParamsScope
     ) {
-        const rebind: TemplateRebinder<
-            ContextualScope,
-            InputParamsScope,
-            TasksOutputsScope // <-- match BodyBound
-        > = <
+        const rebind = <
             NewBodyScope extends TasksOutputsScope,
             NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<
-                ContextualScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope,
-                any,
-                TasksOutputsScope
-            >
+            Self extends TemplateBodyBuilder<any, any, any, any, any, any, any>
         >(
             ctx: ContextualScope,
             inputs: InputParamsScope,
             body: NewBodyScope,
             outputs: NewOutputScope
-        ) =>
-            new StepsBuilder<
-                ContextualScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope
-            >(ctx, inputs, body, this.stepGroups, outputs) as unknown as Self;
+        ): Self => {
+            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs) as any;
+        };
 
         super(contextualScope, inputsScope, bodyScope, outputsScope, rebind);
+    }
+
+    protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {
+        return {
+            inputs: this.inputs,
+            steps: getTaskOutputsByTaskName(this.bodyScope, stepOutput)
+        } as StepsExpressionContext<InputParamsScope, StepsScope>;
     }
 
     /**
@@ -163,6 +166,7 @@ export class StepsBuilder<
             return gb.addTask<Name, TemplateSource, K, LoopT>(name, source, key, ...args);
         }) as any;
     }
+
     protected getBody() {
         return {steps: this.stepGroups};
     }

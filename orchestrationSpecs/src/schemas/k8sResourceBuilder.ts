@@ -26,7 +26,7 @@ export type ResourceWorkflowDefinition = {
     flags?: string[],
     setOwnerReference?: AllowLiteralOrExpression<boolean>,
     // make these more strongly typed!
-    successCondition?: AllowLiteralOrExpression<string>,
+    successCondition?: string, // this should be an expression
     manifest: Record<string, any>
 };
 
@@ -85,7 +85,7 @@ export class K8sResourceBuilder<
     }
 
     // SUBCLASS METHOD: return the concrete subclass directly
-    setDefinition(
+    public setDefinition(
         workflowDefinition: ResourceWorkflowDefinition
     ): K8sResourceBuilder<
         ContextualScope,

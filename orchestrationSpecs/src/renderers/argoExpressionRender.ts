@@ -181,8 +181,9 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         let result = expr.template;
         for (const [key, value] of Object.entries(expr.replacements)) {
             const expandedValue = formatExpression(value).text;
-            result = result.replaceAll(`{{${key}}}`, expandedValue);
+            result = result.replaceAll(`{{${key}}}`, `" + ${expandedValue} + "`);
         }
+        result = `"${result}"`;
         return formattedResult(result, true);
     }
 

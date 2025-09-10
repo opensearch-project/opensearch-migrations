@@ -20,7 +20,8 @@ import {AllowLiteralOrExpression, expr, toExpression} from "@/schemas/expression
 export type TemplateRebinder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
-    BodyBound extends GenericScope
+    BodyBound extends GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
 > = <
     NewBodyScope extends BodyBound,
     NewOutputScope extends OutputParametersRecord,
@@ -30,7 +31,8 @@ export type TemplateRebinder<
         NewBodyScope,
         NewOutputScope,
         Self,
-        BodyBound
+        BodyBound,
+        ExpressionBuilderContext
     >
 >(
     ctx: ContextualScope,
@@ -44,11 +46,20 @@ type ReplaceOutputTypedMembers<
     InputParamsScope extends InputParametersRecord,
     BodyScope extends BodyBound,
     OutputParamsScope extends OutputParametersRecord,
-    Self extends TemplateBodyBuilder<any, any, any, any, any>,
-    BodyBound extends GenericScope = GenericScope
+    Self extends TemplateBodyBuilder<any, any, any, any, any, any, any>,
+    BodyBound extends GenericScope = GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
 > =
     Omit<Self, "outputsScope" | "getFullTemplateScope"> &
-    TemplateBodyBuilder<ContextualScope, InputParamsScope, BodyScope, OutputParamsScope, Self, BodyBound>;
+    TemplateBodyBuilder<
+        ContextualScope,
+        InputParamsScope,
+        BodyScope,
+        OutputParamsScope,
+        Self,
+        BodyBound,
+        ExpressionBuilderContext
+    >;
 
 export abstract class TemplateBodyBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -61,16 +72,18 @@ export abstract class TemplateBodyBuilder<
         BodyScope,
         any,
         Self,
-        BodyBound
+        BodyBound,
+        ExpressionBuilderContext
     >,
-    BodyBound extends GenericScope = GenericScope
+    BodyBound extends GenericScope = GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
 > {
     constructor(
         protected readonly contextualScope: ContextualScope,
         public readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
-        protected readonly rebind: TemplateRebinder<ContextualScope, InputParamsScope, BodyBound>
+        protected readonly rebind: TemplateRebinder<ContextualScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
     ) {}
 
     addOutputs<NewOutputScope extends OutputParametersRecord>(
@@ -82,15 +95,24 @@ export abstract class TemplateBodyBuilder<
             BodyScope,
             NewOutputScope,
             Self,
-            BodyBound
+            BodyBound,
+            ExpressionBuilderContext
         >,
         _check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
     ): ReplaceOutputTypedMembers<
-        ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound
+        ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
     > {
         return builderFn(this as unknown as Self) as unknown as ReplaceOutputTypedMembers<
-            ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound
+            ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
         >;
+    }
+
+    /**
+     * Default implementation provides just inputs. Subclasses can override to add
+     * additional context like steps or tasks.
+     */
+    protected getExpressionBuilderContext(): ExpressionBuilderContext {
+        return { inputs: this.inputs } as ExpressionBuilderContext;
     }
 
     public addExpressionOutput<
@@ -99,7 +121,7 @@ export abstract class TemplateBodyBuilder<
     >(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
         expressionBuilder: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
-            (b: InputParamsToExpressions<InputParamsScope>) => AllowLiteralOrExpression<T>>,
+            (b: ExpressionBuilderContext) => AllowLiteralOrExpression<T>>,
         descriptionValue?: string
     ): ReplaceOutputTypedMembers<
         ContextualScope,
@@ -107,14 +129,15 @@ export abstract class TemplateBodyBuilder<
         BodyScope,
         ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>,
         Self,
-        BodyBound
+        BodyBound,
+        ExpressionBuilderContext
     > {
-        const fn = expressionBuilder as (b: InputParamsToExpressions<InputParamsScope>) => AllowLiteralOrExpression<T>;
+        const fn = expressionBuilder as (b: ExpressionBuilderContext) => AllowLiteralOrExpression<T>;
         const newOutputs = {
             ...this.outputsScope,
             [name as string]: {
                 fromWhere: "expression" as const,
-                expression: toExpression(fn(this.inputs)),
+                expression: toExpression(fn(this.getExpressionBuilderContext())),
                 description: descriptionValue
             }
         } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
@@ -130,7 +153,8 @@ export abstract class TemplateBodyBuilder<
             BodyScope,
             typeof newOutputs,
             Self,
-            BodyBound
+            BodyBound,
+            ExpressionBuilderContext
         >;
     }
 

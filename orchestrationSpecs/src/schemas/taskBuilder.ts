@@ -43,8 +43,25 @@ export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 export type TaskType = "tasks" | "steps";
 type LoopItemType<L extends PlainObject> = [L] extends [never] ? never : AllowLiteralOrExpression<L>;
 
+export type AllTasksAsOutputReferenceable<
+    TasksScope extends Record<string, TasksWithOutputs<any, any>>,
+    Label extends TaskType
+> = {
+    [K in Label]: {
+        [StepName in keyof TasksScope]:
+        TasksScope[StepName] extends TasksWithOutputs<infer _Name, infer Outputs>
+            ? {
+                id: string;
+                outputs: Outputs extends OutputParametersRecord
+                    ? OutputParamsToExpressions<Outputs>
+                    : {};
+            }
+            : { id: string; outputs: {} };
+    }
+};
+
 /**
- * ParamProviderCallbackObject now:
+ * ParamProviderCallbackObject:
  *  - carries a top-level `register` function that accepts ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>
  *  - nests each step under `<Label>.<StepName>.{ id, outputs }`
  *  - preserves `item` when looping
@@ -59,19 +76,8 @@ export type ParamProviderCallbackObject<
         register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol;
         /** runtime copy of the keys to make it possible to narrow values, not just types */
         parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
-    } & {
-    [K in Label]: {
-        [StepName in keyof TasksScope]:
-        TasksScope[StepName] extends TasksWithOutputs<infer _Name, infer Outputs>
-            ? {
-                id: string;
-                outputs: Outputs extends OutputParametersRecord
-                    ? OutputParamsToExpressions<Outputs>
-                    : {};
-            }
-            : { id: string; outputs: {} };
-    }
-} & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
+    } & AllTasksAsOutputReferenceable<TasksScope, Label>
+    & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
 
 /**
  * ParamsRegistrationFn is an alias placeholder that defines the callback that addTasks uses.
@@ -203,7 +209,7 @@ export type InputsOf<T> =
         : never;
 
 export type OutputsOf<T> =
-    T extends { outputs: infer O }
+    T extends { outputs?: infer O }
         ? O extends OutputParametersRecord ? O : {}
         : {};
 
@@ -215,9 +221,6 @@ export type KeyFor<C extends WorkflowAndTemplatesScope, Src> =
         : Src extends Workflow<any, any, any>
             ? Extract<keyof Src["templates"], string>
             : never;
-
-export type KeyMustMatch<C extends WorkflowAndTemplatesScope, Src, K> =
-    K extends KeyFor<C, Src> ? K : never;
 
 export type InputsFrom<C extends WorkflowAndTemplatesScope, Src, K> =
     IsInternal<Src> extends true
@@ -232,6 +235,26 @@ export type OutputsFrom<C extends WorkflowAndTemplatesScope, Src, K> =
         : Src extends Workflow<any, any, any>
             ? OutputsOf<Src["templates"][Extract<K, Extract<keyof Src["templates"], string>>]>
             : never;
+
+export function getTaskOutputsByTaskName<
+    TaskScope extends TasksOutputsScope
+>(
+    tasksScope: TaskScope,
+    getTaskOutputAsExpression: (taskName: string, outputName: string, outputParamDef: OutputParamDef<any>) => any)
+{
+    const tasksByName: Record<string, { id: string; outputs: Record<string, any> }> = {};
+
+    Object.entries(tasksScope).forEach(([taskName, taskDef]: [string, any]) => {
+        const outputs: Record<string, any> = {};
+        if (taskDef.outputTypes) {
+            Object.entries(taskDef.outputTypes).forEach(([outputName, outputParamDef]: [string, any]) => {
+                outputs[outputName] = getTaskOutputAsExpression(taskName, outputName, outputParamDef);
+            });
+        }
+        tasksByName[taskName] = {id: taskName, outputs};
+    });
+    return tasksByName;
+}
 
 export type WorkflowTask<
     IN extends InputParametersRecord,
@@ -380,6 +403,10 @@ export abstract class TaskBuilder<
         return this.rebind(this.contextualScope, nextScope, this.orderedTaskList) as any;
     }
 
+    public getTaskOutputsByTaskName() {
+        return getTaskOutputsByTaskName(this.tasksScope, this.getTaskOutputAsExpression);
+    }
+
     protected buildParamProviderCallbackObject<
         Inputs extends InputParametersRecord,
         LoopT extends PlainObject = never
@@ -388,17 +415,7 @@ export abstract class TaskBuilder<
         register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol,
         loopWith?: LoopWithUnion<LoopT>
     ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
-        const tasksByName: Record<string, { id: string; outputs: Record<string, any> }> = {};
-
-        Object.entries(this.tasksScope).forEach(([taskName, taskDef]: [string, any]) => {
-            const outputs: Record<string, any> = {};
-            if (taskDef.outputTypes) {
-                Object.entries(taskDef.outputTypes).forEach(([outputName, outputParamDef]: [string, any]) => {
-                    outputs[outputName] = this.getTaskOutputAsExpression(taskName, outputName, outputParamDef);
-                });
-            }
-            tasksByName[taskName] = { id: taskName, outputs };
-        });
+        const tasksByName = this.getTaskOutputsByTaskName();
 
         return {
             register,

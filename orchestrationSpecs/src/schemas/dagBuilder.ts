@@ -16,8 +16,10 @@ import {
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope,
+    InputParamsToExpressions,
 } from "@/schemas/workflowTypes";
 import {
+    AllTasksAsOutputReferenceable,
     InputsFrom,
     KeyFor,
     NamedTask,
@@ -27,7 +29,7 @@ import {
     TaskOpts,
     TaskRebinder
 } from "@/schemas/taskBuilder";
-import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
+import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { SimpleExpression, taskOutput } from "@/schemas/expression";
@@ -67,6 +69,14 @@ class DagTaskBuilder<
     }
 }
 
+// Define the expression context type for DagBuilder
+type DagExpressionContext<
+    InputParamsScope extends InputParametersRecord,
+    TaskScope extends TasksOutputsScope
+> = {
+    inputs: InputParamsToExpressions<InputParamsScope>;
+} & AllTasksAsOutputReferenceable<TaskScope, "tasks">;
+
 export class DagBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
@@ -78,7 +88,8 @@ export class DagBuilder<
     TaskScope,
     OutputParamsScope,
     DagBuilder<ContextualScope, InputParamsScope, TaskScope, any>, // Self
-    TasksOutputsScope // BodyBound
+    TasksOutputsScope, // BodyBound
+    DagExpressionContext<InputParamsScope, TaskScope>
 > {
     private readonly taskBuilder: DagTaskBuilder<ContextualScope, TaskScope>;
 
@@ -95,32 +106,14 @@ export class DagBuilder<
         const templateRebind: TemplateRebinder<
             ContextualScope,
             InputParamsScope,
-            TasksOutputsScope
-        > = <
-            NewBodyScope extends TasksOutputsScope,
-            NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<
-                ContextualScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope,
-                any,
-                TasksOutputsScope
-            >
-        >(
-            ctx: ContextualScope,
-            inScope: InputParamsScope,
-            body: NewBodyScope,
-            outScope: NewOutputScope
-        ) => {
+            TasksOutputsScope,
+            DagExpressionContext<InputParamsScope, any>
+        > = (ctx, inScope, body, outScope) => {
             const currentTasks =
                 selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
-            return new DagBuilder<
-                ContextualScope,
-                InputParamsScope,
-                NewBodyScope,
-                NewOutputScope
-            >(ctx, inScope, body, currentTasks, outScope) as unknown as Self;
+            return new DagBuilder(
+                ctx, inScope, body, currentTasks, outScope
+            ) as any;
         };
 
         super(contextualScope, inputs, bodyScope, outputs, templateRebind);
@@ -136,6 +129,13 @@ export class DagBuilder<
 
         // finalize selfRef after fields are initialized
         selfRef = this;
+    }
+
+    protected getExpressionBuilderContext(): DagExpressionContext<InputParamsScope, TaskScope> {
+        return {
+            inputs: this.inputs,
+            tasks: this.taskBuilder.getTaskOutputsByTaskName()
+        } as DagExpressionContext<InputParamsScope, TaskScope>;
     }
 
     public addTask<
