@@ -370,6 +370,7 @@ cleanup_resources() {
     echo "Cleaning up target cluster resources..."
 
     local cluster_id="target-os2x"
+    local domain_name="cluster-${STAGE}-${cluster_id}"
 
     # Based on AWS Solutions CDK structure:
     # - OpenSearch Domain Stack: OpenSearchDomain-{clusterId}-{stage}-{region}
@@ -377,21 +378,98 @@ cleanup_resources() {
     local opensearch_stack_name="OpenSearchDomain-${cluster_id}-${STAGE}-${REGION}"
     local network_stack_name="NetworkInfra-${STAGE}-${REGION}"
 
-    echo "Destroying stacks:"
-    echo "  OpenSearch Stack: $opensearch_stack_name"
-    echo "  Network Stack: $network_stack_name"
+    echo "Enhanced cleanup sequence:"
+    echo "  1. Delete OpenSearch domain directly"
+    echo "  2. Delete OpenSearch Stack: $opensearch_stack_name"
+    echo "  3. Delete Network Stack: $network_stack_name"
 
-    # Destroy OpenSearch domain stack first (has dependency on network stack)
-    echo "Destroying OpenSearch domain stack: $opensearch_stack_name"
-    aws cloudformation delete-stack --stack-name "$opensearch_stack_name" --region "$REGION"
-    aws cloudformation wait stack-delete-complete --stack-name "$opensearch_stack_name" --region "$REGION"
+    # Step 1: Delete OpenSearch domain directly first
+    echo "Step 1: Deleting OpenSearch domain directly: $domain_name"
+    if aws opensearch describe-domain --domain-name "$domain_name" --region "$REGION" >/dev/null 2>&1; then
+        echo "Domain exists, deleting..."
+        aws opensearch delete-domain --domain-name "$domain_name" --region "$REGION"
+        
+        echo "Waiting for domain deletion to complete..."
+        local max_wait=1800  # 30 minutes
+        local wait_interval=30
+        local elapsed=0
+        
+        while [ $elapsed -lt $max_wait ]; do
+            if ! aws opensearch describe-domain --domain-name "$domain_name" --region "$REGION" >/dev/null 2>&1; then
+                echo "OpenSearch domain successfully deleted"
+                break
+            fi
+            
+            echo "Domain deletion in progress... (${elapsed}s elapsed)"
+            sleep $wait_interval
+            elapsed=$((elapsed + wait_interval))
+        done
+        
+        if [ $elapsed -ge $max_wait ]; then
+            echo "ERROR: Domain deletion timed out after ${max_wait}s"
+            return 1
+        fi
+    else
+        echo "Domain does not exist, proceeding with stack cleanup"
+    fi
 
-    # Destroy network stack
-    echo "Destroying network stack: $network_stack_name"
-    aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
-    aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION"
+    # Step 2: Delete OpenSearch domain stack
+    echo "Step 2: Destroying OpenSearch domain stack: $opensearch_stack_name"
+    if aws cloudformation describe-stacks --stack-name "$opensearch_stack_name" --region "$REGION" >/dev/null 2>&1; then
+        aws cloudformation delete-stack --stack-name "$opensearch_stack_name" --region "$REGION"
+        
+        if ! aws cloudformation wait stack-delete-complete --stack-name "$opensearch_stack_name" --region "$REGION"; then
+            local stack_status=$(aws cloudformation describe-stacks --stack-name "$opensearch_stack_name" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+            if [ "$stack_status" = "DELETE_FAILED" ]; then
+                echo "ERROR: OpenSearch stack deletion failed"
+                return 1
+            fi
+        fi
+    else
+        echo "OpenSearch stack does not exist, skipping"
+    fi
 
-    echo "Target cluster cleanup completed"
+    # Step 3: Delete network stack
+    echo "Step 3: Destroying network stack: $network_stack_name"
+    if aws cloudformation describe-stacks --stack-name "$network_stack_name" --region "$REGION" >/dev/null 2>&1; then
+        aws cloudformation delete-stack --stack-name "$network_stack_name" --region "$REGION"
+        
+        if ! aws cloudformation wait stack-delete-complete --stack-name "$network_stack_name" --region "$REGION"; then
+            local stack_status=$(aws cloudformation describe-stacks --stack-name "$network_stack_name" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+            if [ "$stack_status" = "DELETE_FAILED" ]; then
+                echo "ERROR: Network stack deletion failed"
+                return 1
+            fi
+        fi
+    else
+        echo "Network stack does not exist, skipping"
+    fi
+
+    # Final verification
+    local cleanup_success=true
+    
+    if aws opensearch describe-domain --domain-name "$domain_name" --region "$REGION" >/dev/null 2>&1; then
+        echo "ERROR: OpenSearch domain still exists: $domain_name"
+        cleanup_success=false
+    fi
+    
+    if aws cloudformation describe-stacks --stack-name "$opensearch_stack_name" --region "$REGION" >/dev/null 2>&1; then
+        echo "ERROR: OpenSearch stack still exists: $opensearch_stack_name"
+        cleanup_success=false
+    fi
+    
+    if aws cloudformation describe-stacks --stack-name "$network_stack_name" --region "$REGION" >/dev/null 2>&1; then
+        echo "ERROR: Network stack still exists: $network_stack_name"
+        cleanup_success=false
+    fi
+    
+    if [ "$cleanup_success" = true ]; then
+        echo "Target cluster cleanup completed successfully"
+        return 0
+    else
+        echo "Target cluster cleanup failed - some resources still exist"
+        return 1
+    fi
 }
 
 # Cleanup temporary directory
