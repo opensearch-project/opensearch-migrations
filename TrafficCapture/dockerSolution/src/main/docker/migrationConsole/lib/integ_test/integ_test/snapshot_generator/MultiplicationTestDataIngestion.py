@@ -7,7 +7,10 @@ import logging
 from datetime import datetime
 from console_link.models.cluster import HttpMethod
 from integ_test.default_operations import DefaultOperationsLibrary as ops
-from integ_test.snapshot_generator.MultiplicationTestUtils import read_migration_config
+from integ_test.snapshot_generator.MultiplicationTestUtils import (
+    read_migration_config,
+    get_environment_values
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,18 +98,6 @@ def get_index_settings(shard_count, es_major_version):
     return index_settings
 
 
-def calculate_optimal_batch_size(total_docs, max_batch_size=1000):
-    """Calculate optimal batch size to prevent bulk request errors."""
-    if total_docs <= max_batch_size:
-        return total_docs
-    
-    optimal_size = max_batch_size
-    while total_docs % optimal_size > optimal_size * 0.1 and optimal_size > 100:
-        optimal_size -= 50
-    
-    return max(optimal_size, 100)
-
-
 def map_engine_version_to_cluster_version(engine_version):
     """Map engine version (ES_5.6, OS_2.19, etc.) to cluster version (es5x, os2x, etc.)."""
     if engine_version.startswith('ES_5'):
@@ -170,11 +161,20 @@ def get_bulk_index_action(index_name, doc_id, es_major_version):
         return {"index": {"_index": index_name, "_id": doc_id}}
 
 
-def ingest_test_documents(index_name, document_count, sample_doc, source_cluster):
-    """Ingest test documents to source cluster using direct API calls for reliability."""
-    total_docs = document_count
-    batch_size = calculate_optimal_batch_size(total_docs)
-    num_batches = (total_docs + batch_size - 1) // batch_size
+def ingest_test_documents(index_name, total_docs, sample_doc, source_cluster):
+    """Ingest test documents using user-specified batch parameters."""
+    # Get actual parameters from environment variables
+    env_values = get_environment_values()
+    batch_size = env_values['docs_per_batch']
+    num_batches = env_values['batch_count']
+    
+    # Validate that the math works out
+    expected_total = batch_size * num_batches
+    if expected_total != total_docs:
+        raise ValueError(
+            f"Parameter mismatch: {batch_size} × {num_batches} = "
+            f"{expected_total}, but total_docs = {total_docs}"
+        )
     
     # Get version info from config file
     version_info = get_version_info_from_config()
@@ -183,9 +183,19 @@ def ingest_test_documents(index_name, document_count, sample_doc, source_cluster
     es_version = version_info['es_major_version']
     content_type = get_content_type_for_bulk(es_version)
     
-    logger.info(f"Ingesting {total_docs} documents in {num_batches} batches of ~{batch_size} documents each")
-    logger.info(f"Detected from config: engine_version='{engine_version}' -> "
-                f"cluster_version='{cluster_version}' -> ES major version={es_version}")
+    logger.info(
+        f"Ingesting {total_docs} documents in {num_batches} batches "
+        f"of {batch_size} documents each"
+    )
+    logger.info(
+        f"Using user parameters: BATCH_COUNT={num_batches}, "
+        f"DOCS_PER_BATCH={batch_size}"
+    )
+    logger.info(
+        f"Detected from config: engine_version='{engine_version}' -> "
+        f"cluster_version='{cluster_version}' -> ES major version="
+        f"{es_version}"
+    )
     logger.info(f"Using Content-Type: {content_type}")
     
     total_ingested = 0
@@ -259,8 +269,8 @@ def ingest_test_documents(index_name, document_count, sample_doc, source_cluster
     except Exception as e:
         raise RuntimeError(f"Failed to parse count response: {e}")
     
-    if actual_count != document_count:
-        raise RuntimeError(f"Document count mismatch: Expected {document_count}, found {actual_count}")
+    if actual_count != total_docs:
+        raise RuntimeError(f"Document count mismatch: Expected {total_docs}, found {actual_count}")
     
     logger.info(f"Successfully ingested {actual_count} documents to source cluster using {num_batches} batches")
 
