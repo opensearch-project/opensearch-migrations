@@ -2,6 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from console_link.models import backfill_base as backfill
+from console_link.models.step_state import StepStateWithPause
 from console_link.api.sessions import http_safe_find_session
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
@@ -30,6 +31,9 @@ def get_metadata_status(session_name: str):
 
     try:
         return env.backfill.build_backfill_status()
+    except backfill.DeepStatusNotYetAvailable:
+        return backfill.BackfillOverallStatus(status=StepStateWithPause.PENDING,
+                                              percentage_completed=0)
     except Exception as e:
         logger.error(f"Failed to get backfill status: {type(e).__name__} {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get backfill status: {type(e).__name__} {str(e)}")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSourceCluster } from "../../hooks/apiFetch";
+import { useSourceCluster } from "@/hooks/apiFetch";
 import RemoteCluster from "./RemoteCluster";
 
 interface SourceConfigureProps {

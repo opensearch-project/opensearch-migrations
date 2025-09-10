@@ -1,12 +1,16 @@
-'use client';
+"use client";
 
-import React from 'react';
-import Header from '@cloudscape-design/components/header';
-import Container from '@cloudscape-design/components/container';
-import Alert from '@cloudscape-design/components/alert';
-import ExpandableSection from '@cloudscape-design/components/expandable-section';
-import { KeyValuePairs } from '@cloudscape-design/components';
-import { StatusFieldDefinition, generateLoadingItems, generateDataItems } from './statusUtils';
+import React from "react";
+import Header from "@cloudscape-design/components/header";
+import Container from "@cloudscape-design/components/container";
+import Alert from "@cloudscape-design/components/alert";
+import ExpandableSection from "@cloudscape-design/components/expandable-section";
+import { KeyValuePairs } from "@cloudscape-design/components";
+import {
+  StatusFieldDefinition,
+  generateLoadingItems,
+  generateDataItems,
+} from "./statusUtils";
 
 interface StatusContainerProps<T> {
   readonly title: string;

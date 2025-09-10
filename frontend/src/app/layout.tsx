@@ -27,8 +27,18 @@ const navItems: SideNavigationProps.Item[] = [
       },
       {
         type: "link",
-        text: "Migration Wizard",
-        href: `/wizard?sessionName=${defaultSession}`,
+        text: "Snapshot workflow",
+        href: `/snapshot?sessionName=${defaultSession}`,
+      },
+      {
+        type: "link",
+        text: "Metadata workflow",
+        href: `/metadata?sessionName=${defaultSession}`,
+      },
+      {
+        type: "link",
+        text: "Backfill workflow",
+        href: `/backfill?sessionName=${defaultSession}`,
       },
     ],
   },

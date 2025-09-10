@@ -29,26 +29,28 @@ export default function WorkflowWizard({
 }: WorkflowWizardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  
+
   // Initialize activeStepIndex from URL or default to 0
   const stepParam = searchParams?.get("step");
   const initialStep = stepParam ? parseInt(stepParam, 10) : 0;
-  
+
   const [activeStepIndex, setActiveStepIndex] = useState(initialStep);
 
   // Update URL when activeStepIndex changes
   useEffect(() => {
-    const current = new URLSearchParams(Array.from(searchParams?.entries() ?? []));
+    const current = new URLSearchParams(
+      Array.from(searchParams?.entries() ?? []),
+    );
     current.set("step", activeStepIndex.toString());
-    
+
     // If we have a sessionName, keep it in the URL
     if (sessionName && !current.has("sessionName")) {
       current.set("sessionName", sessionName);
     }
-    
+
     const search = current.toString();
     const query = search ? `?${search}` : "";
-    
+
     // Update URL without refreshing the page
     router.replace(`${window.location.pathname}${query}`, { scroll: false });
   }, [activeStepIndex, sessionName, router, searchParams]);
@@ -82,13 +84,9 @@ export default function WorkflowWizard({
   };
 
   // Enhance each step content with the step indicator
-  const enhancedSteps = steps.map((step, index) => ({
+  const enhancedSteps = steps.map((step) => ({
     ...step,
-    content: (
-      <>
-        {step.content}
-      </>
-    ),
+    content: <>{step.content}</>,
   }));
 
   return (

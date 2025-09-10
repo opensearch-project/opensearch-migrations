@@ -10,7 +10,7 @@ from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.factories import (UnsupportedSnapshotError,
                                            get_snapshot)
-from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
+from console_link.models.snapshot import (FailedToCreateSnapshot, FileSystemSnapshot, S3Snapshot,
                                           Snapshot)
 from tests.utils import create_valid_cluster
 
@@ -525,7 +525,8 @@ def test_snapshot_delete(request, snapshot_fixture):
         snapshot_404_response()  # GET check if snapshot is deleted
     ]
 
-    snapshot.delete()
+    result = snapshot.delete()
+    assert "successfully deleted" in result
     source_cluster.call_api.assert_called()
     source_cluster.call_api.assert_has_calls([
         mock.call(f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}", HttpMethod.DELETE),
@@ -543,7 +544,8 @@ def test_snapshot_delete_all_snapshots_single_snapshot(request, snapshot_fixture
         snapshot_404_response()  # GET check if snapshot is deleted
     ]
 
-    snapshot.delete_all_snapshots()
+    result = snapshot.delete_all_snapshots()
+    assert "All snapshots cleared" in result
     source_cluster.call_api.assert_called()
     source_cluster.call_api.assert_has_calls([
         mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True),
@@ -599,12 +601,10 @@ def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     mock = mocker.patch.object(CommandRunner, 'run', cmd="abc", autospec=True,
                                side_effect=CommandRunnerError(2, cmd=fake_command, output="Snapshot failure"))
 
-    result = snapshot.create()
+    with pytest.raises(FailedToCreateSnapshot):
+        snapshot.create()
 
     mock.assert_called_once()
-    assert not result.success
-    for element in fake_command:
-        assert element in result.value
 
 
 @pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
@@ -617,7 +617,7 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     
     result = snapshot.create(extra_args=extra_args)
 
-    assert result.success
+    assert "creation initiated successfully" in result
     mock.assert_called_once()
     assert all([arg in mock.call_args.args[0] for arg in extra_args])
 
