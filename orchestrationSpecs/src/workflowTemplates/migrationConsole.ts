@@ -81,12 +81,12 @@ export const MigrationConsole = WorkflowBuilder.create({
         .addContainer(c=>c
             .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
-            .addArgs(expr.toArray(
+            .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE,
                     { "FILE_CONTENTS": expr.toBase64(c.inputs.configContents),
                         "COMMAND": c.inputs.command
                     })
-                )
+                ]
             )
         )
     )

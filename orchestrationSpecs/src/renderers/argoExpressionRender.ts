@@ -35,18 +35,13 @@ export type ArgoFormatted = {
 
 const formattedResult = (text: string, compound = false): ArgoFormatted => ({ text, compound });
 
-/* ───────────────── toArgoExpression ───────────────── */
-
-export function toArgoExpression(expr: AnyExpr): string {
-    if (isJsonSerialize(expr)) {
-        return toArgoExpression(expr.data);
-    }
-    const rval = formatExpression(expr);
-    return "{{" + (rval.compound ? "=" : "") + rval.text + "}}";
+export function toArgoExpression(expr: AnyExpr, useMarkers=true): string {
+    const rval = formatExpression(expr, true);
+    return useMarkers ? "{{=" + rval.text + "}}" : rval.text;
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
-function formatExpression(expr: AnyExpr): ArgoFormatted {
+function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
     if (isAsStringExpression(expr)) {
         return formatExpression(expr.source);
     }
@@ -66,7 +61,7 @@ function formatExpression(expr: AnyExpr): ArgoFormatted {
 
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
-        const parts = ce.expressions.map(formatExpression);
+        const parts = ce.expressions.map(e=>formatExpression(e));
         const text = parts.map(p => p.text).join(ce.separator ? " + " + ce.separator + " + " : "+");
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
@@ -111,7 +106,11 @@ function formatExpression(expr: AnyExpr): ArgoFormatted {
 
     if (isJsonDeserialize(expr)) {
         const se = expr as DeserializeJson<any>;
-        return formattedResult(`fromJSON(${formatExpression(se.data).text})`, true);
+        const formattedInner = formatExpression(se.data);
+        if (top) {
+            return formattedInner;
+        }
+        return formattedResult(`fromJSON(${formattedInner.text})`, true);
     }
 
     if (isJsonSerialize(expr)) {
@@ -181,7 +180,7 @@ function formatExpression(expr: AnyExpr): ArgoFormatted {
         const f = expr as TemplateReplacementExpression;
         let result = expr.template;
         for (const [key, value] of Object.entries(expr.replacements)) {
-            const expandedValue = toArgoExpression(value);
+            const expandedValue = formatExpression(value).text;
             result = result.replaceAll(`{{${key}}}`, expandedValue);
         }
         return formattedResult(result, true);

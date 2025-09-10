@@ -129,9 +129,9 @@ export class ContainerBuilder<
         );
     }
 
-    addArgs(a: AllowLiteralOrExpression<string[]>):
+    addArgs(a: AllowLiteralOrExpression<string>[]):
         ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, { args: AllowLiteralOrExpression<string[]> }>, EnvScope, OutputParamsScope> {
+            ExtendScope<ContainerScope, { args: AllowLiteralOrExpression<string>[] }>, EnvScope, OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
                 args: a

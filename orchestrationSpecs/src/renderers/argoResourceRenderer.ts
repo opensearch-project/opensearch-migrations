@@ -120,27 +120,31 @@ function formatBody(body: GenericScope) {
 }
 
 function formatOutputSource(def: OutputParamDef<any>) {
-    switch (def.fromWhere) {
-        case "path":
-            return {path: def.path};
-        case "expression":
-            return {expression: toArgoExpression(def.expression)};
-        case "parameter":
-            return {parameter: toArgoExpression(def.parameter)};
-        case "jsonPath":
-            return {jsonPath: def.jsonPath};
-        case "jqFilter":
-            return {jqFilter: def.jqFilter};
-        case "event":
-            return {event: def.event};
-        case "configMapKeyRef":
-            return {configMapKeyRef: def.configMapKeyRef};
-        case "supplied":
-            return {supplied: def.supplied};
-        case "default":
-            return {default: toArgoExpression(def.default)};
-        default:
-            throw new Error(`Unsupported output parameter type: ${(def as any).fromWhere}`);
+    return {
+        valueFrom: (() => {
+            switch (def.fromWhere) {
+                case "path":
+                    return {path: def.path};
+                case "expression":
+                    return {expression: toArgoExpression(def.expression, false)};
+                case "parameter":
+                    return {parameter: toArgoExpression(def.parameter)};
+                case "jsonPath":
+                    return {jsonPath: def.jsonPath};
+                case "jqFilter":
+                    return {jqFilter: def.jqFilter};
+                case "event":
+                    return {event: def.event};
+                case "configMapKeyRef":
+                    return {configMapKeyRef: def.configMapKeyRef};
+                case "supplied":
+                    return {supplied: def.supplied};
+                case "default":
+                    return {default: toArgoExpression(def.default)};
+                default:
+                    throw new Error(`Unsupported output parameter type: ${(def as any).fromWhere}`);
+            }
+        })()
     }
 }
 
