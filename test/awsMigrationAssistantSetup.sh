@@ -404,19 +404,46 @@ cleanup_temp_files() {
     fi
 }
 
+# Remove security group rules from target cluster
+remove_target_cluster_security_groups() {
+    local target_sg_id=$(aws ssm get-parameter \
+        --name "/migration/${STAGE}/default/configuredTargetSecurityGroupId" \
+        --query 'Parameter.Value' \
+        --output text \
+        --region "$REGION" 2>/dev/null)
+    
+    if [ -n "$target_sg_id" ] && [ "$target_sg_id" != "None" ]; then
+        local vpc_cidr=$(aws ec2 describe-vpcs \
+            --vpc-ids "$VPC_ID" \
+            --query 'Vpcs[0].CidrBlock' \
+            --output text \
+            --region "$REGION" 2>/dev/null)
+        
+        if [ -n "$vpc_cidr" ] && [ "$vpc_cidr" != "None" ]; then
+            aws ec2 revoke-security-group-ingress \
+                --group-id "$target_sg_id" \
+                --protocol tcp \
+                --port 443 \
+                --cidr "$vpc_cidr" \
+                --region "$REGION" 2>/dev/null || true
+        fi
+        
+        aws ssm delete-parameter \
+            --name "/migration/${STAGE}/default/configuredTargetSecurityGroupId" \
+            --region "$REGION" 2>/dev/null || true
+    fi
+}
+
 # Cleanup deployed migration infrastructure
 cleanup_migration_infrastructure() {
     echo "Cleaning up migration infrastructure..."
     
+    remove_target_cluster_security_groups
+    
     cd "$MIGRATION_CDK_PATH"
     
-    # Recreate the migration context file for cleanup
-    echo "Recreating migration context for cleanup..."
     generate_migration_context
     
-    # Destroy all migration stacks with proper context
-    # No security group dependency cleanup needed - using VPC CIDR instead of cross-references
-    echo "Destroying migration infrastructure stacks..."
     cdk destroy "*" \
         --c contextFile="$TMP_DIR_PATH/migrationContext.json" \
         --c contextId="default" \

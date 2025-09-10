@@ -418,21 +418,26 @@ def call(Map config = [:]) {
                                 // Second: Clean up target cluster (AWS Samples CDK)
                                 echo "Cleaning up target cluster infrastructure..."
                                 dir('test') {
-                                    sh """
-                                            echo "Destroying target cluster CDK stacks with proper dependency waiting..."
-                                            echo "This will destroy:"
-                                            echo "  - OpenSearchDomain-target-os2x-${params.stage}-${params.region}"
-                                            echo "  - NetworkInfra-${params.stage}-${params.region}"
-                                            echo ""
-                                            
-                                            # Execute target cluster cleanup
-                                            ./awsTargetClusterSetup.sh --cleanup \\
-                                                --cluster-version ${params.targetVersion} \\
-                                                --stage ${params.stage} \\
-                                                --region ${params.region}
-                                    """
-                                    cleanupResults.targetCluster = "SUCCESS"
-                                    echo "Target cluster infrastructure cleaned up successfully"
+                                    try {
+                                        sh """
+                                                echo "Destroying target cluster CDK stacks with proper dependency waiting..."
+                                                echo "This will destroy:"
+                                                echo "  - OpenSearchDomain-target-os2x-${params.stage}-${params.region}"
+                                                echo "  - NetworkInfra-${params.stage}-${params.region}"
+                                                echo ""
+                                                
+                                                # Execute target cluster cleanup
+                                                ./awsTargetClusterSetup.sh --cleanup \\
+                                                    --cluster-version ${params.targetVersion} \\
+                                                    --stage ${params.stage} \\
+                                                    --region ${params.region}
+                                        """
+                                        cleanupResults.targetCluster = "SUCCESS"
+                                        echo "Target cluster infrastructure cleaned up successfully"
+                                    } catch (Exception e) {
+                                        cleanupResults.targetCluster = "FAILED: ${e.message}"
+                                        echo "Warning: Target cluster cleanup failed: ${e.message}"
+                                    }
                                 }
                                 
                                 // Third: Clean up any orphaned bootstrap stacks if they exist
