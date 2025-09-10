@@ -11,8 +11,13 @@
  */
 
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
-import {BaseExpression, FromParameterExpression, inputParam, workflowParam} from "@/schemas/expression";
-import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    FromParameterExpression,
+    inputParam,
+    workflowParam
+} from "@/schemas/expression";
 
 // Zero-runtime “type witness” object that carries a generic T.
 export declare const __type_token__: unique symbol;

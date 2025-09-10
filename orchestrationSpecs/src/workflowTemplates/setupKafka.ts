@@ -1,8 +1,7 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/parameterSchemas";
-import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
-import {INTERNAL} from "@/schemas/taskBuilder";
+import {typeToken} from "@/schemas/parameterSchemas";import {INTERNAL} from "@/schemas/taskBuilder";
+import {AllowLiteralOrExpression} from "@/schemas/expression";
 
 function makeDeployKafkaClusterZookeeperManifest(inputs: { kafkaName: AllowLiteralOrExpression<string> }) {
     return {

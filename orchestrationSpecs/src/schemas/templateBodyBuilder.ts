@@ -13,8 +13,8 @@ import {
     templateInputParametersAsExpressions,
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
-import { AllowLiteralOrExpression } from "@/schemas/workflowTypes";
 import { PlainObject } from "@/schemas/plainObject";
+import {AllowLiteralOrExpression, expr, toExpression} from "@/schemas/expression";
 
 /** Rebinder type the concrete subclass provides to the base. */
 export type TemplateRebinder<
@@ -114,7 +114,7 @@ export abstract class TemplateBodyBuilder<
             ...this.outputsScope,
             [name as string]: {
                 fromWhere: "expression" as const,
-                expression: fn(this.inputs),
+                expression: toExpression(fn(this.inputs)),
                 description: descriptionValue
             }
         } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;

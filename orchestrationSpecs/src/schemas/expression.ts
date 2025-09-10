@@ -1,8 +1,7 @@
-import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
+import {InputParamDef, OutputParamDef, TypeToken} from "@/schemas/parameterSchemas";
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 
-
-export type ExpressionType = "govaluate" | "template";
+export type ExpressionType = "govaluate" | "complicatedExpression";
 
 export abstract class BaseExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> {
     readonly _resultType!: T; // phantom only
@@ -12,8 +11,22 @@ export abstract class BaseExpression<T extends PlainObject, C extends Expression
 }
 
 export type SimpleExpression<T extends PlainObject>   = BaseExpression<T, "govaluate">;
-export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "template">;
-export type AnyExpression<T extends PlainObject>      = BaseExpression<T, ExpressionType>; // kept for external callers; not used below
+export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "complicatedExpression">;
+export type AnyExpression<T extends PlainObject>      = BaseExpression<T, ExpressionType>;
+
+// Helper type to allow both literal values and expressions
+export type AllowLiteralOrExpression<T extends PlainObject> =
+    T | BaseExpression<T, any>;
+
+export function isExpression(v: unknown): v is BaseExpression<any, any> {
+    return v instanceof BaseExpression;
+}
+
+export function toExpression<T extends PlainObject>(
+    v: AllowLiteralOrExpression<T>
+): BaseExpression<T, any> {
+    return isExpression(v) ? v : new LiteralExpression(v as T);
+}
 
 type Scalar = number | string;
 type ResultOf<E> = E extends BaseExpression<infer U, any> ? U : never;
@@ -22,11 +35,17 @@ export type IsAny<T>    = 0 extends (1 & T) ? true : false;
 export type NoAny<T>    =  IsAny<ResultOf<T>> extends true ? never : T;
 
 type WidenComplexity2<A extends ExpressionType, B extends ExpressionType> =
-    A extends "template" ? "template" :
-        B extends "template" ? "template" : "govaluate";
+    A extends "complicatedExpression" ? "complicatedExpression" :
+        B extends "complicatedExpression" ? "complicatedExpression" : "govaluate";
 type WidenComplexity3<A extends ExpressionType, B extends ExpressionType, C extends ExpressionType> = WidenComplexity2<WidenComplexity2<A,B>, C>;
 type WidenExpressionComplexity2<L, R> = WidenComplexity2<ExprC<L>, ExprC<R>>;
 type WidenExpressionComplexity3<A, B, C> = WidenComplexity3<ExprC<A>, ExprC<B>, ExprC<C>>;
+
+export function widenComplexity<T extends PlainObject>(
+    v: BaseExpression<T, any>
+): BaseExpression<T, "complicatedExpression"> {
+    return v as BaseExpression<T, "complicatedExpression">;
+}
 
 export class LiteralExpression<T extends PlainObject>
     extends BaseExpression<T, "govaluate"> {
@@ -124,7 +143,7 @@ export type PathValue<T, P extends string> =
                 ? T[K] extends Record<string, any>
                     ? T[K] extends readonly any[]
                         ? PathValue<T[K], Rest>
-                        : any // For Record<string, any>, return any
+                        : any
                     : PathValue<T[K], Rest>
                 : never
             :
@@ -139,13 +158,19 @@ export class RecordFieldSelectExpression<
     T extends Record<string, any>,    // Explicit record type
     P extends KeyPaths<T>,            // Path constrained to T
     E extends BaseExpression<T, any>  // Source constrained to return T
-> extends BaseExpression<PathValue<T, P>, "template"> {
+> extends BaseExpression<PathValue<T, P>, "complicatedExpression"> {
     constructor(public readonly source: E, public readonly path: P) { super("path"); }
 }
 
-export class SerializeJson extends BaseExpression<string, "template"> {
+export class SerializeJson extends BaseExpression<string, "complicatedExpression"> {
     constructor(public readonly data: BaseExpression<Record<any, any>>) {
         super("serialize_json");
+    }
+}
+
+export class DeserializeJson<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
+    constructor(public readonly data: BaseExpression<string>) {
+        super("deserialize_json");
     }
 }
 
@@ -170,6 +195,18 @@ export class ArrayIndexExpression<
     constructor(public readonly array: A, public readonly index: I) { super("array_index"); }
 }
 
+type WidenComplexityOfArray<ES extends readonly BaseExpression<any, any>[]> =
+    Extract<ExprC<ES[number]>, "complicatedExpression"> extends never
+        ? "govaluate"
+        : "complicatedExpression";
+
+export class ArrayMakeExpression<
+    ES extends readonly BaseExpression<any, any>[],
+    Elem extends PlainObject = ResultOf<ES[number]>
+> extends BaseExpression<Elem[], WidenComplexityOfArray<ES>> {
+    constructor(public readonly elements: ES) { super("array_make"); }
+}
+
 type ParameterSource =
     | { kind: "workflow",   parameterName: string }
     | { kind: "input",      parameterName: string }
@@ -191,23 +228,21 @@ export class WorkflowUuidExpression extends BaseExpression<string,  "govaluate">
 }
 
 export class LoopItemExpression<T extends PlainObject>
-    extends BaseExpression<T, "template"> {
+    extends BaseExpression<T, "complicatedExpression"> {
     constructor() { super("loop_item"); }
 }
 
-export class FromBase64Expression extends BaseExpression<string, "template"> {
+export class FromBase64Expression extends BaseExpression<string, "complicatedExpression"> {
     constructor(public readonly data: BaseExpression<string>) {
         super("from_base64");
     }
 }
 
-export class ToBase64Expression extends BaseExpression<string, "template"> {
+export class ToBase64Expression extends BaseExpression<string, "complicatedExpression"> {
     constructor(public readonly data: BaseExpression<string>) {
         super("to_base64");
     }
 }
-
-// Individual function exports (for granular imports)
 
 export const literal = <T extends PlainObject>(v: T): SimpleExpression<DeepWiden<T>> =>
     new LiteralExpression<DeepWiden<T>>(v as DeepWiden<T>);
@@ -226,13 +261,11 @@ export function ternary<
     L extends BaseExpression<any, any>,
     R extends BaseExpression<ResultOf<L>, any>
 >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<L>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
-
 export function ternary<
     B extends BaseExpression<boolean, any>,
     R extends BaseExpression<any, any>,
     L extends BaseExpression<ResultOf<R>, any>
 >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<R>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
-
 export function ternary(cond: any, whenTrue: any, whenFalse: any): BaseExpression<any, any> {
     return new TernaryExpression(cond, whenTrue, whenFalse);
 }
@@ -295,8 +328,12 @@ export function selectField<
     return new RecordFieldSelectExpression(source, p);
 }
 
-export function jsonToString(data: BaseExpression<Record<string, any>>) {
+export function recordToString(data: BaseExpression<Record<string, any>>) {
     return new SerializeJson(data);
+}
+
+export function stringToRecord<T extends PlainObject = never>(typeToken: TypeToken<T>, data: BaseExpression<string>) {
+    return new DeserializeJson<T>(data);
 }
 
 export const length = <E extends BaseExpression<any[], any>>(arr: E): BaseExpression<number, ExprC<E>> =>
@@ -310,6 +347,43 @@ export function index<
     i: I
 ): BaseExpression<ElemFromArrayExpr<A>, WidenComplexity2<ExprC<A>, ExprC<I>>> {
     return new ArrayIndexExpression(arr, i);
+}
+
+type NormalizeOne<E> =
+    E extends BaseExpression<infer U, infer C> ? BaseExpression<U, C>
+        : E extends PlainObject                       ? SimpleExpression<DeepWiden<E>>
+            : never;
+
+type NormalizeTuple<ES extends readonly unknown[]> = {
+    [K in keyof ES]: NormalizeOne<ES[K]>;
+};
+
+type ElemOfNormalized<ES extends readonly unknown[]> =
+    ResultOf<NormalizeTuple<ES>[number]>;
+
+type ComplexityOfNormalized<ES extends readonly unknown[]> =
+    WidenComplexityOfArray<
+        Extract<NormalizeTuple<ES>, readonly BaseExpression<any, any>[]>
+    >;
+
+export function toArray<ES extends readonly unknown[]>(
+    ...items: ES
+): BaseExpression<
+    ElemOfNormalized<ES>[],
+    ComplexityOfNormalized<ES>
+> {
+    const normalized = items.map((it) =>
+        isExpression(it) ? it : literal(it as any)
+    ) as NormalizeTuple<ES>;
+
+    // Keep the precise tuple type (don't let it widen to BaseExpression<any, any>[])
+    type N = Extract<typeof normalized, readonly BaseExpression<any, any>[]>;
+
+    // Construct with the precise element tuple so complexity computes correctly
+    return new ArrayMakeExpression<N>(normalized as unknown as N) as BaseExpression<
+        ElemOfNormalized<ES>[],
+        ComplexityOfNormalized<ES>
+    >;
 }
 
 export const workflowParam = <T extends PlainObject>(
@@ -359,6 +433,40 @@ export function toBase64(data: BaseExpression<string>) {
     return new ToBase64Expression(data);
 }
 
+export class TemplateReplacementExpression extends BaseExpression<string,  "complicatedExpression"> {
+    constructor(public readonly template: string,
+                public readonly replacements: Record<string, BaseExpression<string>>) {
+        super("fillTemplate");
+    }
+}
+type ExtractTemplatePlaceholders<T extends string> =
+    T extends `${string}{{${infer Placeholder}}}${infer Rest}`
+        ? Placeholder | ExtractTemplatePlaceholders<Rest>
+        : never;
+
+type TemplateReplacements<T extends string> = {
+    [K in ExtractTemplatePlaceholders<T>]: AllowLiteralOrExpression<string>;
+};
+
+type NormalizedReplacements<T extends string> = {
+    [K in ExtractTemplatePlaceholders<T>]: BaseExpression<string>;
+};
+
+function fillTemplate<T extends string>(
+    template: T,
+    replacements: TemplateReplacements<T>
+): BaseExpression<string, "complicatedExpression"> {
+    const normalizedReplacements: NormalizedReplacements<T> = {} as any;
+
+    for (const [key, value] of Object.entries(replacements)) {
+        const typedValue = value as AllowLiteralOrExpression<string>;
+        normalizedReplacements[key as keyof NormalizedReplacements<T>] =
+            typeof typedValue === 'string' ? literal(typedValue) : typedValue;
+    }
+
+    return new TemplateReplacementExpression(template, normalizedReplacements);
+}
+
 // Namespace object for convenient access
 export const expr = {
     // Core functions
@@ -367,6 +475,7 @@ export const expr = {
     concat,
     concatWith,
     ternary,
+    toArray,
 
     // Comparisons
     equals,
@@ -380,7 +489,8 @@ export const expr = {
 
     // JSON Handling
     selectField,
-    jsonToString,
+    stringToRecord,
+    recordToString,
 
     // Array operations
     length,
@@ -396,8 +506,9 @@ export const expr = {
     // utility
     getWorkflowUuid,
     fromBase64,
-    toBase64
+    toBase64,
+    fillTemplate
 } as const;
 
-// Export the namespace as default
+// Export the namespace as defaultexport default expr;
 export default expr;

@@ -20,7 +20,6 @@ import {
     workflowParametersAsExpressions
 } from "@/schemas/parameterSchemas";
 import {
-    AllowLiteralOrExpression,
     ExtendScope,
     GenericScope,
     InputParamsToExpressions, WorkflowAndTemplatesScope,
@@ -38,6 +37,7 @@ import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
+import {AllowLiteralOrExpression} from "@/schemas/expression";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)

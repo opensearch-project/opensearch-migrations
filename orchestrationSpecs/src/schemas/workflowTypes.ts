@@ -11,15 +11,8 @@
  */
 
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {TypescriptError} from "@/utils";
-import {BaseExpression, FromParameterExpression, stepOutput} from "@/schemas/expression";
+import {AllowLiteralOrExpression, BaseExpression, FromParameterExpression, stepOutput} from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
-
-declare global {
-    // true: worse LSP, but squigglies under the name declaration
-    // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
-    const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: boolean;
-}
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<
@@ -51,10 +44,6 @@ export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
 
 // Helper types for extracting output types and creating step references
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
-type PlainRecord = { [key: string]: PlainObject };
-
-// Helper type to allow both literal values and expressions
-export type AllowLiteralOrExpression<T extends PlainObject> = T | BaseExpression<T>;
 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {

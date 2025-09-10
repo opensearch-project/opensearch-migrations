@@ -1,4 +1,4 @@
-import {AllowLiteralOrExpression} from "@/schemas/workflowTypes";
+import {AllowLiteralOrExpression} from "@/schemas/expression";
 
 export type TypescriptError<Message extends string> = {
     readonly __error: Message;

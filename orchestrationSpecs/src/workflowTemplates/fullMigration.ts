@@ -148,7 +148,7 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b,c),
                         sourceConfig: EXPR.selectField(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        sourcePipelineName: EXPR.toBase64(EXPR.jsonToString(EXPR.selectField(b.inputs.sourceMigrationConfig, "source")))
+                        sourcePipelineName: EXPR.toBase64(EXPR.recordToString(EXPR.selectField(b.inputs.sourceMigrationConfig, "source")))
                     }),
                 {loopWith: makeParameterLoop(EXPR.selectField(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
                     )})

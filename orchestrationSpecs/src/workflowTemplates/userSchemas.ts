@@ -59,6 +59,13 @@ export const S3_CONFIG = z.object({
     repo_uri: z.string()
 });
 
+export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
+    kafka: z.string(), // TODO
+    source_cluster: CLUSTER_CONFIG,
+    snapshot: z.string(), // TODO
+    target_cluster: TARGET_CLUSTER_CONFIG
+})
+
 //
 // export  = z.object({
 //     sessionName: z.string(),

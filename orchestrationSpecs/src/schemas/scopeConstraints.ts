@@ -2,6 +2,8 @@ import {ExtendScope, GenericScope, ScopeFn} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 
+// true: worse LSP, but squigglies under the name declaration
+// false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
 declare const __PREFER_UNIQUE_NAME_CHECKS_AT_NAME_SITE__: false;
 
 // Notice that the inverse of this should be something like Extract<keyof S, string>

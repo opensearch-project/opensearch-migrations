@@ -11,10 +11,11 @@
  */
 
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord, TypeToken} from "@/schemas/parameterSchemas";
-import {AllowLiteralOrExpression, ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/schemas/workflowTypes";
+import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/schemas/workflowTypes";
 import {TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration } from "@/schemas/scopeConstraints";
+import {AllowLiteralOrExpression} from "@/schemas/expression";
 
 export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | "patch";
 

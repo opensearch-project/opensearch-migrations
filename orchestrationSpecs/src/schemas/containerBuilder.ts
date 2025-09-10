@@ -12,7 +12,6 @@
 
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord, TypeToken} from "@/schemas/parameterSchemas";
 import {
-    AllowLiteralOrExpression,
     DataScope,
     ExtendScope,
     GenericScope,
@@ -23,6 +22,7 @@ import { inputsToEnvVars, toEnvVarName, TypescriptError } from "@/utils";
 import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
 import { ScopeIsEmptyConstraint } from "@/schemas/scopeConstraints";
 import { PlainObject } from "@/schemas/plainObject";
+import {AllowLiteralOrExpression} from "@/schemas/expression";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 
@@ -129,9 +129,9 @@ export class ContainerBuilder<
         );
     }
 
-    addArgs(a: string[]):
+    addArgs(a: AllowLiteralOrExpression<string[]>):
         ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, { args: string[] }>, EnvScope, OutputParamsScope> {
+            ExtendScope<ContainerScope, { args: AllowLiteralOrExpression<string[]> }>, EnvScope, OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
                 args: a

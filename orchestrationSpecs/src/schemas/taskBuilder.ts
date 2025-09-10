@@ -1,5 +1,4 @@
 import {
-    AllowLiteralOrExpression,
     ExtendScope, IfNever, LoopWithUnion, OutputParamsToExpressions, ParamsWithLiteralsOrExpressions,
     TasksOutputsScope, TasksWithOutputs,
     TemplateSignaturesScope, WorkflowAndTemplatesScope
@@ -8,7 +7,7 @@ import { Workflow } from "@/schemas/workflowBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
-import { SimpleExpression, loopItem } from "@/schemas/expression";
+import {SimpleExpression, loopItem, AllowLiteralOrExpression} from "@/schemas/expression";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
