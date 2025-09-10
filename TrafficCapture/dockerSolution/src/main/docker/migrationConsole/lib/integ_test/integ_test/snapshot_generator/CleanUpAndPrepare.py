@@ -7,7 +7,8 @@ from console_link.models.command_result import CommandResult
 from integ_test.snapshot_generator.MultiplicationTestUtils import (
     cleanup_snapshots_and_repo,
     create_transformation_config,
-    get_environment_values
+    get_environment_values,
+    run_console_command
 )
 from integ_test.snapshot_generator.MultiplicationTestDataIngestion import (
     create_test_index,
@@ -43,6 +44,15 @@ class CleanUpAndPrepare:
         batch_count = ENV_VALUES['batch_count']
         docs_per_batch = ENV_VALUES['docs_per_batch']
         total_docs = batch_count * docs_per_batch
+        
+        # Step 0: Completely stop migration and clean up state
+        logger.info("Step 0: Stopping any running backfill processes")
+        try:
+            run_console_command(["console", "backfill", "stop"])
+            logger.info("Successfully stopped backfill migration completely")
+        except Exception as e:
+            logger.warning(f"Failed to completely stop backfill: {e}")
+            logger.info("Continuing with cleanup (no backfill may be running)")
         
         logger.info("Step 1: Clearing source and target clusters")
         cleanup_snapshots_and_repo(source_cluster, TEST_STAGE, TEST_REGION)

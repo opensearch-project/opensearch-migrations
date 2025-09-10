@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import subprocess
+import textwrap
 import time
 import yaml
 from integ_test.default_operations import DefaultOperationsLibrary as ops
@@ -287,55 +288,81 @@ def cleanup_snapshots_and_repo(source_cluster, stage, region):
         logger.info("Continuing with script execution...")
 
 
-def create_transformation_config(multiplication_factor):
+def create_transformation_config(multiplication_factor: int):
     """Create transformation file with multiplication configuration."""
-    
-    # Remove existing transformation directory if it exists
+
+    # Remove existing transformation directory
     try:
         shutil.rmtree(TRANSFORMATION_CONFIG_DIRECTORY)
         logger.info("Removed existing transformation directory")
     except FileNotFoundError:
         logger.info("No existing transformation files to cleanup")
-    
-    initialization_script = (
-        f"const MULTIPLICATION_FACTOR_WITH_ORIGINAL = {multiplication_factor}; "
-        "function transform(document) { "
-        "if (!document) { throw new Error(\"No source_document was defined - nothing to transform!\"); } "
-        "const operation = document.operation; "
-        "const documentContent = document.document; "
-        "const originalId = operation._id; "
-        "const docsToCreate = []; "
-        "for (let i = 0; i < MULTIPLICATION_FACTOR_WITH_ORIGINAL; i++) { "
-        "const newOperation = {{ ...operation }}; "
-        "const newId = (i === 0) ? originalId : originalId + '_' + i; "
-        "newOperation._id = newId; "
-        "docsToCreate.push({{ "
-        "operation_type: document.operation_type, "
-        "operation: newOperation, "
-        "document: documentContent "
-        "}}); "
-        "} "
-        "return docsToCreate; "
-        "} "
-        "function main(context) { "
-        "console.log(\"Context: \", JSON.stringify(context, null, 2)); "
-        "return (documentList) => { "
-        "if (Array.isArray(documentList)) { "
-        "return documentList.flatMap((item) => transform(item, context)); "
-        "} "
-        "return transform(documentList); "
-        "}; "
-        "} "
-        "(() => main)();"
-    )
-    
+
+    # One single f-string; use {{ }} to emit literal braces in JS.
+    initialization_script = textwrap.dedent(f"""
+        const MULTIPLICATION_FACTOR_WITH_ORIGINAL = {multiplication_factor};
+
+        function jget(obj, key) {{
+          return obj && typeof obj.get === 'function' ? obj.get(key) : (obj ? obj[key] : undefined);
+        }}
+        function jset(obj, key, val) {{
+          if (obj && typeof obj.set === 'function') {{ obj.set(key, val); return obj; }}
+          if (obj) obj[key] = val;
+          return obj;
+        }}
+        function jcloneMapLike(src) {{
+          if (src && typeof src.forEach === 'function') {{
+            const m = new Map(); src.forEach((v,k) => m.set(k, v)); return m;
+          }}
+          return Object.assign({{}}, src || {{}});
+        }}
+        function pickAction(doc) {{
+          for (const k of ['index','create','update','delete']) {{
+            const v = jget(doc, k); if (v !== undefined) return [k, v];
+          }}
+          return [null, null];
+        }}
+
+        function transform(document) {{
+          if (!document) throw new Error('No source_document was defined - nothing to transform!');
+          const [action, meta] = pickAction(document);
+          if (!action) return [];
+          if (action === 'update' || action === 'delete') return []; // multiply only inserts
+
+          const originalSource = jget(document, 'source') ?? jget(document, '_source') ?? {{}};
+          const originalId = jget(meta, '_id');
+          if (!originalId) return [];
+
+          const out = [];
+          for (let i=0; i<MULTIPLICATION_FACTOR_WITH_ORIGINAL; i++) {{
+            const newMeta = jcloneMapLike(meta);
+            jset(newMeta, '_id', i === 0 ? String(originalId) : String(originalId) + '_' + i);
+
+            // Preserve the original action (index/create)
+            const pair = (typeof Map === 'function')
+              ? new Map([[action, newMeta], ['source', originalSource]])
+              : (function() {{ const o = {{}}; o[action] = newMeta; o.source = originalSource; return o; }})();
+
+            out.push(pair);
+          }}
+          return out;
+        }}
+
+        function main(context) {{
+          console.log('Context: ', JSON.stringify((context || {{}}), null, 2));
+          return (doc) => Array.isArray(doc) ? doc.flatMap(transform) : transform(doc);
+        }}
+
+        (() => main)();
+    """).strip()
+
     multiplication_transform = {
         "JsonJSTransformerProvider": {
             "initializationScript": initialization_script,
             "bindingsObject": "{}"
         }
     }
-    
+
     combined_config = [multiplication_transform]
     transformation_file_path = get_transformation_file_path()
     ops().create_transformation_json_file(combined_config, transformation_file_path)
