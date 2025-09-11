@@ -22,8 +22,12 @@ base_dir="./opensearch-migrations"
 build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
-skip_image_build=false
+skip_image_build=true
+use_public_images=true
 keep_build_images_job_alive=false
+
+RELEASE_VERSION=$(<"$base_dir/VERSION")
+RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
@@ -112,7 +116,8 @@ eval "$output"
 
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
-kubectl get namespace ma >/dev/null 2>&1 || kubectl create namespace ma
+kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace ma
+kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
 
 if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
   echo "Installing aws-efs-csi-driver Helm chart..."
@@ -172,7 +177,7 @@ if [[ "$skip_image_build" == "false" ]]; then
   fi
   pod_name=$(kubectl get pod -n "$namespace" -o name | grep '^pod/build-images' | cut -d/ -f2)
   echo "Waiting for pod ${pod_name} to be ready..."
-  kubectl -n ma wait --for=condition=ready pod/"$pod_name" --timeout=300s
+  kubectl -n "$namespace" wait --for=condition=ready pod/"$pod_name" --timeout=300s
   sleep 5
   echo "Tailing logs for ${pod_name}..."
   echo "-------------------------------"
@@ -190,27 +195,46 @@ if [[ "$skip_image_build" == "false" ]]; then
   fi
 fi
 
+if [[ "$use_public_images" == "false" ]]; then
+  IMAGE_FLAGS="\
+    --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.captureProxy.tag=migrations_capture_proxy_latest \
+    --set images.trafficReplayer.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+    --set images.reindexFromSnapshot.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
+    --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.migrationConsole.tag=migrations_migration_console_latest \
+    --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
+    --set images.installer.tag=migrations_migration_console_latest"
+# Use latest public images
+else
+  echo "Using release version tag '$RELEASE_VERSION' for all Migration Assistant images"
+  IMAGE_FLAGS="\
+    --set images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy \
+    --set images.captureProxy.tag=$RELEASE_VERSION \
+    --set images.trafficReplayer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-replayer \
+    --set images.trafficReplayer.tag=$RELEASE_VERSION \
+    --set images.reindexFromSnapshot.repository=public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot \
+    --set images.reindexFromSnapshot.tag=$RELEASE_VERSION \
+    --set images.migrationConsole.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
+    --set images.migrationConsole.tag=$RELEASE_VERSION \
+    --set images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
+    --set images.installer.tag=$RELEASE_VERSION"
+fi
+
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
-helm install ma "${ma_chart_dir}" \
+helm install "$namespace" "${ma_chart_dir}" \
   --namespace $namespace \
   -f "${ma_chart_dir}/values.yaml" \
   -f "${ma_chart_dir}/valuesEks.yaml" \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
-  --set images.captureProxy.repository="${MIGRATIONS_ECR_REGISTRY}" \
-  --set images.captureProxy.tag=migrations_capture_proxy_latest \
-  --set images.trafficReplayer.repository="${MIGRATIONS_ECR_REGISTRY}" \
-  --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
-  --set images.reindexFromSnapshot.repository="${MIGRATIONS_ECR_REGISTRY}" \
-  --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
-  --set images.migrationConsole.repository="${MIGRATIONS_ECR_REGISTRY}" \
-  --set images.migrationConsole.tag=migrations_migration_console_latest \
-  --set images.installer.repository="${MIGRATIONS_ECR_REGISTRY}" \
-  --set images.installer.tag=migrations_migration_console_latest \
+  "$IMAGE_FLAGS" \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
-kubectl -n ma wait --for=condition=ready pod/migration-console-0 --timeout=300s
+kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
 cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
 echo "Accessing migration console with command: $cmd"
 eval "$cmd"
