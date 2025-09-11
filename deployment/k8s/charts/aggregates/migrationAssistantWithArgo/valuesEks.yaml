@@ -1,5 +1,5 @@
 conditionalPackageInstalls:
-  localstack: true
+  localstack: false
 
 aws:
   configureAwsEksResources: true
@@ -7,10 +7,10 @@ aws:
   account: ""
 
 defaultBucketConfiguration:
-  useLocalStack: true
+  useLocalStack: false
   deleteOnUninstall: true
   emptyBeforeDelete: true
-  endpoint: localstack
+  endpoint: ""
 
 # Useful for updating images while developing
 #images:
