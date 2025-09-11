@@ -42,9 +42,9 @@ function formatParameterDefinition<T extends PlainObject, P extends InputParamDe
         out.description = inputs.description;
     }
     if (isDefault(inputs)) {
-        if (inputs.defaultValue.expression) {
+        if (inputs.defaultValue.expression !== undefined) {
             out.value = transformExpressionsDeep(inputs.defaultValue.expression);
-        } else if (inputs.defaultValue.from) {
+        } else if (inputs.defaultValue.from !== undefined) {
             const f = inputs.defaultValue.from;
             out.valueFrom = {
                 configMapKeyRef: {

@@ -7,8 +7,13 @@ export const HTTP_AUTH_BASIC = z.object({
 });
 
 export const HTTP_AUTH_SIGV4 = z.object({
-    region: z.string(),
+    region: z.number(),
     service: z.string().default("es").optional(),
+});
+
+export const HTTP_AUTH_MTLS = z.object({
+    caCert: z.string(),
+    clientSecretName: z.string()
 });
 
 export const CLUSTER_CONFIG = z.object({
@@ -16,7 +21,7 @@ export const CLUSTER_CONFIG = z.object({
     endpoint: z.string().optional(),
     allow_insecure: z.boolean().optional(),
     version: z.string().optional(),
-    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4]).optional(),
+    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
@@ -37,13 +42,14 @@ export const RFS_OPTIONS = z.object({
 
     loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
-    docTransformerBase64: z.string().default(""),
+    docTransformerBase64: z.string().default("not a transform"),
     documentsPerBulkRequest: z.number().default(0),
     indexAllowlist: z.string().default(""),
     initialLeaseDuration: z.string().default(""),
     maxConnections: z.number().default(0),
     maxShardSizeBytes: z.number().default(0),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317")
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    targetCompression: z.optional(z.boolean())
 });
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({

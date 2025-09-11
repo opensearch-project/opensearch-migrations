@@ -37,7 +37,7 @@ import {ContainerBuilder} from "@/schemas/containerBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
-import {AllowLiteralOrExpression} from "@/schemas/expression";
+import {AllowLiteralOrExpression, expr, isExpression} from "@/schemas/expression";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -100,7 +100,9 @@ export class TemplateBuilder<
             inputParameters: InputParamsToExpressions<InputParamsScope>,
             rawParameters: { workflow: ContextualScope; currentTemplate: InputParamsScope }
         }) => T;
-        return this.extendWithParam(name as string, defineParam({expression: fn(this.inputs) as T, description})) as any;
+        const e = fn(this.inputs) as T;
+        return this.extendWithParam(name as string,
+            defineParam({expression: isExpression(e) ? e : expr.literal(e as PlainObject), description})) as any;
     }
 
     public get inputs() {

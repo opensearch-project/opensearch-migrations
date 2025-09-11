@@ -50,7 +50,7 @@ export function setupTestCredsForContainer(
         ...restOfContainer,
         env: [
             ...safeSpread(env),
-            { name: "AWS_SHARED_CREDENTIALS_FILE", value: "/config/credentials" }
+            { name: "AWS_SHARED_CREDENTIALS_FILE", value: expr.literal("/config/credentials") }
         ],
         volumeMounts: [
             ...safeSpread(volumeMounts),
