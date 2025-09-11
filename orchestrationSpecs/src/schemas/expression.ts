@@ -384,6 +384,14 @@ export function nullCoalesce<T extends PlainObject>(
     return new NullCoalesce<T>(v, d);
 }
 
+/**
+ * Pretty unsafe, but this is here at least until we have a smarter ternary in place.
+ * If one knows that something can't be missing, because it's already been checked, this is the way out
+ */
+export function cast<T extends PlainObject>(v: BaseExpression<T|MissingField>): BaseExpression<T> {
+    return v as BaseExpression<T>;
+}
+
 export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> =>
     new ConcatExpression(es);
 
@@ -607,6 +615,7 @@ export const expr = {
     ternary,
     toArray,
     nullCoalesce,
+    cast,
 
     // Comparisons
     equals,

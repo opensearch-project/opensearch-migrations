@@ -2,7 +2,7 @@ import {expectTypeOf, IsAny} from "expect-type";
 import {
     BaseExpression,
     literal,
-    selectField,
+    jsonPathLoose,
     equals,
     ternary, SimpleExpression, NoAny, expr as EXPR,
 } from "../src/schemas/expression";
@@ -65,13 +65,13 @@ describe("expression type contracts", () => {
             c: [{ c2: { c3: "foundIt" }}]
         });
 
-        const v1 = EXPR.selectField(obj, "c");
+        const v1 = EXPR.jsonPathLoose(obj, "c");
         const v2 = EXPR.index(v1, EXPR.literal(0));
-        const v3 = EXPR.selectField(EXPR.selectField(v2, "c2"), "c3");
+        const v3 = EXPR.jsonPathLoose(EXPR.jsonPathLoose(v2, "c2"), "c3");
         expectTypeOf(v3).toExtend<BaseExpression<string>>();
         expectTypeOf(v3).not.toBeAny();
 
-        const result = selectField(obj, "a");
+        const result = jsonPathLoose(obj, "a");
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
         console.log(result);
     });

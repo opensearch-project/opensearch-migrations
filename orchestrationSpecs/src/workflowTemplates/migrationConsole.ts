@@ -4,7 +4,14 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {defineRequiredParam, typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
-import {AllowLiteralOrExpression, BaseExpression, expr, stringToRecord, toBase64} from "@/schemas/expression";
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    expr,
+    nullCoalesce,
+    stringToRecord,
+    toBase64
+} from "@/schemas/expression";
 import {
     CLUSTER_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE, S3_CONFIG,
@@ -14,6 +21,7 @@ import {
 } from "@/workflowTemplates/userSchemas";
 import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
+import {MissingField, PlainObject} from "@/schemas/plainObject";
 
 const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
 set -e -x
@@ -93,29 +101,30 @@ function getConsoleDeploymentResource(
     }
 };
 
-function conditionalInclude(label: string, contents: BaseExpression<string>): BaseExpression<string> {
-    return expr.ternary(expr.equals(contents, expr.literal("")),
+function conditionalInclude<
+    T extends Record<string, any>,
+    U extends MissingField | T
+>(label: string, contents: BaseExpression<U>): BaseExpression<string> {
+    return expr.ternary(expr.equals(expr.asString(contents), expr.literal("")),
         expr.literal(""), // do-nothing branch
         expr.concat(
             // Fill out the appropriate line(s) of the config.  Notice that yaml allows inlining JSON,
             // which makes handling contents, especially at argo runtime, simpler
             expr.literal(label+": "),
-            contents,
+            expr.recordToString(expr.cast<T>(contents)),
             expr.literal("\n")
         )
     );
 }
 
 const configComponentParameters = {
-    command: defineRequiredParam<string>({
-        description: "Command to run"}),
-    kafkaInfo: defineRequiredParam<z.infer<typeof UNKNOWN>[]>({
+    kafkaInfo: defineRequiredParam<z.infer<typeof UNKNOWN>|MissingField>({
         description: "Snapshot configuration information (JSON)"}),
-    sourceCluster: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>[]>({
+    sourceCluster: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
         description: "Source cluster configuration (JSON)"}),
-    snapshotInfo: defineRequiredParam<z.infer<typeof UNKNOWN>[]>({
+    snapshotConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>|MissingField>({
         description: "Snapshot configuration information (JSON)"}),
-    targetCluster: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>[]>({
+    targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>|MissingField>({
         description: "Target cluster configuration (JSON)"})
 };
 
@@ -134,10 +143,10 @@ export const MigrationConsole = WorkflowBuilder.create({
         .addExpressionOutput("configContents", c=>
             stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
                 expr.concat(
-                    conditionalInclude("kafka", expr.recordToString(c.inputs.kafkaInfo)),
-                    conditionalInclude("source_cluster", expr.recordToString(c.inputs.sourceCluster)),
-                    conditionalInclude("snapshot", expr.recordToString(c.inputs.snapshotInfo)),
-                    conditionalInclude("target_cluster", expr.recordToString(c.inputs.targetCluster)),
+                    conditionalInclude("kafka", c.inputs.kafkaInfo),
+                    conditionalInclude("source_cluster", c.inputs.sourceCluster),
+                    conditionalInclude("snapshot", c.inputs.snapshotConfig),
+                    conditionalInclude("target_cluster", c.inputs.targetConfig),
                 ))
         )
     )
@@ -185,6 +194,7 @@ export const MigrationConsole = WorkflowBuilder.create({
 
 
     .addTemplate("runConsole", t=>t
+        .addRequiredInput("command", typeToken<string>())
         .addInputsFromRecord(configComponentParameters)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(s=>s
@@ -202,6 +212,7 @@ export const MigrationConsole = WorkflowBuilder.create({
 
 
     .addTemplate("deployConsole", t=>t
+        .addRequiredInput("command", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addInputsFromRecord(configComponentParameters)
         .addRequiredInput("name", typeToken<string>())

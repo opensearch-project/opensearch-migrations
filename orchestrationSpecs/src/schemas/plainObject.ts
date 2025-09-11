@@ -1,5 +1,7 @@
 declare const __missingBrand: unique symbol;
-export type MissingField = { readonly [__missingBrand]: "MissingField" };
+
+export const MISSING_FIELD = Symbol("missingField");
+export type MissingField = typeof MISSING_FIELD;
 
 // PlainObject type system for constraining values to serializable plain objects
 export type Primitive = string | number | boolean | MissingField;

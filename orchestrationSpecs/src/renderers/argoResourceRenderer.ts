@@ -1,7 +1,7 @@
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
 import {StepGroup} from "@/schemas/stepsBuilder";
-import {PlainObject} from "@/schemas/plainObject";
+import {MISSING_FIELD, PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {BaseExpression} from "@/schemas/expression";
@@ -88,7 +88,7 @@ function formatArguments(passedParameters: {parameters?: Record<string, any> | u
     if (passedParameters == undefined) { return {}};
     return Object.entries(passedParameters).map(([key, value]) => ({
         name: key,
-        value: transformExpressionsDeep(value)
+        value: (value as any === MISSING_FIELD ? "" : transformExpressionsDeep(value))
     }));
 }
 

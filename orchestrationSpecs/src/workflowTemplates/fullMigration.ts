@@ -77,7 +77,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", INTERNAL, "migrateMetaData", c =>
                 c.register(selectInputsForRegister(b, c)))
-            .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoadFromConfig", c =>
+            .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     sessionName: c.steps.idGenerator.id,

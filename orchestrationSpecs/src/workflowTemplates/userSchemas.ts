@@ -21,7 +21,6 @@ export const CLUSTER_CONFIG = z.object({
     endpoint: z.string().optional(),
     allow_insecure: z.boolean().optional(),
     version: z.string().optional(),
-    otherAuth: HTTP_AUTH_MTLS,
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 

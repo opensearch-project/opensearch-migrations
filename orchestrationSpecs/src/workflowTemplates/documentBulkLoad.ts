@@ -17,6 +17,7 @@ import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {inputsToEnvVars, inputsToEnvVarsList, transformZodObjectToParams} from "@/utils";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {InputParamsToExpressions, ExtendScope} from "@/schemas/workflowTypes";
+import {MISSING_FIELD} from "@/schemas/plainObject";
 
 function getCheckRfsCompletionScript(sessionName: BaseExpression<string>) {
     const template = `
@@ -129,6 +130,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         {limit: "200", retryPolicy: "Always", backoff: {duration: "5", factor: "2", maxDuration: "300"}}
     )
 
+
     .addTemplate("createReplicaset", t=>t
         .addOptionalInput("numPods", c=>1)
         .addOptionalInput("useLocalStack", c=>false)
@@ -194,14 +196,29 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             })))
     )
 
-
-    .addTemplate("runBulkLoadFromConfig", t=>t
+    .addTemplate("runBulkLoad", t=>t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
-        .addSteps(sb=>sb)
+        .addSteps(b=>b
+            // .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c=>
+            //     c.register({
+            //         ...selectInputsForRegister(b, c),
+            //         s3Config: undefined,
+            //         target: undefined,
+            //         snapshotName: "",
+            //         targetCompression: false
+            //     })
+            .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c=>
+                c.register({
+                    ...selectInputsForRegister(b,c),
+                    kafkaInfo: MISSING_FIELD,
+                    sourceCluster: MISSING_FIELD,
+                    snapshotConfig: b.inputs.snapshotConfig,
+                    targetConfig: b.inputs.targetConfig
+                })))
     )
 
     .getFullScope();
