@@ -180,16 +180,17 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c=>
             c.register({
                 ...selectInputsForRegister(b, c),
-                targetAwsRegion: expr.selectField(b.inputs.target, "authConfig[?(@.caCert)].caCert"),
-                targetAwsSigningName: expr.selectField(b.inputs.target, "authConfig.region"),
-                targetCACert: "",
-                targetClientSecretName: "",
-                targetInsecure: false,
-                targetUsername: "",
-                targetPassword: "",
-                s3Endpoint: "",
-                s3Region: "",
-                s3RepoUri: ""
+                targetAwsRegion:        expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "region"), ""),
+                targetAwsSigningName:   expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "service"), ""),
+                targetCACert:           expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "caCert"), ""),
+                targetClientSecretName: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "clientSecretName"), ""),
+                targetInsecure:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "allow_insecure"), false),
+                targetUsername:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "username"), ""),
+                targetPassword:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "password"), ""),
+
+                s3Endpoint:             expr.jsonPathLoose(b.inputs.s3Config, "endpoint"),
+                s3Region:               expr.jsonPathLoose(b.inputs.s3Config, "aws_region"),
+                s3RepoUri:              expr.jsonPathLoose(b.inputs.s3Config, "repo_uri")
             })))
     )
 

@@ -1,5 +1,5 @@
 import {InputParamDef, OutputParamDef, TypeToken} from "@/schemas/parameterSchemas";
-import {DeepWiden, PlainObject} from "@/schemas/plainObject";
+import {DeepWiden, MissingField, PlainObject} from "@/schemas/plainObject";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 
@@ -51,11 +51,27 @@ export class LiteralExpression<T extends PlainObject>
     constructor(public readonly value: T) { super("literal"); }
 }
 
+// BEGIN basicExpressions.ts
+
+
 export class AsStringExpression<
     E extends BaseExpression<any, CE>,
     CE extends ExpressionType = ExprC<E>
 > extends BaseExpression<string, CE> {
     constructor(public readonly source: E) { super("as_string"); }
+}
+
+export class NullCoalesce<
+    T extends PlainObject
+> extends BaseExpression<DeepWiden<T>, "complicatedExpression"> {
+    public readonly defaultValue: BaseExpression<DeepWiden<T>>;
+    constructor(
+        public readonly preferredValue: BaseExpression<T|MissingField>,
+        d: AllowLiteralOrExpression<DeepWiden<T>>
+    ) {
+        super("null_coalesce");
+        this.defaultValue = toExpression(d);
+    }
 }
 
 export class ConcatExpression<
@@ -117,49 +133,9 @@ export class ArithmeticExpression<
     ) { super("arithmetic"); }
 }
 
-type IndexSeg = `[${number}]`;
 
-type _KeyPathsObj<T> =
-    {
-        [K in Extract<keyof T, string>]:
-        | K
-        | (KeyPaths<T[K]> extends never ? never : `${K}.${KeyPaths<T[K]>}`)
-    }[Extract<keyof T, string>];
 
-type _KeyPathsArray<T> =
-    | IndexSeg
-    | (KeyPaths<T> extends never ? never : `${IndexSeg}.${KeyPaths<T>}`);
-
-export type KeyPaths<T> =
-    T extends readonly (infer U)[] ? _KeyPathsArray<U> :
-        T extends object               ? _KeyPathsObj<T>   :
-            never;
-
-export type PathValue<T, P extends string> =
-    P extends keyof T ? T[P] :
-        P extends `${infer K}.${infer Rest}`
-            ? K extends keyof T
-                ? T[K] extends Record<string, any>
-                    ? T[K] extends readonly any[]
-                        ? PathValue<T[K], Rest>
-                        : any
-                    : PathValue<T[K], Rest>
-                : never
-            :
-            P extends `[${infer _Index}]${infer Rest}`
-                ? T extends readonly (infer U)[]
-                    ? Rest extends "" ? U
-                        : Rest extends `.${infer R}` ? PathValue<U, R> : never
-                    : never
-                : never;
-
-export class RecordFieldSelectExpression<
-    T extends Record<string, any>,    // Explicit record type
-    P extends KeyPaths<T>,            // Path constrained to T
-    E extends BaseExpression<T, any>  // Source constrained to return T
-> extends BaseExpression<PathValue<T, P>, "complicatedExpression"> {
-    constructor(public readonly source: E, public readonly path: P) { super("path"); }
-}
+// Begin jsonExpressions.ts
 
 export class SerializeJson extends BaseExpression<string, "complicatedExpression"> {
     constructor(public readonly data: BaseExpression<Record<any, any>>) {
@@ -172,6 +148,154 @@ export class DeserializeJson<T extends PlainObject> extends BaseExpression<T, "c
         super("deserialize_json");
     }
 }
+
+// Everything else is for jsonPath
+
+export class RecordFieldSelectExpression<T, P, E> extends BaseExpression<any, "complicatedExpression"> {
+    constructor(public readonly source: E, public readonly path: P) { super("path"); }
+}
+
+/*** SEGMENT / TUPLE NAVIGATION FOR EXPRESSIONS (TYPE-ONLY) ***/
+// --- helpers ----------------------------------------------------
+
+type StripUndefined<T> = Exclude<T, undefined>;
+
+// union helpers
+type AnyTrue<U> = Extract<U, true> extends never ? false : true;
+
+// Is the key K missing in any member of union T?
+type MissingInAny<T, K extends PropertyKey> =
+    AnyTrue<T extends any ? (K extends keyof T ? false : true) : never>;
+
+// Is the key K present-but-optional in any member of union T?
+type OptionalInAny<T, K extends PropertyKey> =
+    AnyTrue<T extends any ? (K extends keyof T ? ({} extends Pick<T, K> ? true : false) : false) : never>;
+
+// already have this, but ensure it's here:
+export type NonMissing<T> = Exclude<T, MissingField>;
+type HasMissing<T> = Extract<T, MissingField> extends never ? false : true;
+
+// property type with undefined removed (members lacking K contribute never)
+type PropTypeNoUndef<T, K extends PropertyKey> =
+    T extends any
+        ? (K extends keyof T ? StripUndefined<T[K]> : never)
+        : never;
+
+// tuple/index helpers unchanged...
+
+// --- segments over NON-MISSING values only ----------------------
+
+type SegKey<T> = Extract<keyof T, string>;
+type IsTuple<A> = A extends readonly [...infer _T] ? true : false;
+
+type SegsFor<T> =
+    T extends readonly (infer U)[]
+        ? readonly [number, ...SegsFor<U>] | readonly [number]
+        : T extends object
+            ? { [K in SegKey<T>]:
+                readonly [K, ...SegsFor<T[K]>] | readonly [K]
+            }[SegKey<T>]
+            : readonly [];
+
+export type KeySegments<T> = SegsFor<NonMissing<T>>;
+
+// --- missing propagation flag (do NOT union MissingField into T) -
+
+type BoolOr<A extends boolean, B extends boolean> =
+    A extends true ? true : B extends true ? true : false;
+
+type IsTupleIndexStrict<T, I> =
+    IsTuple<T> extends true
+        ? I extends number
+            ? T extends readonly [...infer Tup]
+                ? Extract<I, keyof Tup> extends never ? false : true
+                : false
+            : false
+        : false;
+
+type NextMissingAfterProp<T, K extends PropertyKey, Acc extends boolean> =
+    BoolOr<Acc, BoolOr<OptionalInAny<T, K>, MissingInAny<T, K>>>;
+
+type NextMissingAfterIndex<T, I, Acc extends boolean> =
+    IsTupleIndexStrict<T, I> extends true ? Acc : true;
+
+// ---- STRICT value evaluator over NON-MISSING T -----------------
+
+type ValueAtSegsStrict<T, S extends readonly unknown[]> =
+    S extends []
+        ? T
+        : S extends readonly [infer H, ...infer R]
+            ? H extends number
+                ? T extends readonly (infer U)[]
+                    ? ValueAtSegsStrict<U, Extract<R, readonly unknown[]>>
+                    : never
+                : H extends keyof T
+                    ? ValueAtSegsStrict<T[H], Extract<R, readonly unknown[]>>
+                    : never
+            : never;
+
+export type SegmentsValueStrict<T, S extends readonly unknown[]> =
+    ValueAtSegsStrict<NonMissing<T>, S>;
+
+type MaybeMissing<Flag extends boolean, V> =
+    Flag extends true ? V | MissingField : V;
+
+type ValueAtSegsMissing<
+    T,                                      // must be NonMissing<…>
+    S extends readonly unknown[],
+    AccMissing extends boolean
+> =
+    S extends []
+        ? MaybeMissing<AccMissing, T>
+        : S extends readonly [infer H, ...infer R]
+            ? H extends number
+                ? T extends readonly (infer U)[]
+                    ? ValueAtSegsMissing<U, Extract<R, readonly unknown[]>, NextMissingAfterIndex<T, H, AccMissing>>
+                    : MissingField                      // indexing non-array
+                : H extends PropertyKey
+                    ? ValueAtSegsMissing<
+                        PropTypeNoUndef<T, H>,
+                        Extract<R, readonly unknown[]>,
+                        NextMissingAfterProp<T, H, AccMissing>
+                    >
+                    : MissingField
+            : never;
+
+// START with the “source may already be missing” flag; keep T non-missing while recursing.
+export type SegmentsValueMissing<T, S extends readonly unknown[]> =
+    ValueAtSegsMissing<NonMissing<T>, S, HasMissing<T>>;
+
+
+/** Render a path string from segments (type is irrelevant; purely cosmetic). */
+function _segmentsToPath(segs: readonly unknown[]): string {
+    return segs.map(s => typeof s === "number" ? `[${s}]` : String(s)).join(".");
+}
+
+/** STRICT: assumes presence; no `undefined` in result type. */
+export function jsonPathLoose<
+    T extends Record<string, any>,
+    S extends KeySegments<T>
+>(
+    source: BaseExpression<T, any>,
+    ...segs: S
+): BaseExpression<SegmentsValueMissing<T, S>, "complicatedExpression"> {
+    const path = _segmentsToPath(segs);
+    return new RecordFieldSelectExpression(source, path) as any;
+}
+
+export function jsonPathStrict<
+    T extends Record<string, any>,
+    S extends KeySegments<T>
+>(
+    source: BaseExpression<T, any>,
+    ...segs: S
+): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression"> {
+    const path = _segmentsToPath(segs);
+    return new RecordFieldSelectExpression(source, path) as any;
+}
+
+
+// Begin arrayExpressions.ts
 
 export class ArrayLengthExpression<
     E extends BaseExpression<any[], CE>,
@@ -205,6 +329,7 @@ export class ArrayMakeExpression<
 > extends BaseExpression<Elem[], WidenComplexityOfArray<ES>> {
     constructor(public readonly elements: ES) { super("array_make"); }
 }
+
 
 export type ParameterSource =
     | { kind: "workflow",   parameterName: string }
@@ -251,6 +376,13 @@ export const literal = <T extends PlainObject>(v: T): SimpleExpression<DeepWiden
 
 export const asString = <E extends BaseExpression<any, any>>(e: E): BaseExpression<string, ExprC<E>> =>
     new AsStringExpression(e);
+
+export function nullCoalesce<T extends PlainObject>(
+    v: BaseExpression<T | MissingField, any>,
+    d: AllowLiteralOrExpression<DeepWiden<T>>
+) {
+    return new NullCoalesce<T>(v, d);
+}
 
 export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> =>
     new ConcatExpression(es);
@@ -320,16 +452,6 @@ export const subtract = <
 >(l: L, r: R): BaseExpression<number, WidenComplexity2<CL, CR>> =>
     new ArithmeticExpression("-", l, r);
 
-export function selectField<
-    T extends Record<string, any>,
-    K extends KeyPaths<T>
->(
-    source: BaseExpression<T, any>,
-    p: K
-): RecordFieldSelectExpression<T, K, BaseExpression<T, any>> {
-    return new RecordFieldSelectExpression(source, p);
-}
-
 export function recordToString(data: BaseExpression<Record<string, any>>) {
     return new SerializeJson(data);
 }
@@ -388,6 +510,9 @@ export function toArray<ES extends readonly unknown[]>(
     >;
 }
 
+
+// Begin parameterExpressions.ts
+
 export const workflowParam = <T extends PlainObject>(
     name: string,
     def?: InputParamDef<T, any>
@@ -427,6 +552,7 @@ export function getWorkflowValue(value: WORKFLOW_VALUES) {
     return new WorkflowValueExpression(value);
 }
 
+// These go in basicExpressions
 export function fromBase64(data: BaseExpression<string>) {
     return new FromBase64Expression(data);
 }
@@ -434,6 +560,8 @@ export function fromBase64(data: BaseExpression<string>) {
 export function toBase64(data: BaseExpression<string>) {
     return new ToBase64Expression(data);
 }
+
+// begin templateExpression.ts
 
 export class TemplateReplacementExpression extends BaseExpression<string,  "complicatedExpression"> {
     constructor(public readonly template: string,
@@ -478,6 +606,7 @@ export const expr = {
     concatWith,
     ternary,
     toArray,
+    nullCoalesce,
 
     // Comparisons
     equals,
@@ -490,7 +619,8 @@ export const expr = {
     subtract,
 
     // JSON Handling
-    selectField,
+    jsonPathLoose,
+    jsonPathStrict,
     stringToRecord,
     recordToString,
 
@@ -512,5 +642,4 @@ export const expr = {
     fillTemplate
 } as const;
 
-// Export the namespace as defaultexport default expr;
 export default expr;

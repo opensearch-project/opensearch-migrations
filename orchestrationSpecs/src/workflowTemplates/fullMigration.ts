@@ -87,7 +87,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     prefix: b.inputs.latchCoordinationPrefix,
-                    targetName: EXPR.selectField(b.inputs.target, "name"),
+                    targetName: EXPR.jsonPathLoose(b.inputs.target, "name"),
                     processorId: c.steps.idGenerator.id
                 }))
             .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c=>
@@ -127,7 +127,7 @@ export const FullMigration = WorkflowBuilder.create({
                     c=> c.register({
                         ...selectInputsForRegister(b, c),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        migrationConfig: EXPR.selectField(b.inputs.snapshotAndMigrationConfig, "migrations"),
+                        migrationConfig: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
                         target: c.item
                     }),
                     {loopWith: makeParameterLoop(b.inputs.targets)})
@@ -146,11 +146,11 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot", c =>
                     c.register({
                         ...selectInputsForRegister(b,c),
-                        sourceConfig: EXPR.selectField(b.inputs.sourceMigrationConfig, "source"),
+                        sourceConfig: EXPR.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        sourcePipelineName: EXPR.toBase64(EXPR.recordToString(EXPR.selectField(b.inputs.sourceMigrationConfig, "source")))
+                        sourcePipelineName: EXPR.toBase64(EXPR.recordToString(EXPR.jsonPathLoose(b.inputs.sourceMigrationConfig, "source")))
                     }),
-                {loopWith: makeParameterLoop(EXPR.selectField(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
+                {loopWith: makeParameterLoop(EXPR.jsonPathLoose(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
                     )})
         )
     )

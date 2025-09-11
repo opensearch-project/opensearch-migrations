@@ -1,5 +1,8 @@
+declare const __missingBrand: unique symbol;
+export type MissingField = { readonly [__missingBrand]: "MissingField" };
+
 // PlainObject type system for constraining values to serializable plain objects
-export type Primitive = string | number | boolean;
+export type Primitive = string | number | boolean | MissingField;
 export type PlainObject = Primitive | readonly PlainObject[] | { [key: string]: PlainObject };
 
 export type WidenPrimitive<T> =

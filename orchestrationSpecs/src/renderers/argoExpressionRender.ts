@@ -20,7 +20,7 @@ import expression, {
     SerializeJson,
     NotExpression,
     DeserializeJson,
-    TemplateReplacementExpression,
+    TemplateReplacementExpression, NullCoalesce,
 } from "@/schemas/expression";
 import { PlainObject } from "@/schemas/plainObject";
 
@@ -73,6 +73,13 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         const t = formatExpression(te.whenTrue);
         const f = formatExpression(te.whenFalse);
         return formattedResult(`${c.text} ? ${t.text} : ${f.text}`, true);
+    }
+
+    if (isNullCoalesce(expr)) {
+        const e = expr as NullCoalesce<any>;
+        const formattedPreferred = formatExpression(e.preferredValue);
+        const formattedDefault = formatExpression(e.defaultValue)
+        return formattedResult(`sprig.coalesce(${formattedPreferred.text}, ${formattedDefault.text})`, true);
     }
 
     if (isComparisonExpression(expr)) {
@@ -200,6 +207,7 @@ export function isJsonSerialize(e: AnyExpr): e is SerializeJson { return e.kind 
 export function isJsonDeserialize(e: AnyExpr): e is DeserializeJson<any> { return e.kind === "deserialize_json"; }
 export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> { return e.kind === "concat"; }
 export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> { return e.kind === "ternary"; }
+export function isNullCoalesce(e: AnyExpr): e is NullCoalesce<any> { return e.kind === "null_coalesce"; }
 export function isArithmeticExpression(e: AnyExpr): e is ArithmeticExpression<any, any> { return e.kind === "arithmetic"; }
 export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> { return e.kind === "comparison"; }
 export function isNotExpression(e: AnyExpr): e is NotExpression<any> { return e.kind === "not"; }
