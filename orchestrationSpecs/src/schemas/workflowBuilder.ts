@@ -104,7 +104,8 @@ export class WorkflowBuilder<
         builderFn: UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope, (tb: TemplateBuilder<{
             workflowParameters: WorkflowInputsScope;
             templates: TemplateSigScope;
-        }, {}, {}, {}>) => TB>
+        }, {}, {}, {}>) => TB>,
+        retryParameters?: Record<string, any>
     ): UniqueNameConstraintOutsideDeclaration<Name, TemplateSigScope,
         WorkflowBuilder<
             MetadataScope,
@@ -123,7 +124,7 @@ export class WorkflowBuilder<
             workflowParameters: WorkflowInputsScope;
             templates: TemplateSigScope;
         }, {}>) => TB;
-        const templateBuilder = fn(new TemplateBuilder(templateScope, {}, {}, {}) as any);
+        const templateBuilder = fn(new TemplateBuilder(templateScope, {}, {}, {}, retryParameters) as any);
         const fullTemplate = templateBuilder.getFullTemplateScope();
 
         const newSig = {

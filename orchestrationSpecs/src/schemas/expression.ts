@@ -6,7 +6,6 @@ export type ExpressionType = "govaluate" | "complicatedExpression";
 export abstract class BaseExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> {
     readonly _resultType!: T; // phantom only
     readonly _complexity!: C; // phantom only
-
     constructor(public readonly kind: string) {}
 }
 
@@ -207,11 +206,14 @@ export class ArrayMakeExpression<
     constructor(public readonly elements: ES) { super("array_make"); }
 }
 
-type ParameterSource =
+export type ParameterSource =
     | { kind: "workflow",   parameterName: string }
     | { kind: "input",      parameterName: string }
     | { kind: "step_output", stepName: string, parameterName: string }
     | { kind: "task_output", taskName: string, parameterName: string };
+
+export type WORKFLOW_VALUES =
+    "name"|"mainEntrypoint"|"serviceAccountName"|"uid"|"labels.json"|"creationTimestamp"|"priority"|"duration"|"scheduledTime";
 
 export class FromParameterExpression<T extends PlainObject>
     extends BaseExpression<T, "govaluate"> {
@@ -221,9 +223,9 @@ export class FromParameterExpression<T extends PlainObject>
     ) { super("parameter"); }
 }
 
-export class WorkflowUuidExpression extends BaseExpression<string,  "govaluate"> {
-    constructor() {
-        super("workflow_uuid");
+export class WorkflowValueExpression extends BaseExpression<string,  "govaluate"> {
+    constructor(public readonly variable: WORKFLOW_VALUES) {
+        super("workflow_value");
     }
 }
 
@@ -421,8 +423,8 @@ export const taskOutput = <T extends PlainObject>(
 export const loopItem = <T extends PlainObject>(): TemplateExpression<T> =>
     new LoopItemExpression<T>();
 
-export function getWorkflowUuid() {
-    return new WorkflowUuidExpression();
+export function getWorkflowValue(value: WORKFLOW_VALUES) {
+    return new WorkflowValueExpression(value);
 }
 
 export function fromBase64(data: BaseExpression<string>) {
@@ -504,7 +506,7 @@ export const expr = {
     loopItem,
 
     // utility
-    getWorkflowUuid,
+    getWorkflowValue,
     fromBase64,
     toBase64,
     fillTemplate

@@ -54,7 +54,8 @@ export class TemplateBuilder<
     constructor(protected readonly contextualScope: ContextualScope,
                 protected readonly bodyScope: BodyScope,
                 public readonly inputScope: InputParamsScope,
-                protected readonly outputScope: OutputParamsScope) {
+                protected readonly outputScope: OutputParamsScope,
+                public readonly retryStrategy?: Record<string, any>) {
     }
 
     private extendWithParam<
@@ -74,7 +75,7 @@ export class TemplateBuilder<
             ({[name]: param})
         );
 
-        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope);
+        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope, this.retryStrategy);
     }
 
     addOptionalInput<T extends PlainObject, Name extends string>(
@@ -149,7 +150,8 @@ export class TemplateBuilder<
             this.contextualScope,
             this.bodyScope,
             newScope,
-            this.outputScope
+            this.outputScope,
+            this.retryStrategy
         ) as any;
     }
 

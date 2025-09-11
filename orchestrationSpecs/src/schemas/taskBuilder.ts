@@ -134,6 +134,32 @@ function getAcceptedRegisterKeys(cb: any): string[] | undefined {
 }
 
 /**
+ * NEW: Strongly-typed helper that keeps only the provided keys.
+ * - `builder.inputs` can be any record
+ * - `keys` must be a readonly array of keys from `builder.inputs`
+ * - Return type is precisely Pick<inputs, keys[number]>
+ */
+export function selectInputsForKeys<
+    BuilderT extends { inputs: Record<string, any> },
+    Ks extends readonly (keyof BuilderT["inputs"])[]
+>(
+    builder: BuilderT,
+    keys: Ks
+): Pick<BuilderT["inputs"], Ks[number]> {
+    const src = builder.inputs as Record<string, any>;
+    const out: Partial<BuilderT["inputs"]> = {};
+
+    for (const k of keys) {
+        if (Object.prototype.hasOwnProperty.call(src, k as string)) {
+            // TS is happy because k ∈ keyof BuilderT["inputs"]
+            (out as any)[k] = src[k as string];
+        }
+    }
+
+    return out as Pick<BuilderT["inputs"], Ks[number]>;
+}
+
+/**
  * Infers the correct Pick<...> from (b.inputs, c.register) at compile time,
  * and at runtime returns only those inputs considered "required at callsite".
  *
@@ -148,17 +174,8 @@ export function selectInputsForRegister<
     callback: ParamsCallbackT
 ): Pick<BuilderT["inputs"], Extract<keyof BuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>
 {
-    const src = builder.inputs as Record<string, any>;
     const keysToKeep = getAcceptedRegisterKeys(callback) as readonly (keyof BuilderT["inputs"])[];
-
-    const out: Partial<Record<keyof BuilderT["inputs"], any>> = {};
-    for (const k of keysToKeep) {
-        if (Object.prototype.hasOwnProperty.call(src, k as string)) {
-            out[k] = src[k as string];
-        }
-    }
-    return out as any;
-}
+    return selectInputsForKeys(builder, keysToKeep) as any;}
 
 export type ParamsTuple<
     I extends InputParametersRecord,

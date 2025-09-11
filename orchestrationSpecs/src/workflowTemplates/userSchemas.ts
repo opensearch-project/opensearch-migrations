@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {transformZodObjectToParams} from "@/utils";
 
 export const HTTP_AUTH_BASIC = z.object({
     username: z.string(),
@@ -24,6 +25,27 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 
 export const UNKNOWN = z.object({});
 
+export const S3_CONFIG = z.object({
+    aws_region: z.string(),
+    endpoint: z.string(),
+    repo_uri: z.string()
+});
+
+export const RFS_OPTIONS = z.object({
+    snapshotName: z.string(),
+    sessionName: z.string(),
+
+    loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
+    allowLooseVersionMatching: z.boolean().default(true).describe(""),
+    docTransformerBase64: z.string().default(""),
+    documentsPerBulkRequest: z.number().default(0),
+    indexAllowlist: z.string().default(""),
+    initialLeaseDuration: z.string().default(""),
+    maxConnections: z.number().default(0),
+    maxShardSizeBytes: z.number().default(0),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317")
+});
+
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     indices: z.array(z.string()),
     migrations: z.array(z.object({
@@ -33,10 +55,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
             }),
             documentBackfillConfigs: z.object({
                 indices: z.array(z.string()),
-                config: z.object({
-                    batchSize: z.number(),
-                    initialReplicas: z.number(),
-                }),
+                options: RFS_OPTIONS
             }),
         }),
     })),
@@ -53,22 +72,9 @@ export const SOURCE_MIGRATION_CONFIG = z.object({
     replayerConfig: REPLAYER_CONFIG,
 });
 
-export const S3_CONFIG = z.object({
-    aws_region: z.string(),
-    endpoint: z.string(),
-    repo_uri: z.string()
-});
-
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
     kafka: z.string(), // TODO
     source_cluster: CLUSTER_CONFIG,
     snapshot: z.string(), // TODO
     target_cluster: TARGET_CLUSTER_CONFIG
-})
-
-//
-// export  = z.object({
-//     sessionName: z.string(),
-//     sourceMigrations: SOURCE_MIGRATION_CONFIG,
-//     targets: z.array(TARGET_CLUSTER_CONFIG),
-// });
+});

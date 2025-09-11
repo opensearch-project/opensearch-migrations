@@ -191,6 +191,7 @@ export const MigrationConsole = WorkflowBuilder.create({
             .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c=>
                 c.register(selectInputsForRegister(s, c)))
 
+
             .addStep("runConsoleWithConfig", INTERNAL, "runMigrationCommand", c=>
                 c.register({
                     ...selectInputsForRegister(s, c),

@@ -1,11 +1,94 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
-    CommonWorkflowParameters, makeRequiredImageParametersForKeys
+    CommonWorkflowParameters, makeRequiredImageParametersForKeys,
+    setupLog4jConfigForContainer, setupTestCredsForContainer
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord, typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
-import {expr} from "@/schemas/expression";
-import {SNAPSHOT_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG, UNKNOWN} from "@/workflowTemplates/userSchemas";
+import {asString, BaseExpression, expr} from "@/schemas/expression";
+import {
+    CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, S3_CONFIG,
+    SNAPSHOT_MIGRATION_CONFIG,
+    TARGET_CLUSTER_CONFIG,
+    UNKNOWN
+} from "@/workflowTemplates/userSchemas";
+import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
+import {selectInputsForRegister} from "@/schemas/taskBuilder";
+import {inputsToEnvVars, inputsToEnvVarsList, transformZodObjectToParams} from "@/utils";
+import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
+import {InputParamsToExpressions, ExtendScope} from "@/schemas/workflowTypes";
+
+function getCheckRfsCompletionScript(sessionName: BaseExpression<string>) {
+    const template = `
+set -x && 
+python -c '
+import sys
+from lib.console_link.console_link.environment import Environment
+from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
+from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
+
+status = get_detailed_status_dict(Environment("/config/migration_services.yaml").target_cluster, 
+                                  "{{SESSION_NAME}}")
+print(status)
+all_finished = all_shards_finished_processing(Environment("/config/migration_services.yaml").target_cluster,
+                                              "{{SESSION_NAME}}")
+sys.exit(0 if all_finished else 1)`;
+    return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
+}
+
+function getRfsReplicasetManifest
+(args: {
+    workflowName: BaseExpression<string>,
+    sessionName: BaseExpression<string>,
+    rfsImageName: BaseExpression<string>,
+    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    inputsAsEnvList: Record<string, any>[],
+    useLocalstackAwsCreds: BaseExpression<boolean>
+    loggingConfigMap: BaseExpression<string>
+})
+{
+    const baseContainerDefinition = {
+        name: "bulk-loader",
+        image: args.rfsImageName,
+        imagePullPolicy: args.rfsImagePullPolicy,
+        env: [
+            ...args.inputsAsEnvList,
+            {name: "LUCENE_DIR", value: "/tmp"}
+        ]
+    };
+    const finalContainerDefinition =
+        setupTestCredsForContainer(args.useLocalstackAwsCreds,
+            setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition));
+    return {
+        apiVersion: "apps/v1",
+            kind: "ReplicaSet",
+        metadata: {
+        name: expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot")),
+            labels: {
+            "workflows.argoproj.io/workflow": args.workflowName
+        },
+    },
+        spec: {
+            replicas: "{{POD_REPLICA_COUNT}}",
+                selector: {
+                matchLabels: {
+                    app: "bulk-loader",
+                },
+            },
+            template: {
+                metadata: {
+                    labels: {
+                        app: "bulk-loader",
+                        "workflows.argoproj.io/workflow": args.workflowName,
+                    },
+                },
+                spec: {
+                    containers: [finalContainerDefinition]
+                },
+            },
+        }
+    }
+}
 
 export const DocumentBulkLoad = WorkflowBuilder.create({
     k8sResourceName: "DocumentBulkLoad",
@@ -29,13 +112,47 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             })
         ))
 
+
     .addTemplate("waitForCompletion", t=>t
-        .addRequiredInput("configContents", typeToken<z.infer<typeof UNKNOWN>>())
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(s=>s
-            //.addStep("checkRfsCompletion", )
-        )
+        .addSteps(b=>b
+            .addStep("checkRfsCompletion", MigrationConsole, "runMigrationCommand", c =>
+            c.register({
+                ...selectInputsForRegister(b, c),
+                command: getCheckRfsCompletionScript(b.inputs.sessionName)
+            }))
+        ),
+        {limit: "200", retryPolicy: "Always", backoff: {duration: "5", factor: "2", maxDuration: "300"}}
+    )
+
+
+    .addTemplate("createReplicaset", t=>t
+        .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
+        .addOptionalInput("numPods", c=>1)
+        .addOptionalInput("useLocalStack", c=>false)
+        .addRequiredInput("target", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+
+        .addInputsFromRecord(transformZodObjectToParams(RFS_OPTIONS))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
+
+        .addResourceTask(b=>b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: true,
+                manifest: getRfsReplicasetManifest({
+                    loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
+                    useLocalstackAwsCreds: b.inputs.useLocalStack,
+                    sessionName: b.inputs.sessionName,
+                    rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
+                    rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
+                    inputsAsEnvList: [
+                        ...inputsToEnvVarsList({...b.inputs})
+                    ],
+                    workflowName: expr.getWorkflowValue("name")
+                })
+            }))
     )
 
     .addTemplate("runBulkLoadFromConfig", t=>t

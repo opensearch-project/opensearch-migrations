@@ -180,7 +180,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("init", TargetLatchHelpers, "init", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
-                    prefix: EXPR.concat(EXPR.literal("workflow-"), EXPR.getWorkflowUuid()),
+                    prefix: EXPR.concat(EXPR.literal("workflow-"), EXPR.getWorkflowValue("uid")),
                     configuration: b.inputs.sourceMigrationConfigs
                 }))
             .addStep("pipelineSourceMigration", INTERNAL, "pipelineSourceMigration",

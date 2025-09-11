@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: default-log4j-config
+data:
+  active: "false" # true to enable this configuration for any pod that uses it
+  # fill this in with the contents of the log4j2 configuration file that should be passed to a java process
+  configuration: ""

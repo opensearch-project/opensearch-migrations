@@ -12,7 +12,7 @@ import expression, {
     ExpressionType,
     FromBase64Expression,
     FromParameterExpression,
-    WorkflowUuidExpression,
+    WorkflowValueExpression,
     LiteralExpression,
     RecordFieldSelectExpression,
     TernaryExpression,
@@ -160,8 +160,9 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         return formattedResult("item");
     }
 
-    if (isWorkflowUuid(expr)) {
-        return formattedResult("workflow.uuid");
+    if (isWorkflowValue(expr)) {
+        const e = expr as WorkflowValueExpression;
+        return formattedResult("workflow." + e.variable);
     }
 
     if (isFromBase64(expr)) {
@@ -207,7 +208,7 @@ export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<an
 export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
 export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "parameter"; }
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "loop_item"; }
-export function isWorkflowUuid(e: AnyExpr): e is WorkflowUuidExpression { return e.kind === "workflow_uuid"; }
+export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
 export function isFromBase64(e: AnyExpr): e is FromBase64Expression { return e.kind === "from_base64"; }
 export function isToBase64(e: AnyExpr): e is ToBase64Expression { return e.kind === "to_base64"; }
 function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }
