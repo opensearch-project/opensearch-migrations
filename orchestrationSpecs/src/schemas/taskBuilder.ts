@@ -1,5 +1,5 @@
 import {
-    ExtendScope, IfNever, LoopWithUnion, OutputParamsToExpressions, ParamsWithLiteralsOrExpressions,
+    ExtendScope, ExtractOutputParamType, IfNever, LoopWithUnion, ParamsWithLiteralsOrExpressions,
     TasksOutputsScope, TasksWithOutputs,
     TemplateSignaturesScope, WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
@@ -7,7 +7,14 @@ import { Workflow } from "@/schemas/workflowBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
-import {SimpleExpression, loopItem, AllowLiteralOrExpression} from "@/schemas/expression";
+import {
+    SimpleExpression,
+    loopItem,
+    AllowLiteralOrExpression,
+    BaseExpression,
+    taskOutput,
+    expr
+} from "@/schemas/expression";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
@@ -43,6 +50,12 @@ export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
 export type TaskType = "tasks" | "steps";
 type LoopItemType<L extends PlainObject> = [L] extends [never] ? never : AllowLiteralOrExpression<L>;
 
+export type OutputParamsToExpressions<
+    Outputs extends OutputParametersRecord,
+    Label extends TaskType
+> = {
+    [K in keyof Outputs]: ReturnType<typeof taskOutput<ExtractOutputParamType<Outputs[K]>, Label>>
+};
 export type AllTasksAsOutputReferenceable<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType
@@ -51,12 +64,13 @@ export type AllTasksAsOutputReferenceable<
         [StepName in keyof TasksScope]:
         TasksScope[StepName] extends TasksWithOutputs<infer _Name, infer Outputs>
             ? {
-                id: string;
+                id: BaseExpression<string>;
+                status: BaseExpression<string>;
                 outputs: Outputs extends OutputParametersRecord
-                    ? OutputParamsToExpressions<Outputs>
+                    ? OutputParamsToExpressions<Outputs, Label>
                     : {};
             }
-            : { id: string; outputs: {} };
+            : { id: BaseExpression<string>; status: BaseExpression<string>; outputs: {} };
     }
 };
 
@@ -257,20 +271,28 @@ export function getTaskOutputsByTaskName<
     TaskScope extends TasksOutputsScope
 >(
     tasksScope: TaskScope,
-    getTaskOutputAsExpression: (taskName: string, outputName: string, outputParamDef: OutputParamDef<any>) => any)
-{
-    const tasksByName: Record<string, { id: string; outputs: Record<string, any> }> = {};
+    taskType: TaskType
+) {
+    const tasksByName: Record<string, any> = {};
 
     Object.entries(tasksScope).forEach(([taskName, taskDef]: [string, any]) => {
         const outputs: Record<string, any> = {};
         if (taskDef.outputTypes) {
             Object.entries(taskDef.outputTypes).forEach(([outputName, outputParamDef]: [string, any]) => {
-                outputs[outputName] = getTaskOutputAsExpression(taskName, outputName, outputParamDef);
+                outputs[outputName] = taskOutput(taskType, taskName, outputName, outputParamDef);
             });
         }
-        tasksByName[taskName] = {id: taskName, outputs};
+        tasksByName[taskName] = {
+            id: expr.taskData(taskType, taskName, "id"),
+            status: expr.taskData(taskType, taskName, "status"),
+            outputs
+        };
     });
-    return tasksByName;
+    return tasksByName as Record<TaskType, {
+        id: BaseExpression<string>;
+        status: BaseExpression<string>;
+        outputs: Record<string, any>
+    }>;
 }
 
 export type WorkflowTask<
@@ -421,7 +443,7 @@ export abstract class TaskBuilder<
     }
 
     public getTaskOutputsByTaskName() {
-        return getTaskOutputsByTaskName(this.tasksScope, this.getTaskOutputAsExpression);
+        return getTaskOutputsByTaskName(this.tasksScope, this.label);
     }
 
     protected buildParamProviderCallbackObject<
@@ -441,12 +463,6 @@ export abstract class TaskBuilder<
             ...(loopWith ? { item: loopItem<LoopT>() } : {})
         } as unknown as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;
     }
-
-    protected abstract getTaskOutputAsExpression<T extends PlainObject>(
-        taskName: string,
-        outputName: string,
-        outputParamDef: OutputParamDef<any>
-    ): SimpleExpression<T>;
 
     public getTasks() {
         return { scope: this.tasksScope, taskList: this.orderedTaskList };

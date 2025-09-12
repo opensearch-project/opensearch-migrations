@@ -61,12 +61,6 @@ class DagTaskBuilder<
                 ? { dependencies: opts.dependencies } : {})
         };
     }
-
-    protected getTaskOutputAsExpression<T extends PlainObject>(
-        taskName: string, outputName: string, outputParamDef: OutputParamDef<any>
-    ): SimpleExpression<T> {
-        return taskOutput(taskName, outputName, outputParamDef);
-    }
 }
 
 // Define the expression context type for DagBuilder

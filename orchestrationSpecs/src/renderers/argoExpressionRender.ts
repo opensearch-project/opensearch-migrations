@@ -20,7 +20,7 @@ import expression, {
     SerializeJson,
     NotExpression,
     DeserializeJson,
-    TemplateReplacementExpression, NullCoalesce,
+    TemplateReplacementExpression, NullCoalesce, TaskDataExpression,
 } from "@/schemas/expression";
 import { PlainObject } from "@/schemas/plainObject";
 
@@ -154,9 +154,9 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
                 return formattedResult(`workflow.parameters.${pe.source.parameterName}`);
             case "input":
                 return formattedResult(`inputs.parameters.${pe.source.parameterName}`);
-            case "step_output":
+            case "steps_output":
                 return formattedResult(`steps.${pe.source.stepName}.outputs.parameters.${pe.source.parameterName}`);
-            case "task_output":
+            case "tasks_output":
                 return formattedResult(`tasks.${pe.source.taskName}.outputs.parameters.${pe.source.parameterName}`);
             default:
                 throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
@@ -170,6 +170,11 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
     if (isWorkflowValue(expr)) {
         const e = expr as WorkflowValueExpression;
         return formattedResult("workflow." + e.variable);
+    }
+
+    if (isTaskData(expr)) {
+        const e = expr as TaskDataExpression<any>;
+        return formattedResult(`${e.taskType}.${e.name}['${e.key}']`)
     }
 
     if (isFromBase64(expr)) {
@@ -217,6 +222,7 @@ export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any>
 export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "parameter"; }
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "loop_item"; }
 export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
+export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> { return e.kind === "task_data"; }
 export function isFromBase64(e: AnyExpr): e is FromBase64Expression { return e.kind === "from_base64"; }
 export function isToBase64(e: AnyExpr): e is ToBase64Expression { return e.kind === "to_base64"; }
 function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }

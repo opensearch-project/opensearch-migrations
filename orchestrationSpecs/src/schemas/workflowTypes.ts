@@ -11,7 +11,7 @@
  */
 
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {AllowLiteralOrExpression, BaseExpression, FromParameterExpression, stepOutput} from "@/schemas/expression";
+import {AllowLiteralOrExpression, BaseExpression, FromParameterExpression} from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
 
 // Specific scope types for different purposes
@@ -48,10 +48,6 @@ export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {
     [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : T[K]
-};
-
-export type OutputParamsToExpressions<Outputs extends OutputParametersRecord> = {
-    [K in keyof Outputs]: ReturnType<typeof stepOutput<ExtractOutputParamType<Outputs[K]>>>
 };
 
 export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {

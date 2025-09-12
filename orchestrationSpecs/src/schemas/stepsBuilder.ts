@@ -26,7 +26,7 @@ import {
     InputsFrom, KeyFor, NamedTask, OutputsFrom, ParamsTuple,
     TaskBuilder, TaskRebinder
 } from "@/schemas/taskBuilder";
-import { SimpleExpression, stepOutput } from "@/schemas/expression";
+import { SimpleExpression } from "@/schemas/expression";
 
 export interface StepGroup {
     steps: NamedTask[];
@@ -52,12 +52,6 @@ class StepGroupBuilder<
             <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, t: NamedTask[]) =>
                 new StepGroupBuilder<ContextualScope, NS>(ctx, scope, t);
         super(contextualScope, tasksScope, tasks, rebind);
-    }
-
-    protected getTaskOutputAsExpression<T extends PlainObject>(
-        taskName: string, outputName: string, outputParamDef: OutputParamDef<any>
-    ): SimpleExpression<T> {
-        return stepOutput(taskName, outputName, outputParamDef);
     }
 }
 
@@ -111,7 +105,7 @@ export class StepsBuilder<
     protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {
         return {
             inputs: this.inputs,
-            steps: getTaskOutputsByTaskName(this.bodyScope, stepOutput)
+            steps: getTaskOutputsByTaskName(this.bodyScope, "steps")
         } as StepsExpressionContext<InputParamsScope, StepsScope>;
     }
 

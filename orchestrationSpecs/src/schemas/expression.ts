@@ -1,5 +1,6 @@
 import {InputParamDef, OutputParamDef, TypeToken} from "@/schemas/parameterSchemas";
 import {DeepWiden, MissingField, PlainObject} from "@/schemas/plainObject";
+import {TaskType} from "@/schemas/taskBuilder";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 
@@ -332,10 +333,10 @@ export class ArrayMakeExpression<
 
 
 export type ParameterSource =
-    | { kind: "workflow",   parameterName: string }
-    | { kind: "input",      parameterName: string }
-    | { kind: "step_output", stepName: string, parameterName: string }
-    | { kind: "task_output", taskName: string, parameterName: string };
+    | { kind: "workflow",     parameterName: string }
+    | { kind: "input",        parameterName: string }
+    | { kind: "steps_output", stepName: string, parameterName: string }
+    | { kind: "tasks_output", taskName: string, parameterName: string };
 
 export type WORKFLOW_VALUES =
     "name"|"mainEntrypoint"|"serviceAccountName"|"uid"|"labels.json"|"creationTimestamp"|"priority"|"duration"|"scheduledTime";
@@ -346,6 +347,12 @@ export class FromParameterExpression<T extends PlainObject>
         public readonly source: ParameterSource,
         public readonly paramDef?: InputParamDef<T, any> | OutputParamDef<T>
     ) { super("parameter"); }
+}
+
+export class TaskDataExpression<T extends PlainObject> extends BaseExpression<T, "govaluate"> {
+    constructor(public readonly taskType: TaskType,  public readonly name: string, public readonly key: string) {
+        super("task_data");
+    }
 }
 
 export class WorkflowValueExpression extends BaseExpression<string,  "govaluate"> {
@@ -533,25 +540,36 @@ export const inputParam = <T extends PlainObject>(
 ) =>
     new FromParameterExpression({ kind: "input", parameterName: name }, def);
 
-export const stepOutput = <T extends PlainObject>(
-    stepName: string,
-    parameterName: string,
-    def?: OutputParamDef<T>
-): SimpleExpression<DeepWiden<T>> =>
-    new FromParameterExpression<DeepWiden<T>>(
-        { kind: "step_output", stepName, parameterName },
-        def as any
-    );
 
-export const taskOutput = <T extends PlainObject>(
+export const taskData = <T extends PlainObject>(
+    taskType: TaskType,
+    taskName: string,
+    key: string
+): SimpleExpression<T> =>
+    new TaskDataExpression<T>(taskType, taskName, key);
+
+export const taskOutput = <T extends PlainObject, Label extends TaskType>(
+    taskType: Label,
     taskName: string,
     parameterName: string,
     def?: OutputParamDef<T>
 ): SimpleExpression<DeepWiden<T>> =>
     new FromParameterExpression<DeepWiden<T>>(
-        { kind: "task_output", taskName, parameterName },
+        {
+            kind: `${taskType}_output` as any,
+            [`${taskType.substring(0,taskType.length-1)}Name`]: taskName,
+            parameterName
+        } as ParameterSource,
         def as any
     );
+
+export function taskDataAsExpression(
+    taskType: TaskType,
+    taskName: string,
+    key: "id"|"status"
+) {
+    return new TaskDataExpression(taskType, taskName, key);
+}
 
 export const loopItem = <T extends PlainObject>(): TemplateExpression<T> =>
     new LoopItemExpression<T>();
@@ -640,7 +658,7 @@ export const expr = {
     // Parameter functions
     workflowParam,
     inputParam,
-    stepOutput,
+    taskData,
     taskOutput,
     loopItem,
 
