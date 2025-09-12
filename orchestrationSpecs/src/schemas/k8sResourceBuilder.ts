@@ -12,7 +12,7 @@
 
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord, TypeToken} from "@/schemas/parameterSchemas";
 import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/schemas/workflowTypes";
-import {TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration } from "@/schemas/scopeConstraints";
 import {AllowLiteralOrExpression} from "@/schemas/expression";
@@ -47,7 +47,8 @@ export class K8sResourceBuilder<
         contextualScope: ContextualScope,
         inputsScope: InputParamsScope,
         bodyScope: ResourceScope,
-        outputsScope: OutputParamsScope
+        outputsScope: OutputParamsScope,
+        retryParameters: RetryParameters
     ) {
         const templateRebind: TemplateRebinder<
             ContextualScope,
@@ -68,16 +69,17 @@ export class K8sResourceBuilder<
             ctx: ContextualScope,
             inputs: InputParamsScope,
             body: NewBodyScope,
-            outputs: NewOutputScope
+            outputs: NewOutputScope,
+            retry: RetryParameters
         ) =>
             new K8sResourceBuilder<
                 ContextualScope,
                 InputParamsScope,
                 NewBodyScope,
                 NewOutputScope
-            >(ctx, inputs, body, outputs) as unknown as Self;
+            >(ctx, inputs, body, outputs, retry) as unknown as Self;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, templateRebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, templateRebind);
     }
 
     protected getBody() {
@@ -102,7 +104,8 @@ export class K8sResourceBuilder<
             this.contextualScope,
             this.inputsScope,
             newBody,
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         );
     }
 
@@ -131,7 +134,8 @@ export class K8sResourceBuilder<
             this.contextualScope,
             this.inputsScope,
             this.bodyScope,
-            newOutputs
+            newOutputs,
+            this.retryParameters
         );
     }
 }

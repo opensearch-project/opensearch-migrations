@@ -1,4 +1,4 @@
-import {AllowLiteralOrExpression} from "@/schemas/expression";
+import {AllowLiteralOrExpression, expr} from "@/schemas/expression";
 import {z} from "zod";
 import {defineParam, defineRequiredParam} from "@/schemas/parameterSchemas";
 import {PlainObject} from "@/schemas/plainObject";
@@ -7,6 +7,38 @@ export type TypescriptError<Message extends string> = {
     readonly __error: Message;
     readonly __never: never;
 };
+
+// Type helper that remaps keys according to the mapping table
+export type RemapRecordKeys<T extends Record<string, any>, M extends Partial<Record<keyof T, string>>> = {
+    [K in keyof T as K extends keyof M
+        ? M[K] extends string
+            ? M[K]
+            : K
+        : K]: T[K]
+}
+
+/**
+ * Remaps some fields of a record according to a mapping table
+ * @param source - The source record to remap
+ * @param remapTable - Object mapping old key names to new key names
+ * @returns New record with remapped keys
+ */
+export function remapRecordNames<
+    S extends Record<string, any>,
+    M extends Partial<Record<keyof S, string>>
+>(
+    source: S,
+    remapTable: M
+): RemapRecordKeys<S, M> {
+    const result: any = {};
+
+    Object.entries(source).forEach(([key, value]) => {
+        const newKey = remapTable[key] ?? key;
+        result[newKey] = value;
+    });
+
+    return result;
+}
 
 export function toEnvVarName(str: string): string {
     return str
@@ -29,11 +61,6 @@ export function inputsToEnvVarsList<T extends Record<string, AllowLiteralOrExpre
     inputs: T
 ) {
     return Object.entries(inputsToEnvVars(inputs)).map(([name, value]) => ({ name, value }));
-}
-
-// Helper function to create literal values
-function literal<T>(value: T): T {
-    return value;
 }
 
 // Helper to check if a Zod type has a default value
@@ -100,7 +127,7 @@ export function transformZodObjectToParams<T extends z.ZodRawShape>(
             const defaultValue = getDefaultValue(zodType);
             result[key] = defineParam({
                 ...(description && { description }),
-                expression: literal(defaultValue)
+                expression: expr.literal(defaultValue)
             });
         } else {
             // Field is required (no default)

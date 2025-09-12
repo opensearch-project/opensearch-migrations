@@ -164,6 +164,8 @@ function formatTemplate(template: GenericScope) {
     return {
         inputs: formatParameters(template.inputs),
         ...formatBody(template.body),
+        ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
+            {retryStrategy: template.retryStrategy} : {}),
         outputs: formatOutputParameters(template.outputs)
     }
 }

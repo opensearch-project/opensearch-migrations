@@ -37,8 +37,7 @@ export const S3_CONFIG = z.object({
 });
 
 export const RFS_OPTIONS = z.object({
-    snapshotName: z.string(),
-    sessionName: z.string(),
+    snapshotName: z.string().optional(),
 
     loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
@@ -50,6 +49,13 @@ export const RFS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(0),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     targetCompression: z.boolean().default(true)
+});
+
+export const REPLAYER_OPTIONS = z.object({
+    authHeaderOverride: z.optional(z.string()),
+    loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
+    docTransformerBase64: z.string().default("not a transform"),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({

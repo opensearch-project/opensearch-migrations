@@ -54,8 +54,7 @@ export class TemplateBuilder<
     constructor(protected readonly contextualScope: ContextualScope,
                 protected readonly bodyScope: BodyScope,
                 public readonly inputScope: InputParamsScope,
-                protected readonly outputScope: OutputParamsScope,
-                public readonly retryStrategy?: Record<string, any>) {
+                protected readonly outputScope: OutputParamsScope) {
     }
 
     private extendWithParam<
@@ -75,7 +74,7 @@ export class TemplateBuilder<
             ({[name]: param})
         );
 
-        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope, this.retryStrategy);
+        return new TemplateBuilder(this.contextualScope, this.bodyScope, newScope, this.outputScope);
     }
 
     addOptionalInput<T extends PlainObject, Name extends string>(
@@ -152,8 +151,7 @@ export class TemplateBuilder<
             this.contextualScope,
             this.bodyScope,
             newScope,
-            this.outputScope,
-            this.retryStrategy
+            this.outputScope
         ) as any;
     }
 
@@ -186,7 +184,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new StepsBuilder(c, i, {}, [], {})))
+            ((c, i) => new StepsBuilder(c, i, {}, [], {}, {})))
         (this.contextualScope, this.inputScope));
     }
 
@@ -200,7 +198,7 @@ export class TemplateBuilder<
     {
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {})))
+            ((c, i) => new DagBuilder(c, this.inputScope, {}, [], {}, {})))
         (this.contextualScope, this.inputScope));
     }
 
@@ -214,7 +212,7 @@ export class TemplateBuilder<
     ): FinalBuilder {
         const fn = builderFn as (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new K8sResourceBuilder(c, i, {}, {})))
+            ((c, i) => new K8sResourceBuilder(c, i, {}, {}, {})))
         (this.contextualScope, this.inputScope));
     }
 
@@ -228,7 +226,7 @@ export class TemplateBuilder<
     ): FinalBuilder {
         const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}>) => FinalBuilder;
         return fn((factory ??
-            ((c, i) => new ContainerBuilder(c, i, {}, {}, {})))
+            ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {})))
         (this.contextualScope, this.inputScope));
     }
 

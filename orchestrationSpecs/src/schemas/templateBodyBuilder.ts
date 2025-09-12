@@ -16,6 +16,8 @@ import {
 import { PlainObject } from "@/schemas/plainObject";
 import {AllowLiteralOrExpression, expr, toExpression} from "@/schemas/expression";
 
+export type RetryParameters = GenericScope;
+
 /** Rebinder type the concrete subclass provides to the base. */
 export type TemplateRebinder<
     ContextualScope extends WorkflowAndTemplatesScope,
@@ -38,7 +40,8 @@ export type TemplateRebinder<
     ctx: ContextualScope,
     inputs: InputParamsScope,
     body: NewBodyScope,
-    outputs: NewOutputScope
+    outputs: NewOutputScope,
+    retryParameters: RetryParameters
 ) => Self;
 
 type ReplaceOutputTypedMembers<
@@ -83,6 +86,7 @@ export abstract class TemplateBodyBuilder<
         public readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
+        protected readonly retryParameters: GenericScope,
         protected readonly rebind: TemplateRebinder<ContextualScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
     ) {}
 
@@ -105,6 +109,16 @@ export abstract class TemplateBodyBuilder<
         return builderFn(this as unknown as Self) as unknown as ReplaceOutputTypedMembers<
             ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
         >;
+    }
+
+    public addRetryParameters(retryParameters: GenericScope) {
+        return this.rebind(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            retryParameters
+        );
     }
 
     /**
@@ -146,7 +160,8 @@ export abstract class TemplateBodyBuilder<
             this.contextualScope,
             this.inputsScope,
             this.bodyScope,
-            newOutputs
+            newOutputs,
+            this.retryParameters
         ) as unknown as ReplaceOutputTypedMembers<
             ContextualScope,
             InputParamsScope,
@@ -173,14 +188,11 @@ export abstract class TemplateBodyBuilder<
     protected abstract getBody(): Record<string, any>;
 
     // used by the TemplateBuilder!
-    getFullTemplateScope(): {
-        inputs: InputParamsScope,
-        outputs: OutputParamsScope,
-        body: Record<string, any> // implementation of the body's type is purposefully type-erased
-    } {
+    getFullTemplateScope() {
         return {
             inputs: this.inputsScope,
             outputs: this.outputsScope,
+            retryStrategy: this.retryParameters,
             body: this.getBody()
         };
     }

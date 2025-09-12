@@ -1,7 +1,13 @@
-import {defineParam, defineRequiredParam, InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {
+    defineParam,
+    defineRequiredParam,
+    InputParamDef,
+    InputParametersRecord,
+    typeToken
+} from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {z} from "zod/index";
-import {S3_CONFIG} from "@/workflowTemplates/userSchemas";
+import {S3_CONFIG, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {BaseExpression, expr} from "@/schemas/expression";
 
 export const CommonWorkflowParameters = {
@@ -31,6 +37,28 @@ export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKey
         Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,true>>;
 }
 export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
+
+export const TargetClusterParameters = {
+    targetAwsRegion: defineRequiredParam<string>(),
+    targetAwsSigningName: defineRequiredParam<string>(),
+    targetCACert: defineRequiredParam<string>(),
+    targetClientSecretName: defineRequiredParam<string>(), // TODO
+    targetInsecure: defineRequiredParam<boolean>(),
+    targetUsername: defineRequiredParam<string>(),
+    targetPassword: defineRequiredParam<string>()
+}
+
+export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<z.infer<typeof TARGET_CLUSTER_CONFIG>>) {
+    return {
+        targetAwsRegion:        expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),
+        targetAwsSigningName:   expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "service"), ""),
+        targetCACert:           expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "caCert"), ""),
+        targetClientSecretName: expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "clientSecretName"), ""),
+        targetInsecure:         expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "allow_insecure"), false),
+        targetUsername:         expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "username"), ""),
+        targetPassword:         expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "password"), ""),
+    };
+}
 
 export const s3ConfigParam = {
     s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>>({

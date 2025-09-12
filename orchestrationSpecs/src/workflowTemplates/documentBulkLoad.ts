@@ -1,7 +1,7 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
     CommonWorkflowParameters, makeRequiredImageParametersForKeys,
-    setupLog4jConfigForContainer, setupTestCredsForContainer
+    setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {InputParamDef, InputParametersRecord, typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
@@ -40,6 +40,7 @@ function getRfsReplicasetManifest
 (args: {
     workflowName: BaseExpression<string>,
     sessionName: BaseExpression<string>,
+    numPods: BaseExpression<number>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>
     loggingConfigMap: BaseExpression<string>
@@ -65,13 +66,13 @@ function getRfsReplicasetManifest
         apiVersion: "apps/v1",
             kind: "ReplicaSet",
         metadata: {
-        name: expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot")),
+            name: expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot")),
             labels: {
-            "workflows.argoproj.io/workflow": args.workflowName
+                "workflows.argoproj.io/workflow": args.workflowName
+            },
         },
-    },
         spec: {
-            replicas: "{{POD_REPLICA_COUNT}}",
+            replicas: args.numPods,
                 selector: {
                 matchLabels: {
                     app: "bulk-loader",
@@ -125,27 +126,25 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 ...selectInputsForRegister(b, c),
                 command: getCheckRfsCompletionScript(b.inputs.sessionName)
             }))
-        ),
-        {limit: "200", retryPolicy: "Always", backoff: {duration: "5", factor: "2", maxDuration: "300"}}
+        )
+        .addRetryParameters({
+            limit: "200",
+            retryPolicy: "Always",
+            backoff: {duration: "5", factor: "2", maxDuration: "300"}
+        })
     )
 
 
     .addTemplate("createReplicaset", t=>t
+        .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("numPods", c=>1)
         .addOptionalInput("useLocalStack", c=>false)
-
-        .addRequiredInput("targetAwsRegion", typeToken<string>())
-        .addRequiredInput("targetAwsSigningName", typeToken<string>())
-        .addRequiredInput("targetCACert", typeToken<string>())
-        .addRequiredInput("targetClientSecretName", typeToken<string>()) // TODO
-        .addRequiredInput("targetInsecure", typeToken<boolean>())
-        .addRequiredInput("targetUsername", typeToken<string>())
-        .addRequiredInput("targetPassword", typeToken<string>())
 
         .addRequiredInput("s3Endpoint", typeToken<string>())
         .addRequiredInput("s3Region", typeToken<string>())
         .addRequiredInput("s3RepoUri", typeToken<string>())
 
+        .addInputsFromRecord(TargetClusterParameters)
         .addInputsFromRecord(transformZodObjectToParams(RFS_OPTIONS))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
@@ -154,6 +153,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             action: "create",
             setOwnerReference: true,
             manifest: getRfsReplicasetManifest({
+                numPods: b.inputs.numPods,
                 loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                 useLocalstackAwsCreds: b.inputs.useLocalStack,
                 sessionName: b.inputs.sessionName,
@@ -169,6 +169,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
 
     .addTemplate("createReplicasetFromConfig", t=>t
+        .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
         .addOptionalInput("numPods", c=>1)
         .addOptionalInput("useLocalStack", c=>false)

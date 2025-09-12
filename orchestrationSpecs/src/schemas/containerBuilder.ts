@@ -19,7 +19,7 @@ import {
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
 import { inputsToEnvVars, toEnvVarName, TypescriptError } from "@/utils";
-import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
 import { ScopeIsEmptyConstraint } from "@/schemas/scopeConstraints";
 import { PlainObject } from "@/schemas/plainObject";
 import {AllowLiteralOrExpression} from "@/schemas/expression";
@@ -55,7 +55,8 @@ export class ContainerBuilder<
         inputsScope: InputParamsScope,
         bodyScope: ContainerScope,
         public readonly envScope: EnvScope,
-        outputsScope: OutputParamsScope
+        outputsScope: OutputParamsScope,
+        retryParameters: RetryParameters
     ) {
         // REBINDER: must accept any NewBodyScope extends GenericScope and return ContainerBuilder
         const rebind: TemplateRebinder<
@@ -77,7 +78,8 @@ export class ContainerBuilder<
             ctx: ContextualScope,
             inputs: InputParamsScope,
             body: NewBodyScope,
-            outputs: NewOutputScope
+            outputs: NewOutputScope,
+            retry: RetryParameters
         ) =>
             new ContainerBuilder<
                 ContextualScope,
@@ -85,9 +87,9 @@ export class ContainerBuilder<
                 NewBodyScope,
                 EnvScope,
                 NewOutputScope
-            >(ctx, inputs, body, this.envScope, outputs) as unknown as Self;
+            >(ctx, inputs, body, this.envScope, outputs, retry) as unknown as Self;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, rebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
     }
 
     protected getBody() {
@@ -113,7 +115,8 @@ export class ContainerBuilder<
             this.inputsScope,
             { ...this.bodyScope, image, pullPolicy },
             this.envScope,
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         );
     }
 
@@ -125,7 +128,8 @@ export class ContainerBuilder<
                 command: s
             },
             this.envScope,  // Preserve env scope
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         );
     }
 
@@ -137,7 +141,8 @@ export class ContainerBuilder<
                 args: a
             },
             this.envScope,  // Preserve env scope
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         );
     }
 
@@ -167,7 +172,7 @@ export class ContainerBuilder<
             ContainerScope,
             EnvScope,
             NewOut
-        >(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, newOutputs);
+        >(this.contextualScope, this.inputsScope, this.bodyScope, this.envScope, newOutputs, this.retryParameters);
     }
 
     addEnvVar<Name extends string>(
@@ -199,7 +204,8 @@ export class ContainerBuilder<
             this.inputsScope,
             this.bodyScope,
             {},
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         );
         return builderFn(emptyEnvBuilder) as any;
     }
@@ -228,7 +234,8 @@ export class ContainerBuilder<
             this.inputsScope,
             { ...this.bodyScope, env: { ...currentEnv, [name as string]: value } },
             newEnvScope,
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         );
     }
 
@@ -259,7 +266,8 @@ export class ContainerBuilder<
                 env: envVars
             },
             envVars,
-            this.outputsScope
+            this.outputsScope,
+            this.retryParameters
         ) as any;
     }
 }

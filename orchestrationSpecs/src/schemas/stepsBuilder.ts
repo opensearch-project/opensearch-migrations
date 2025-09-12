@@ -16,7 +16,7 @@ import {
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope,
-    InputParamsToExpressions
+    InputParamsToExpressions, GenericScope
 } from "@/schemas/workflowTypes";
 import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
@@ -84,7 +84,8 @@ export class StepsBuilder<
         inputsScope: InputParamsScope,
         public readonly bodyScope: StepsScope,
         readonly stepGroups: StepGroup[],
-        public readonly outputsScope: OutputParamsScope
+        public readonly outputsScope: OutputParamsScope,
+        protected readonly retryParameters: GenericScope
     ) {
         const rebind = <
             NewBodyScope extends TasksOutputsScope,
@@ -94,12 +95,13 @@ export class StepsBuilder<
             ctx: ContextualScope,
             inputs: InputParamsScope,
             body: NewBodyScope,
-            outputs: NewOutputScope
+            outputs: NewOutputScope,
+            retry: GenericScope,
         ): Self => {
-            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs) as any;
+            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry) as any;
         };
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, rebind);
+        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
     }
 
     protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {
@@ -129,7 +131,8 @@ export class StepsBuilder<
                 this.inputsScope,
                 results.scope,
                 [...this.stepGroups, {steps: results.taskList}],
-                this.outputsScope
+                this.outputsScope,
+                this.retryParameters
             ) as any;
         } else {
             return newGroup; // Propagate the error object to the callsite

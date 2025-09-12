@@ -1,10 +1,11 @@
 import {renderWorkflowTemplate} from "@/renderers/argoResourceRenderer";
-import {SetupKafka} from "@/workflowTemplates/setupKafka";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {FullMigration} from "@/workflowTemplates/fullMigration";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
+import {Replayer} from "@/workflowTemplates/replayer";
+import {SetupKafka} from "@/workflowTemplates/setupKafka";
 
 
 console.log("OUTPUT: ");
@@ -14,6 +15,7 @@ const templates = [
     [DocumentBulkLoad],
     [FullMigration],
     [MigrationConsole],
+    [Replayer],
     [SetupKafka],
     [TargetLatchHelpers],
 ];

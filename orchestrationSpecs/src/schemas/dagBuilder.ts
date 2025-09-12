@@ -29,7 +29,7 @@ import {
     TaskOpts,
     TaskRebinder
 } from "@/schemas/taskBuilder";
-import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { SimpleExpression, taskOutput } from "@/schemas/expression";
@@ -92,7 +92,8 @@ export class DagBuilder<
         inputs: InputParamsScope,
         bodyScope: TaskScope,
         orderedTasks: NamedTask[],
-        outputs: OutputParamsScope
+        outputs: OutputParamsScope,
+        retryParameters: RetryParameters
     ) {
         // Trick: capture a mutable selfRef within a closure for use inside the rebinder
         let selfRef: DagBuilder<ContextualScope, InputParamsScope, any, any> | undefined;
@@ -102,21 +103,21 @@ export class DagBuilder<
             InputParamsScope,
             TasksOutputsScope,
             DagExpressionContext<InputParamsScope, any>
-        > = (ctx, inScope, body, outScope) => {
+        > = (ctx, inScope, body, outScope, retry: RetryParameters) => {
             const currentTasks =
                 selfRef ? selfRef.taskBuilder.getTasks().taskList : orderedTasks;
             return new DagBuilder(
-                ctx, inScope, body, currentTasks, outScope
+                ctx, inScope, body, currentTasks, outScope, retry
             ) as any;
         };
 
-        super(contextualScope, inputs, bodyScope, outputs, templateRebind);
+        super(contextualScope, inputs, bodyScope, outputs, retryParameters, templateRebind);
 
         // This rebinder produces a NEW DagBuilder with the NEW task scope when tasks change
         const tasksRebind: TaskRebinder<ContextualScope> =
             <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, tasks: NamedTask[]) =>
                 new DagBuilder<ContextualScope, InputParamsScope, NS, OutputParamsScope>(
-                    ctx, this.inputsScope, scope, tasks, this.outputsScope
+                    ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters
                 );
 
         this.taskBuilder = new DagTaskBuilder(contextualScope, bodyScope, orderedTasks, tasksRebind);
