@@ -6,6 +6,185 @@ spec:
   serviceAccountName: argo-workflow-executor
   
   templates:
+    # Elasticsearch 2.4 Single Node Template
+    - name: elasticsearch-2-4-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: dtzar/helm-kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            # Create Elasticsearch 2.4 configuration file
+            cat > /tmp/elasticsearch.yml << EOF
+            cluster.name: {{inputs.parameters.cluster-name}}
+            network.host: 0.0.0.0
+            http.host: 0.0.0.0
+            transport.host: 0.0.0.0
+            discovery.zen.minimum_master_nodes: 1
+            bootstrap.system_call_filter: false
+            EOF
+            
+            # Create ConfigMap with the configuration
+            kubectl create configmap {{inputs.parameters.cluster-name}}-config \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n {{inputs.parameters.namespace}} \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
+            # Create Elasticsearch 2.4 deployment directly with kubectl
+            cat > /tmp/elasticsearch-2-4.yaml << 'EOF'
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: {{inputs.parameters.cluster-name}}
+              namespace: {{inputs.parameters.namespace}}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: {{inputs.parameters.cluster-name}}
+              template:
+                metadata:
+                  labels:
+                    app: {{inputs.parameters.cluster-name}}
+                spec:
+                  securityContext:
+                    runAsUser: 1000
+                    runAsGroup: 1000
+                    fsGroup: 1000
+                  initContainers:
+                  - name: install-s3-plugin
+                    image: jritsema/rpi-elasticsearch:2.4.0
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        echo "Installing repository-s3 plugin for ES 2.4..."
+                        cd /elasticsearch-2.4.0
+                        ./bin/plugin install cloud-aws
+                        echo "S3 plugin installation completed"
+                        ls -la plugins/ || true
+                    volumeMounts:
+                    - name: elasticsearch-plugins
+                      mountPath: /elasticsearch-2.4.0/plugins
+                    securityContext:
+                      runAsUser: 1000
+                      runAsGroup: 1000
+                      runAsNonRoot: true
+                  containers:
+                  - name: elasticsearch
+                    image: jritsema/rpi-elasticsearch:2.4.0
+                    command: ["/bin/sh", "-lc"]
+                    securityContext:
+                      runAsUser: 1000
+                      runAsGroup: 1000
+                      runAsNonRoot: true
+                    args:
+                      - >
+                        ES_BIN="/elasticsearch-2.4.0/bin/elasticsearch";
+                        if [ ! -x "$ES_BIN" ]; then
+                          echo "ERROR: elasticsearch binary not found";
+                          ls -la /elasticsearch-2.4.0/bin || true;
+                          sleep 3600;
+                        fi;
+                        echo "Checking installed plugins:";
+                        ls -la /elasticsearch-2.4.0/plugins/ || true;
+                        exec "$ES_BIN"
+                          -Des.path.conf=/elasticsearch-2.4.0/config
+                          -Des.network.host=0.0.0.0
+                          -Des.http.host=0.0.0.0
+                          -Des.transport.host=0.0.0.0
+                          -Des.discovery.zen.minimum_master_nodes=1
+                          -Des.bootstrap.system_call_filter=false
+                          -Djava.net.preferIPv4Stack=true
+                    ports:
+                    - containerPort: 9200
+                      name: http
+                    - containerPort: 9300
+                      name: transport
+                    volumeMounts:
+                    - name: elasticsearch-config
+                      mountPath: /elasticsearch-2.4.0/config/elasticsearch.yml
+                      subPath: elasticsearch.yml
+                    - name: elasticsearch-plugins
+                      mountPath: /elasticsearch-2.4.0/plugins
+                    - name: elasticsearch-data
+                      mountPath: /elasticsearch-2.4.0/data
+                    - name: elasticsearch-logs
+                      mountPath: /elasticsearch-2.4.0/logs
+                    readinessProbe:
+                      httpGet:
+                        path: /
+                        port: 9200
+                      initialDelaySeconds: 5
+                      periodSeconds: 3
+                      failureThreshold: 20
+                    resources:
+                      requests:
+                        cpu: 500m
+                        memory: 1Gi
+                      limits:
+                        cpu: 1000m
+                        memory: 2Gi
+                  volumes:
+                  - name: elasticsearch-config
+                    configMap:
+                      name: {{inputs.parameters.cluster-name}}-config
+                  - name: elasticsearch-plugins
+                    emptyDir: {}
+                  - name: elasticsearch-data
+                    emptyDir: {}
+                  - name: elasticsearch-logs
+                    emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: {{inputs.parameters.cluster-name}}
+              namespace: {{inputs.parameters.namespace}}
+            spec:
+              selector:
+                app: {{inputs.parameters.cluster-name}}
+              ports:
+              - name: http
+                port: 9200
+                targetPort: 9200
+              - name: transport
+                port: 9300
+                targetPort: 9300
+            EOF
+            
+            # Apply the deployment
+            kubectl apply -f /tmp/elasticsearch-2-4.yaml
+            
+            # Wait for deployment to be ready
+            kubectl wait --for=condition=available --timeout=300s deployment/{{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}}
+            
+            # Generate cluster configuration output
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allow_insecure": true,
+              "no_auth": null,
+              "version": "ES_2.4"
+            }
+            EOF
+
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n {{inputs.parameters.namespace}} \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
+            echo "Elasticsearch 2.4 cluster created successfully"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
     # Elasticsearch 5.6 Single Node Template
     - name: elasticsearch-5-6-single-node
       inputs:
