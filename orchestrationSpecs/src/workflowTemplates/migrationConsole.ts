@@ -122,10 +122,10 @@ const configComponentParameters = {
         description: "Snapshot configuration information (JSON)"}),
     sourceCluster: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
         description: "Source cluster configuration (JSON)"}),
-    snapshotConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>|MissingField>({
-        description: "Snapshot configuration information (JSON)"}),
     targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>|MissingField>({
-        description: "Target cluster configuration (JSON)"})
+        description: "Target cluster configuration (JSON)"}),
+    snapshotName: defineRequiredParam<string|MissingField>({description: "Snapshot name"}),
+    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>|MissingField>({description: "S3 Configuration"}),
 };
 
 
@@ -145,8 +145,13 @@ export const MigrationConsole = WorkflowBuilder.create({
                 expr.concat(
                     conditionalInclude("kafka", c.inputs.kafkaInfo),
                     conditionalInclude("source_cluster", c.inputs.sourceCluster),
-                    conditionalInclude("snapshot", c.inputs.snapshotConfig),
                     conditionalInclude("target_cluster", c.inputs.targetConfig),
+                    expr.literal("snapshotConfig: {"),
+                    expr.ternary(expr.equals(expr.asString(c.inputs.snapshotName), expr.literal("")),
+                        expr.literal(""),
+                        expr.concat(expr.literal("snapshot_name: "), expr.cast<string>(c.inputs.snapshotName))),
+                    conditionalInclude("s3", c.inputs.s3Config),
+                    expr.literal("}")
                 ))
         )
     )

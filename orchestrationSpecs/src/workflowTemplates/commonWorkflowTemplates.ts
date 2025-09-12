@@ -33,7 +33,7 @@ export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKey
 export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
 
 export const s3ConfigParam = {
-    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>[]>({
+    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>>({
         description: "S3 connection info (region, endpoint, etc)"})};
 
 

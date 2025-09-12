@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {
-    CLUSTER_CONFIG,
+    CLUSTER_CONFIG, S3_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
     SOURCE_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG
 } from '@/workflowTemplates/userSchemas'
@@ -34,7 +34,8 @@ const s3ImageTargetParams = { // s3ConfigParam, targets, ImageParameters
 
 const sourceMigrationParams = { // sourceMigrationConfig, snapshotConfig, migrationConfig
     sourceConfig: defineRequiredParam<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>(),
-    snapshotConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>(),
+    snapshotName: defineRequiredParam<string>(),
+    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>>(),
     migrationConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>(),
     target: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>>(
         {description: "Server configuration to direct migrated traffic toward" })
@@ -126,7 +127,7 @@ export const FullMigration = WorkflowBuilder.create({
                 .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
                     c=> c.register({
                         ...selectInputsForRegister(b, c),
-                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
+                        snapshotName: c.steps.createOrGetSnapshot.outputs.snapshotName,
                         migrationConfig: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
                         target: c.item
                     }),

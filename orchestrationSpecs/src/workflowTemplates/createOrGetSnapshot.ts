@@ -18,9 +18,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceName", typeToken<string>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addInputsFromRecord(s3ConfigParam)
-        .addSteps(sb=>sb)
-         .addExpressionOutput("snapshotConfig", inputs=>({
-            
-         }) as z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>))
+        .addSteps(b=>b)
+         .addExpressionOutput("snapshotName", c=>c.inputs.sourceName))
 
     .getFullScope();

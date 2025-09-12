@@ -9,8 +9,7 @@ import {asString, BaseExpression, expr} from "@/schemas/expression";
 import {
     CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, S3_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
-    TARGET_CLUSTER_CONFIG,
-    UNKNOWN
+    TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
@@ -173,7 +172,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
         .addOptionalInput("numPods", c=>1)
         .addOptionalInput("useLocalStack", c=>false)
-        .addRequiredInput("target", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
         .addInputsFromRecord(transformZodObjectToParams(RFS_OPTIONS))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
@@ -182,13 +181,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c=>
             c.register({
                 ...selectInputsForRegister(b, c),
-                targetAwsRegion:        expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "region"), ""),
-                targetAwsSigningName:   expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "service"), ""),
-                targetCACert:           expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "caCert"), ""),
-                targetClientSecretName: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "clientSecretName"), ""),
-                targetInsecure:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "allow_insecure"), false),
-                targetUsername:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "username"), ""),
-                targetPassword:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.target, "authConfig", "password"), ""),
+
+                targetAwsRegion:        expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "region"), ""),
+                targetAwsSigningName:   expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "service"), ""),
+                targetCACert:           expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "caCert"), ""),
+                targetClientSecretName: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "clientSecretName"), ""),
+                targetInsecure:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "allow_insecure"), false),
+                targetUsername:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "username"), ""),
+                targetPassword:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "password"), ""),
 
                 s3Endpoint:             expr.jsonPathLoose(b.inputs.s3Config, "endpoint"),
                 s3Region:               expr.jsonPathLoose(b.inputs.s3Config, "aws_region"),
@@ -198,27 +198,28 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("runBulkLoad", t=>t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("snapshotName", typeToken<string>())
         .addRequiredInput("sessionName", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
+        .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot","MigrationConsole"]))
 
         .addSteps(b=>b
-            // .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c=>
-            //     c.register({
-            //         ...selectInputsForRegister(b, c),
-            //         s3Config: undefined,
-            //         target: undefined,
-            //         snapshotName: "",
-            //         targetCompression: false
-            //     })
+            .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c=>
+                c.register(selectInputsForRegister(b, c)))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c=>
                 c.register({
                     ...selectInputsForRegister(b,c),
                     kafkaInfo: MISSING_FIELD,
-                    sourceCluster: MISSING_FIELD,
-                    snapshotConfig: b.inputs.snapshotConfig,
-                    targetConfig: b.inputs.targetConfig
-                })))
+                    sourceCluster: MISSING_FIELD
+                }))
+            .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c=>
+                c.register({
+                    ...selectInputsForRegister(b,c),
+                    configContents: c.steps.setupWaitForCompletion.outputs.configContents
+                }))
+            .addStep("deleteReplicaSet", INTERNAL, "deleteReplicaSet", c=>
+                c.register({name: b.inputs.sessionName}))
+        )
     )
 
     .getFullScope();

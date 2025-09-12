@@ -49,7 +49,7 @@ export const RFS_OPTIONS = z.object({
     maxConnections: z.number().default(0),
     maxShardSizeBytes: z.number().default(0),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-    targetCompression: z.optional(z.boolean())
+    targetCompression: z.boolean().default(true)
 });
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
