@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: empty-configuration
+data:
+  active: "false" # true to enable this configuration for any pod that uses it
+  configuration: ""
