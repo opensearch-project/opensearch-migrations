@@ -11,6 +11,7 @@ spec:
         parameters:
           - name: migration-console-image
           - name: migration-console-pull-policy
+          - name: otel-collector-endpoint
           - name: snapshot-name
             value: "migration-assistant-snapshot"
           - name: source-config
@@ -21,7 +22,7 @@ spec:
             value: ""
             description: "Which indices should be snapshot.  Default empty.  Empty string means all."
           - name: snapshot-config
-            value: "{ \"snapshot_name\": \"{{inputs.parameters.snapshot-name}}\", \"s3\": {{inputs.parameters.s3-config}} }"
+            value: "{ \"snapshot_name\": \"{{inputs.parameters.snapshot-name}}\", \"otel_endpoint\": \"{{inputs.parameters.otel-collector-endpoint}}\" , \"s3\": {{inputs.parameters.s3-config}} }"
       outputs:
         parameters:
           - name: snapshot-config

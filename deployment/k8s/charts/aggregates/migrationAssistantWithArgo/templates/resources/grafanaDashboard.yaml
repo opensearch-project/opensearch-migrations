@@ -1,10 +1,9 @@
-{{ if .Values.conditionalPackageInstalls.grafana }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-metrics-dashboard
   labels:
-    grafana_dashboard: "1"
+    grafana_dashboard: "1" # Required label for Grafana to pick-up dashboard
 data:
   prometheus-metrics-dashboard.json: |
     {
@@ -135,4 +134,3 @@ data:
         }
       ]
     }
-    {{ end }}

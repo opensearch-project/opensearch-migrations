@@ -31,6 +31,7 @@ spec:
                               {
                                   "metadata": {
                                       "from_snapshot": null,
+                                      "otel_endpoint": "http://otel-collector:4317",
                                       "transformer_config_base64": ""
                                   },
                                   "documentBackfillConfigs": [

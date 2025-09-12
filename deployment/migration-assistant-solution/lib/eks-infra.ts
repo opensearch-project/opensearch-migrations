@@ -19,6 +19,7 @@ export interface EKSInfraProps {
     stackName: string;
     namespace?: string;
     buildImagesServiceAccountName?: string;
+    argoWorkflowServiceAccountName?: string;
     migrationsServiceAccountName?: string;
 }
 
@@ -31,6 +32,7 @@ export class EKSInfra extends Construct {
 
         const namespace = props.namespace ?? 'ma';
         const buildImagesServiceAccountName = props.buildImagesServiceAccountName ?? 'build-images-service-account';
+        const argoWorkflowServiceAccountName = props.argoWorkflowServiceAccountName ?? 'argo-workflow-executor';
         const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
 
         const migrationSecurityGroup = new SecurityGroup(this, 'MigrationsSecurityGroup', {
@@ -202,11 +204,26 @@ export class EKSInfra extends Construct {
                 ],
                 resources: ['*'],
             }),
+            // Sending traces to xray
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    "xray:PutTraceSegments",
+                    "xray:PutTelemetryRecords"
+                ],
+                resources: ['*'],
+            }),
         );
         const buildImagesPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'BuildImagesPodIdentityAssociation', {
             clusterName: props.clusterName,
             namespace: namespace,
             serviceAccount: buildImagesServiceAccountName,
+            roleArn: podIdentityRole.roleArn,
+        });
+        const argoWorkflowIdentityAssociation = new CfnPodIdentityAssociation(this, 'ArgoWorkflowPodIdentityAssociation', {
+            clusterName: props.clusterName,
+            namespace: namespace,
+            serviceAccount: argoWorkflowServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
         const migrationsPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'MigrationsPodIdentityAssociation', {
@@ -216,6 +233,7 @@ export class EKSInfra extends Construct {
             roleArn: podIdentityRole.roleArn,
         });
         buildImagesPodIdentityAssociation.node.addDependency(this.cluster)
+        argoWorkflowIdentityAssociation.node.addDependency(this.cluster)
         migrationsPodIdentityAssociation.node.addDependency(this.cluster)
     }
 }
