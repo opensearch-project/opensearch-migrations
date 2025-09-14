@@ -211,7 +211,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b,c),
                     kafkaInfo: MISSING_FIELD,
-                    sourceCluster: MISSING_FIELD
+                    sourceConfig: MISSING_FIELD
                 }))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c=>
                 c.register({

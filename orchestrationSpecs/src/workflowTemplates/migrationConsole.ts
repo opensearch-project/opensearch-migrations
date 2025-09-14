@@ -120,7 +120,7 @@ function conditionalInclude<
 const configComponentParameters = {
     kafkaInfo: defineRequiredParam<z.infer<typeof UNKNOWN>|MissingField>({
         description: "Snapshot configuration information (JSON)"}),
-    sourceCluster: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
+    sourceConfig: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
         description: "Source cluster configuration (JSON)"}),
     targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>|MissingField>({
         description: "Target cluster configuration (JSON)"}),
@@ -144,7 +144,7 @@ export const MigrationConsole = WorkflowBuilder.create({
             stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
                 expr.concat(
                     conditionalInclude("kafka", c.inputs.kafkaInfo),
-                    conditionalInclude("source_cluster", c.inputs.sourceCluster),
+                    conditionalInclude("source_cluster", c.inputs.sourceConfig),
                     conditionalInclude("target_cluster", c.inputs.targetConfig),
                     expr.literal("snapshotConfig: {"),
                     expr.ternary(expr.equals(expr.asString(c.inputs.snapshotName), expr.literal("")),

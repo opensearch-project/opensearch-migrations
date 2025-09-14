@@ -6,12 +6,14 @@ import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
 import {Replayer} from "@/workflowTemplates/replayer";
 import {SetupKafka} from "@/workflowTemplates/setupKafka";
+import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 
 
 console.log("OUTPUT: ");
 const templates = [
     // [CaptureReplay]
     [CreateOrGetSnapshot],
+    [CreateSnapshot],
     [DocumentBulkLoad],
     [FullMigration],
     [MigrationConsole],

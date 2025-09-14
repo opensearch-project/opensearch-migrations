@@ -28,9 +28,7 @@ const targetsArrayParam = {
         description: "List of server configurations to direct migrated traffic toward"})
 };
 
-const s3ImageTargetParams = { // s3ConfigParam, targets, ImageParameters
-    ...s3ConfigParam, ...targetsArrayParam, ...ImageParameters
-}
+const s3ImageTargetParams = { ...s3ConfigParam, ...targetsArrayParam, ...ImageParameters }
 
 const sourceMigrationParams = { // sourceMigrationConfig, snapshotConfig, migrationConfig
     sourceConfig: defineRequiredParam<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>(),
