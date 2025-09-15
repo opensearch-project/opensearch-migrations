@@ -6,6 +6,121 @@ spec:
   serviceAccountName: argo-workflow-executor
   
   templates:
+    # Elasticsearch 1.5 Single Node Template - Inline Manifests
+    - name: elasticsearch-1-5-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: dtzar/helm-kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            # Apply the Deployment + Service for ES 1.5
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                spec:
+                  containers:
+                    - name: elasticsearch
+                      image: elasticsearch:1.5.2
+                      imagePullPolicy: IfNotPresent
+                      command: ["/bin/sh","-lc"]
+                      args:
+                        - >
+                          exec /elasticsearch-1.5.2/bin/elasticsearch
+                            -Des.network.host=0.0.0.0
+                            -Des.http.host=0.0.0.0
+                            -Des.transport.host=0.0.0.0
+                            -Des.cluster.name=${CLUSTER_NAME}
+                      ports:
+                        - containerPort: 9200
+                          name: http
+                        - containerPort: 9300
+                          name: transport
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: 9200
+                        initialDelaySeconds: 5
+                        periodSeconds: 3
+                        failureThreshold: 20
+                      resources:
+                        requests:
+                          cpu: "500m"
+                          memory: "1Gi"
+                        limits:
+                          cpu: "1000m"
+                          memory: "2Gi"
+                      volumeMounts:
+                        - name: elasticsearch-data
+                          mountPath: /elasticsearch-1.5.2/data
+                        - name: elasticsearch-logs
+                          mountPath: /elasticsearch-1.5.2/logs
+                  volumes:
+                    - name: elasticsearch-data
+                      emptyDir: {}
+                    - name: elasticsearch-logs
+                      emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 9200
+                  targetPort: 9200
+                - name: transport
+                  port: 9300
+                  targetPort: 9300
+            EOF
+
+            kubectl -n "${NAMESPACE}" rollout status deploy/${CLUSTER_NAME} --timeout=300s
+
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${CLUSTER_NAME}:9200",
+              "allow_insecure": true,
+              "no_auth": null,
+              "version": "ES_1.5"
+            }
+            EOF
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            echo "Elasticsearch 1.5 cluster created successfully."
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
     # Elasticsearch 2.4 Single Node Template - Inline Manifests
     - name: elasticsearch-2-4-single-node
       inputs:

@@ -14,11 +14,12 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_2.4", "ES_5.6", "ES_7.10"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
 
 # Version to template name mapping
 VERSION_TO_TEMPLATE_MAP = {
+    "ES_1.5": "elasticsearch-1-5-single-node",
     "ES_2.4": "elasticsearch-2-4-single-node",
     "ES_5.6": "elasticsearch-5-6-single-node", 
     "ES_7.10": "elasticsearch-7-10-single-node",
