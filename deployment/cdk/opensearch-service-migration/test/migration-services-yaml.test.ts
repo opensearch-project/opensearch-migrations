@@ -391,7 +391,7 @@ describe('Migration Services YAML Tests', () => {
         const parsedFromYaml = yaml.parse(yamlFileContents);
 
         expect(parsedFromYaml.metadata_migration).toBeDefined();
-        expect(parsedFromYaml.metadata_migration.source_cluster_version).toBeDefined();
+        expect(parsedFromYaml.metadata_migration.source_cluster_version).toBe("ES_7.10")
 
         expect(parsedFromYaml.target_cluster).toBeDefined();
         expect(parsedFromYaml.target_cluster.basic_auth).toBeDefined();
