@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 
 VALID_SOURCE_VERSIONS = ["ES_2.4", "ES_5.6", "ES_7.10"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
+
+# Version to template name mapping
+VERSION_TO_TEMPLATE_MAP = {
+    "ES_2.4": "elasticsearch-2-4-single-node",
+    "ES_5.6": "elasticsearch-5-6-single-node", 
+    "ES_7.10": "elasticsearch-7-10-single-node",
+    "OS_1.3": "opensearch-1-3-single-node",
+    "OS_2.19": "opensearch-2-19-single-node"
+}
 MA_RELEASE_NAME = "ma"
 
 
@@ -103,7 +112,13 @@ class TestRunner:
 
     def _parse_test_report(self, data: dict) -> TestReport:
         tests = [TestEntry(**test) for test in data.get("tests", [])]
-        summary = TestSummary(**data.get("summary"))
+        summary_data = data.get("summary", {})
+        summary = TestSummary(
+            passed=summary_data.get("passed", 0),
+            failed=summary_data.get("failed", 0),
+            source_version=summary_data.get("source_version", ""),
+            target_version=summary_data.get("target_version", "")
+        )
         return TestReport(tests=tests, summary=summary)
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
@@ -166,7 +181,23 @@ class TestRunner:
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
-                chart_values = {"developerModeEnabled": "true"} if developer_mode else None
+                # Build chart values with template names based on versions
+                chart_values = {}
+                if developer_mode:
+                    chart_values["developerModeEnabled"] = "true"
+                
+                # Map versions to template names
+                source_template = VERSION_TO_TEMPLATE_MAP.get(source_version)
+                target_template = VERSION_TO_TEMPLATE_MAP.get(target_version)
+                
+                if source_template:
+                    chart_values["fullMigrationWithClusters.sourceClusterTemplate"] = source_template
+                    logger.info(f"Setting source cluster template to: {source_template}")
+                
+                if target_template:
+                    chart_values["fullMigrationWithClusters.targetClusterTemplate"] = target_template
+                    logger.info(f"Setting target cluster template to: {target_template}")
+
                 if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
                                                      values=chart_values):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
@@ -207,19 +238,19 @@ def _generate_unique_id() -> str:
     return f"{random_part}-{timestamp}"
 
 
-def parse_version_string(version_str: str) -> (string, string, string):
+def parse_version_string(version_str: str) -> tuple[str, str, str]:
     """Parse a string in format ES|OS_x.y and return the distinct pieces as (cluster_type, major, minor)"""
     try:
         cluster_type_part, version_part = version_str.split('_', 1)
         major_str, minor_str = version_part.split('.', 1)
 
         cluster_type = cluster_type_part.lower()
-        major = int(major_str)
+        major = str(int(major_str))
 
         try:
-            minor = int(minor_str)
+            minor = str(int(minor_str))
         except ValueError:
-            minor = minor_str
+            minor = str(minor_str)
 
         return cluster_type, major, minor
     except (ValueError, AttributeError):

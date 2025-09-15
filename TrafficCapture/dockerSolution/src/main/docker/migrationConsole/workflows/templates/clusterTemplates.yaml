@@ -6,7 +6,7 @@ spec:
   serviceAccountName: argo-workflow-executor
   
   templates:
-    # Elasticsearch 2.4 Single Node Template
+    # Elasticsearch 2.4 Single Node Template - Inline Manifests
     - name: elasticsearch-2-4-single-node
       inputs:
         parameters:
@@ -17,166 +17,172 @@ spec:
         command: [sh, -c]
         args:
           - |
-            # Create Elasticsearch 2.4 configuration file
-            cat > /tmp/elasticsearch.yml << EOF
-            cluster.name: {{inputs.parameters.cluster-name}}
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            # 1) Write ES 2.4 config to a file, then create/update the ConfigMap idempotently
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
             network.host: 0.0.0.0
             http.host: 0.0.0.0
             transport.host: 0.0.0.0
             discovery.zen.minimum_master_nodes: 1
             bootstrap.system_call_filter: false
-            EOF
-            
-            # Create ConfigMap with the configuration
-            kubectl create configmap {{inputs.parameters.cluster-name}}-config \
+            cloud.aws.region: us-east-2
+            cloud.aws.protocol: http
+            cloud.aws.s3.endpoint: http://localstack:4566
+            ESCFG
+            # inject cluster name into the file
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
-              -n {{inputs.parameters.namespace}} \
+              -n "${NAMESPACE}" \
               --dry-run=client -o yaml | kubectl apply -f -
-            
-            # Create Elasticsearch 2.4 deployment directly with kubectl
-            cat > /tmp/elasticsearch-2-4.yaml << 'EOF'
+
+            # 2) Create/update AWS creds secret (for the ES 2.4 cloud-aws plugin to pick up)
+            kubectl create secret generic "${CLUSTER_NAME}-aws" \
+              --from-literal=AWS_ACCESS_KEY_ID=test \
+              --from-literal=AWS_SECRET_ACCESS_KEY=test \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            # 3) Apply the Deployment + Service that mirror our proven setup
+            cat <<EOF | kubectl apply -f -
             apiVersion: apps/v1
             kind: Deployment
             metadata:
-              name: {{inputs.parameters.cluster-name}}
-              namespace: {{inputs.parameters.namespace}}
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
             spec:
               replicas: 1
               selector:
                 matchLabels:
-                  app: {{inputs.parameters.cluster-name}}
+                  app: ${CLUSTER_NAME}
               template:
                 metadata:
                   labels:
-                    app: {{inputs.parameters.cluster-name}}
+                    app: ${CLUSTER_NAME}
                 spec:
                   securityContext:
                     runAsUser: 1000
                     runAsGroup: 1000
                     fsGroup: 1000
                   initContainers:
-                  - name: install-s3-plugin
-                    image: jritsema/rpi-elasticsearch:2.4.0
-                    command: ["/bin/sh", "-c"]
-                    args:
-                      - |
-                        echo "Installing repository-s3 plugin for ES 2.4..."
-                        cd /elasticsearch-2.4.0
-                        ./bin/plugin install cloud-aws
-                        echo "S3 plugin installation completed"
-                        ls -la plugins/ || true
-                    volumeMounts:
-                    - name: elasticsearch-plugins
-                      mountPath: /elasticsearch-2.4.0/plugins
-                    securityContext:
-                      runAsUser: 1000
-                      runAsGroup: 1000
-                      runAsNonRoot: true
+                    - name: install-s3-plugin
+                      image: jritsema/rpi-elasticsearch:2.4.0
+                      command: ["sh","-c"]
+                      args:
+                        - cd /elasticsearch-2.4.0 && ./bin/plugin install cloud-aws
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /elasticsearch-2.4.0/plugins
+                      securityContext:
+                        runAsUser: 1000
+                        runAsGroup: 1000
+                        runAsNonRoot: true
                   containers:
-                  - name: elasticsearch
-                    image: jritsema/rpi-elasticsearch:2.4.0
-                    command: ["/bin/sh", "-lc"]
-                    securityContext:
-                      runAsUser: 1000
-                      runAsGroup: 1000
-                      runAsNonRoot: true
-                    args:
-                      - >
-                        ES_BIN="/elasticsearch-2.4.0/bin/elasticsearch";
-                        if [ ! -x "$ES_BIN" ]; then
-                          echo "ERROR: elasticsearch binary not found";
-                          ls -la /elasticsearch-2.4.0/bin || true;
-                          sleep 3600;
-                        fi;
-                        echo "Checking installed plugins:";
-                        ls -la /elasticsearch-2.4.0/plugins/ || true;
-                        exec "$ES_BIN"
-                          -Des.path.conf=/elasticsearch-2.4.0/config
-                          -Des.network.host=0.0.0.0
-                          -Des.http.host=0.0.0.0
-                          -Des.transport.host=0.0.0.0
-                          -Des.discovery.zen.minimum_master_nodes=1
-                          -Des.bootstrap.system_call_filter=false
-                          -Djava.net.preferIPv4Stack=true
-                    ports:
-                    - containerPort: 9200
-                      name: http
-                    - containerPort: 9300
-                      name: transport
-                    volumeMounts:
-                    - name: elasticsearch-config
-                      mountPath: /elasticsearch-2.4.0/config/elasticsearch.yml
-                      subPath: elasticsearch.yml
-                    - name: elasticsearch-plugins
-                      mountPath: /elasticsearch-2.4.0/plugins
-                    - name: elasticsearch-data
-                      mountPath: /elasticsearch-2.4.0/data
-                    - name: elasticsearch-logs
-                      mountPath: /elasticsearch-2.4.0/logs
-                    readinessProbe:
-                      httpGet:
-                        path: /
-                        port: 9200
-                      initialDelaySeconds: 5
-                      periodSeconds: 3
-                      failureThreshold: 20
-                    resources:
-                      requests:
-                        cpu: 500m
-                        memory: 1Gi
-                      limits:
-                        cpu: 1000m
-                        memory: 2Gi
+                    - name: elasticsearch
+                      image: jritsema/rpi-elasticsearch:2.4.0
+                      imagePullPolicy: IfNotPresent
+                      envFrom:
+                        - secretRef:
+                            name: ${CLUSTER_NAME}-aws
+                      command: ["/bin/sh","-lc"]
+                      args:
+                        - >
+                          ES_BIN="/elasticsearch-2.4.0/bin/elasticsearch";
+                          if [ ! -x "\$ES_BIN" ]; then
+                            echo "ERROR: elasticsearch binary not found"; ls -la /elasticsearch-2.4.0/bin; sleep 3600;
+                          fi;
+                          exec "\$ES_BIN"
+                            -Des.path.conf=/elasticsearch-2.4.0/config
+                            -Des.network.host=0.0.0.0
+                            -Des.http.host=0.0.0.0
+                            -Des.transport.host=0.0.0.0
+                            -Des.discovery.zen.minimum_master_nodes=1
+                            -Des.bootstrap.system_call_filter=false
+                            -Djava.net.preferIPv4Stack=true
+                      ports:
+                        - containerPort: 9200
+                          name: http
+                        - containerPort: 9300
+                          name: transport
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: 9200
+                        initialDelaySeconds: 5
+                        periodSeconds: 3
+                        failureThreshold: 20
+                      resources:
+                        requests:
+                          cpu: "500m"
+                          memory: "1Gi"
+                        limits:
+                          cpu: "1000m"
+                          memory: "2Gi"
+                      volumeMounts:
+                        # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
+                        - name: elasticsearch-config
+                          mountPath: /elasticsearch-2.4.0/config/elasticsearch.yml
+                          subPath: elasticsearch.yml
+                        # Writable locations
+                        - name: elasticsearch-data
+                          mountPath: /elasticsearch-2.4.0/data
+                        - name: elasticsearch-logs
+                          mountPath: /elasticsearch-2.4.0/logs
+                        # Persist the plugin installed in init container
+                        - name: plugins
+                          mountPath: /elasticsearch-2.4.0/plugins
                   volumes:
-                  - name: elasticsearch-config
-                    configMap:
-                      name: {{inputs.parameters.cluster-name}}-config
-                  - name: elasticsearch-plugins
-                    emptyDir: {}
-                  - name: elasticsearch-data
-                    emptyDir: {}
-                  - name: elasticsearch-logs
-                    emptyDir: {}
+                    - name: elasticsearch-config
+                      configMap:
+                        name: ${CLUSTER_NAME}-config
+                    - name: elasticsearch-data
+                      emptyDir: {}
+                    - name: elasticsearch-logs
+                      emptyDir: {}
+                    - name: plugins
+                      emptyDir: {}
             ---
             apiVersion: v1
             kind: Service
             metadata:
-              name: {{inputs.parameters.cluster-name}}
-              namespace: {{inputs.parameters.namespace}}
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
             spec:
               selector:
-                app: {{inputs.parameters.cluster-name}}
+                app: ${CLUSTER_NAME}
               ports:
-              - name: http
-                port: 9200
-                targetPort: 9200
-              - name: transport
-                port: 9300
-                targetPort: 9300
+                - name: http
+                  port: 9200
+                  targetPort: 9200
+                - name: transport
+                  port: 9300
+                  targetPort: 9300
             EOF
-            
-            # Apply the deployment
-            kubectl apply -f /tmp/elasticsearch-2-4.yaml
-            
-            # Wait for deployment to be ready
-            kubectl wait --for=condition=available --timeout=300s deployment/{{inputs.parameters.cluster-name}} -n {{inputs.parameters.namespace}}
-            
-            # Generate cluster configuration output
-            cat > /tmp/cluster-config.json << EOF
+
+            # 4) Wait for it to be available (nice UX + reliable handoff)
+            kubectl -n "${NAMESPACE}" rollout status deploy/${CLUSTER_NAME} --timeout=300s
+
+            # 5) Emit cluster config as output
+            cat > /tmp/cluster-config.json <<EOF
             {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "endpoint": "http://${CLUSTER_NAME}:9200",
               "allow_insecure": true,
               "no_auth": null,
               "version": "ES_2.4"
             }
             EOF
 
-            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
-              -n {{inputs.parameters.namespace}} \
+              -n ${NAMESPACE} \
               --dry-run=client -o yaml | kubectl apply -f -
-            
-            echo "Elasticsearch 2.4 cluster created successfully"
+
+            echo "Elasticsearch 2.4 cluster created successfully (manifests inline)."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
