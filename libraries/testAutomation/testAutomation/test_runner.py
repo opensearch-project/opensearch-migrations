@@ -203,6 +203,27 @@ class TestRunner:
                                                      values=chart_values):
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
+                # Force update cluster templates to ensure latest changes are used
+                logger.info("Force updating cluster templates...")
+                try:
+                    import subprocess
+                    import os
+                    template_path = os.path.join(os.path.dirname(__file__), 
+                        "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/workflows/templates/clusterTemplates.yaml")
+                    
+                    # Delete existing template first to force recreation
+                    subprocess.run(["kubectl", "delete", "workflowtemplate", "cluster-templates", "-n", "ma", "--ignore-not-found=true"], 
+                                 check=True, capture_output=True)
+                    
+                    # Apply the updated template
+                    subprocess.run(["kubectl", "apply", "-f", template_path, "-n", "ma"], 
+                                 check=True, capture_output=True)
+                    logger.info("Cluster templates force updated successfully")
+                except subprocess.CalledProcessError as e:
+                    logger.warning(f"Failed to update cluster templates: {e}")
+                except Exception as e:
+                    logger.warning(f"Error updating cluster templates: {e}")
+
                 self.k8s_service.wait_for_all_healthy_pods()
 
                 tests_passed = self.run_tests(source_version=source_version,
