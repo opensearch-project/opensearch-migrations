@@ -1,4 +1,4 @@
-import { Template, Capture } from 'aws-cdk-lib/assertions';
+import { Template } from 'aws-cdk-lib/assertions';
 import { ContainerImage } from 'aws-cdk-lib/aws-ecs';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { ReindexFromSnapshotStack } from '../lib/service-stacks/reindex-from-snapshot-stack';
@@ -100,12 +100,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack).toBeDefined();
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
@@ -157,12 +158,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack).toBeDefined();
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
@@ -218,12 +220,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack).toBeDefined();
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
@@ -292,12 +295,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack).toBeDefined();
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
@@ -345,12 +349,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack).toBeDefined();
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
@@ -383,11 +388,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
       Cpu: "16384",
       Memory: "32768",
     });
-      const volumesCapture = new Capture();
-      template.hasResourceProperties('AWS::ECS::Service', {
-        VolumeConfigurations: volumesCapture,
-      });
-      const volumes = volumesCapture.asArray();
+      // Find the ECS service resource
+      const services = template.findResources('AWS::ECS::Service');
+      const serviceKeys = Object.keys(services);
+      expect(serviceKeys.length).toBe(1);
+      
+      const service = services[serviceKeys[0]];
+      const volumes = service.Properties.VolumeConfigurations;
       expect(volumes).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -399,12 +406,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
           }),
         ])
       );
-      const volumeCapture = new Capture();
-      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-        Volumes: volumeCapture,
-      });
+      // Check volumes directly from the task definition
+      const taskVolumes = taskDefinition.Properties.Volumes;
       // Ensure there are 2 volumes, ebs and ephemeral
-      expect(volumeCapture.asArray().length).toBe(2);
+      expect(taskVolumes.length).toBe(2);
     });
 
   test('ReindexFromSnapshotStack configures ephemeral storage in GovCloud', () => {
@@ -425,12 +430,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack.region).toEqual("us-gov-west-1");
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
@@ -438,20 +444,14 @@ describe('ReindexFromSnapshotStack Tests', () => {
       '/rfs-app/entrypoint.sh'
     ]);
 
-    const ephemeralStorageCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      EphemeralStorage: ephemeralStorageCapture,
-    });
-
-    const ephemeralStorage = ephemeralStorageCapture.asObject();
+    // Check ephemeral storage directly from the task definition
+    const ephemeralStorage = taskDefinition.Properties.EphemeralStorage;
     expect(ephemeralStorage.SizeInGiB).toBe(199);
 
-    const volumeCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      Volumes: volumeCapture,
-    });
+    // Check volumes directly from the task definition
+    const taskVolumes = taskDefinition.Properties.Volumes;
     // Ensure the only volume is the ephemeral storage
-    expect(volumeCapture.asArray().length).toBe(1);
+    expect(taskVolumes.length).toBe(1);
   });
 
   test('ReindexFromSnapshotStack uses ceiling of maxShardSizeBytes calculation', () => {
@@ -478,12 +478,13 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack).toBeDefined();
     const template = Template.fromStack(reindexStack);
 
-    const taskDefinitionCapture = new Capture();
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: taskDefinitionCapture,
-    });
-
-    const containerDefinitions = taskDefinitionCapture.asArray();
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+    
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
     expect(containerDefinitions.length).toBe(1);
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
