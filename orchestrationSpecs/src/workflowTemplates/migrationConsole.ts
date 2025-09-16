@@ -13,8 +13,8 @@ import {
     toBase64
 } from "@/schemas/expression";
 import {
-    CLUSTER_CONFIG,
-    CONSOLE_SERVICES_CONFIG_FILE, S3_CONFIG,
+    CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE, DYNAMIC_SNAPSHOT_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
     TARGET_CLUSTER_CONFIG,
     UNKNOWN
@@ -111,7 +111,7 @@ function conditionalInclude<
             // Fill out the appropriate line(s) of the config.  Notice that yaml allows inlining JSON,
             // which makes handling contents, especially at argo runtime, simpler
             expr.literal(label+": "),
-            expr.recordToString(expr.cast<T>(contents)),
+            expr.recordToString(expr.cast(contents).to<T>()),
             expr.literal("\n")
         )
     );
@@ -124,8 +124,8 @@ const configComponentParameters = {
         description: "Source cluster configuration (JSON)"}),
     targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>|MissingField>({
         description: "Target cluster configuration (JSON)"}),
-    snapshotName: defineRequiredParam<string|MissingField>({description: "Snapshot name"}),
-    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>|MissingField>({description: "S3 Configuration"}),
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>|MissingField>({
+        description: "Snapshot configuration information (JSON)"}),
 };
 
 
@@ -146,12 +146,9 @@ export const MigrationConsole = WorkflowBuilder.create({
                     conditionalInclude("kafka", c.inputs.kafkaInfo),
                     conditionalInclude("source_cluster", c.inputs.sourceConfig),
                     conditionalInclude("target_cluster", c.inputs.targetConfig),
-                    expr.literal("snapshotConfig: {"),
-                    expr.ternary(expr.equals(expr.asString(c.inputs.snapshotName), expr.literal("")),
-                        expr.literal(""),
-                        expr.concat(expr.literal("snapshot_name: "), expr.cast<string>(c.inputs.snapshotName))),
-                    conditionalInclude("s3", c.inputs.s3Config),
-                    expr.literal("}")
+                    conditionalInclude("target_cluster", c.inputs.targetConfig),
+                    conditionalInclude("snapshot", c.inputs.snapshotConfig),
+                    conditionalInclude("target_cluster", c.inputs.targetConfig)
                 ))
         )
     )

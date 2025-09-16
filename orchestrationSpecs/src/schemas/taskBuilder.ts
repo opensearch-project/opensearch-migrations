@@ -135,16 +135,27 @@ export type RequiredKeysOfRegister<R extends (arg: any, ...rest: any[]) => any> 
         ? RequiredKeys<Parameters<R>[0]>
         : never;
 
-// Convention: an input is optional-at-callsite iff value._hasDefault === true
-function isRequiredAtCallsite(v: any): boolean {
-    return !(v && v._hasDefault === true);
-}
+/**
+ * Read an optional runtime allow-list of parameter keys from the callback object,
+ * but keep the type tied to the *input params* keys.
+ */
+export function getAcceptedRegisterKeys<
+    Inputs extends Record<string, any>
+>(
+    cb:
+        | { parameterKeys?: readonly (Extract<keyof Inputs, string>)[] }
+        | {
+        register: ((arg: any, ...rest: any[]) => any) & {
+            parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
+        };
+    }
+): readonly (Extract<keyof Inputs, string>)[];
 
-// read an optional runtime allow-list of keys from the callback object
-function getAcceptedRegisterKeys(cb: any): string[] | undefined {
-    if (cb && Array.isArray(cb.parameterKeys)) return cb.parameterKeys as string[];
-    if (cb?.register && Array.isArray(cb.register.parameterKeys)) return cb.register.parameterKeys as string[];
-    return undefined;
+/** Implementation signature */
+export function getAcceptedRegisterKeys(cb: any): readonly string[] {
+    if (cb && Array.isArray(cb.parameterKeys)) return cb.parameterKeys as readonly string[];
+    if (cb?.register && Array.isArray(cb.register.parameterKeys)) return cb.register.parameterKeys as readonly string[];
+    return [];
 }
 
 /**
@@ -189,7 +200,8 @@ export function selectInputsForRegister<
 ): Pick<BuilderT["inputs"], Extract<keyof BuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>
 {
     const keysToKeep = getAcceptedRegisterKeys(callback) as readonly (keyof BuilderT["inputs"])[];
-    return selectInputsForKeys(builder, keysToKeep) as any;}
+    return selectInputsForKeys(builder, keysToKeep) as any;
+}
 
 export type ParamsTuple<
     I extends InputParametersRecord,

@@ -4,9 +4,8 @@ import {StepGroup} from "@/schemas/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {BaseExpression} from "@/schemas/expression";
 import {NamedTask} from "@/schemas/taskBuilder";
-import {optional} from "zod";
+import {BaseExpression} from "@/schemas/expression";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>

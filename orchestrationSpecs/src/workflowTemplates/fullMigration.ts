@@ -1,20 +1,19 @@
 import {z} from 'zod';
 import {
-    CLUSTER_CONFIG, S3_CONFIG,
+    CLUSTER_CONFIG, DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
     SOURCE_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG
 } from '@/workflowTemplates/userSchemas'
 import {
     CommonWorkflowParameters,
-    ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys,
-    s3ConfigParam
+    ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys, snapshotInputConfigParam
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {expr as EXPR} from "@/schemas/expression";
 import {makeParameterLoop} from "@/schemas/workflowTypes";
 import {configMapKey, defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
-import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
+import {getAcceptedRegisterKeys, INTERNAL, selectInputsForKeys, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
 import { IMAGE_PULL_POLICY } from '@/schemas/containerBuilder';
@@ -28,12 +27,9 @@ const targetsArrayParam = {
         description: "List of server configurations to direct migrated traffic toward"})
 };
 
-const s3ImageTargetParams = { ...s3ConfigParam, ...targetsArrayParam, ...ImageParameters }
-
 const sourceMigrationParams = { // sourceMigrationConfig, snapshotConfig, migrationConfig
     sourceConfig: defineRequiredParam<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>(),
-    snapshotName: defineRequiredParam<string>(),
-    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>>(),
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
     migrationConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>(),
     target: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>>(
         {description: "Server configuration to direct migrated traffic toward" })
@@ -113,19 +109,20 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotAndMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("sourcePipelineName", typeToken<string>())
-        .addInputsFromRecord(s3ImageTargetParams) // s3ConfigParam, targets, ImageParameters
+        .addInputsFromRecord({...snapshotInputConfigParam, ...targetsArrayParam, ...ImageParameters})
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
         .addSteps(b=> b
                 .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                     c=>c.register({
-                        ...selectInputsForRegister(b,c),
-                        sourceName: b.inputs.sourcePipelineName
+                        ...selectInputsForRegister(b, c),
+                        indices: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "indices"),
+                        autocreateSnapshotName: b.inputs.sourcePipelineName
                     }))
 
                 .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
                     c=> c.register({
                         ...selectInputsForRegister(b, c),
-                        snapshotName: c.steps.createOrGetSnapshot.outputs.snapshotName,
+                        snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
                         migrationConfig: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
                         target: c.item
                     }),
@@ -137,7 +134,7 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("pipelineSourceMigration", t => t
         .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
         .addInputsFromRecord(targetsArrayParam) // "targetConfig"
-        .addInputsFromRecord(s3ConfigParam) // s3Config
+        .addInputsFromRecord(snapshotInputConfigParam) // s3Config
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
         .addInputsFromRecord(ImageParameters)
 
@@ -159,7 +156,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
         .addInputsFromRecord(targetsArrayParam)
-        .addInputsFromRecord(s3ConfigParam)
+        .addInputsFromRecord(snapshotInputConfigParam)
         .addInputsFromRecord( // These image configurations have defaults from the ConfigMap
             Object.fromEntries(LogicalOciImages.flatMap(k => [
                 [`image${k}Location`, defineParam({

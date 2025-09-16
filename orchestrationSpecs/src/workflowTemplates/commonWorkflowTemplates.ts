@@ -7,7 +7,7 @@ import {
 } from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {z} from "zod/index";
-import {S3_CONFIG, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
+import {DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {BaseExpression, expr} from "@/schemas/expression";
 
 export const CommonWorkflowParameters = {
@@ -60,10 +60,13 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<z.
     };
 }
 
-export const s3ConfigParam = {
-    s3Config: defineRequiredParam<z.infer<typeof S3_CONFIG>>({
-        description: "S3 connection info (region, endpoint, etc)"})};
+export const snapshotInputConfigParam = {
+    snapshotConfig: defineRequiredParam<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>({
+        description: "Snapshot storage details (region, endpoint, etc)"})};
 
+export const snapshotOutputConfigInputParam = {
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
+        description: "Snapshot storage details (region, endpoint, etc)"})};
 
 export function safeSpread<T>(list: T[]) {
     return list === undefined ? [] : list;

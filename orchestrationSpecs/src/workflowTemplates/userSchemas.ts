@@ -30,15 +30,22 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 
 export const UNKNOWN = z.object({});
 
-export const S3_CONFIG = z.object({
+export const S3_REPO_CONFIG = z.object({
     aws_region: z.string(),
     endpoint: z.string(),
-    repo_uri: z.string()
+    repoPath: z.string()
+});
+
+export const DYNAMIC_SNAPSHOT_CONFIG = z.object({
+    repoConfig: S3_REPO_CONFIG,
+    snapshotName: z.string().optional()
+});
+
+export const COMPLETE_SNAPSHOT_CONFIG = DYNAMIC_SNAPSHOT_CONFIG.extend({
+    snapshotName: z.string() // override to required
 });
 
 export const RFS_OPTIONS = z.object({
-    snapshotName: z.string().optional(),
-
     loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
     docTransformerBase64: z.string().default("not a transform"),

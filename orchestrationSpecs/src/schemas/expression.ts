@@ -150,6 +150,110 @@ export class DeserializeJson<T extends PlainObject> extends BaseExpression<T, "c
     }
 }
 
+
+type NormalizeValue<V> =
+    V extends BaseExpression<infer U, infer C> ? BaseExpression<U, C> :
+        V extends PlainObject                     ? SimpleExpression<DeepWiden<V>> :
+            never;
+
+type NormalizeRecord<R extends Record<string, unknown>> = {
+    [K in keyof R]: NormalizeValue<R[K]>;
+};
+
+type ResultRecord<N extends Record<string, BaseExpression<any, any>>> = {
+    [K in keyof N]: ResultOf<N[K]>;
+};
+
+type ComplexityOfRecord<N extends Record<string, BaseExpression<any, any>>> =
+    Extract<N[keyof N], BaseExpression<any, "complicatedExpression">> extends never
+        ? "govaluate"
+        : "complicatedExpression";
+
+// ===== ADD: expression node for constructing a dict ========================
+
+export class DictMakeExpression<
+    N extends Record<string, BaseExpression<any, any>>
+> extends BaseExpression<ResultRecord<N>, ComplexityOfRecord<N>> {
+    constructor(public readonly entries: N) {
+        super("dict_make");
+    }
+}
+
+/**
+ * Strongly-typed Sprig-like dict constructor.
+ * Accepts a record whose values can be literals or expressions.
+ * - Infers the resulting object shape and value types.
+ * - Result complexity is "complicated" if any value is complicated.
+ */
+export function makeDict<R extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+    entries: R
+): BaseExpression<
+    { [K in keyof R]: ResultOf<NormalizeValue<R[K]>> },
+    ComplexityOfRecord<NormalizeRecord<R>>
+> {
+    const normalized = Object.fromEntries(
+        Object.entries(entries).map(([k, v]) => {
+            const e = isExpression(v) ? v : expr.literal(v as any);
+            return [k, e];
+        })
+    ) as NormalizeRecord<R>;
+
+    return new DictMakeExpression(normalized) as BaseExpression<
+        { [K in keyof R]: ResultOf<NormalizeValue<R[K]>> },
+        ComplexityOfRecord<NormalizeRecord<R>>
+    >;
+}
+
+// -------- Type utilities for merging two result records --------
+
+type Keys<A, B> = keyof A | keyof B;
+
+type MergeTwo<A extends Record<string, any>, B extends Record<string, any>> = {
+    [K in Keys<A, B>]:
+    K extends keyof B
+        ? (K extends keyof A ? A[K] | B[K] : B[K])
+        : (K extends keyof A ? A[K] : never)
+};
+
+// -------- Expression node for merging two dicts --------
+
+export class DictMergeExpression<
+    L extends BaseExpression<Record<string, any>, CL>,
+    R extends BaseExpression<Record<string, any>, CR>,
+    CL extends ExpressionType = ExprC<L>,
+    CR extends ExpressionType = ExprC<R>
+> extends BaseExpression<
+    MergeTwo<ResultOf<L>, ResultOf<R>>,
+    "complicatedExpression" // I don't think when expressions can run sprig functions
+    //(CL | CR) extends "complicatedExpression" ? "complicatedExpression" : "govaluate"
+> {
+    constructor(public readonly left: L, public readonly right: R) {
+        super("dict_merge");
+    }
+}
+
+// -------- Public API --------------------------------------------------------
+
+/**
+ * Merge two dictionary expressions (right wins at runtime; types become a union where keys overlap).
+ * - Keeps precise key sets from both inputs.
+ * - Value types for overlapping keys are unioned: A[K] | B[K].
+ * - Complexity widens if either side is "complicatedExpression".
+ */
+export function mergeDicts<
+    L extends BaseExpression<Record<string, any>, any>,
+    R extends BaseExpression<Record<string, any>, any>
+>(
+    left: L,
+    right: R
+): BaseExpression<
+    MergeTwo<ResultOf<L>, ResultOf<R>>,
+    (ExprC<L> | ExprC<R>) extends "complicatedExpression" ? "complicatedExpression" : "govaluate"
+> {
+    return new DictMergeExpression(left, right) as any;
+}
+
+
 // Everything else is for jsonPath
 
 export class RecordFieldSelectExpression<T, P, E> extends BaseExpression<any, "complicatedExpression"> {
@@ -395,8 +499,12 @@ export function nullCoalesce<T extends PlainObject>(
  * Pretty unsafe, but this is here at least until we have a smarter ternary in place.
  * If one knows that something can't be missing, because it's already been checked, this is the way out
  */
-export function cast<T extends PlainObject>(v: BaseExpression<T|MissingField>): BaseExpression<T> {
-    return v as BaseExpression<T>;
+export function cast<FROM extends PlainObject>(v: BaseExpression<FROM>) {
+    return {
+        to<TO extends PlainObject>(): BaseExpression<TO> {
+            return v as unknown as BaseExpression<TO>;
+        }
+    };
 }
 
 export const concat = <ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> =>
@@ -474,6 +582,8 @@ export function recordToString(data: BaseExpression<Record<string, any>>) {
 export function stringToRecord<T extends PlainObject = never>(typeToken: TypeToken<T>, data: BaseExpression<string>) {
     return new DeserializeJson<T>(data);
 }
+
+
 
 export const length = <E extends BaseExpression<any[], any>>(arr: E): BaseExpression<number, ExprC<E>> =>
     new ArrayLengthExpression(arr);
@@ -650,6 +760,8 @@ export const expr = {
     jsonPathStrict,
     stringToRecord,
     recordToString,
+    makeDict,
+    mergeDicts,
 
     // Array operations
     length,

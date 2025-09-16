@@ -5,7 +5,12 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
-import {CLUSTER_CONFIG, CONSOLE_SERVICES_CONFIG_FILE, S3_CONFIG} from "@/workflowTemplates/userSchemas";
+import {
+    CLUSTER_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE,
+    DYNAMIC_SNAPSHOT_CONFIG
+} from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {INTERNAL, selectInputsForKeys, selectInputsForRegister} from "@/schemas/taskBuilder";
 import {MISSING_FIELD} from "@/schemas/plainObject";
@@ -35,9 +40,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
 
     .addTemplate("snapshotWorkflow", t=>t
-        .addRequiredInput("snapshotName", typeToken<string>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
-        .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("indices", typeToken<string[]>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
@@ -65,6 +69,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     configContents: c.steps.getConsoleConfig.outputs.configContents
                 }))
         )
+        .addExpressionOutput("snapshotConfig", b=>b.inputs.snapshotConfig)
     )
 
 

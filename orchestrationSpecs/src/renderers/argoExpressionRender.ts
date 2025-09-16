@@ -1,6 +1,5 @@
 // Type-safe visitor pattern for conversion
 import expression, {
-    AnyExpression,
     ArithmeticExpression,
     ArrayIndexExpression,
     ArrayLengthExpression,
@@ -9,18 +8,17 @@ import expression, {
     BaseExpression,
     ComparisonExpression,
     ConcatExpression,
-    ExpressionType,
     FromBase64Expression,
     FromParameterExpression,
-    WorkflowValueExpression,
     LiteralExpression,
+    WorkflowValueExpression,
     RecordFieldSelectExpression,
     TernaryExpression,
     ToBase64Expression,
     SerializeJson,
     NotExpression,
     DeserializeJson,
-    TemplateReplacementExpression, NullCoalesce, TaskDataExpression,
+    TemplateReplacementExpression, NullCoalesce, TaskDataExpression, DictMakeExpression, DictMergeExpression,
 } from "@/schemas/expression";
 import { PlainObject } from "@/schemas/plainObject";
 
@@ -147,6 +145,30 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         return formattedResult(`[${inner}]`, true);
     }
 
+    // ---- NEW: Dict make ----------------------------------------------------
+    if (isDictMakeExpression(expr)) {
+        const de = expr as DictMakeExpression<Record<string, AnyExpr>>;
+        const parts: string[] = [];
+        for (const [k, v] of Object.entries(de.entries)) {
+            const fv = formatExpression(v as any);
+            parts.push(`"${k}"`, fv.text);
+        }
+        const args = parts.join(", ");
+        // Using function-call form for consistency with other sprig.* calls here:
+        // sprig.dict("k1", v1, "k2", v2)
+        const text = parts.length ? `sprig.dict(${args})` : `sprig.dict()`;
+        return formattedResult(text, true);
+    }
+
+    // ---- NEW: Dict merge ---------------------------------------------------
+    if (isDictMergeExpression(expr)) {
+        const me = expr as DictMergeExpression<any, any, any, any>;
+        const l = formatExpression(me.left);
+        const r = formatExpression(me.right);
+        // Function-call form to match coalesce style
+        return formattedResult(`sprig.merge(${l.text}, ${r.text})`, true);
+    }
+
     if (isParameterExpression(expr)) {
         const pe = expr as FromParameterExpression<any>;
         switch (pe.source.kind) {
@@ -191,8 +213,8 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
     if (isTemplateExpression(expr)) {
         const f = expr as TemplateReplacementExpression;
-        let result = expr.template;
-        for (const [key, value] of Object.entries(expr.replacements)) {
+        let result = f.template;
+        for (const [key, value] of Object.entries(f.replacements)) {
             const expandedValue = formatExpression(value).text;
             result = result.replaceAll(`{{${key}}}`, `" + ${expandedValue} + "`);
         }
@@ -219,6 +241,8 @@ export function isNotExpression(e: AnyExpr): e is NotExpression<any> { return e.
 export function isArrayLengthExpression(e: AnyExpr): e is ArrayLengthExpression<any> { return e.kind === "array_length"; }
 export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> { return e.kind === "array_index"; }
 export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
+export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> { return e.kind === "dict_make"; }
+export function isDictMergeExpression(e: AnyExpr): e is DictMergeExpression<any, any, any, any> { return e.kind === "dict_merge"; }
 export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "parameter"; }
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "loop_item"; }
 export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }

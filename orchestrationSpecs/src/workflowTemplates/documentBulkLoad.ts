@@ -7,7 +7,7 @@ import {InputParamDef, InputParametersRecord, typeToken} from "@/schemas/paramet
 import {z} from "zod/index";
 import {asString, BaseExpression, expr} from "@/schemas/expression";
 import {
-    CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, S3_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
@@ -140,9 +140,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addOptionalInput("numPods", c=>1)
         .addOptionalInput("useLocalStack", c=>false)
 
+        .addRequiredInput("snapshotName", typeToken<string>())
+        .addRequiredInput("snapshotRepoPath", typeToken<string>())
         .addRequiredInput("s3Endpoint", typeToken<string>())
         .addRequiredInput("s3Region", typeToken<string>())
-        .addRequiredInput("s3RepoUri", typeToken<string>())
 
         .addInputsFromRecord(TargetClusterParameters)
         .addInputsFromRecord(transformZodObjectToParams(RFS_OPTIONS))
@@ -170,7 +171,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("createReplicasetFromConfig", t=>t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addOptionalInput("numPods", c=>1)
         .addOptionalInput("useLocalStack", c=>false)
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
@@ -183,25 +184,32 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             c.register({
                 ...selectInputsForRegister(b, c),
 
-                targetAwsRegion:        expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "region"), ""),
-                targetAwsSigningName:   expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "service"), ""),
-                targetCACert:           expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "caCert"), ""),
-                targetClientSecretName: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "clientSecretName"), ""),
-                targetInsecure:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "allow_insecure"), false),
-                targetUsername:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "username"), ""),
-                targetPassword:         expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "password"), ""),
+                targetAwsRegion:      
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "region"), ""),
+                targetAwsSigningName:
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "service"), ""),
+                targetCACert:
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "caCert"), ""),
+                targetClientSecretName:
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "clientSecretName"), ""),
+                targetInsecure:
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "allow_insecure"), false),
+                targetUsername:
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "username"), ""),
+                targetPassword:
+                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "password"), ""),
 
-                s3Endpoint:             expr.jsonPathLoose(b.inputs.s3Config, "endpoint"),
-                s3Region:               expr.jsonPathLoose(b.inputs.s3Config, "aws_region"),
-                s3RepoUri:              expr.jsonPathLoose(b.inputs.s3Config, "repo_uri")
+                s3Endpoint:       expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "endpoint"),
+                s3Region:         expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "aws_region"),
+                snapshotRepoPath: expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "repoPath"),
+                snapshotName:     expr.jsonPathLoose(b.inputs.snapshotConfig, "snapshotName"),
             })))
     )
 
     .addTemplate("runBulkLoad", t=>t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("snapshotName", typeToken<string>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("s3Config", typeToken<z.infer<typeof S3_CONFIG>>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot","MigrationConsole"]))
 
         .addSteps(b=>b

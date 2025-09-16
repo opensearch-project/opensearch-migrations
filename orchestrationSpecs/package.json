@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "npm run type-check && tsup",
-    "dev": "node dev.cjs",
+    "dev": "node --require source-map-support/register dev.cjs",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit"
   },
