@@ -7,7 +7,9 @@ import WorkflowWizard, {
 } from "@/components/common/WorkflowWizard";
 import SourceConfigure from "@/components/connection/SourceConfigure";
 import TargetConfigure from "@/components/connection/TargetConfigure";
-import { Alert, Box } from "@cloudscape-design/components";
+import SnapshotCreator from "@/components/snapshot/SnapshotCreator";
+import SnapshotReview from "@/components/snapshot/SnapshotReview";
+import { Alert } from "@cloudscape-design/components";
 
 export default function SnapshotPage() {
   return (
@@ -43,12 +45,12 @@ function SnapshotPageInner() {
     {
       title: "Snapshot Review",
       description: "Review snapshot details",
-      content: <Box>Placeholder</Box>,
+      content: <SnapshotReview sessionName={sessionName} />,
     },
     {
       title: "Snapshot Creation",
       description: "Create or select snapshot",
-      content: <Box>Placeholder</Box>,
+      content: <SnapshotCreator sessionName={sessionName} />,
     },
   ];
 
