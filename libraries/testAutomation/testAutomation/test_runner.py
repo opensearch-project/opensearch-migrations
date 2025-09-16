@@ -2,14 +2,17 @@ import argparse
 import ast
 from dataclasses import dataclass, field
 import datetime
-from k8s_service import K8sService, HelmCommandFailed
-import logging
+import os
 import random
 import re
 import string
+import subprocess
 import sys
-from tabulate import tabulate
 from typing import List, Optional, Tuple
+
+from k8s_service import K8sService, HelmCommandFailed
+from tabulate import tabulate
+import logging
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +24,7 @@ VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
 VERSION_TO_TEMPLATE_MAP = {
     "ES_1.5": "elasticsearch-1-5-single-node",
     "ES_2.4": "elasticsearch-2-4-single-node",
-    "ES_5.6": "elasticsearch-5-6-single-node", 
+    "ES_5.6": "elasticsearch-5-6-single-node",
     "ES_7.10": "elasticsearch-7-10-single-node",
     "OS_1.3": "opensearch-1-3-single-node",
     "OS_2.19": "opensearch-2-19-single-node"
@@ -59,8 +62,8 @@ class TestsFailed(Exception):
 
 class TestRunner:
 
-    def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
-                 combinations: List[Tuple[str, str]]) -> None:
+    def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str],
+                 ma_chart_path: str, combinations: List[Tuple[str, str]]) -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -77,14 +80,21 @@ class TestRunner:
             print()
 
     def _print_summary_table(self, reports: List[TestReport]) -> None:
-        all_test_names = sorted({test.name for report in reports for test in report.tests})
+        all_test_names = sorted({
+            test.name for report in reports for test in report.tests
+        })
 
         # Build the test matrix rows
         matrix_rows = []
         for report in reports:
-            version_label = f"{report.summary.source_version} -> {report.summary.target_version}"
+            version_label = (
+                f"{report.summary.source_version} -> {report.summary.target_version}"
+            )
             row = [version_label]
-            test_results = {test.name: "✓" if test.result == "passed" else "X" for test in report.tests}
+            test_results = {
+                test.name: "✓" if test.result == "passed" else "X"
+                for test in report.tests
+            }
             for name in all_test_names:
                 row.append(test_results.get(name, ""))
             matrix_rows.append(row)
@@ -101,14 +111,23 @@ class TestRunner:
         print(tabulate(matrix_rows, headers=headers, tablefmt="fancy_grid"))
 
         # Print Test Case Information
-        description_table = [[name, test_descriptions[name]] for name in all_test_names]
+        description_table = [
+            [name, test_descriptions[name]] for name in all_test_names
+        ]
         print("\nTest Case Information:")
-        print(tabulate(description_table, headers=["Test Name", "Description"], tablefmt="fancy_grid"))
+        print(tabulate(
+            description_table,
+            headers=["Test Name", "Description"],
+            tablefmt="fancy_grid"
+        ))
 
         # Print Test Stats
         print("\nTest Stats:")
         for report in reports:
-            print(f"===== {report.summary.source_version} -> {report.summary.target_version} =====")
+            version_pair = (
+                f"{report.summary.source_version} -> {report.summary.target_version}"
+            )
+            print(f"===== {version_pair} =====")
             self._print_test_stats(report)
 
     def _parse_test_report(self, data: dict) -> TestReport:
@@ -122,10 +141,12 @@ class TestRunner:
         )
         return TestReport(tests=tests, summary=summary)
 
-    def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
-                  reuse_clusters: bool = False) -> bool:
+    def run_tests(self, source_version: str, target_version: str,
+                  keep_workflows: bool = False, reuse_clusters: bool = False) -> bool:
         """Runs pytest tests."""
-        logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
+        logger.info(
+            f"Executing migration test cases with pytest and test ID filters: {self.test_ids}"
+        )
         command_list = [
             "pipenv",
             "run",
@@ -145,8 +166,9 @@ class TestRunner:
         self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
-        cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
-                                                                   unbuffered=False)
+        cmd_response = self.k8s_service.exec_migration_console_cmd(
+            command_list=["cat", output_file_path], unbuffered=False
+        )
         test_data = ast.literal_eval(cmd_response)
         logger.debug(f"Received the following test data: {test_data}")
         test_report = self._parse_test_report(test_data)
@@ -163,7 +185,8 @@ class TestRunner:
             if pattern.match(install):
                 self.k8s_service.helm_uninstall(release_name=install)
         for configmap in self.k8s_service.get_configmaps():
-            if pattern.match(configmap) and configmap.endswith("migration-config"):
+            if (pattern.match(configmap) and
+                    configmap.endswith("migration-config")):
                 self.k8s_service.delete_configmap(configmap_name=configmap)
 
     def cleanup_deployment(self) -> None:
@@ -175,12 +198,14 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
-    def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
-            reuse_clusters: bool = False) -> None:
+    def run(self, skip_delete: bool = False, keep_workflows: bool = False,
+            developer_mode: bool = False, reuse_clusters: bool = False) -> None:
         for source_version, target_version in self.combinations:
             try:
-                logger.info(f"Performing helm deployment for migration testing environment "
-                            f"from {source_version} to {target_version}")
+                logger.info(
+                    f"Performing helm deployment for migration testing environment "
+                    f"from {source_version} to {target_version}"
+                )
 
                 # Build chart values with template names based on versions
                 chart_values = {}
@@ -192,26 +217,38 @@ class TestRunner:
                 target_template = VERSION_TO_TEMPLATE_MAP.get(target_version)
                 
                 if source_template:
-                    chart_values["fullMigrationWithClusters.sourceClusterTemplate"] = source_template
+                    chart_values[
+                        "fullMigrationWithClusters.sourceClusterTemplate"
+                    ] = source_template
                     logger.info(f"Setting source cluster template to: {source_template}")
                 
                 if target_template:
-                    chart_values["fullMigrationWithClusters.targetClusterTemplate"] = target_template
+                    chart_values[
+                        "fullMigrationWithClusters.targetClusterTemplate"
+                    ] = target_template
                     logger.info(f"Setting target cluster template to: {target_template}")
 
-                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
-                                                     values=chart_values):
-                    raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
+                if not self.k8s_service.helm_install(
+                    chart_path=self.ma_chart_path,
+                    release_name=MA_RELEASE_NAME,
+                    values=chart_values
+                ):
+                    raise HelmCommandFailed(
+                        "Helm install of Migrations Assistant chart failed"
+                    )
 
                 # Force update cluster templates to ensure latest changes are used
                 logger.info("Force updating cluster templates...")
                 try:
-                    import subprocess
-                    import os
-                    template_path = os.path.join(os.path.dirname(__file__), 
-                        "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/workflows/templates/clusterTemplates.yaml")
-                    
-                    # Delete existing template first to force recreation
+                    # Use absolute path from repo root
+                    repo_root = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "../../..")
+                    )
+                    template_path = os.path.join(
+                        repo_root,
+                        "TrafficCapture/dockerSolution/src/main/docker/"
+                        "migrationConsole/workflows/templates/clusterTemplates.yaml"
+                    )xisting template first to force recreation
                     subprocess.run(["kubectl", "delete", "workflowtemplate", "cluster-templates", "-n", "ma", "--ignore-not-found=true"], 
                                  check=True, capture_output=True)
                     

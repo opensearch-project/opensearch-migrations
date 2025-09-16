@@ -4,9 +4,11 @@ from .cluster_version import ClusterVersion
 from .default_operations import DefaultOperationsLibrary
 
 
-def get_type_mapping_split_transformation(multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
-                                          split_index_name_1: str, split_index_name_2: str,
-                                          cluster_version: ClusterVersion) -> Dict:
+def get_type_mapping_split_transformation(
+    multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
+    split_index_name_1: str, split_index_name_2: str,
+    cluster_version: ClusterVersion
+) -> Dict:
     return {
         "TypeMappingSanitizationTransformerProvider": {
             "staticMappings": {
@@ -25,8 +27,10 @@ def get_type_mapping_split_transformation(multi_type_index_name: str, doc_type_1
     }
 
 
-def get_type_mapping_union_transformation(multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
-                                          cluster_version: ClusterVersion) -> Dict:
+def get_type_mapping_union_transformation(
+    multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
+    cluster_version: ClusterVersion
+) -> Dict:
     return {
         "TypeMappingSanitizationTransformerProvider": {
             "staticMappings": {
@@ -55,22 +59,30 @@ class ElasticsearchV2_XOperationsLibrary(DefaultOperationsLibrary):
 
 class ElasticsearchV5_XOperationsLibrary(DefaultOperationsLibrary):
 
-    def get_type_mapping_union_transformation(self, multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
-                                              cluster_version: ClusterVersion):
-        return get_type_mapping_union_transformation(multi_type_index_name=multi_type_index_name,
-                                                     doc_type_1=doc_type_1,
-                                                     doc_type_2=doc_type_2,
-                                                     cluster_version=cluster_version)
+    def get_type_mapping_union_transformation(
+        self, multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
+        cluster_version: ClusterVersion
+    ):
+        return get_type_mapping_union_transformation(
+            multi_type_index_name=multi_type_index_name,
+            doc_type_1=doc_type_1,
+            doc_type_2=doc_type_2,
+            cluster_version=cluster_version
+        )
 
-    def get_type_mapping_split_transformation(self, multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
-                                              split_index_name_1: str, split_index_name_2: str,
-                                              cluster_version: ClusterVersion):
-        return get_type_mapping_split_transformation(multi_type_index_name=multi_type_index_name,
-                                                     doc_type_1=doc_type_1,
-                                                     doc_type_2=doc_type_2,
-                                                     split_index_name_1=split_index_name_1,
-                                                     split_index_name_2=split_index_name_2,
-                                                     cluster_version=cluster_version)
+    def get_type_mapping_split_transformation(
+        self, multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
+        split_index_name_1: str, split_index_name_2: str,
+        cluster_version: ClusterVersion
+    ):
+        return get_type_mapping_split_transformation(
+            multi_type_index_name=multi_type_index_name,
+            doc_type_1=doc_type_1,
+            doc_type_2=doc_type_2,
+            split_index_name_1=split_index_name_1,
+            split_index_name_2=split_index_name_2,
+            cluster_version=cluster_version
+        )
 
     def get_type_mapping_only_union_transformation(self, cluster_version: ClusterVersion):
         return {
