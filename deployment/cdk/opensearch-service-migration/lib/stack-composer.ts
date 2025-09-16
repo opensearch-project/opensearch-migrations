@@ -585,6 +585,7 @@ export class StackComposer {
                 vpcDetails: networkStack.vpcDetails,
                 streamingSourceType: streamingSourceType,
                 servicesYaml: servicesYaml,
+                sourceClusterVersion: sourceClusterField?.version,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

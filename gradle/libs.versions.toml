@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.38.11"
+aws-crt = "0.38.13"
 aws-msk-iam-auth = "2.3.2"
-aws-sdk = "2.33.4"
+aws-sdk = "2.33.9"
 bouncycastle = "1.81"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -36,9 +36,9 @@ netty = "4.1.124.Final"
 opensearch-testcontainers = "2.0.1"
 opentelemetry = "1.54.0"
 opentelemetry-semconv = "1.23.1-alpha"
-protobuf = "4.32.0"
-reactor-netty = "1.2.9"
-reactor-test = "3.7.9"
+protobuf = "4.32.1"
+reactor-netty = "1.2.10"
+reactor-test = "3.7.11"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
 testcontainers = "1.21.3"
@@ -185,6 +185,6 @@ transitive-json-path         = { module = "com.jayway.jsonpath:json-path",      
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
 transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.21.2"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
-transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.2"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.3"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
 transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",        version = "1.4.21"   }
