@@ -10,17 +10,17 @@ export interface SnapshotIndex {
    * The name of the index
    */
   name: string;
-  
+
   /**
    * The number of documents in the index
    */
   document_count: number;
-  
+
   /**
    * The size of the index in bytes
    */
   size_bytes: number;
-  
+
   /**
    * The number of shards in the index
    */
@@ -33,7 +33,7 @@ export interface SnapshotIndex {
 export enum SnapshotIndexState {
   NOT_STARTED = "not_started",
   IN_PROGRESS = "in_progress",
-  COMPLETED = "completed"
+  COMPLETED = "completed",
 }
 
 /**
