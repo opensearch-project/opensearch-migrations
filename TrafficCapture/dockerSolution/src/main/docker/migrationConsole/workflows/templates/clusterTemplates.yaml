@@ -6,7 +6,7 @@ spec:
   serviceAccountName: argo-workflow-executor
   
   templates:
-    # Elasticsearch 1.5 Single Node Template - Inline Manifests
+    # Elasticsearch 1.5 Single Node Template
     - name: elasticsearch-1-5-single-node
       inputs:
         parameters:
@@ -21,7 +21,35 @@ spec:
             CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
             NAMESPACE='{{inputs.parameters.namespace}}'
 
-            # Apply the Deployment + Service for ES 1.5
+            # 1) Write ES 1.5 config to a file, then create/update the ConfigMap idempotently
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
+            network.host: 0.0.0.0
+            http.host: 0.0.0.0
+            transport.host: 0.0.0.0
+            discovery.zen.minimum_master_nodes: 1
+            discovery.zen.ping.multicast.enabled: false
+            bootstrap.system_call_filter: false
+            cloud.aws.region: us-east-2
+            cloud.aws.protocol: http
+            cloud.aws.s3.endpoint: http://localstack:4566
+            ESCFG
+            # inject cluster name into the file
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            # 2) Create/update AWS creds secret (for the ES 1.5 cloud-aws plugin to pick up)
+            kubectl create secret generic "${CLUSTER_NAME}-aws" \
+              --from-literal=AWS_ACCESS_KEY_ID=test \
+              --from-literal=AWS_SECRET_ACCESS_KEY=test \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            # 3) Apply the Deployment + Service with PATHS for carlchinatomby/elasticsearch:1.5.2-arm64
             cat <<EOF | kubectl apply -f -
             apiVersion: apps/v1
             kind: Deployment
@@ -38,18 +66,54 @@ spec:
                   labels:
                     app: ${CLUSTER_NAME}
                 spec:
+                  securityContext:
+                    runAsUser: 1000
+                    runAsGroup: 1000
+                    fsGroup: 1000
+                  initContainers:
+                    - name: install-s3-plugin
+                      image: carlchinatomby/elasticsearch:1.5.2-arm64
+                      command: ["sh","-c"]
+                      args:
+                        - |
+                          set -e
+                          cd /tmp
+                          wget https://download.elastic.co/elasticsearch/elasticsearch-cloud-aws/elasticsearch-cloud-aws-2.5.1.zip
+                          unzip elasticsearch-cloud-aws-2.5.1.zip
+                          mkdir -p /elasticsearch/plugins/cloud-aws
+                          cp *.jar /elasticsearch/plugins/cloud-aws/
+                          echo "S3 plugin installed successfully"
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /elasticsearch/plugins
+                      securityContext:
+                        runAsUser: 1000
+                        runAsGroup: 1000
+                        runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: elasticsearch:1.5.2
+                      image: carlchinatomby/elasticsearch:1.5.2-arm64
                       imagePullPolicy: IfNotPresent
+                      env:
+                        - name: ES_HEAP_SIZE
+                          value: "512m"
+                      envFrom:
+                        - secretRef:
+                            name: ${CLUSTER_NAME}-aws
                       command: ["/bin/sh","-lc"]
                       args:
                         - >
-                          exec /elasticsearch-1.5.2/bin/elasticsearch
+                          exec /elasticsearch/bin/elasticsearch
+                            -Des.path.conf=/elasticsearch/config
+                            -Des.path.data=/elasticsearch/data
+                            -Des.path.logs=/elasticsearch/logs
                             -Des.network.host=0.0.0.0
                             -Des.http.host=0.0.0.0
                             -Des.transport.host=0.0.0.0
-                            -Des.cluster.name=${CLUSTER_NAME}
+                            -Des.cluster.name={{inputs.parameters.cluster-name}}
+                            -Des.discovery.zen.minimum_master_nodes=1
+                            -Des.bootstrap.system_call_filter=false
+                            -Djava.net.preferIPv4Stack=true
                       ports:
                         - containerPort: 9200
                           name: http
@@ -70,14 +134,27 @@ spec:
                           cpu: "1000m"
                           memory: "2Gi"
                       volumeMounts:
+                        # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
+                        - name: elasticsearch-config
+                          mountPath: /elasticsearch/config/elasticsearch.yml
+                          subPath: elasticsearch.yml
+                        # Writable locations
                         - name: elasticsearch-data
-                          mountPath: /elasticsearch-1.5.2/data
+                          mountPath: /elasticsearch/data
                         - name: elasticsearch-logs
-                          mountPath: /elasticsearch-1.5.2/logs
+                          mountPath: /elasticsearch/logs
+                        # Persist the plugin installed in init container
+                        - name: plugins
+                          mountPath: /elasticsearch/plugins
                   volumes:
+                    - name: elasticsearch-config
+                      configMap:
+                        name: ${CLUSTER_NAME}-config
                     - name: elasticsearch-data
                       emptyDir: {}
                     - name: elasticsearch-logs
+                      emptyDir: {}
+                    - name: plugins
                       emptyDir: {}
             ---
             apiVersion: v1
@@ -97,8 +174,10 @@ spec:
                   targetPort: 9300
             EOF
 
+            # 4) Wait for it to be available (nice UX + reliable handoff)
             kubectl -n "${NAMESPACE}" rollout status deploy/${CLUSTER_NAME} --timeout=300s
 
+            # 5) Emit cluster config as output
             cat > /tmp/cluster-config.json <<EOF
             {
               "endpoint": "http://${CLUSTER_NAME}:9200",
@@ -113,7 +192,8 @@ spec:
               -n ${NAMESPACE} \
               --dry-run=client -o yaml | kubectl apply -f -
 
-            echo "Elasticsearch 1.5 cluster created successfully."
+            echo "Elasticsearch 1.5 cluster created successfully (ARM-compatible with correct paths)."
+            echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
         parameters:
