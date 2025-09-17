@@ -6,9 +6,9 @@ import shadow.lucene9.org.apache.lucene.codecs.KnnVectorsWriter;
 import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 
-public class IgnoreVectors816Format extends KnnVectorsFormat {
+public class IgnoreES816BinaryQuantizedVectorsFormat extends KnnVectorsFormat {
 
-    public IgnoreVectors816Format() {
+    public IgnoreES816BinaryQuantizedVectorsFormat() {
         super("ES816BinaryQuantizedVectorsFormat");
     }
 

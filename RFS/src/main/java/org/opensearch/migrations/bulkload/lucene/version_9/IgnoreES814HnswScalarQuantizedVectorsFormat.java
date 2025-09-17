@@ -9,9 +9,9 @@ import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 /**
  * PostingsFormat fallback for Elasticsearch 8.14+ vector formats.
  */
-public class IgnoreVectorsFormat extends KnnVectorsFormat {
+public class IgnoreES814HnswScalarQuantizedVectorsFormat extends KnnVectorsFormat {
 
-    public IgnoreVectorsFormat() {
+    public IgnoreES814HnswScalarQuantizedVectorsFormat() {
         super("ES814HnswScalarQuantizedVectorsFormat");
     }
 
