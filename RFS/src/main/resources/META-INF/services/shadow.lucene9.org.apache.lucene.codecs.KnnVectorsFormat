@@ -1,1 +1,2 @@
 org.opensearch.migrations.bulkload.lucene.version_9.IgnoreVectorsFormat
+org.opensearch.migrations.bulkload.lucene.version_9.IgnoreVectors816Format
