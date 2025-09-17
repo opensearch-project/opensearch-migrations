@@ -1,9 +1,10 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {OutputParamDef, typeToken} from "@/schemas/parameterSchemas";
+import {OutputParamDef} from "@/schemas/parameterSchemas";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {expectTypeOf} from "expect-type";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {INTERNAL} from "@/schemas/taskBuilder";
+import {typeToken} from "@/schemas/sharedTypes";
 
 describe("paramsFns runtime validation", () => {
     const sharedNothingTemplate =

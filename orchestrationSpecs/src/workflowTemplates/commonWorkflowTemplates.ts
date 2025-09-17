@@ -2,13 +2,13 @@ import {
     defineParam,
     defineRequiredParam,
     InputParamDef,
-    InputParametersRecord,
-    typeToken
+    InputParametersRecord
 } from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {z} from "zod/index";
 import {DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {BaseExpression, expr} from "@/schemas/expression";
+import {typeToken} from "@/schemas/sharedTypes";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints:        defineParam({ expression: "http://etcd.ma.svc.cluster.local:2379" }),
@@ -60,11 +60,11 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<z.
     };
 }
 
-export const snapshotInputConfigParam = {
+export const dynamicSnapshotConfigParam = {
     snapshotConfig: defineRequiredParam<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>({
         description: "Snapshot storage details (region, endpoint, etc)"})};
 
-export const snapshotOutputConfigInputParam = {
+export const completeSnapshotConfigParam = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
         description: "Snapshot storage details (region, endpoint, etc)"})};
 

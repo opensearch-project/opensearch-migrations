@@ -1,20 +1,34 @@
 import {
-    ExtendScope, ExtractOutputParamType, IfNever, LoopWithUnion, ParamsWithLiteralsOrExpressions,
-    TasksOutputsScope, TasksWithOutputs,
-    TemplateSignaturesScope, WorkflowAndTemplatesScope
+    ExtendScope,
+    ExtractOutputParamType,
+    IfNever,
+    LoopWithUnion,
+    ParamsWithLiteralsOrExpressions,
+    TasksOutputsScope,
+    TasksWithOutputs,
+    TemplateSignaturesScope,
+    WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import { Workflow } from "@/schemas/workflowBuilder";
-import { PlainObject } from "@/schemas/plainObject";
-import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import { CallerParams, InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
+import {Workflow} from "@/schemas/workflowBuilder";
+import {PlainObject} from "@/schemas/plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
+import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {NamedTask, TaskType} from "@/schemas/sharedTypes";
 import {
-    SimpleExpression,
-    loopItem,
     AllowLiteralOrExpression,
     BaseExpression,
-    taskOutput,
-    expr
+    expr,
+    loopItem,
+    SimpleExpression,
+    taskOutput
 } from "@/schemas/expression";
+import {
+    buildDefaultsObject,
+    CallerParams,
+    DefaultsOfInputs,
+    HasRequiredByDef,
+    NormalizeInputs
+} from "@/schemas/parameterConversions";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
@@ -28,34 +42,13 @@ type ParamsPushedSymbol = typeof PARAMS_PUSHED;
 // Sentinel to indicate "use local template by key"
 export const INTERNAL: unique symbol = Symbol("INTERNAL_TEMPLATE");
 
-// ==== helpers for InputParamDef-based detection ====
-
-// A field is optional-at-callsite iff its value type has `_hasDefault: true`
-export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
-
-// Collect keys that are *required* at callsite (i.e., no _hasDefault: true)
-export type SomeRequiredKey<T> =
-    [keyof T] extends [never] ? never
-        : { [K in keyof T]-?: ValueHasDefault<T[K]> extends true ? never : K }[keyof T];
-export type HasRequiredByDef<T> = [SomeRequiredKey<T>] extends [never] ? false : true;
-
-// Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
-export type InputKind<T> =
-    [keyof T] extends [never] ? "empty"
-        : HasRequiredByDef<T> extends true ? "hasRequired"
-            : "allOptional";
-
-export type NormalizeInputs<T> = [T] extends [undefined] ? {} : T;
-
-export type TaskType = "tasks" | "steps";
-type LoopItemType<L extends PlainObject> = [L] extends [never] ? never : AllowLiteralOrExpression<L>;
-
 export type OutputParamsToExpressions<
     Outputs extends OutputParametersRecord,
     Label extends TaskType
 > = {
     [K in keyof Outputs]: ReturnType<typeof taskOutput<ExtractOutputParamType<Outputs[K]>, Label>>
 };
+
 export type AllTasksAsOutputReferenceable<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType
@@ -90,6 +83,8 @@ export type ParamProviderCallbackObject<
         register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol;
         /** runtime copy of the keys to make it possible to narrow values, not just types */
         parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
+        defaults: DefaultsOfInputs<Inputs>;
+        defaultKeys?: readonly (Extract<keyof DefaultsOfInputs<Inputs>, string>)[];
     } & AllTasksAsOutputReferenceable<TasksScope, Label>
     & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
 
@@ -102,6 +97,12 @@ export type ParamsRegistrationFn<
     Label extends TaskType,
     LoopT extends PlainObject
 > = (ctx: ParamProviderCallbackObject<TaskScope, Label, Inputs, LoopT>) => ParamsPushedSymbol;
+
+// Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
+export type InputKind<T> =
+    [keyof T] extends [never] ? "empty"
+        : HasRequiredByDef<T> extends true ? "hasRequired"
+            : "allOptional";
 
 export type NormalizeInputsOfCtxTemplate<
     C extends WorkflowAndTemplatesScope,
@@ -118,90 +119,6 @@ export type NormalizeInputsOfWfTemplate<
     W["templates"][K] extends { inputs: infer X }
         ? NormalizeInputs<X> extends InputParametersRecord ? NormalizeInputs<X> : {}
         : {};
-
-// Is K optional in T?
-export type IsOptionalKey<T, K extends keyof T> =
-    {} extends Pick<T, K> ? true : false;
-
-// Union of the *required* (non-optional) keys of T
-export type RequiredKeys<T> =
-    T extends object
-        ? { [K in keyof T]-?: IsOptionalKey<T, K> extends true ? never : K }[keyof T]
-        : never;
-
-// Required keys of the first parameter of R (if it’s an object)
-export type RequiredKeysOfRegister<R extends (arg: any, ...rest: any[]) => any> =
-    Parameters<R>[0] extends object
-        ? RequiredKeys<Parameters<R>[0]>
-        : never;
-
-/**
- * Read an optional runtime allow-list of parameter keys from the callback object,
- * but keep the type tied to the *input params* keys.
- */
-export function getAcceptedRegisterKeys<
-    Inputs extends Record<string, any>
->(
-    cb:
-        | { parameterKeys?: readonly (Extract<keyof Inputs, string>)[] }
-        | {
-        register: ((arg: any, ...rest: any[]) => any) & {
-            parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
-        };
-    }
-): readonly (Extract<keyof Inputs, string>)[];
-
-/** Implementation signature */
-export function getAcceptedRegisterKeys(cb: any): readonly string[] {
-    if (cb && Array.isArray(cb.parameterKeys)) return cb.parameterKeys as readonly string[];
-    if (cb?.register && Array.isArray(cb.register.parameterKeys)) return cb.register.parameterKeys as readonly string[];
-    return [];
-}
-
-/**
- * NEW: Strongly-typed helper that keeps only the provided keys.
- * - `builder.inputs` can be any record
- * - `keys` must be a readonly array of keys from `builder.inputs`
- * - Return type is precisely Pick<inputs, keys[number]>
- */
-export function selectInputsForKeys<
-    BuilderT extends { inputs: Record<string, any> },
-    Ks extends readonly (keyof BuilderT["inputs"])[]
->(
-    builder: BuilderT,
-    keys: Ks
-): Pick<BuilderT["inputs"], Ks[number]> {
-    const src = builder.inputs as Record<string, any>;
-    const out: Partial<BuilderT["inputs"]> = {};
-
-    for (const k of keys) {
-        if (Object.prototype.hasOwnProperty.call(src, k as string)) {
-            // TS is happy because k ∈ keyof BuilderT["inputs"]
-            (out as any)[k] = src[k as string];
-        }
-    }
-
-    return out as Pick<BuilderT["inputs"], Ks[number]>;
-}
-
-/**
- * Infers the correct Pick<...> from (b.inputs, c.register) at compile time,
- * and at runtime returns only those inputs considered "required at callsite".
- *
- * B: any object with an `inputs` record
- * C: any object with a `register` function of shape (arg: {...}) => any
- */
-export function selectInputsForRegister<
-    BuilderT extends { inputs: Record<string, any> },
-    ParamsCallbackT extends { register: (arg: any, ...rest: any[]) => any }
->(
-    builder: BuilderT,
-    callback: ParamsCallbackT
-): Pick<BuilderT["inputs"], Extract<keyof BuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>
-{
-    const keysToKeep = getAcceptedRegisterKeys(callback) as readonly (keyof BuilderT["inputs"])[];
-    return selectInputsForKeys(builder, keysToKeep) as any;
-}
 
 export type ParamsTuple<
     I extends InputParametersRecord,
@@ -306,25 +223,6 @@ export function getTaskOutputsByTaskName<
         outputs: Record<string, any>
     }>;
 }
-
-export type WorkflowTask<
-    IN extends InputParametersRecord,
-    OUT extends OutputParametersRecord,
-    LoopT extends PlainObject = never
-> = {
-    args?: { parameters?: Record<string, any> },
-    when?: SimpleExpression<boolean>
-} & (
-    | { templateRef: { name: string; template: string } }
-    | { template: string }
-    ) & IfNever<LoopT, {}, { withLoop: LoopT }>;
-
-export type NamedTask<
-    IN extends InputParametersRecord = InputParametersRecord,
-    OUT extends OutputParametersRecord = OutputParametersRecord,
-    LoopT extends PlainObject = never,
-    Extra extends Record<string, any> = {}
-> = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
 
 export type TaskRebinder<C extends WorkflowAndTemplatesScope> =
     <NS extends TasksOutputsScope>(context: C, scope: NS, tasks: NamedTask[]) => any;
@@ -468,9 +366,14 @@ export abstract class TaskBuilder<
     ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
         const tasksByName = this.getTaskOutputsByTaskName();
 
+        const defaultsRecord = buildDefaultsObject(inputs as unknown as Record<string, any>);
+        const defaultKeys = Object.keys(defaultsRecord) as Extract<keyof DefaultsOfInputs<Inputs>, string>[];
+
         return {
             register,
             parameterKeys: Object.keys(inputs) as Extract<keyof Inputs, string>[],
+            defaults: defaultsRecord as DefaultsOfInputs<Inputs>,
+            defaultKeys,
             [this.label]: tasksByName,
             ...(loopWith ? { item: loopItem<LoopT>() } : {})
         } as unknown as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;

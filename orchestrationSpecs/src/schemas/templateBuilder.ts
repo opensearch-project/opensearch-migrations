@@ -14,10 +14,7 @@ import {
     defineParam,
     InputParamDef,
     InputParametersRecord,
-    OutputParametersRecord,
-    templateInputParametersAsExpressions,
-    TypeToken,
-    workflowParametersAsExpressions
+    OutputParametersRecord
 } from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
@@ -38,6 +35,8 @@ import {PlainObject} from "@/schemas/plainObject";
 import {DagBuilder} from "@/schemas/dagBuilder";
 import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "@/schemas/expression";
+import {TypeToken} from "@/schemas/sharedTypes";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterConversions";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -101,7 +100,7 @@ export class TemplateBuilder<
         }) => T;
         const e = fn(this.inputs) as T;
         return this.extendWithParam(name as string,
-            defineParam({expression: isExpression(e) ? e : expr.literal(e as PlainObject), description})) as any;
+            defineParam({expression: isExpression(e) ? e : expr.literal(e), description})) as any;
     }
 
     public get inputs() {

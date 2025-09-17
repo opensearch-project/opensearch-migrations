@@ -11,21 +11,8 @@
  */
 
 import {DeepWiden, PlainObject} from "@/schemas/plainObject";
-import {
-    AllowLiteralOrExpression,
-    BaseExpression,
-    FromParameterExpression,
-    inputParam,
-    workflowParam
-} from "@/schemas/expression";
-
-// Zero-runtime “type witness” object that carries a generic T.
-export declare const __type_token__: unique symbol;
-
-export type TypeToken<T> = {
-    readonly [__type_token__]?: (x: T) => T; // phantom to make T invariant
-};
-export const typeToken = <T>(): TypeToken<T> => ({}) as TypeToken<T>;
+import {AllowLiteralOrExpression, BaseExpression, FromParameterExpression} from "@/schemas/expression";
+import {typeToken, TypeToken} from "@/schemas/sharedTypes";
 
 type DefaultSpec<T extends PlainObject> =
     | {
@@ -117,55 +104,3 @@ export type OutputParamDef<T extends PlainObject> = {
 export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
 export type OutputParametersRecord = Record<string, OutputParamDef<any>>;
 
-/** Type-only: infer the value type from an InputParamDef. */
-export type InferParamType<P> = P extends InputParamDef<infer T, any> ? T : never;
-
-/** Type-only: compute the caller object type.
- * - Keys with defaults become optional (`T | undefined`)
- * - Required keys are mandatory (`T`)
- */
-export type CallerParams<T extends InputParametersRecord> =
-// optional keys (those with defaults)
-    { [K in keyof T as T[K] extends { _hasDefault: true } ? K : never]?: InferParamType<T[K]> } &
-    // required keys (no defaults)
-    { [K in keyof T as T[K] extends { _hasDefault: true } ? never : K]-?: InferParamType<T[K]> };
-
-/**
- * Convenience: turn template input param defs into expression leaves.
- * NOTE: These are *runtime* constructors of expression nodes, but remain
- * shape-preserving and side-effect free. Circular import with expression.ts
- * is intentional and safe as long as you don't execute these during module
- * initialization in a way that depends on expression.ts having finished
- * evaluating. Typical usage is inside builders/factories.
- */
-export function templateInputParametersAsExpressions<WP extends InputParametersRecord>(params: WP): {
-    [K in keyof WP]: WP[K] extends InputParamDef<infer T, any>
-        ? [T] extends [PlainObject]
-            ? [T] extends [null | undefined]
-                ? never
-                : ReturnType<typeof inputParam<T>>
-            : never
-        : never
-} {
-    const out: any = {};
-    for (const key of Object.keys(params)) {
-        out[key] = inputParam(key, params[key]);
-    }
-    return out;
-}
-
-export function workflowParametersAsExpressions<WP extends InputParametersRecord>(params: WP): {
-    [K in keyof WP]: WP[K] extends InputParamDef<infer T, any>
-        ? [T] extends [PlainObject]
-            ? [T] extends [null | undefined]
-                ? never
-                : ReturnType<typeof workflowParam<T>>
-            : never
-        : never
-} {
-    const out: any = {};
-    for (const key of Object.keys(params)) {
-        out[key] = workflowParam(key, params[key]);
-    }
-    return out;
-}

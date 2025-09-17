@@ -2,21 +2,25 @@ import {z} from 'zod';
 import {
     CLUSTER_CONFIG, DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
-    SOURCE_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG
+    SOURCE_MIGRATION_CONFIG, TARGET_CLUSTER_CONFIG, PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
 } from '@/workflowTemplates/userSchemas'
 import {
     CommonWorkflowParameters,
-    ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys, snapshotInputConfigParam
+    ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys, dynamicSnapshotConfigParam,
+    completeSnapshotConfigParam
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
 import {expr as EXPR} from "@/schemas/expression";
 import {makeParameterLoop} from "@/schemas/workflowTypes";
-import {configMapKey, defineParam, defineRequiredParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
-import {getAcceptedRegisterKeys, INTERNAL, selectInputsForKeys, selectInputsForRegister} from "@/schemas/taskBuilder";
+import {configMapKey, defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
+import {INTERNAL} from "@/schemas/taskBuilder";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
 import { IMAGE_PULL_POLICY } from '@/schemas/containerBuilder';
+import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
+import {selectInputsForRegister} from "@/schemas/parameterConversions";
+import {typeToken} from "@/schemas/sharedTypes";
 
 const latchCoordinationPrefixParam = {
     latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})
@@ -26,14 +30,6 @@ const targetsArrayParam = {
     targets: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>[]>({
         description: "List of server configurations to direct migrated traffic toward"})
 };
-
-const sourceMigrationParams = { // sourceMigrationConfig, snapshotConfig, migrationConfig
-    sourceConfig: defineRequiredParam<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>(),
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
-    migrationConfig: defineRequiredParam<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>(),
-    target: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>>(
-        {description: "Server configuration to direct migrated traffic toward" })
-}
 
 export const FullMigration = WorkflowBuilder.create({
         k8sResourceName: "FullMigration",
@@ -58,25 +54,32 @@ export const FullMigration = WorkflowBuilder.create({
             .addArgs(["echo runReplayerForTarget"])))
 
 
-    .addTemplate("migrateMetaData", t => t
-        .addInputsFromRecord(sourceMigrationParams) // sourceConfig, snapshotConfig, migrationConfig, targets
-        .addSteps(sb=>sb))
-
-
     .addTemplate("pipelineMigrateFromSnapshot", t=>t
-        .addInputsFromRecord(sourceMigrationParams) // sourceConfig, snapshotConfig, migrationConfig, target
+        .addRequiredInput("migrationConfig", typeToken<z.infer<typeof PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("target", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+
         .addInputsFromRecord(latchCoordinationPrefixParam)
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
             .addStep("idGenerator", INTERNAL, "doNothing")
-            .addStep("metadataMigrate", INTERNAL, "migrateMetaData", c =>
-                c.register(selectInputsForRegister(b, c)))
+            .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    targetConfig: b.inputs.target,
+                    indices: EXPR.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"),
+                    metadataMigrationConfig: EXPR.jsonPathLoose(b.inputs.migrationConfig, "metadata", "options")
+                }))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     sessionName: c.steps.idGenerator.id,
-                    targetConfig: b.inputs.target
+                    targetConfig: b.inputs.target,
+                    indices: EXPR.nullCoalesce(EXPR.jsonPathLoose(b.inputs.migrationConfig, "documentBackfillConfigs", "indices"), []),
+                    backfillConfig:  EXPR.jsonPathStrict(b.inputs.migrationConfig, "documentBackfillConfigs", "options")
                 }))
             .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c=>
                 c.register({
@@ -95,13 +98,21 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     .addTemplate("pipelineSnapshotToTarget", t=>t
-        .addInputsFromRecord(sourceMigrationParams) // sourceConfig, snapshotConfig, migrationConfig, target
+        .addRequiredInput("migrationConfigs", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>['migrations']>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>['source']>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("target", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addInputsFromRecord(latchCoordinationPrefixParam)
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
             .addStep("pipelineMigrateFromSnapshot", INTERNAL, "pipelineMigrateFromSnapshot",
-                c=>c.register(selectInputsForRegister(b, c)))
+                c=>c.register({
+                    ...selectInputsForRegister(b, c),
+                    migrationConfig: c.item
+                }),
+                {loopWith: makeParameterLoop(b.inputs.migrationConfigs)})
         )
     )
 
@@ -109,8 +120,9 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotAndMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("sourcePipelineName", typeToken<string>())
-        .addInputsFromRecord({...snapshotInputConfigParam, ...targetsArrayParam, ...ImageParameters})
+        .addInputsFromRecord({...dynamicSnapshotConfigParam, ...targetsArrayParam, ...ImageParameters})
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addSteps(b=> b
                 .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                     c=>c.register({
@@ -123,7 +135,7 @@ export const FullMigration = WorkflowBuilder.create({
                     c=> c.register({
                         ...selectInputsForRegister(b, c),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        migrationConfig: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
+                        migrationConfigs: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
                         target: c.item
                     }),
                     {loopWith: makeParameterLoop(b.inputs.targets)})
@@ -134,8 +146,9 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("pipelineSourceMigration", t => t
         .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
         .addInputsFromRecord(targetsArrayParam) // "targetConfig"
-        .addInputsFromRecord(snapshotInputConfigParam) // s3Config
+        .addInputsFromRecord(completeSnapshotConfigParam)
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
@@ -156,7 +169,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
         .addInputsFromRecord(targetsArrayParam)
-        .addInputsFromRecord(snapshotInputConfigParam)
+        .addInputsFromRecord(completeSnapshotConfigParam)
+        .addOptionalInput("useLocalStack", c=>false)
         .addInputsFromRecord( // These image configurations have defaults from the ConfigMap
             Object.fromEntries(LogicalOciImages.flatMap(k => [
                 [`image${k}Location`, defineParam({

@@ -1,10 +1,10 @@
 import {WorkflowBuilder} from "../src/schemas/workflowBuilder";
 import {TemplateBuilder} from "../src/schemas/templateBuilder";
-import {z} from "zod";
-import {CallerParams, defineParam, InputParamDef, typeToken} from "@/schemas/parameterSchemas";
-import {ParamsWithLiteralsOrExpressions} from "@/schemas/workflowTypes";
-import {BaseExpression, LiteralExpression} from "@/schemas/expression";
+import {defineParam, InputParamDef} from "@/schemas/parameterSchemas";
 import {expectTypeOf} from "expect-type";
+import {typeToken} from "@/schemas/sharedTypes";
+import {CallerParams} from "@/schemas/parameterConversions";
+import expr from "@/schemas/expression";
 
 export type SIMPLE_ENUM = "a" | "b" | "c";
 
@@ -68,6 +68,7 @@ describe("paramsFns runtime validation", () => {
             // @ts-expect-error — mixed scalar types should be rejected
             sb.addStep("init", doNothingTemplate, "reqEnum", c => c.register({reqEnum: "aaa"}));
             sb.addStep("init", doNothingTemplate, "reqEnum", c => c.register({reqEnum: "a"}));
+            sb.addStep("init", doNothingTemplate, "reqEnum", c => c.register({reqEnum: expr.literal("a" as SIMPLE_ENUM)}));
             return sb;
         });
     });

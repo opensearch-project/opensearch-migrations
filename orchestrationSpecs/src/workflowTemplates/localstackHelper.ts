@@ -1,8 +1,8 @@
 import expr, {BaseExpression} from "@/schemas/expression";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {typeToken} from "@/schemas/parameterSchemas";
 import {makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
+import {typeToken} from "@/schemas/sharedTypes";
 
 export function getS3EndpointResolverContainer(s3Endpoint: BaseExpression<string>) {
     const template = `

@@ -5,15 +5,16 @@ import {
     CommonWorkflowParameters, extractTargetKeysToExpressionMap, makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
 import {BaseExpression, expr} from "@/schemas/expression";
 import {REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
-import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
+import {INTERNAL} from "@/schemas/taskBuilder";
 import {inputsToEnvVars, inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams} from "@/utils";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {InputParamsToExpressions, ExtendScope} from "@/schemas/workflowTypes";
 import {MISSING_FIELD} from "@/schemas/plainObject";
+import {selectInputsForRegister} from "@/schemas/parameterConversions";
+import {typeToken} from "@/schemas/sharedTypes";
 
 function getReplayerDeploymentManifest
 (args: {

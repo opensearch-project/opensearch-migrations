@@ -6,8 +6,8 @@ import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {typeToken} from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
+import {typeToken} from "@/schemas/sharedTypes";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }

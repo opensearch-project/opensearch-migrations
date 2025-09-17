@@ -9,12 +9,11 @@ import { ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration, UniqueNameCo
 import {
     InputParametersRecord,
     OutputParamDef,
-    OutputParametersRecord,
-    templateInputParametersAsExpressions,
-    workflowParametersAsExpressions
+    OutputParametersRecord
 } from "@/schemas/parameterSchemas";
 import { PlainObject } from "@/schemas/plainObject";
 import {AllowLiteralOrExpression, expr, toExpression} from "@/schemas/expression";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterConversions";
 
 export type RetryParameters = GenericScope;
 

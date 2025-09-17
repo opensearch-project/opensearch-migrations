@@ -1,11 +1,7 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {OutputParamDef, typeToken, CallerParams} from "@/schemas/parameterSchemas";
-import {TemplateBuilder} from "@/schemas/templateBuilder";
-import {expectTypeOf} from "expect-type";
-import {DagBuilder} from "@/schemas/dagBuilder";
-import {StepsBuilder} from "@/schemas/stepsBuilder";
 import { INTERNAL } from "@/schemas/taskBuilder"; // sentinel import
-import { no } from "zod/locales";
+import {typeToken} from "@/schemas/sharedTypes";
+import {CallerParams} from "@/schemas/parameterConversions";
 
 describe("paramsFns runtime validation - comprehensive", () => {
     // Shared external templates with different parameter configurations

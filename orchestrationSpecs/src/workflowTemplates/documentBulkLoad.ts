@@ -3,20 +3,21 @@ import {
     CommonWorkflowParameters, makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {InputParamDef, InputParametersRecord, typeToken} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
 import {asString, BaseExpression, expr} from "@/schemas/expression";
 import {
-    CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
-    SNAPSHOT_MIGRATION_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, COMPLETE_SNAPSHOT_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
+import {INTERNAL} from "@/schemas/taskBuilder";
 import {inputsToEnvVars, inputsToEnvVarsList, transformZodObjectToParams} from "@/utils";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {InputParamsToExpressions, ExtendScope} from "@/schemas/workflowTypes";
 import {MISSING_FIELD} from "@/schemas/plainObject";
+import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
+import {typeToken} from "@/schemas/sharedTypes";
 
 function getCheckRfsCompletionScript(sessionName: BaseExpression<string>) {
     const template = `
@@ -138,7 +139,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addTemplate("createReplicaset", t=>t
         .addRequiredInput("sessionName", typeToken<string>())
         .addOptionalInput("numPods", c=>1)
-        .addOptionalInput("useLocalStack", c=>false)
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
 
         .addRequiredInput("snapshotName", typeToken<string>())
         .addRequiredInput("snapshotRepoPath", typeToken<string>())
@@ -171,20 +172,22 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("createReplicasetFromConfig", t=>t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addOptionalInput("numPods", c=>1)
-        .addOptionalInput("useLocalStack", c=>false)
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
+
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
-        .addInputsFromRecord(transformZodObjectToParams(RFS_OPTIONS))
+        .addOptionalInput("backfillConfig", c=> ({} as z.infer<typeof RFS_OPTIONS>))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b=>b
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c=>
             c.register({
                 ...selectInputsForRegister(b, c),
+                ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
 
-                targetAwsRegion:      
+                targetAwsRegion:
                     expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "region"), ""),
                 targetAwsSigningName:
                     expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "service"), ""),
@@ -210,11 +213,16 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
+        .addOptionalInput("indices", c=>[] as readonly string[])
+        .addOptionalInput("backfillConfig", c=> ({} as z.infer<typeof RFS_OPTIONS>))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot","MigrationConsole"]))
 
         .addSteps(b=>b
             .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c=>
-                c.register(selectInputsForRegister(b, c)))
+                c.register({
+                    ...selectInputsForRegister(b, c)
+                }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c=>
                 c.register({
                     ...selectInputsForRegister(b,c),

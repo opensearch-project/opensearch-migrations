@@ -7,6 +7,8 @@ import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
 import {Replayer} from "@/workflowTemplates/replayer";
 import {SetupKafka} from "@/workflowTemplates/setupKafka";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
+import {LocalstackHelper} from "@/workflowTemplates/localstackHelper";
+import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
 
 
 console.log("OUTPUT: ");
@@ -16,6 +18,8 @@ const templates = [
     [CreateSnapshot],
     [DocumentBulkLoad],
     [FullMigration],
+    [LocalstackHelper],
+    [MetadataMigration],
     [MigrationConsole],
     [Replayer],
     [SetupKafka],

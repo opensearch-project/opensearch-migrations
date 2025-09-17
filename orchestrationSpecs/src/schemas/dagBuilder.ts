@@ -22,7 +22,6 @@ import {
     AllTasksAsOutputReferenceable,
     InputsFrom,
     KeyFor,
-    NamedTask,
     OutputsFrom,
     ParamsTuple,
     TaskBuilder,
@@ -33,6 +32,7 @@ import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import { SimpleExpression, taskOutput } from "@/schemas/expression";
+import {NamedTask} from "@/schemas/sharedTypes";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
     TaskOpts<LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };

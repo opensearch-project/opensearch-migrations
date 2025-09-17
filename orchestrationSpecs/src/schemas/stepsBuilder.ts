@@ -23,10 +23,11 @@ import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclarati
 import { PlainObject } from "@/schemas/plainObject";
 import {
     AllTasksAsOutputReferenceable, getTaskOutputsByTaskName,
-    InputsFrom, KeyFor, NamedTask, OutputsFrom, ParamsTuple,
+    InputsFrom, KeyFor, OutputsFrom, ParamsTuple,
     TaskBuilder, TaskRebinder
 } from "@/schemas/taskBuilder";
 import { SimpleExpression } from "@/schemas/expression";
+import {NamedTask} from "@/schemas/sharedTypes";
 
 export interface StepGroup {
     steps: NamedTask[];

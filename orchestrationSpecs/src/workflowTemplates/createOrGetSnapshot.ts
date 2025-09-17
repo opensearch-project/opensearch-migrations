@@ -3,13 +3,12 @@ import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
-import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
+import {CLUSTER_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
 import {expr, literal} from "@/schemas/expression";
-import {SNAPSHOT_MIGRATION_CONFIG} from "@/workflowTemplates/userSchemas"
-import {getAcceptedRegisterKeys, INTERNAL, selectInputsForKeys} from "@/schemas/taskBuilder";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
+import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/schemas/parameterConversions";
+import {typeToken} from "@/schemas/sharedTypes";
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "CreateOrGetSnapshot",

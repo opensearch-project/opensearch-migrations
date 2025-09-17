@@ -10,12 +10,13 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord, TypeToken} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/schemas/workflowTypes";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
 import {PlainObject} from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration } from "@/schemas/scopeConstraints";
 import {AllowLiteralOrExpression} from "@/schemas/expression";
+import {TypeToken} from "@/schemas/sharedTypes";
 
 export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | "patch";
 

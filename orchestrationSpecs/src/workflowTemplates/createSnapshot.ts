@@ -3,7 +3,6 @@ import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
 import {
     CLUSTER_CONFIG,
@@ -12,8 +11,10 @@ import {
     DYNAMIC_SNAPSHOT_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {INTERNAL, selectInputsForKeys, selectInputsForRegister} from "@/schemas/taskBuilder";
+import {INTERNAL} from "@/schemas/taskBuilder";
 import {MISSING_FIELD} from "@/schemas/plainObject";
+import {selectInputsForRegister} from "@/schemas/parameterConversions";
+import {typeToken} from "@/schemas/sharedTypes";
 
 export const CreateSnapshot = WorkflowBuilder.create({
     k8sResourceName: "FullMigration",

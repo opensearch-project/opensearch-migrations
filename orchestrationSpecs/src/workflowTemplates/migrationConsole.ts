@@ -2,7 +2,7 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
     CommonWorkflowParameters, makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {defineRequiredParam, typeToken} from "@/schemas/parameterSchemas";
+import {defineRequiredParam} from "@/schemas/parameterSchemas";
 import {z} from "zod/index";
 import {
     AllowLiteralOrExpression,
@@ -19,9 +19,11 @@ import {
     TARGET_CLUSTER_CONFIG,
     UNKNOWN
 } from "@/workflowTemplates/userSchemas";
-import {INTERNAL, selectInputsForRegister} from "@/schemas/taskBuilder";
+import {INTERNAL} from "@/schemas/taskBuilder";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {MissingField, PlainObject} from "@/schemas/plainObject";
+import {selectInputsForRegister} from "@/schemas/parameterConversions";
+import {typeToken} from "@/schemas/sharedTypes";
 
 const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
 set -e -x

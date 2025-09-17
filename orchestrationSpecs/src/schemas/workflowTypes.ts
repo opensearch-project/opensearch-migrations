@@ -45,9 +45,28 @@ export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
 // Helper types for extracting output types and creating step references
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
 
+export type InvalidType<T> = {INVALID_TYPE: T};
+
+type StripUndefined<T> = Exclude<T, undefined>;
+type HasUndefined<T> = undefined extends T ? true : false;
+
+type NormalizeBaseExpression<T> =
+  T extends BaseExpression<infer R, infer C>
+    ? HasUndefined<R> extends true
+        ? BaseExpression<StripUndefined<R>, C> | undefined
+        : BaseExpression<StripUndefined<R>, C>
+    : T;
+
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {
-    [K in keyof T]: T[K] extends PlainObject ? AllowLiteralOrExpression<T[K]> : T[K]
+  [K in keyof T]:
+    T[K] extends PlainObject | undefined
+      ? HasUndefined<T[K]> extends true
+          ? AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
+          : AllowLiteralOrExpression<StripUndefined<T[K]>>
+      : T[K] extends BaseExpression<any, any>
+          ? NormalizeBaseExpression<T[K]>
+          : InvalidType<T[K]>;
 };
 
 export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {

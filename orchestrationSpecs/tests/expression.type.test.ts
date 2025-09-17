@@ -7,7 +7,6 @@ import {
     ternary, SimpleExpression, NoAny, expr as EXPR,
 } from "../src/schemas/expression";
 import {DeepWiden} from "../src/schemas/plainObject";
-import {selectInputsForRegister} from "@/schemas/taskBuilder";
 
 describe("expression type contracts", () => {
     it("literal() produces the correct value/complexity types", () => {

@@ -104,7 +104,6 @@ type ParamReturnFor<U, HasDef extends boolean> =
             : ReturnType<typeof defineRequiredParam<U>>
         : TypescriptError<"Zod field does not infer to PlainObject (required by defineParam).">;
 
-// Strongly typed return type for the transformer
 type TransformedParams<T extends z.ZodRawShape> = {
     [K in keyof T]:
     ExtractInnerType<T[K]> extends infer U
@@ -112,7 +111,6 @@ type TransformedParams<T extends z.ZodRawShape> = {
         : never;
 };
 
-// Main transformer function with strong typing
 export function transformZodObjectToParams<T extends z.ZodRawShape>(
     zodObject: z.ZodObject<T>
 ): TransformedParams<T> {

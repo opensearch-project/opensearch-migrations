@@ -45,7 +45,12 @@ export const COMPLETE_SNAPSHOT_CONFIG = DYNAMIC_SNAPSHOT_CONFIG.extend({
     snapshotName: z.string() // override to required
 });
 
+export const METADATA_OPTIONS = z.object({
+
+});
+
 export const RFS_OPTIONS = z.object({
+    requiredThing: z.number(),
     loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
     docTransformerBase64: z.string().default("not a transform"),
@@ -65,19 +70,20 @@ export const REPLAYER_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
+export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
+    metadata: z.object({
+        indices: z.array(z.string()),
+        options: METADATA_OPTIONS
+    }),
+    documentBackfillConfigs: z.object({
+        indices: z.array(z.string()),
+        options: RFS_OPTIONS
+    })
+});
+
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     indices: z.array(z.string()),
-    migrations: z.array(z.object({
-        metadata: z.object({
-            mappings: z.object({
-                properties: z.record(z.string(), z.any()),
-            }),
-            documentBackfillConfigs: z.object({
-                indices: z.array(z.string()),
-                options: RFS_OPTIONS
-            }),
-        }),
-    })),
+    migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG),
 });
 
 export const REPLAYER_CONFIG = z.object({

@@ -1,6 +1,6 @@
-import {InputParamDef, OutputParamDef, TypeToken} from "@/schemas/parameterSchemas";
 import {DeepWiden, MissingField, PlainObject} from "@/schemas/plainObject";
-import {TaskType} from "@/schemas/taskBuilder";
+import {StripUndefined, TaskType, TypeToken} from "@/schemas/sharedTypes";
+import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 
@@ -193,7 +193,7 @@ export function makeDict<R extends Record<string, AllowLiteralOrExpression<Plain
 > {
     const normalized = Object.fromEntries(
         Object.entries(entries).map(([k, v]) => {
-            const e = isExpression(v) ? v : expr.literal(v as any);
+            const e = isExpression(v) ? v : expr.literal(v);
             return [k, e];
         })
     ) as NormalizeRecord<R>;
@@ -262,8 +262,6 @@ export class RecordFieldSelectExpression<T, P, E> extends BaseExpression<any, "c
 
 /*** SEGMENT / TUPLE NAVIGATION FOR EXPRESSIONS (TYPE-ONLY) ***/
 // --- helpers ----------------------------------------------------
-
-type StripUndefined<T> = Exclude<T, undefined>;
 
 // union helpers
 type AnyTrue<U> = Extract<U, true> extends never ? false : true;
@@ -376,25 +374,57 @@ function _segmentsToPath(segs: readonly unknown[]): string {
     return segs.map(s => typeof s === "number" ? `[${s}]` : String(s)).join(".");
 }
 
-/** STRICT: assumes presence; no `undefined` in result type. */
+export function jsonPathLoose<
+    T extends Record<string, any>,
+    K extends Extract<keyof NonMissing<T>, string>
+>(
+    source: BaseExpression<T, any>,
+    key: K
+): BaseExpression<SegmentsValueMissing<T, readonly [K]>, "complicatedExpression">;
+
+// variadic overload
 export function jsonPathLoose<
     T extends Record<string, any>,
     S extends KeySegments<T>
 >(
     source: BaseExpression<T, any>,
     ...segs: S
-): BaseExpression<SegmentsValueMissing<T, S>, "complicatedExpression"> {
+): BaseExpression<SegmentsValueMissing<T, S>, "complicatedExpression">;
+
+// Single implementation
+export function jsonPathLoose(
+    source: BaseExpression<any, any>,
+    ...segs: readonly unknown[]
+): BaseExpression<any, "complicatedExpression"> {
     const path = _segmentsToPath(segs);
     return new RecordFieldSelectExpression(source, path) as any;
 }
 
+
+///
+
+export function jsonPathStrict<
+    T extends Record<string, any>,
+    K extends Extract<keyof NonMissing<T>, string>
+>(
+    source: BaseExpression<T, any>,
+    key: K
+): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression">;
+
+// variadic overload
 export function jsonPathStrict<
     T extends Record<string, any>,
     S extends KeySegments<T>
 >(
     source: BaseExpression<T, any>,
     ...segs: S
-): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression"> {
+): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
+
+// Single implementation
+export function jsonPathStrict(
+    source: BaseExpression<any, any>,
+    ...segs: readonly unknown[]
+): BaseExpression<any, "complicatedExpression"> {
     const path = _segmentsToPath(segs);
     return new RecordFieldSelectExpression(source, path) as any;
 }
@@ -622,7 +652,7 @@ export function toArray<ES extends readonly unknown[]>(
     ComplexityOfNormalized<ES>
 > {
     const normalized = items.map((it) =>
-        isExpression(it) ? it : literal(it as any)
+        isExpression(it) ? it : literal(it as PlainObject)
     ) as NormalizeTuple<ES>;
 
     // Keep the precise tuple type (don't let it widen to BaseExpression<any, any>[])
