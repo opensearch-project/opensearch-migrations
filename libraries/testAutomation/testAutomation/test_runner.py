@@ -173,7 +173,10 @@ class TestRunner:
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
-                workflow_yaml = "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/workflows/templates/fullMigrationWithClusters.yaml"
+                workflow_yaml = (
+                    "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
+                    "workflows/templates/fullMigrationWithClusters.yaml"
+                )
                 self.k8s_service.exec_migration_console_cmd([
                     "kubectl", "apply", "-f", workflow_yaml, "-n", "ma"
                 ])
