@@ -9,7 +9,7 @@ metadata:
     "helm.sh/hook-delete-policy": hook-succeeded
 spec:
   ttlSecondsAfterFinished: 600
-  backoffLimit: 6
+  backoffLimit: 2
   template:
     metadata:
       labels:
