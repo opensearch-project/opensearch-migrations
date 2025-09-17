@@ -9,7 +9,6 @@ import string
 import subprocess
 import sys
 from typing import List, Optional, Tuple
-
 from k8s_service import K8sService, HelmCommandFailed
 from tabulate import tabulate
 import logging
@@ -19,16 +18,6 @@ logger = logging.getLogger(__name__)
 
 VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
-
-# Version to template name mapping
-VERSION_TO_TEMPLATE_MAP = {
-    "ES_1.5": "elasticsearch-1-5-single-node",
-    "ES_2.4": "elasticsearch-2-4-single-node",
-    "ES_5.6": "elasticsearch-5-6-single-node",
-    "ES_7.10": "elasticsearch-7-10-single-node",
-    "OS_1.3": "opensearch-1-3-single-node",
-    "OS_2.19": "opensearch-2-19-single-node"
-}
 MA_RELEASE_NAME = "ma"
 
 
@@ -202,64 +191,13 @@ class TestRunner:
             developer_mode: bool = False, reuse_clusters: bool = False) -> None:
         for source_version, target_version in self.combinations:
             try:
-                logger.info(
-                    f"Performing helm deployment for migration testing environment "
-                    f"from {source_version} to {target_version}"
-                )
+                logger.info(f"Performing helm deployment for migration testing environment "
+                            f"from {source_version} to {target_version}")
 
-                # Build chart values with template names based on versions
-                chart_values = {}
-                if developer_mode:
-                    chart_values["developerModeEnabled"] = "true"
-                
-                # Map versions to template names
-                source_template = VERSION_TO_TEMPLATE_MAP.get(source_version)
-                target_template = VERSION_TO_TEMPLATE_MAP.get(target_version)
-                
-                if source_template:
-                    chart_values[
-                        "fullMigrationWithClusters.sourceClusterTemplate"
-                    ] = source_template
-                    logger.info(f"Setting source cluster template to: {source_template}")
-                
-                if target_template:
-                    chart_values[
-                        "fullMigrationWithClusters.targetClusterTemplate"
-                    ] = target_template
-                    logger.info(f"Setting target cluster template to: {target_template}")
-
-                if not self.k8s_service.helm_install(
-                    chart_path=self.ma_chart_path,
-                    release_name=MA_RELEASE_NAME,
-                    values=chart_values
-                ):
-                    raise HelmCommandFailed(
-                        "Helm install of Migrations Assistant chart failed"
-                    )
-
-                # Force update cluster templates to ensure latest changes are used
-                logger.info("Force updating cluster templates...")
-                try:
-                    # Use absolute path from repo root
-                    repo_root = os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), "../../..")
-                    )
-                    template_path = os.path.join(
-                        repo_root,
-                        "TrafficCapture/dockerSolution/src/main/docker/"
-                        "migrationConsole/workflows/templates/clusterTemplates.yaml"
-                    )xisting template first to force recreation
-                    subprocess.run(["kubectl", "delete", "workflowtemplate", "cluster-templates", "-n", "ma", "--ignore-not-found=true"], 
-                                 check=True, capture_output=True)
-                    
-                    # Apply the updated template
-                    subprocess.run(["kubectl", "apply", "-f", template_path, "-n", "ma"], 
-                                 check=True, capture_output=True)
-                    logger.info("Cluster templates force updated successfully")
-                except subprocess.CalledProcessError as e:
-                    logger.warning(f"Failed to update cluster templates: {e}")
-                except Exception as e:
-                    logger.warning(f"Error updating cluster templates: {e}")
+                chart_values = {"developerModeEnabled": "true"} if developer_mode else None
+                if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
+                                                     values=chart_values):
+                    raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
@@ -297,19 +235,19 @@ def _generate_unique_id() -> str:
     return f"{random_part}-{timestamp}"
 
 
-def parse_version_string(version_str: str) -> tuple[str, str, str]:
+def parse_version_string(version_str: str) -> (string, string, string):
     """Parse a string in format ES|OS_x.y and return the distinct pieces as (cluster_type, major, minor)"""
     try:
         cluster_type_part, version_part = version_str.split('_', 1)
         major_str, minor_str = version_part.split('.', 1)
 
         cluster_type = cluster_type_part.lower()
-        major = str(int(major_str))
+        major = int(major_str)
 
         try:
-            minor = str(int(minor_str))
+            minor = int(minor_str)
         except ValueError:
-            minor = str(minor_str)
+            minor = minor_str
 
         return cluster_type, major, minor
     except (ValueError, AttributeError):
