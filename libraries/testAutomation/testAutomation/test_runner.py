@@ -173,6 +173,12 @@ class TestRunner:
 
                 self.k8s_service.wait_for_all_healthy_pods()
 
+                workflow_yaml = "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/workflows/templates/fullMigrationWithClusters.yaml"
+                self.k8s_service.exec_migration_console_cmd([
+                    "kubectl", "apply", "-f", workflow_yaml, "-n", "ma"
+                ])
+                logger.info("Re-applied fullMigrationWithClusters workflow template")
+
                 tests_passed = self.run_tests(source_version=source_version,
                                               target_version=target_version,
                                               keep_workflows=keep_workflows,
