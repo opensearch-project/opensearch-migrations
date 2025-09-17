@@ -1,9 +1,9 @@
-# Elastic docker registry does not seem to include 2.x versions and thus being pulled from docker hub
 elasticsearch:
-  imageTag: "2.4.0"
-  image: "jritsema/rpi-elasticsearch:2.4.0"
+  # ES 1.5 configuration using ARM-compatible image
+  imageTag: "1.5.2"
+  image: "carlchinatomby/elasticsearch:1.5.2-arm64"
   antiAffinity: "soft"
-  esJavaOpts: "-Xmx128m -Xms128m"
+  esJavaOpts: "" # not used by ES 1.5; empty it to avoid confusion
   protocol: http
   replicas: 1 # Set replicas to the number of nodes you want in the cluster (e.g., 3)
   createCert: false
@@ -15,9 +15,9 @@ elasticsearch:
       xpack.security.enabled: false
       network.host: 0.0.0.0
   extraEnvs:
-    - name: "cluster.initial_master_nodes" # Replace this setting that is added by chart with "" since this setting is not supported in ES 2.x
+    - name: "cluster.initial_master_nodes" # Replace this setting that is added by chart with "" since this setting is not supported in ES 1.x
       value: ""
-    - name: "node.roles" # Replace this setting that is added by chart with "" since this setting is not supported in ES 2.x
+    - name: "node.roles" # Replace this setting that is added by chart with "" since this setting is not supported in ES 1.x
       value: ""
     - name: "path.repo"
       value: "/snapshot"
