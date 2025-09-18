@@ -5,10 +5,16 @@ import {
     InputParametersRecord
 } from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
-import {z} from "zod/index";
-import {DYNAMIC_SNAPSHOT_CONFIG, COMPLETE_SNAPSHOT_CONFIG, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
-import {BaseExpression, expr} from "@/schemas/expression";
+import {z} from "zod";
+import {
+    DYNAMIC_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
+    TARGET_CLUSTER_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE
+} from "@/workflowTemplates/userSchemas";
+import {BaseExpression, expr, FromParameterExpression} from "@/schemas/expression";
 import {typeToken} from "@/schemas/sharedTypes";
+import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints:        defineParam({ expression: "http://etcd.ma.svc.cluster.local:2379" }),
@@ -122,4 +128,24 @@ export function setupLog4jConfigForContainer(
             }
         ]
     }
+}
+
+export function getParametersFromTargetConfig<Self, BodyBound, ExpressionBuilderContext>(
+    targetConfig: FromParameterExpression<z.infer<typeof TARGET_CLUSTER_CONFIG>>) {
+    return {
+        targetAwsRegion:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),
+        targetAwsSigningName:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "service"), ""),
+        targetCACert:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "caCert"), ""),
+        targetClientSecretName:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "clientSecretName"), ""),
+        targetInsecure:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "allow_insecure"), false),
+        targetUsername:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "username"), ""),
+        targetPassword:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "password"), ""),
+    };
 }

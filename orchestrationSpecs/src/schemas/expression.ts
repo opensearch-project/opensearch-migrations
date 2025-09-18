@@ -21,8 +21,8 @@ export function isExpression(v: unknown): v is BaseExpression<any, any> {
     return v instanceof BaseExpression;
 }
 
-export function toExpression<T extends PlainObject>(
-    v: AllowLiteralOrExpression<T>
+export function toExpression<T extends PlainObject, C extends ExpressionType>(
+    v: AllowLiteralOrExpression<T, C>
 ): BaseExpression<T, any> {
     return isExpression(v) ? v : new LiteralExpression(v as T);
 }
@@ -459,18 +459,18 @@ class ExprBuilder {
 
     // Comparisons
     equals: {
-        <L extends BaseExpression<number, any>, R extends BaseExpression<number, any>>(
+        <L extends AllowLiteralOrExpression<number, any>, R extends AllowLiteralOrExpression<number, any>>(
             l: NoAny<L>, r: NoAny<R>
         ): BaseExpression<boolean, WidenExpressionComplexity2<L, R>>;
-        <L extends BaseExpression<string, any>, R extends BaseExpression<string, any>>(
+        <L extends AllowLiteralOrExpression<string, any>, R extends AllowLiteralOrExpression<string, any>>(
             l: NoAny<L>, r: NoAny<R>
         ): BaseExpression<boolean, WidenExpressionComplexity2<L, R>>;
     } = <
         T extends Scalar,
-        L extends BaseExpression<T, any>,
-        R extends BaseExpression<T, any>
+        L extends AllowLiteralOrExpression<T, any>,
+        R extends AllowLiteralOrExpression<T, any>,
     >(l: L, r: R): BaseExpression<boolean, WidenExpressionComplexity2<L, R>> =>
-        new ComparisonExpression<T, L, R>("==", l, r) as any;
+        new ComparisonExpression<T, BaseExpression<T, any>, BaseExpression<T, any>>("==", toExpression(l), toExpression(r)) as any;
 
     lessThan<
         L extends BaseExpression<number, any>,

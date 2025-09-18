@@ -5,15 +5,13 @@ import {
     CommonWorkflowParameters, extractTargetKeysToExpressionMap, makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {z} from "zod/index";
+import {z} from "zod";
 import {BaseExpression, expr} from "@/schemas/expression";
 import {REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {INTERNAL} from "@/schemas/taskBuilder";
-import {inputsToEnvVars, inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams} from "@/utils";
+import {inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams} from "@/utils";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
-import {InputParamsToExpressions, ExtendScope} from "@/schemas/workflowTypes";
-import {MISSING_FIELD} from "@/schemas/plainObject";
-import {selectInputsForRegister} from "@/schemas/parameterConversions";
+import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
 function getReplayerDeploymentManifest
@@ -23,9 +21,11 @@ function getReplayerDeploymentManifest
 
     loggingConfigMap: BaseExpression<string>
 
+    podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    inputsAsEnvList: Record<string, any>[],
+
+    inputsAsEnvList: Record<string, any>[]
 })
 {
     const baseContainerDefinition = {
@@ -50,7 +50,7 @@ function getReplayerDeploymentManifest
             },
         },
         spec: {
-            replicas: "{{POD_REPLICA_COUNT}}",
+            replicas: args.podReplicas,
             selector: {
                 matchLabels: {
                     app: "replayer",
@@ -79,7 +79,7 @@ export const Replayer = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("deployReplayer", t=>t
+    .addTemplate("deployReplayer", t=>t // TODO: rename to createDeployment to be consistent w/ createReplicaset
         .addOptionalInput("numPods", c=>1)
 
         .addInputsFromRecord(TargetClusterParameters)
@@ -92,6 +92,7 @@ export const Replayer = WorkflowBuilder.create({
                 action: "create",
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
+                    podReplicas: b.inputs.podReplicas,
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     sessionName: expr.literal(""),//b.inputs.sessionName,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
@@ -105,18 +106,24 @@ export const Replayer = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("deployReplayerFromConfig", t=>t
-        .addOptionalInput("numPods", c=>1)
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+    .addTemplate("deployReplayerFromConfig", t=>t // TODO: rename to createDeploymentFromConfig to be consistent w/ createReplicaset
+        .addRequiredInput("kafkaTrafficBrokers", typeToken<string>())
+        .addRequiredInput("kafkaTrafficTopic", typeToken<string>())
+        .addRequiredInput("kafkaGroupId", typeToken<string>())
 
-        .addInputsFromRecord(transformZodObjectToParams(REPLAYER_OPTIONS))
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("replayerConfig", typeToken<z.infer<typeof REPLAYER_OPTIONS>>())
+
+        .addOptionalInput("numPods", c=>1)
+
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
         .addSteps(b=>b
             .addStep("deployReplayer", INTERNAL, "deployReplayer", c=>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...extractTargetKeysToExpressionMap(b.inputs.targetConfig)
+                    ...extractTargetKeysToExpressionMap(b.inputs.targetConfig),
+                    ...selectInputsFieldsAsExpressionRecord(b.inputs.replayerConfig, c)
                 })))
     )
 

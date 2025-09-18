@@ -1,11 +1,11 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
-    CommonWorkflowParameters, makeRequiredImageParametersForKeys,
+    CommonWorkflowParameters, getParametersFromTargetConfig, makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
-import {z} from "zod/index";
-import {BaseExpression, expr} from "@/schemas/expression";
+import {z} from "zod";
+import {BaseExpression, expr, FromParameterExpression} from "@/schemas/expression";
 import {
     CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, COMPLETE_SNAPSHOT_CONFIG,
     TARGET_CLUSTER_CONFIG
@@ -14,7 +14,7 @@ import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {INTERNAL} from "@/schemas/taskBuilder";
 import {inputsToEnvVars, inputsToEnvVarsList, transformZodObjectToParams} from "@/utils";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
-import {InputParamsToExpressions, ExtendScope} from "@/schemas/workflowTypes";
+import {InputParamsToExpressions, ExtendScope, TemplateSigEntry} from "@/schemas/workflowTypes";
 import {MISSING_FIELD} from "@/schemas/plainObject";
 import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
@@ -186,21 +186,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             c.register({
                 ...selectInputsForRegister(b, c),
                 ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
-
-                targetAwsRegion:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "region"), ""),
-                targetAwsSigningName:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "service"), ""),
-                targetCACert:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "caCert"), ""),
-                targetClientSecretName:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "clientSecretName"), ""),
-                targetInsecure:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "allow_insecure"), false),
-                targetUsername:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "username"), ""),
-                targetPassword:
-                    expr.nullCoalesce(expr.jsonPathLoose(b.inputs.targetConfig, "authConfig", "password"), ""),
+                ...(getParametersFromTargetConfig(b.inputs.targetConfig)),
 
                 s3Endpoint:       expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "endpoint"),
                 s3Region:         expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "aws_region"),

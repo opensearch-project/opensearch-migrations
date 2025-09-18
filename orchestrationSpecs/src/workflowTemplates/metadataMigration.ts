@@ -4,7 +4,7 @@ import {
     completeSnapshotConfigParam, makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {z} from "zod/index";
+import {z} from "zod";
 import {CLUSTER_CONFIG, METADATA_OPTIONS, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {MISSING_FIELD} from "@/schemas/plainObject";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";

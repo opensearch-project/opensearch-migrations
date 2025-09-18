@@ -81,7 +81,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
 
 export const REPLAYER_OPTIONS = z.object({
     speedupFactor: z.number(),
-    initialReplicas: z.number(),
+    podReplicas: z.number(),
     authHeaderOverride: z.optional(z.string()),
     loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
     docTransformerBase64: z.string().default("not a transform"),

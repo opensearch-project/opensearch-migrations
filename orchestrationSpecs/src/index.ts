@@ -9,24 +9,27 @@ import {SetupKafka} from "@/workflowTemplates/setupKafka";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 import {LocalstackHelper} from "@/workflowTemplates/localstackHelper";
 import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
+import {CaptureReplay} from "@/workflowTemplates/captureReplay";
+import {CaptureProxy} from "@/workflowTemplates/proxy";
 
 
 console.log("OUTPUT: ");
 const templates = [
-    // [CaptureReplay]
-    [CreateOrGetSnapshot],
-    [CreateSnapshot],
-    [DocumentBulkLoad],
-    [FullMigration],
-    [LocalstackHelper],
-    [MetadataMigration],
-    [MigrationConsole],
-    [Replayer],
-    [SetupKafka],
-    [TargetLatchHelpers],
+    CaptureReplay,
+    CaptureProxy,
+    CreateOrGetSnapshot,
+    CreateSnapshot,
+    DocumentBulkLoad,
+    FullMigration,
+    LocalstackHelper,
+    MetadataMigration,
+    MigrationConsole,
+    Replayer,
+    SetupKafka,
+    TargetLatchHelpers,
 ];
 
-for (const [wf] of templates) {
+for (const wf of templates) {
     const finalConfig = renderWorkflowTemplate(wf);
     console.log(JSON.stringify(finalConfig, null, 2));
     console.log("\n\n========\n\n")

@@ -3,7 +3,7 @@ import {
     CommonWorkflowParameters, makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {defineRequiredParam} from "@/schemas/parameterSchemas";
-import {z} from "zod/index";
+import {z} from "zod";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
@@ -115,8 +115,13 @@ function conditionalInclude<
     );
 }
 
+const KafkaServicesConfig = z.object({
+    broker_endpoints: z.string(),
+    standard: z.string()
+})
+
 const configComponentParameters = {
-    kafkaInfo: defineRequiredParam<z.infer<typeof UNKNOWN>|MissingField>({
+    kafkaInfo: defineRequiredParam<z.infer<typeof KafkaServicesConfig>|MissingField>({
         description: "Snapshot configuration information (JSON)"}),
     sourceConfig: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
         description: "Source cluster configuration (JSON)"}),

@@ -3,7 +3,7 @@ import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {z} from "zod/index";
+import {z} from "zod";
 import {CLUSTER_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
 import {expr} from "@/schemas/expression";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
