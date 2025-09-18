@@ -6,13 +6,10 @@ import shadow.lucene9.org.apache.lucene.codecs.KnnVectorsWriter;
 import shadow.lucene9.org.apache.lucene.index.SegmentReadState;
 import shadow.lucene9.org.apache.lucene.index.SegmentWriteState;
 
-/**
- * PostingsFormat fallback for Elasticsearch 8.14+ vector formats.
- */
-public class IgnoreVectorsFormat extends KnnVectorsFormat {
+public class IgnoreES816BinaryQuantizedVectorsFormat extends KnnVectorsFormat {
 
-    public IgnoreVectorsFormat() {
-        super("ES814HnswScalarQuantizedVectorsFormat");
+    public IgnoreES816BinaryQuantizedVectorsFormat() {
+        super("ES816BinaryQuantizedVectorsFormat");
     }
 
     @Override
