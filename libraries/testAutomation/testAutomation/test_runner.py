@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_7.10"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
 MA_RELEASE_NAME = "ma"
 
@@ -172,6 +172,15 @@ class TestRunner:
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
+
+                workflow_yaml = (
+                    "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
+                    "workflows/templates/fullMigrationWithClusters.yaml"
+                )
+                self.k8s_service.exec_migration_console_cmd([
+                    "kubectl", "apply", "-f", workflow_yaml, "-n", "ma"
+                ])
+                logger.info("Re-applied fullMigrationWithClusters workflow template")
 
                 tests_passed = self.run_tests(source_version=source_version,
                                               target_version=target_version,

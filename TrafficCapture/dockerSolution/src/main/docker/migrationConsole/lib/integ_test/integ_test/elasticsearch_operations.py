@@ -45,6 +45,14 @@ def get_type_mapping_union_transformation(multi_type_index_name: str, doc_type_1
     }
 
 
+class ElasticsearchV1_XOperationsLibrary(DefaultOperationsLibrary):
+    pass
+
+
+class ElasticsearchV2_XOperationsLibrary(DefaultOperationsLibrary):
+    pass
+
+
 class ElasticsearchV5_XOperationsLibrary(DefaultOperationsLibrary):
 
     def get_type_mapping_union_transformation(self, multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
