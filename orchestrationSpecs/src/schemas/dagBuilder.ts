@@ -56,7 +56,7 @@ class DagTaskBuilder<
         task: NamedTask, opts?: OptsType
     ): NamedTask {
         return {
-            ...super.onTaskPushed(task),
+            ...super.onTaskPushed(task, opts),
             ...((isDagTaskOpts<TaskScope, LoopT>(opts) && opts.dependencies?.length)
                 ? { dependencies: opts.dependencies } : {})
         };

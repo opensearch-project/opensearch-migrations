@@ -8,19 +8,14 @@ import expression, {
     BaseExpression,
     ComparisonExpression,
     ConcatExpression,
-    FromBase64Expression,
     FromParameterExpression,
     LiteralExpression,
     WorkflowValueExpression,
     RecordFieldSelectExpression,
     TernaryExpression,
-    ToBase64Expression,
-    SerializeJson,
-    NotExpression,
-    DeserializeJson,
-    TemplateReplacementExpression, NullCoalesce, TaskDataExpression, DictMakeExpression, DictMergeExpression,
+    TemplateReplacementExpression, TaskDataExpression, DictMakeExpression,
+    FunctionExpression,
 } from "@/schemas/expression";
-import { PlainObject } from "@/schemas/plainObject";
 
 /** Lightweight erased type to avoid deep generic instantiation */
 type AnyExpr = BaseExpression<any, any>;
@@ -73,11 +68,17 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         return formattedResult(`${c.text} ? ${t.text} : ${f.text}`, true);
     }
 
-    if (isNullCoalesce(expr)) {
-        const e = expr as NullCoalesce<any>;
-        const formattedPreferred = formatExpression(e.preferredValue);
-        const formattedDefault = formatExpression(e.defaultValue)
-        return formattedResult(`sprig.coalesce(${formattedPreferred.text}, ${formattedDefault.text})`, true);
+    if (isFunction(expr)) {
+        const e = expr as FunctionExpression<any, any>;
+        if (e.functionName === "toJSON" && isParameterExpression(e.args[0] as AnyExpr)) {
+            return formatExpression(e.args[0]);
+        } else if (e.functionName === "fromJSON" && top) {
+            return formatExpression(e.args[0]);
+        }
+        const formattedArgs = e.args.map(a=>formatExpression(a));
+        const combinedFormatted = formattedArgs.map(f=>f.text).join(", ");
+        const compound = formattedArgs.map(f=>f.compound).some(v=>v);
+        return formattedResult(`${e.functionName}(${combinedFormatted})`, compound);
     }
 
     if (isComparisonExpression(expr)) {
@@ -85,12 +86,6 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         const l = formatExpression(ce.left);
         const r = formatExpression(ce.right);
         return formattedResult(`${l.text} ${ce.operator} ${r.text}`, true);
-    }
-
-    if (isNotExpression(expr)) {
-        const n = expr as NotExpression<any>;
-        const f = formatExpression(n.boolValue);
-        return formattedResult(`!(${f.text})`, true);
     }
 
     if (isArithmeticExpression(expr)) {
@@ -107,23 +102,6 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         const source = needsFromJson ? `fromJSON(${inner.text})` : inner.text;
         const jsonPath = pe.path.replace(/\[(\d+)\]/g, "[$1]").replace(/^/, "$.");
         return formattedResult(`jsonpath(${source}, '${jsonPath}')`, true);
-    }
-
-    if (isJsonDeserialize(expr)) {
-        const se = expr as DeserializeJson<any>;
-        const formattedInner = formatExpression(se.data);
-        if (top) {
-            return formattedInner;
-        }
-        return formattedResult(`fromJSON(${formattedInner.text})`, true);
-    }
-
-    if (isJsonSerialize(expr)) {
-        const se = expr as SerializeJson;
-        const inner = formatExpression(se.data);
-        const finalText = isParameterExpression(se.data as AnyExpr)
-            ? inner.text : `toJSON(${inner.text})`;
-        return formattedResult(finalText, true);
     }
 
     if (isArrayLengthExpression(expr)) {
@@ -160,15 +138,6 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         return formattedResult(text, true);
     }
 
-    // ---- NEW: Dict merge ---------------------------------------------------
-    if (isDictMergeExpression(expr)) {
-        const me = expr as DictMergeExpression<any, any, any, any>;
-        const l = formatExpression(me.left);
-        const r = formatExpression(me.right);
-        // Function-call form to match coalesce style
-        return formattedResult(`sprig.merge(${l.text}, ${r.text})`, true);
-    }
-
     if (isParameterExpression(expr)) {
         const pe = expr as FromParameterExpression<any>;
         switch (pe.source.kind) {
@@ -199,18 +168,6 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         return formattedResult(`${e.taskType}.${e.name}['${e.key}']`)
     }
 
-    if (isFromBase64(expr)) {
-        const e = expr as FromBase64Expression;
-        const d = formatExpression(e.data);
-        return formattedResult(`fromBase64(${d.text})`, true);
-    }
-
-    if (isToBase64(expr)) {
-        const e = expr as ToBase64Expression;
-        const d = formatExpression(e.data);
-        return formattedResult(`toBase64(${d.text})`, true);
-    }
-
     if (isTemplateExpression(expr)) {
         const f = expr as TemplateReplacementExpression;
         let result = f.template;
@@ -230,23 +187,17 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 export function isAsStringExpression(e: AnyExpr): e is AsStringExpression<any> { return e.kind === "as_string"; }
 export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> { return e.kind === "literal"; }
 export function isPathExpression(e: AnyExpr): e is RecordFieldSelectExpression<any, any, any> { return e.kind === "path"; }
-export function isJsonSerialize(e: AnyExpr): e is SerializeJson { return e.kind === "serialize_json"; }
-export function isJsonDeserialize(e: AnyExpr): e is DeserializeJson<any> { return e.kind === "deserialize_json"; }
 export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> { return e.kind === "concat"; }
 export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> { return e.kind === "ternary"; }
-export function isNullCoalesce(e: AnyExpr): e is NullCoalesce<any> { return e.kind === "null_coalesce"; }
+export function isFunction(e: AnyExpr): e is FunctionExpression<any, any> { return e.kind === "function"; }
 export function isArithmeticExpression(e: AnyExpr): e is ArithmeticExpression<any, any> { return e.kind === "arithmetic"; }
 export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> { return e.kind === "comparison"; }
-export function isNotExpression(e: AnyExpr): e is NotExpression<any> { return e.kind === "not"; }
 export function isArrayLengthExpression(e: AnyExpr): e is ArrayLengthExpression<any> { return e.kind === "array_length"; }
 export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> { return e.kind === "array_index"; }
 export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
 export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> { return e.kind === "dict_make"; }
-export function isDictMergeExpression(e: AnyExpr): e is DictMergeExpression<any, any, any, any> { return e.kind === "dict_merge"; }
 export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "parameter"; }
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "loop_item"; }
 export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
 export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> { return e.kind === "task_data"; }
-export function isFromBase64(e: AnyExpr): e is FromBase64Expression { return e.kind === "from_base64"; }
-export function isToBase64(e: AnyExpr): e is ToBase64Expression { return e.kind === "to_base64"; }
 function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }

@@ -91,12 +91,11 @@ function formatArguments(passedParameters: {parameters?: Record<string, any> | u
     }));
 }
 
-function formatStep<T extends NamedTask & { args?: unknown, withLoop?: unknown }>(step: T) {
-    const {withLoop, args, ...rest} = step;
+function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unknown }>(step: T) {
+    const {withLoop, when, args, ...rest} = step;
     return {
-        ...(withLoop !== undefined
-            ? renderWithLoop(withLoop as LoopWithUnion<any>)
-            : {}),
+        ...(undefined === when     ? {} : { when: `${toArgoExpression(when)}` }),
+        ...(undefined === withLoop ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...rest,
         ...{ "arguments": { parameters: (formatArguments(args) as object) } }
     };
@@ -104,14 +103,15 @@ function formatStep<T extends NamedTask & { args?: unknown, withLoop?: unknown }
 
 function formatBody(body: GenericScope) {
     if (body) {
-        if (body.steps == undefined) {
-            return transformExpressionsDeep(body);
-        } else {
+        if (body.steps !== undefined ) {
             return {
                 steps: (body.steps as StepGroup[])
-                    .map(g => g
-                        .steps.map(s => formatStep(s)))
+                    .map(g => g.steps.map(s => formatStepOrTask(s)))
             };
+        } else if (body.dag !== undefined) {
+            return { dag: (body.dag as []).map(t => formatStepOrTask(t)) };
+        } else {
+            return transformExpressionsDeep(body);
         }
     } else {
         return {};

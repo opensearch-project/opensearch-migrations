@@ -8,14 +8,10 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
-    nullCoalesce,
-    stringToRecord,
-    toBase64
 } from "@/schemas/expression";
 import {
     CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
-    CONSOLE_SERVICES_CONFIG_FILE, DYNAMIC_SNAPSHOT_CONFIG,
-    SNAPSHOT_MIGRATION_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE,
     TARGET_CLUSTER_CONFIG,
     UNKNOWN
 } from "@/workflowTemplates/userSchemas";
@@ -143,7 +139,7 @@ export const MigrationConsole = WorkflowBuilder.create({
         .addInputsFromRecord(configComponentParameters)
         .addSteps(s=>s)
         .addExpressionOutput("configContents", c=>
-            stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
+            expr.stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
                 expr.concat(
                     conditionalInclude("kafka", c.inputs.kafkaInfo),
                     conditionalInclude("source_cluster", c.inputs.sourceConfig),

@@ -12,11 +12,10 @@ export abstract class BaseExpression<T extends PlainObject, C extends Expression
 
 export type SimpleExpression<T extends PlainObject>   = BaseExpression<T, "govaluate">;
 export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "complicatedExpression">;
-export type AnyExpression<T extends PlainObject>      = BaseExpression<T, ExpressionType>;
 
 // Helper type to allow both literal values and expressions
-export type AllowLiteralOrExpression<T extends PlainObject> =
-    T | BaseExpression<T, any>;
+export type AllowLiteralOrExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+    T | BaseExpression<T, C>;
 
 export function isExpression(v: unknown): v is BaseExpression<any, any> {
     return v instanceof BaseExpression;
@@ -70,7 +69,7 @@ export class NullCoalesce<
         public readonly preferredValue: BaseExpression<T|MissingField>,
         d: AllowLiteralOrExpression<DeepWiden<T>>
     ) {
-        super("null_coalesce");
+        super("sprig.coalesce");
         this.defaultValue = toExpression(d);
     }
 }
@@ -115,12 +114,6 @@ export class ComparisonExpression<
     ) { super("comparison"); }
 }
 
-export class NotExpression<C extends ExpressionType> extends BaseExpression<boolean, C> {
-    constructor(public readonly boolValue: BaseExpression<boolean, C>) {
-        super("not");
-    }
-}
-
 export class ArithmeticExpression<
     L extends BaseExpression<number, CL>,
     R extends BaseExpression<number, CR>,
@@ -137,19 +130,6 @@ export class ArithmeticExpression<
 
 
 // Begin jsonExpressions.ts
-
-export class SerializeJson extends BaseExpression<string, "complicatedExpression"> {
-    constructor(public readonly data: BaseExpression<Record<any, any>>) {
-        super("serialize_json");
-    }
-}
-
-export class DeserializeJson<T extends PlainObject> extends BaseExpression<T, "complicatedExpression"> {
-    constructor(public readonly data: BaseExpression<string>) {
-        super("deserialize_json");
-    }
-}
-
 
 type NormalizeValue<V> =
     V extends BaseExpression<infer U, infer C> ? BaseExpression<U, C> :
@@ -215,46 +195,7 @@ type MergeTwo<A extends Record<string, any>, B extends Record<string, any>> = {
         : (K extends keyof A ? A[K] : never)
 };
 
-// -------- Expression node for merging two dicts --------
-
-export class DictMergeExpression<
-    L extends BaseExpression<Record<string, any>, CL>,
-    R extends BaseExpression<Record<string, any>, CR>,
-    CL extends ExpressionType = ExprC<L>,
-    CR extends ExpressionType = ExprC<R>
-> extends BaseExpression<
-    MergeTwo<ResultOf<L>, ResultOf<R>>,
-    "complicatedExpression" // I don't think when expressions can run sprig functions
-    //(CL | CR) extends "complicatedExpression" ? "complicatedExpression" : "govaluate"
-> {
-    constructor(public readonly left: L, public readonly right: R) {
-        super("dict_merge");
-    }
-}
-
-// -------- Public API --------------------------------------------------------
-
-/**
- * Merge two dictionary expressions (right wins at runtime; types become a union where keys overlap).
- * - Keeps precise key sets from both inputs.
- * - Value types for overlapping keys are unioned: A[K] | B[K].
- * - Complexity widens if either side is "complicatedExpression".
- */
-export function mergeDicts<
-    L extends BaseExpression<Record<string, any>, any>,
-    R extends BaseExpression<Record<string, any>, any>
->(
-    left: L,
-    right: R
-): BaseExpression<
-    MergeTwo<ResultOf<L>, ResultOf<R>>,
-    (ExprC<L> | ExprC<R>) extends "complicatedExpression" ? "complicatedExpression" : "govaluate"
-> {
-    return new DictMergeExpression(left, right) as any;
-}
-
-
-// Everything else is for jsonPath
+// Below is for jsonPath
 
 export class RecordFieldSelectExpression<T, P, E> extends BaseExpression<any, "complicatedExpression"> {
     constructor(public readonly source: E, public readonly path: P) { super("path"); }
@@ -465,7 +406,6 @@ export class ArrayMakeExpression<
     constructor(public readonly elements: ES) { super("array_make"); }
 }
 
-
 export type ParameterSource =
     | { kind: "workflow",     parameterName: string }
     | { kind: "input",        parameterName: string }
@@ -500,30 +440,11 @@ export class LoopItemExpression<T extends PlainObject>
     constructor() { super("loop_item"); }
 }
 
-export class FromBase64Expression extends BaseExpression<string, "complicatedExpression"> {
-    constructor(public readonly data: BaseExpression<string>) {
-        super("from_base64");
-    }
-}
-
-export class ToBase64Expression extends BaseExpression<string, "complicatedExpression"> {
-    constructor(public readonly data: BaseExpression<string>) {
-        super("to_base64");
-    }
-}
-
 export const literal = <T extends PlainObject>(v: T): SimpleExpression<DeepWiden<T>> =>
     new LiteralExpression<DeepWiden<T>>(v as DeepWiden<T>);
 
 export const asString = <E extends BaseExpression<any, any>>(e: E): BaseExpression<string, ExprC<E>> =>
     new AsStringExpression(e);
-
-export function nullCoalesce<T extends PlainObject>(
-    v: BaseExpression<T | MissingField, any>,
-    d: AllowLiteralOrExpression<DeepWiden<T>>
-) {
-    return new NullCoalesce<T>(v, d);
-}
 
 /**
  * Pretty unsafe, but this is here at least until we have a smarter ternary in place.
@@ -587,10 +508,6 @@ export function greaterThan<
     return new ComparisonExpression<number,L,R>(">", l, r);
 }
 
-export function not<C extends ExpressionType>(data: BaseExpression<boolean, C>): BaseExpression<boolean, C> {
-    return new NotExpression(data);
-}
-
 export const add = <
     L extends BaseExpression<number, any>,
     R extends BaseExpression<number, any>
@@ -604,15 +521,6 @@ export const subtract = <
     CR extends ExpressionType = ExprC<R>
 >(l: L, r: R): BaseExpression<number, WidenComplexity2<CL, CR>> =>
     new ArithmeticExpression("-", l, r);
-
-export function recordToString(data: BaseExpression<Record<string, any>>) {
-    return new SerializeJson(data);
-}
-
-export function stringToRecord<T extends PlainObject = never>(typeToken: TypeToken<T>, data: BaseExpression<string>) {
-    return new DeserializeJson<T>(data);
-}
-
 
 
 export const length = <E extends BaseExpression<any[], any>>(arr: E): BaseExpression<number, ExprC<E>> =>
@@ -703,28 +611,11 @@ export const taskOutput = <T extends PlainObject, Label extends TaskType>(
         def as any
     );
 
-export function taskDataAsExpression(
-    taskType: TaskType,
-    taskName: string,
-    key: "id"|"status"
-) {
-    return new TaskDataExpression(taskType, taskName, key);
-}
-
 export const loopItem = <T extends PlainObject>(): TemplateExpression<T> =>
     new LoopItemExpression<T>();
 
 export function getWorkflowValue(value: WORKFLOW_VALUES) {
     return new WorkflowValueExpression(value);
-}
-
-// These go in basicExpressions
-export function fromBase64(data: BaseExpression<string>) {
-    return new FromBase64Expression(data);
-}
-
-export function toBase64(data: BaseExpression<string>) {
-    return new ToBase64Expression(data);
 }
 
 // begin templateExpression.ts
@@ -763,52 +654,130 @@ function fillTemplate<T extends string>(
     return new TemplateReplacementExpression(template, normalizedReplacements);
 }
 
-// Namespace object for convenient access
-export const expr = {
+export class FunctionExpression<
+    ResultT extends PlainObject,
+    InputT extends PlainObject,
+    CIn extends ExpressionType = "complicatedExpression",
+    COut extends ExpressionType = "complicatedExpression",
+    InputExpressionsT extends readonly BaseExpression<InputT, CIn>[] = readonly BaseExpression<InputT, CIn>[]
+> extends BaseExpression<ResultT, COut> {
+    constructor(
+        public readonly functionName: string,
+        public readonly args: InputExpressionsT,
+        // convenience args for callers that would rather infer types
+        _typeToken?: TypeToken<ResultT>
+    ) {
+        super("function");
+    }
+}
+
+export class BinaryFunctionExpression<
+    ResultT extends PlainObject,
+    Input1T extends PlainObject = PlainObject,
+    Input2T extends PlainObject = PlainObject,
+    C1 extends ExpressionType = "complicatedExpression",
+    C2 extends ExpressionType = "complicatedExpression"
+> extends BaseExpression<ResultT, WidenComplexity2<C1, C2>> {
+    constructor(
+        public readonly functionName: string,
+        public readonly arg1: BaseExpression<Input1T, C1>,
+        public readonly arg2: BaseExpression<Input2T, C2>,
+        // convenience args for callers that would rather infer types
+        _typeToken?: TypeToken<ResultT>
+    ) {
+        super("function");
+    }
+}
+
+function fn<
+    R extends PlainObject,
+    CIn extends ExpressionType = "complicatedExpression",
+    COut extends ExpressionType = CIn
+>(
+    name: string,
+    ...args: BaseExpression<any, CIn>[]
+) {
+    return new FunctionExpression<R, any, CIn, COut, typeof args>(name, args);
+}
+
+class ExprBuilder {
+
     // Core functions
-    literal,
-    asString,
-    concat,
-    concatWith,
-    ternary,
-    toArray,
-    nullCoalesce,
-    cast,
+    literal = literal;
+    asString = asString;
+    concat = concat;
+    concatWith = concatWith;
+    ternary = ternary;
+    toArray = toArray;
+    cast = cast;
+
+    nullCoalesce<T extends PlainObject>(
+        v: BaseExpression<T | MissingField, any>,
+        d: AllowLiteralOrExpression<DeepWiden<T>>
+    ) {
+        return fn<DeepWiden<T>>("sprig.coalesce", v, toExpression(d));
+    }
 
     // Comparisons
-    equals,
-    lessThan,
-    greaterThan,
-    not,
+    equals = equals;
+    lessThan = lessThan;
+    greaterThan = greaterThan;
+    not<C extends ExpressionType="govaluate">(data: AllowLiteralOrExpression<boolean, C>) {
+        return fn<boolean, C>("!", toExpression(data));
+    }
 
     // Arithmetic
-    add,
-    subtract,
+    add = add;
+    subtract = subtract;
 
     // JSON Handling
-    jsonPathLoose,
-    jsonPathStrict,
-    stringToRecord,
-    recordToString,
-    makeDict,
-    mergeDicts,
+    jsonPathLoose = jsonPathLoose;
+    jsonPathStrict = jsonPathStrict;
+    stringToRecord<R extends PlainObject>(capture: TypeToken<R>, data: AllowLiteralOrExpression<string>) {
+        return fn<R>("fromJSON", toExpression(data));
+    }
+    recordToString<T extends PlainObject>(data: AllowLiteralOrExpression<T>) {
+        return fn<string>("toJSON", toExpression(data));
+    }
+    makeDict = makeDict;
+    mergeDicts<
+        L extends BaseExpression<Record<string, any>, any>,
+        R extends BaseExpression<Record<string, any>, any>
+    >(
+        left: L,
+        right: R
+    ): BaseExpression<MergeTwo<ResultOf<L>, ResultOf<R>>, "complicatedExpression"> {
+        return new FunctionExpression<
+            MergeTwo<ResultOf<L>, ResultOf<R>>,
+            any,
+            "complicatedExpression",
+            "complicatedExpression",
+            readonly [L, R]
+        >("merge", [left, right] as const);
+    }
 
     // Array operations
-    length,
-    index,
+    length = length;
+    index = index;
+    last<T extends PlainObject>(arr: BaseExpression<T[]>) { return fn<T,ExpressionType,"complicatedExpression">("last", arr)}
 
     // Parameter functions
-    workflowParam,
-    inputParam,
-    taskData,
-    taskOutput,
-    loopItem,
+    workflowParam = workflowParam;
+    inputParam = inputParam;
+    taskData = taskData;
+    taskOutput = taskOutput;
+    loopItem = loopItem;
 
-    // utility
-    getWorkflowValue,
-    fromBase64,
-    toBase64,
-    fillTemplate
-} as const;
+    // Utility
+    split(arr: AllowLiteralOrExpression<string>, delim: AllowLiteralOrExpression<string>) {
+        return fn<string[],ExpressionType,"complicatedExpression">("split", toExpression(arr), toExpression(delim))
+    }
+    getWorkflowValue = getWorkflowValue;
+    fromBase64(data: AllowLiteralOrExpression<string>) {return fn<string>("fromBase64", toExpression(data));}
+    toBase64(data: AllowLiteralOrExpression<string>) {return fn<string>("toBase64", toExpression(data));}
+    fillTemplate = fillTemplate;
+}
+
+export const expr = new ExprBuilder();
 
 export default expr;
