@@ -1,11 +1,13 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Alert, Box } from "@cloudscape-design/components";
+import { Alert } from "@cloudscape-design/components";
+import MetadataMigrateView from "@/components/metadata/MetadataMigrateView";
 import WorkflowWizard, {
   WorkflowWizardStep,
 } from "@/components/common/WorkflowWizard";
+import { useRouter } from "next/navigation";
 
 export default function MetadataPage() {
   return (
@@ -16,8 +18,14 @@ export default function MetadataPage() {
 }
 
 function MetadataPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const sessionName = searchParams?.get("sessionName") ?? "";
+
+  const onSubmit = useCallback(
+    () => router.push(`/backfill?sessionName=${sessionName}`),
+    [router, sessionName],
+  );
 
   if (!sessionName) {
     return (
@@ -30,13 +38,23 @@ function MetadataPageInner() {
   const steps: WorkflowWizardStep[] = [
     {
       title: "Metadata Evaluation",
-      description: "Review snapshot settings",
-      content: <Box>Placeholder</Box>,
+      description: "Review metadata actions",
+      content: (
+        <MetadataMigrateView
+          dryRun={true}
+          sessionName={sessionName}
+        ></MetadataMigrateView>
+      ),
     },
     {
       title: "Metadata Migration",
-      description: "Review snapshot settings",
-      content: <Box>Placeholder</Box>,
+      description: "Migrate metadata settings",
+      content: (
+        <MetadataMigrateView
+          dryRun={false}
+          sessionName={sessionName}
+        ></MetadataMigrateView>
+      ),
     },
   ];
 
@@ -45,6 +63,7 @@ function MetadataPageInner() {
       steps={steps}
       sessionName={sessionName}
       submitButtonText="Complete Metadata Migration"
+      onSubmit={onSubmit}
     />
   );
 }

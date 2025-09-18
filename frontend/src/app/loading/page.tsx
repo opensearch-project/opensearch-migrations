@@ -17,14 +17,13 @@ import DebugCommands from "@/components/debug/DebugCommands";
 import Image from "next/image";
 import { usePollingSystemHealth } from "@/hooks/apiPoll";
 import router from "next/router";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 export default function LoadingPage() {
   const [debugError, setDebugError] = useState<string | null>(null);
   const [debugIsReady, setDebugIsReady] = useState<boolean | null>(null);
 
   const { data, error } = usePollingSystemHealth(
-    // Need to figure out how to make sure we've got browser access without blowing up the missing local storage references
     !getSiteReadiness(),
     (data: HealthApiResponse) => {
       const ready = data?.status === "ok";
@@ -35,7 +34,7 @@ export default function LoadingPage() {
   const isReady = debugIsReady ?? getSiteReadiness() ?? data?.status === "ok";
   const errorMessage = debugError ?? error ?? null;
 
-  const startMigration = () => router.push("/migration");
+  const startMigration = useCallback(() => router.push("/createSession"), []);
 
   return (
     <SpaceBetween size="l">
