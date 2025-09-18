@@ -97,6 +97,7 @@ export default function BackfillStatusView({
         data={backfillData}
         fields={fields}
         columns={2}
+        goToLocation="backfill"
       />
       <BackfillDebugControls
         onScenarioSelect={applyDebugScenario}

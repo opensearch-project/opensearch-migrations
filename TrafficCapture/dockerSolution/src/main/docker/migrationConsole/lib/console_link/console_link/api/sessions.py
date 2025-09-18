@@ -106,3 +106,5 @@ def delete_session(session_name: str) -> SessionDeleteResponse:
         return SessionDeleteResponse(detail=f"Session '{session_name}' deleted.")
     except session_db.SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to delete session: {e}")

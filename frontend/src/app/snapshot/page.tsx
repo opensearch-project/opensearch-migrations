@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import WorkflowWizard, {
   WorkflowWizardStep,
@@ -10,6 +10,7 @@ import TargetConfigure from "@/components/connection/TargetConfigure";
 import SnapshotCreator from "@/components/snapshot/SnapshotCreator";
 import SnapshotReview from "@/components/snapshot/SnapshotReview";
 import { Alert } from "@cloudscape-design/components";
+import { useRouter } from "next/navigation";
 
 export default function SnapshotPage() {
   return (
@@ -20,8 +21,14 @@ export default function SnapshotPage() {
 }
 
 function SnapshotPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const sessionName = searchParams?.get("sessionName") ?? "";
+
+  const onSubmit = useCallback(
+    () => router.push(`/metadata?sessionName=${sessionName}`),
+    [router, sessionName],
+  );
 
   if (!sessionName) {
     return (
@@ -59,6 +66,7 @@ function SnapshotPageInner() {
       steps={steps}
       sessionName={sessionName}
       submitButtonText="Complete Snapshot Creation"
+      onSubmit={onSubmit}
     />
   );
 }

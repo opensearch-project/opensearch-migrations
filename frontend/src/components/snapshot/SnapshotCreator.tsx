@@ -77,7 +77,11 @@ export default function SnapshotCreator({
   return (
     <SpaceBetween size="l">
       {/* Prefer passing the already-polled data down to avoid double-polling */}
-      <SnapshotStatusView sessionName={sessionName} />
+      <SnapshotStatusView
+        isLoading={isStatusLoading}
+        data={snapshotStatus}
+        error={statusError}
+      />
 
       {error && (
         <Alert type="error" header="Error">

@@ -59,7 +59,6 @@ export default function SnapshotConfigView({
     setIsLoading(false);
     setError(null);
   };
-
   const resetToApiData = () => {
     setDebugData(null);
     setSnapshotConfig(apiSnapshotData);

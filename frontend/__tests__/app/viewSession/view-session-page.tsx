@@ -7,6 +7,9 @@ import { useSearchParams } from "next/navigation";
 
 jest.mock("next/navigation", () => ({
   useSearchParams: jest.fn(),
+  useRouter: () => ({
+    push: jest.fn(),
+  }),
 }));
 
 describe("ViewSessionPage", () => {

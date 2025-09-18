@@ -8,6 +8,7 @@ import SnapshotStatusView from "@/components/snapshot/SnapshotStatusView";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import MetadataStatusView from "@/components/metadata/MetadataStatusView";
 import BackfillStatusView from "@/components/backfill/BackfillStatusView";
+import { useSnapshotStatus } from "@/hooks/apiFetch";
 
 export default function ViewSessionPage() {
   return (
@@ -20,6 +21,11 @@ export default function ViewSessionPage() {
 function ViewSessionPageInner() {
   const searchParams = useSearchParams();
   const sessionName = searchParams.get("sessionName");
+  const {
+    isLoading: snapshotIsLoading,
+    data: snapshotData,
+    error: snapshotError,
+  } = useSnapshotStatus(sessionName!);
 
   return (
     <SpaceBetween size="m">
@@ -27,7 +33,11 @@ function ViewSessionPageInner() {
       {sessionName && (
         <SpaceBetween size="l">
           <SessionOverviewView sessionName={sessionName} />
-          <SnapshotStatusView sessionName={sessionName} />
+          <SnapshotStatusView
+            isLoading={snapshotIsLoading}
+            data={snapshotData}
+            error={snapshotError}
+          />
           <MetadataStatusView sessionName={sessionName} />
           <BackfillStatusView sessionName={sessionName} />
         </SpaceBetween>

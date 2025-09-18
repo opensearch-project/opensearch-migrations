@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { StatusFieldDefinition } from "@/components/session/statusUtils";
-import { useSnapshotStatus } from "@/hooks/apiFetch";
 import StatusContainer from "@/components/session/StatusContainer";
 import {
   StatusDisplay,
@@ -19,15 +18,17 @@ export interface SessionStatusProps {
   readonly sessionName: string;
 }
 
-export default function SnapshotStatusView({
-  sessionName,
-}: Readonly<SessionStatusProps>) {
-  const {
-    isLoading: apiLoading,
-    data: apiSnapshotData,
-    error,
-  } = useSnapshotStatus(sessionName);
+export interface SnapshotStatusViewProps {
+  readonly isLoading: boolean;
+  readonly data: SnapshotStatus | null | undefined;
+  readonly error: string | null;
+}
 
+export default function SnapshotStatusView({
+  isLoading: apiLoading,
+  data,
+  error,
+}: SnapshotStatusViewProps) {
   const [debugData, setDebugData] = useState<SnapshotStatus | null>(null);
   const [isLoading, setIsLoading] = useState(apiLoading);
   const [snapshotData, setSnapshotData] = useState<SnapshotStatus | null>(null);
@@ -35,14 +36,14 @@ export default function SnapshotStatusView({
   useEffect(() => {
     if (!debugData) {
       // Only update if there's actual API data
-      if (apiSnapshotData) {
-        setSnapshotData(apiSnapshotData);
+      if (data) {
+        setSnapshotData(data);
       } else {
         setSnapshotData(null);
       }
       setIsLoading(apiLoading);
     }
-  }, [apiSnapshotData, apiLoading, debugData]);
+  }, [data, apiLoading, debugData]);
 
   const applyDebugScenario = (scenario: keyof typeof SNAPSHOT_SCENARIOS) => {
     setDebugData(SNAPSHOT_SCENARIOS[scenario]);
@@ -97,6 +98,7 @@ export default function SnapshotStatusView({
         data={snapshotData}
         fields={fields}
         columns={2}
+        goToLocation="snapshot"
       />
 
       <SnapshotDebugControls

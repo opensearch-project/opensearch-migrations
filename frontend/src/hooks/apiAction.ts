@@ -1,4 +1,8 @@
-import { snapshotCreate, snapshotDelete } from "@/generated/api";
+import {
+  metadataMigrate,
+  snapshotCreate,
+  snapshotDelete,
+} from "@/generated/api";
 import { useCallback, useRef, useState } from "react";
 import { SessionPromise } from "./apiFetch";
 
@@ -44,14 +48,30 @@ export function useAsyncAction<T>(
   return { run, reset, isLoading, data, error };
 }
 
+const defaultArgs = (name: string) => {
+  return { path: { session_name: name } };
+};
+
+export function useMetadataMigrateAction(dryRun: boolean) {
+  return useAsyncAction(
+    async (sessionName: string) => {
+      return await metadataMigrate({
+        ...defaultArgs(sessionName),
+        body: { dryRun },
+      });
+    },
+    `metadata ${dryRun ? "evaluate" : "migrate"}`,
+  );
+}
+
 export function useSnapshotCreateAction() {
   return useAsyncAction(async (sessionName: string) => {
-    return await snapshotCreate({ path: { session_name: sessionName } });
+    return await snapshotCreate(defaultArgs(sessionName));
   }, "snapshot create");
 }
 
 export function useSnapshotDeleteAction() {
   return useAsyncAction(async (sessionName: string) => {
-    return await snapshotDelete({ path: { session_name: sessionName } });
+    return await snapshotDelete(defaultArgs(sessionName));
   }, "snapshot delete");
 }

@@ -82,6 +82,7 @@ export default function MetadataStatusView({
         data={metadataData}
         fields={fields}
         columns={2}
+        goToLocation="metadata"
       />
       <MetadataDebugControls
         onScenarioSelect={applyDebugScenario}
