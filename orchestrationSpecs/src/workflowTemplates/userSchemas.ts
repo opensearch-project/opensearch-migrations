@@ -63,13 +63,6 @@ export const RFS_OPTIONS = z.object({
     targetCompression: z.boolean().default(true)
 });
 
-export const REPLAYER_OPTIONS = z.object({
-    authHeaderOverride: z.optional(z.string()),
-    loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
-    docTransformerBase64: z.string().default("not a transform"),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-});
-
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     metadata: z.object({
         indices: z.array(z.string()),
@@ -86,15 +79,19 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG),
 });
 
-export const REPLAYER_CONFIG = z.object({
+export const REPLAYER_OPTIONS = z.object({
     speedupFactor: z.number(),
     initialReplicas: z.number(),
+    authHeaderOverride: z.optional(z.string()),
+    loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
+    docTransformerBase64: z.string().default("not a transform"),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
 export const SOURCE_MIGRATION_CONFIG = z.object({
     source: CLUSTER_CONFIG,
     snapshotAndMigrationConfigs: z.array(SNAPSHOT_MIGRATION_CONFIG),
-    replayerConfig: REPLAYER_CONFIG,
+    replayerConfig: REPLAYER_OPTIONS,
 });
 
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
@@ -102,4 +99,9 @@ export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
     source_cluster: CLUSTER_CONFIG,
     snapshot: z.string(), // TODO
     target_cluster: TARGET_CLUSTER_CONFIG
+});
+
+export const OVERALL_MIGRATION_CONFIG = z.object({
+    targets: z.array(TARGET_CLUSTER_CONFIG),
+    sourceMigrationConfigs: SOURCE_MIGRATION_CONFIG
 });
