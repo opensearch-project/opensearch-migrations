@@ -5,7 +5,7 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod/index";
 import {CLUSTER_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
-import {expr, literal} from "@/schemas/expression";
+import {expr} from "@/schemas/expression";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
@@ -35,7 +35,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                         repoConfig: expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig"),
                         snapshotName: b.inputs.autocreateSnapshotName
                     }),
-                }), {when: expr.equals(b.inputs.alreadyDefinedName, literal(""))})
+                }), {when: expr.equals(b.inputs.alreadyDefinedName, expr.literal(""))})
         )
          .addExpressionOutput("snapshotConfig",
                  c=> c.steps.createSnapshot.outputs.snapshotConfig))

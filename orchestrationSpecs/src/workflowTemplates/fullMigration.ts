@@ -11,7 +11,7 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {expr as EXPR} from "@/schemas/expression";
+import {expr as expr} from "@/schemas/expression";
 import {makeParameterLoop} from "@/schemas/workflowTypes";
 import {configMapKey, defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
 import {INTERNAL} from "@/schemas/taskBuilder";
@@ -70,22 +70,22 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     targetConfig: b.inputs.target,
-                    indices: EXPR.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"),
-                    metadataMigrationConfig: EXPR.jsonPathLoose(b.inputs.migrationConfig, "metadata", "options")
+                    indices: expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"),
+                    metadataMigrationConfig: expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "options")
                 }))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     sessionName: c.steps.idGenerator.id,
                     targetConfig: b.inputs.target,
-                    indices: EXPR.nullCoalesce(EXPR.jsonPathLoose(b.inputs.migrationConfig, "documentBackfillConfigs", "indices"), []),
-                    backfillConfig:  EXPR.jsonPathStrict(b.inputs.migrationConfig, "documentBackfillConfigs", "options")
+                    indices: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "documentBackfillConfigs", "indices"), []),
+                    backfillConfig:  expr.jsonPathStrict(b.inputs.migrationConfig, "documentBackfillConfigs", "options")
                 }))
             .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c=>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     prefix: b.inputs.latchCoordinationPrefix,
-                    targetName: EXPR.jsonPathLoose(b.inputs.target, "name"),
+                    targetName: expr.jsonPathLoose(b.inputs.target, "name"),
                     processorId: c.steps.idGenerator.id
                 }))
             .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c=>
@@ -127,7 +127,7 @@ export const FullMigration = WorkflowBuilder.create({
                 .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                     c=>c.register({
                         ...selectInputsForRegister(b, c),
-                        indices: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "indices"),
+                        indices: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "indices"),
                         autocreateSnapshotName: b.inputs.sourcePipelineName
                     }))
 
@@ -135,7 +135,7 @@ export const FullMigration = WorkflowBuilder.create({
                     c=> c.register({
                         ...selectInputsForRegister(b, c),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        migrationConfigs: EXPR.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
+                        migrationConfigs: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
                         target: c.item
                     }),
                     {loopWith: makeParameterLoop(b.inputs.targets)})
@@ -155,11 +155,11 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot", c =>
                     c.register({
                         ...selectInputsForRegister(b,c),
-                        sourceConfig: EXPR.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"),
+                        sourceConfig: expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        sourcePipelineName: EXPR.toBase64(EXPR.recordToString(EXPR.jsonPathLoose(b.inputs.sourceMigrationConfig, "source")))
+                        sourcePipelineName: expr.toBase64(expr.recordToString(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source")))
                     }),
-                {loopWith: makeParameterLoop(EXPR.jsonPathLoose(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
+                {loopWith: makeParameterLoop(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
                     )})
         )
     )
@@ -190,7 +190,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("init", TargetLatchHelpers, "init", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
-                    prefix: EXPR.concat(EXPR.literal("workflow-"), EXPR.getWorkflowValue("uid")),
+                    prefix: expr.concat(expr.literal("workflow-"), expr.getWorkflowValue("uid")),
                     configuration: b.inputs.sourceMigrationConfigs
                 }))
             .addStep("pipelineSourceMigration", INTERNAL, "pipelineSourceMigration",

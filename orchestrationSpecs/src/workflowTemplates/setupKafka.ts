@@ -1,7 +1,7 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {INTERNAL} from "@/schemas/taskBuilder";
-import {AllowLiteralOrExpression, BaseExpression, equals, expr} from "@/schemas/expression";
+import {AllowLiteralOrExpression, BaseExpression, expr} from "@/schemas/expression";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 

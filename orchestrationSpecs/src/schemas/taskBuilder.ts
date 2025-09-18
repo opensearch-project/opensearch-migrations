@@ -10,17 +10,15 @@ import {
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
 import {Workflow} from "@/schemas/workflowBuilder";
-import {PlainObject} from "@/schemas/plainObject";
+import {DeepWiden, PlainObject} from "@/schemas/plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {NamedTask, TaskType} from "@/schemas/sharedTypes";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
-    expr,
-    loopItem,
-    SimpleExpression,
-    taskOutput
+    expr, FromParameterExpression, LoopItemExpression, ParameterSource,
+    SimpleExpression, TemplateExpression
 } from "@/schemas/expression";
 import {
     buildDefaultsObject,
@@ -41,6 +39,26 @@ type ParamsPushedSymbol = typeof PARAMS_PUSHED;
 
 // Sentinel to indicate "use local template by key"
 export const INTERNAL: unique symbol = Symbol("INTERNAL_TEMPLATE");
+
+function loopItem<T extends PlainObject>(): TemplateExpression<T> {
+    return new LoopItemExpression<T>();
+}
+
+function taskOutput<T extends PlainObject, Label extends TaskType>(
+    taskType: Label,
+    taskName: string,
+    parameterName: string,
+    def?: OutputParamDef<T>
+): SimpleExpression<DeepWiden<T>> {
+    return new FromParameterExpression<DeepWiden<T>>(
+        {
+            kind: `${taskType}_output` as any,
+            [`${taskType.substring(0,taskType.length-1)}Name`]: taskName,
+            parameterName
+        } as ParameterSource,
+        def as any
+    );
+}
 
 export type OutputParamsToExpressions<
     Outputs extends OutputParametersRecord,

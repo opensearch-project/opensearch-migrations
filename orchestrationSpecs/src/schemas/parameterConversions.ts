@@ -1,7 +1,13 @@
-import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
-import {BaseExpression, expr, inputParam, workflowParam,} from "@/schemas/expression";
+import {InputParamDef, InputParametersRecord, OutputParamDef} from "@/schemas/parameterSchemas";
+import {
+    BaseExpression,
+    expr,
+    FromParameterExpression,
+    SimpleExpression,
+    TaskDataExpression
+} from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
-import {StripUndefined} from "@/schemas/sharedTypes";
+import {StripUndefined, TaskType} from "@/schemas/sharedTypes";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
 
@@ -203,6 +209,20 @@ export function selectInputsFieldsAsExpressionRecord<
     }
 
     return out as SelectedExprRecord<T, CB>;
+}
+
+function workflowParam<T extends PlainObject>(
+    name: string,
+    def?: InputParamDef<T, any>
+) {
+    return new FromParameterExpression({ kind: "workflow", parameterName: name }, def);
+}
+
+function inputParam<T extends PlainObject>(
+    name: string,
+    def: InputParamDef<T, any>
+) {
+    return new FromParameterExpression({ kind: "input", parameterName: name }, def);
 }
 
 /**

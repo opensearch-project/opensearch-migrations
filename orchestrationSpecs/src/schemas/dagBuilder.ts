@@ -31,7 +31,6 @@ import {
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
 import { PlainObject } from "@/schemas/plainObject";
 import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import { SimpleExpression, taskOutput } from "@/schemas/expression";
 import {NamedTask} from "@/schemas/sharedTypes";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
