@@ -1,12 +1,11 @@
 "use client";
 
 import { Suspense, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Alert, Box } from "@cloudscape-design/components";
 import WorkflowWizard, {
   WorkflowWizardStep,
 } from "@/components/common/WorkflowWizard";
-import { useRouter } from "next/navigation";
 
 export default function BackfillPage() {
   return (

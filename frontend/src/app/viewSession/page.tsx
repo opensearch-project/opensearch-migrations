@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense } from "react";
-import { Header, Spinner } from "@cloudscape-design/components";
+import { Alert, Header, Spinner } from "@cloudscape-design/components";
 import { useSearchParams } from "next/navigation";
 import SessionOverviewView from "@/components/session/SessionOverviewView";
 import SnapshotStatusView from "@/components/snapshot/SnapshotStatusView";
@@ -21,6 +21,15 @@ export default function ViewSessionPage() {
 function ViewSessionPageInner() {
   const searchParams = useSearchParams();
   const sessionName = searchParams.get("sessionName");
+
+  if (!sessionName) {
+    return (
+      <Alert type="error" header={`Unable to find an associated session`}>
+        Please create a session or adjust the sessionName parameter in the url.
+      </Alert>
+    );
+  }
+
   const {
     isLoading: snapshotIsLoading,
     data: snapshotData,

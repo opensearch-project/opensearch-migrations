@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import WorkflowWizard, {
   WorkflowWizardStep,
 } from "@/components/common/WorkflowWizard";
@@ -10,7 +10,6 @@ import TargetConfigure from "@/components/connection/TargetConfigure";
 import SnapshotCreator from "@/components/snapshot/SnapshotCreator";
 import SnapshotReview from "@/components/snapshot/SnapshotReview";
 import { Alert } from "@cloudscape-design/components";
-import { useRouter } from "next/navigation";
 
 export default function SnapshotPage() {
   return (
