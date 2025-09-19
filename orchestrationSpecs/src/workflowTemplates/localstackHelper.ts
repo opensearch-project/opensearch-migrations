@@ -4,6 +4,26 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
 import {typeToken} from "@/schemas/sharedTypes";
 
+
+export const LocalstackHelper = WorkflowBuilder.create({
+    k8sResourceName: "localstack-helper",
+    serviceAccountName: "argo-workflow-executor"
+})
+    .addTemplate("resolveS3Endpoint", t=>t
+        .addRequiredInput("s3Endpoint", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b=>b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["sh", "-c"])
+            .addArgs([getS3EndpointResolverContainer(b.inputs.s3Endpoint)])
+        )
+        .addPathOutput("resolvedS3Endpoint", "/tmp/resolved", typeToken<string>())
+        .addPathOutput("isLocalstackEndpoint", "/tmp/isLocalstack", typeToken<boolean>())
+    )
+    .setEntrypoint("resolveS3Endpoint")
+    .getFullScope();
+
+
 export function getS3EndpointResolverContainer(s3Endpoint: BaseExpression<string>) {
     const template = `
 set -euo pipefail
@@ -42,21 +62,3 @@ echo "true" > /tmp/isLocalstack
 `;
     return expr.fillTemplate(template, {"S3_ENDPOINT": s3Endpoint});
 }
-
-export const LocalstackHelper = WorkflowBuilder.create({
-    k8sResourceName: "localstack-helper",
-    serviceAccountName: "argo-workflow-executor"
-})
-    .addTemplate("resolveS3Endpoint", t=>t
-        .addRequiredInput("s3Endpoint", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addContainer(b=>b
-            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["sh", "-c"])
-            .addArgs([getS3EndpointResolverContainer(b.inputs.s3Endpoint)])
-        )
-        .addPathOutput("resolvedS3Endpoint", "/tmp/resolved", typeToken<string>())
-        .addPathOutput("isLocalstackEndpoint", "/tmp/isLocalstack", typeToken<boolean>())
-    )
-    .setEntrypoint("resolveS3Endpoint")
-    .getFullScope();

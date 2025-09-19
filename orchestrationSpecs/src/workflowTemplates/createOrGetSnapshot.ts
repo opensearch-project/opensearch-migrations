@@ -11,7 +11,7 @@ import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/schemas/parameterC
 import {typeToken} from "@/schemas/sharedTypes";
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
-    k8sResourceName: "CreateOrGetSnapshot",
+    k8sResourceName: "create-or-get-snapshot",
     serviceAccountName: "argo-workflow-executor"
 })
 

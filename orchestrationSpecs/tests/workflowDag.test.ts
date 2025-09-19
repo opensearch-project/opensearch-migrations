@@ -8,7 +8,7 @@ import {typeToken} from "@/schemas/sharedTypes";
 
 describe("paramsFns runtime validation", () => {
     const sharedNothingTemplate =
-        WorkflowBuilder.create({k8sResourceName: "SharedDoNothing"})
+        WorkflowBuilder.create({k8sResourceName: "shared-do-nothing"})
             .addTemplate("doNothing", b => {
                 const result = b
                     .addOptionalInput("strParam", s => "str")
@@ -27,7 +27,7 @@ describe("paramsFns runtime validation", () => {
         const empty =
             WorkflowBuilder
                 .create({
-                    k8sResourceName: "Test"
+                    k8sResourceName: "test"
                 })
                 .addTemplate("emptyDag", b => b
                     .addDag(d => d)
@@ -35,7 +35,7 @@ describe("paramsFns runtime validation", () => {
                 .getFullScope();
         expect(empty).toEqual({
             "metadata": {
-                "k8sMetadata": {"name": "Test"},
+                "k8sMetadata": {"name": "test"},
                 "name": "",
                 "parallelism": undefined,
                 "serviceAccountName": undefined,
@@ -68,7 +68,7 @@ describe("paramsFns runtime validation", () => {
     it("test that a dag workflow can be created", () => {
         var wf = WorkflowBuilder
             .create({
-                k8sResourceName: "Test"
+                k8sResourceName: "test"
             })
             .addTemplate("doNothing", t => t
                 //.addRequiredInput("str", typeToken<string>())
@@ -90,7 +90,7 @@ describe("paramsFns runtime validation", () => {
         expectTypeOf(wf).not.toBeAny();
         expect(wf).toEqual({
             "metadata": {
-                "k8sMetadata": {"name": "Test"},
+                "k8sMetadata": {"name": "test"},
                 "name": "",
                 "parallelism": undefined,
                 "serviceAccountName": undefined,
@@ -106,7 +106,7 @@ describe("paramsFns runtime validation", () => {
                                 "name": "first",
                                 "templateRef": {
                                     "name": "doNothing",
-                                    "template": "SharedDoNothing",
+                                    "template": "shared-do-nothing",
                                 },
                             },
                             {

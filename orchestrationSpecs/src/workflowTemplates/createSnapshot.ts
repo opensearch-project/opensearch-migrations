@@ -17,7 +17,7 @@ import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
 export const CreateSnapshot = WorkflowBuilder.create({
-    k8sResourceName: "FullMigration",
+    k8sResourceName: "full-migration",
     parallelism: 100,
     serviceAccountName: "argo-workflow-executor"
 })

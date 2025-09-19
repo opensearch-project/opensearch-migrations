@@ -29,12 +29,12 @@ function getNamespace(): string {
     }
 
     // Default namespace
-    return 'default';
+    return 'ma';
 }
 
 function getDryRun(): boolean {
     const args = process.argv.slice(2);
-    return args.includes('--dry-run') || process.env.DRY_RUN === 'true';
+    return args.includes('--dry-run') || args.includes('--dryRun') || process.env.DRY_RUN === 'true';
 }
 
 const targetNamespace = getNamespace();
@@ -139,7 +139,7 @@ async function deployAllWorkflows() {
         console.log("\n");
     }
 
-    console.log("All Argo WorkflowTemplates deployed!");
+    console.log(`Processed ${templates.length} templates.`);
 }
 
 // Run the deployment

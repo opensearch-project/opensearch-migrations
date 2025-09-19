@@ -9,22 +9,8 @@ import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {typeToken} from "@/schemas/sharedTypes";
 
-function addCommonTargetLatchInputs<
-    C extends { workflowParameters: typeof CommonWorkflowParameters }
->(tb: TemplateBuilder<C, {}, {}, {}>) {
-    return tb
-        .addRequiredInput("prefix", typeToken<string>())
-        // this makes it much easier to standardize handling in the rest of the template below, rather than pulling
-        // now all values can come from input parameters!
-        .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
-        .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
-        .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]))
-        ;
-}
-
 export const TargetLatchHelpers = WorkflowBuilder.create({
-        k8sResourceName: "TargetLatchHelpers",
+        k8sResourceName: "target-latch-helpers",
         serviceAccountName: "argo-workflow-executor",
         k8sMetadata: {},
         parallelism: 1
@@ -68,3 +54,18 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         )
     )
     .getFullScope();
+
+
+function addCommonTargetLatchInputs<
+    C extends { workflowParameters: typeof CommonWorkflowParameters }
+>(tb: TemplateBuilder<C, {}, {}, {}>) {
+    return tb
+        .addRequiredInput("prefix", typeToken<string>())
+        // this makes it much easier to standardize handling in the rest of the template below, rather than pulling
+        // now all values can come from input parameters!
+        .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
+        .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
+        .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]))
+        ;
+}

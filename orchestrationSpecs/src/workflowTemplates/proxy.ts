@@ -10,7 +10,7 @@ import {CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {z} from "zod";
 
 export const CaptureProxy = WorkflowBuilder.create({
-    k8sResourceName: "DocumentBulkLoad",
+    k8sResourceName: "capture-proxy",
     serviceAccountName: "argo-workflow-executor"
 })
 

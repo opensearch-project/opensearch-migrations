@@ -18,7 +18,7 @@ import {CaptureProxy} from "@/workflowTemplates/proxy";
 
 
 export const CaptureReplay = WorkflowBuilder.create({
-    k8sResourceName: "CaptureReplay",
+    k8sResourceName: "capture-replay",
     parallelism: 100,
     serviceAccountName: "argo-workflow-executor"
 })

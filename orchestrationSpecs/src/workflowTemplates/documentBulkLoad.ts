@@ -19,83 +19,8 @@ import {MISSING_FIELD} from "@/schemas/plainObject";
 import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
-function getCheckRfsCompletionScript(sessionName: BaseExpression<string>) {
-    const template = `
-set -x && 
-python -c '
-import sys
-from lib.console_link.console_link.environment import Environment
-from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
-from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
-
-status = get_detailed_status_dict(Environment("/config/migration_services.yaml").target_cluster, 
-                                  "{{SESSION_NAME}}")
-print(status)
-all_finished = all_shards_finished_processing(Environment("/config/migration_services.yaml").target_cluster,
-                                              "{{SESSION_NAME}}")
-sys.exit(0 if all_finished else 1)`;
-    return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
-}
-
-function getRfsReplicasetManifest
-(args: {
-    workflowName: BaseExpression<string>,
-    sessionName: BaseExpression<string>,
-    numPods: BaseExpression<number>,
-
-    useLocalstackAwsCreds: BaseExpression<boolean>
-    loggingConfigMap: BaseExpression<string>
-
-    rfsImageName: BaseExpression<string>,
-    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    inputsAsEnvList: Record<string, any>[],
-})
-{
-    const baseContainerDefinition = {
-        name: "bulk-loader",
-        image: args.rfsImageName,
-        imagePullPolicy: args.rfsImagePullPolicy,
-        env: [
-            ...args.inputsAsEnvList,
-            {name: "LUCENE_DIR", value: expr.literal("/tmp") }
-        ]
-    };
-    const finalContainerDefinition =
-        setupTestCredsForContainer(args.useLocalstackAwsCreds,
-            setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition));
-    return {
-        apiVersion: "apps/v1",
-            kind: "ReplicaSet",
-        metadata: {
-            name: expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot")),
-            labels: {
-                "workflows.argoproj.io/workflow": args.workflowName
-            },
-        },
-        spec: {
-            replicas: args.numPods,
-                selector: {
-                matchLabels: {
-                    app: "bulk-loader",
-                },
-            },
-            template: {
-                metadata: {
-                    labels: {
-                        app: "bulk-loader",
-                        "workflows.argoproj.io/workflow": args.workflowName,
-                    },
-                },
-                spec: {
-                    containers: [finalContainerDefinition]
-                },
-            },
-        }
-    }
-}
-
 export const DocumentBulkLoad = WorkflowBuilder.create({
-    k8sResourceName: "DocumentBulkLoad",
+    k8sResourceName: "document-bulk-load",
     serviceAccountName: "argo-workflow-executor"
 })
 
@@ -195,6 +120,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             })))
     )
 
+
     .addTemplate("runBulkLoad", t=>t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
@@ -226,3 +152,80 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     )
 
     .getFullScope();
+
+
+function getRfsReplicasetManifest
+(args: {
+    workflowName: BaseExpression<string>,
+    sessionName: BaseExpression<string>,
+    numPods: BaseExpression<number>,
+
+    useLocalstackAwsCreds: BaseExpression<boolean>
+    loggingConfigMap: BaseExpression<string>
+
+    rfsImageName: BaseExpression<string>,
+    rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    inputsAsEnvList: Record<string, any>[],
+})
+{
+    const baseContainerDefinition = {
+        name: "bulk-loader",
+        image: args.rfsImageName,
+        imagePullPolicy: args.rfsImagePullPolicy,
+        env: [
+            ...args.inputsAsEnvList,
+            {name: "LUCENE_DIR", value: expr.literal("/tmp") }
+        ]
+    };
+    const finalContainerDefinition =
+        setupTestCredsForContainer(args.useLocalstackAwsCreds,
+            setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition));
+    return {
+        apiVersion: "apps/v1",
+        kind: "ReplicaSet",
+        metadata: {
+            name: expr.concat(args.sessionName, expr.literal("-reindex-from-snapshot")),
+            labels: {
+                "workflows.argoproj.io/workflow": args.workflowName
+            },
+        },
+        spec: {
+            replicas: args.numPods,
+            selector: {
+                matchLabels: {
+                    app: "bulk-loader",
+                },
+            },
+            template: {
+                metadata: {
+                    labels: {
+                        app: "bulk-loader",
+                        "workflows.argoproj.io/workflow": args.workflowName,
+                    },
+                },
+                spec: {
+                    containers: [finalContainerDefinition]
+                },
+            },
+        }
+    }
+}
+
+
+function getCheckRfsCompletionScript(sessionName: BaseExpression<string>) {
+    const template = `
+set -x && 
+python -c '
+import sys
+from lib.console_link.console_link.environment import Environment
+from lib.console_link.console_link.models.backfill_rfs import get_detailed_status_dict
+from lib.console_link.console_link.models.backfill_rfs import all_shards_finished_processing
+
+status = get_detailed_status_dict(Environment("/config/migration_services.yaml").target_cluster, 
+                                  "{{SESSION_NAME}}")
+print(status)
+all_finished = all_shards_finished_processing(Environment("/config/migration_services.yaml").target_cluster,
+                                              "{{SESSION_NAME}}")
+sys.exit(0 if all_finished else 1)`;
+    return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
+}

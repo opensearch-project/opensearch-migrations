@@ -11,7 +11,7 @@ import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
 export const MetadataMigration = WorkflowBuilder.create({
-    k8sResourceName: "MetadataMigration",
+    k8sResourceName: "metadata-migration",
     serviceAccountName: "argo-workflow-executor"
 })
 

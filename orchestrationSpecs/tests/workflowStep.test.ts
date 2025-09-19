@@ -7,7 +7,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
     // Shared external templates with different parameter configurations
 
     // Template with no parameters
-    const noParamsTemplate = WorkflowBuilder.create({ k8sResourceName: "NoParams"})
+    const noParamsTemplate = WorkflowBuilder.create({ k8sResourceName: "no-params"})
         .addTemplate("noParams", b=> b
             .addSteps(x=>x)
             .addExpressionOutput("result", inputs=>"success" as string)
@@ -15,7 +15,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         .getFullScope();
 
     // Template with only required parameters
-    const requiredOnlyTemplate = WorkflowBuilder.create({ k8sResourceName: "RequiredOnly"})
+    const requiredOnlyTemplate = WorkflowBuilder.create({ k8sResourceName: "required-only"})
         .addTemplate("requiredOnly", b=> b
             .addRequiredInput("reqStr", typeToken<string>())
             .addRequiredInput("reqNum", typeToken<number>())
@@ -25,7 +25,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         .getFullScope();
 
     // Template with only optional parameters
-    const optionalOnlyTemplate = WorkflowBuilder.create({ k8sResourceName: "OptionalOnly"})
+    const optionalOnlyTemplate = WorkflowBuilder.create({ k8sResourceName: "optional-only"})
         .addTemplate("optionalOnly", b=> b
             .addOptionalInput("optStr", s=>"defaultStr")
             .addOptionalInput("optNum", n=>42)
@@ -35,7 +35,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         .getFullScope();
 
     // Template with mixed required and optional parameters
-    const mixedParamsTemplate = WorkflowBuilder.create({ k8sResourceName: "MixedParams"})
+    const mixedParamsTemplate = WorkflowBuilder.create({ k8sResourceName: "mixed-arams"})
         .addTemplate("mixedParams", b=> b
             .addRequiredInput("reqStr", typeToken<string>())
             .addOptionalInput("optNum", n=>0)
@@ -47,7 +47,7 @@ describe("paramsFns runtime validation - comprehensive", () => {
         .getFullScope();
 
     // Base workflow builder for internal templates
-    const baseWorkflow = WorkflowBuilder.create({ k8sResourceName: "TestWorkflow" })
+    const baseWorkflow = WorkflowBuilder.create({ k8sResourceName: "test-workflow" })
         // Internal template with no parameters
         .addTemplate("internalNoParams", t => t
             .addSteps(b=>b)

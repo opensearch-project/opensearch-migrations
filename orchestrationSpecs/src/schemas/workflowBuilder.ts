@@ -29,6 +29,9 @@ type MetadataScopeBase = {
     parallelism?: number
 };
 
+type LowercaseOnly<S extends string> =
+    S extends Lowercase<S> ? S : never;
+
 export class WorkflowBuilder<
     MetadataScope extends MetadataScopeBase,
     WorkflowInputsScope extends InputParametersRecord,
@@ -49,8 +52,8 @@ export class WorkflowBuilder<
      * many of the things being orchestrated are K8s resource (replicasets, services, etc).
      * @param opts
      */
-    static create(opts: {
-        k8sResourceName: string,
+    static create<K extends string>(opts: {
+        k8sResourceName: LowercaseOnly<K>,
         k8sMetadata?: Record<string, PlainObject>,
         serviceAccountName?: string,
         parallelism?: number

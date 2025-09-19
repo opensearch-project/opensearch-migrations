@@ -9,7 +9,7 @@ import expr from "@/schemas/expression";
 export type SIMPLE_ENUM = "a" | "b" | "c";
 
 describe("paramsFns runtime validation", () => {
-    const doNothingTemplate = WorkflowBuilder.create({ k8sResourceName: "DoNothing"})
+    const doNothingTemplate = WorkflowBuilder.create({ k8sResourceName: "do-nothing"})
         .addTemplate("opStr", b=>b
             .addOptionalInput("optionalA", s=>"str")
             .addSteps(x=>x))
@@ -83,7 +83,7 @@ describe("paramsFns runtime validation", () => {
 
     it("workflow param types can be used with input params", () => {
         const standaloneParam = defineParam({expression: "str"});
-        const wpsBuilder = WorkflowBuilder.create({ k8sResourceName: "WorkflowParamSample"})
+        const wpsBuilder = WorkflowBuilder.create({ k8sResourceName: "workflow-param-sample"})
             .addParams({
                 wpStr: defineParam({expression: "str"}),
                 wpEnum: defineParam({expression: "b" as SIMPLE_ENUM}),

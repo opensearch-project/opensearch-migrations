@@ -21,6 +21,111 @@ import {MissingField, PlainObject} from "@/schemas/plainObject";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
+
+export const MigrationConsole = WorkflowBuilder.create({
+    k8sResourceName: "migration-console",
+    serviceAccountName: "argo-workflow-executor"
+})
+
+    // .addParams(CommonWorkflowParameters)
+
+
+    .addTemplate("getConsoleConfig", b=>b
+        .addInputsFromRecord(configComponentParameters)
+        .addSteps(s=>s)
+        .addExpressionOutput("configContents", c=>
+            expr.stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
+                expr.concat(
+                    conditionalInclude("kafka", c.inputs.kafkaInfo),
+                    conditionalInclude("source_cluster", c.inputs.sourceConfig),
+                    conditionalInclude("target_cluster", c.inputs.targetConfig),
+                    conditionalInclude("target_cluster", c.inputs.targetConfig),
+                    conditionalInclude("snapshot", c.inputs.snapshotConfig),
+                    conditionalInclude("target_cluster", c.inputs.targetConfig)
+                ))
+        )
+    )
+
+
+    .addTemplate("runMigrationCommand", t=>t
+        .addRequiredInput("command", typeToken<string>())
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addContainer(c=>c
+            .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/sh", "-c"])
+            .addArgs([
+                expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
+                    "FILE_CONTENTS": expr.toBase64(expr.recordToString(c.inputs.configContents)),
+                    "COMMAND": c.inputs.command
+                })]
+            )
+        )
+    )
+
+
+    .addTemplate("deployConsoleWithConfig", t=>t
+        .addRequiredInput("command", typeToken<string>())
+        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("name", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addResourceTask(b=>b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: true,
+                successCondition: "status.availableReplicas > 0",
+                manifest: getConsoleDeploymentResource(b.inputs.name,
+                    b.inputs.imageMigrationConsoleLocation,
+                    b.inputs.imageMigrationConsolePullPolicy,
+                    expr.toBase64(expr.recordToString(b.inputs.configContents)),
+                    b.inputs.command)
+            }))
+
+        .addJsonPathOutput("deploymentName", "{.metadata.name}", typeToken<string>())
+    )
+
+
+    .addTemplate("runConsole", t=>t
+        .addRequiredInput("command", typeToken<string>())
+        .addInputsFromRecord(configComponentParameters)
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(s=>s
+            .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c=>
+                c.register(selectInputsForRegister(s, c)))
+
+
+            .addStep("runConsoleWithConfig", INTERNAL, "runMigrationCommand", c=>
+                c.register({
+                    ...selectInputsForRegister(s, c),
+                    configContents: c.steps.getConsoleConfig.outputs.configContents
+                }))
+        )
+    )
+
+
+    .addTemplate("deployConsole", t=>t
+        .addRequiredInput("command", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addInputsFromRecord(configComponentParameters)
+        .addRequiredInput("name", typeToken<string>())
+        .addSteps(s=>s
+            .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c=>
+                c.register(selectInputsForRegister(s, c)))
+            .addStep("deployConsoleWithConfig", INTERNAL, "deployConsoleWithConfig", c=>
+                c.register({
+                    ...selectInputsForRegister(s, c),
+                    configContents: c.steps.getConsoleConfig.outputs.configContents
+                }))
+        )
+        .addExpressionOutput("deploymentName",
+                c=>c.steps.getConsoleConfig.outputs.configContents)
+    )
+
+    .getFullScope();
+
+
 const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
 set -e -x
 
@@ -130,108 +235,3 @@ const configComponentParameters = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>|MissingField>({
         description: "Snapshot configuration information (JSON)"}),
 };
-
-
-export const MigrationConsole = WorkflowBuilder.create({
-    k8sResourceName: "MigrationConsole",
-    serviceAccountName: "argo-workflow-executor"
-})
-
-    // .addParams(CommonWorkflowParameters)
-
-
-    .addTemplate("getConsoleConfig", b=>b
-        .addInputsFromRecord(configComponentParameters)
-        .addSteps(s=>s)
-        .addExpressionOutput("configContents", c=>
-            expr.stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
-                expr.concat(
-                    conditionalInclude("kafka", c.inputs.kafkaInfo),
-                    conditionalInclude("source_cluster", c.inputs.sourceConfig),
-                    conditionalInclude("target_cluster", c.inputs.targetConfig),
-                    conditionalInclude("target_cluster", c.inputs.targetConfig),
-                    conditionalInclude("snapshot", c.inputs.snapshotConfig),
-                    conditionalInclude("target_cluster", c.inputs.targetConfig)
-                ))
-        )
-    )
-
-
-    .addTemplate("runMigrationCommand", t=>t
-        .addRequiredInput("command", typeToken<string>())
-        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addContainer(c=>c
-            .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/sh", "-c"])
-            .addArgs([
-                expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE,
-                    { "FILE_CONTENTS": expr.toBase64(expr.recordToString(c.inputs.configContents)),
-                        "COMMAND": c.inputs.command
-                    })
-                ]
-            )
-        )
-    )
-
-
-    .addTemplate("deployConsoleWithConfig", t=>t
-        .addRequiredInput("command", typeToken<string>())
-        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addRequiredInput("name", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-
-        .addResourceTask(b=>b
-            .setDefinition({
-                action: "create",
-                setOwnerReference: true,
-                successCondition: "status.availableReplicas > 0",
-                manifest: getConsoleDeploymentResource(b.inputs.name,
-                    b.inputs.imageMigrationConsoleLocation,
-                    b.inputs.imageMigrationConsolePullPolicy,
-                    expr.toBase64(expr.recordToString(b.inputs.configContents)),
-                    b.inputs.command)
-            }))
-
-        .addJsonPathOutput("deploymentName", "{.metadata.name}", typeToken<string>())
-    )
-
-
-    .addTemplate("runConsole", t=>t
-        .addRequiredInput("command", typeToken<string>())
-        .addInputsFromRecord(configComponentParameters)
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(s=>s
-            .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c=>
-                c.register(selectInputsForRegister(s, c)))
-
-
-            .addStep("runConsoleWithConfig", INTERNAL, "runMigrationCommand", c=>
-                c.register({
-                    ...selectInputsForRegister(s, c),
-                    configContents: c.steps.getConsoleConfig.outputs.configContents
-                }))
-        )
-    )
-
-
-    .addTemplate("deployConsole", t=>t
-        .addRequiredInput("command", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addInputsFromRecord(configComponentParameters)
-        .addRequiredInput("name", typeToken<string>())
-        .addSteps(s=>s
-            .addStep("getConsoleConfig", INTERNAL, "getConsoleConfig", c=>
-                c.register(selectInputsForRegister(s, c)))
-            .addStep("deployConsoleWithConfig", INTERNAL, "deployConsoleWithConfig", c=>
-                c.register({
-                    ...selectInputsForRegister(s, c),
-                    configContents: c.steps.getConsoleConfig.outputs.configContents
-                }))
-        )
-        .addExpressionOutput("deploymentName",
-                c=>c.steps.getConsoleConfig.outputs.configContents)
-    )
-
-    .getFullScope();

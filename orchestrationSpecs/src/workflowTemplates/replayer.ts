@@ -14,65 +14,8 @@ import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
-function getReplayerDeploymentManifest
-(args: {
-    workflowName: BaseExpression<string>,
-    sessionName: BaseExpression<string>,
-
-    loggingConfigMap: BaseExpression<string>
-
-    podReplicas: BaseExpression<number>,
-    replayerImageName: BaseExpression<string>,
-    replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-
-    inputsAsEnvList: Record<string, any>[]
-})
-{
-    const baseContainerDefinition = {
-        name: "replayer",
-        image: args.replayerImageName,
-        imagePullPolicy: args.replayerImagePullPolicy,
-        env: [
-            ...args.inputsAsEnvList,
-            {name: "LUCENE_DIR", value: expr.literal("/tmp") }
-        ]
-    };
-    const finalContainerDefinition =
-        setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition);
-    return {
-        apiVersion: "apps/v1",
-        kind: "Deployment",
-        metadata: {
-            name: expr.concat(args.sessionName, expr.literal("-replayer")),
-            labels: {
-                app: "replayer",
-                "workflows.argoproj.io/workflow": args.workflowName
-            },
-        },
-        spec: {
-            replicas: args.podReplicas,
-            selector: {
-                matchLabels: {
-                    app: "replayer",
-                },
-            },
-            template: {
-                metadata: {
-                    labels: {
-                        app: "replayer",
-                        "workflows.argoproj.io/workflow": args.workflowName,
-                    },
-                },
-                spec: {
-                    containers: [finalContainerDefinition]
-                },
-            },
-        }
-    }
-}
-
 export const Replayer = WorkflowBuilder.create({
-    k8sResourceName: "DocumentBulkLoad",
+    k8sResourceName: "replayer",
     serviceAccountName: "argo-workflow-executor"
 })
 
@@ -129,3 +72,61 @@ export const Replayer = WorkflowBuilder.create({
 
 
     .getFullScope();
+
+
+function getReplayerDeploymentManifest
+(args: {
+    workflowName: BaseExpression<string>,
+    sessionName: BaseExpression<string>,
+
+    loggingConfigMap: BaseExpression<string>
+
+    podReplicas: BaseExpression<number>,
+    replayerImageName: BaseExpression<string>,
+    replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+
+    inputsAsEnvList: Record<string, any>[]
+})
+{
+    const baseContainerDefinition = {
+        name: "replayer",
+        image: args.replayerImageName,
+        imagePullPolicy: args.replayerImagePullPolicy,
+        env: [
+            ...args.inputsAsEnvList,
+            {name: "LUCENE_DIR", value: expr.literal("/tmp") }
+        ]
+    };
+    const finalContainerDefinition =
+        setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition);
+    return {
+        apiVersion: "apps/v1",
+        kind: "Deployment",
+        metadata: {
+            name: expr.concat(args.sessionName, expr.literal("-replayer")),
+            labels: {
+                app: "replayer",
+                "workflows.argoproj.io/workflow": args.workflowName
+            },
+        },
+        spec: {
+            replicas: args.podReplicas,
+            selector: {
+                matchLabels: {
+                    app: "replayer",
+                },
+            },
+            template: {
+                metadata: {
+                    labels: {
+                        app: "replayer",
+                        "workflows.argoproj.io/workflow": args.workflowName,
+                    },
+                },
+                spec: {
+                    containers: [finalContainerDefinition]
+                },
+            },
+        }
+    }
+}
