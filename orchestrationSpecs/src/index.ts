@@ -32,46 +32,47 @@ function getNamespace(): string {
     return 'ma';
 }
 
-function getDryRun(): boolean {
+function getCreateResources(): boolean {
     const args = process.argv.slice(2);
-    return args.includes('--dry-run') || args.includes('--dryRun') || process.env.DRY_RUN === 'true';
+    const createResourcesArgIndex = args.indexOf('--createResources');
+
+    if (createResourcesArgIndex !== -1 && args[createResourcesArgIndex + 1]) {
+        const value = args[createResourcesArgIndex + 1].toLowerCase();
+        if (value === 'true') return true;
+        if (value === 'false') return false;
+    }
+
+    // If not found or invalid value, print error and exit
+    console.error('Error: --createResources flag is required and must be set to true or false');
+    process.exit(1);
+}
+
+function getShowResources(): boolean {
+    const args = process.argv.slice(2);
+    return args.indexOf('--showResources') !== -1;
 }
 
 const targetNamespace = getNamespace();
-const dryRun = getDryRun();
+const createResources = getCreateResources();
+const showResources = getShowResources();
 
 console.log(`Target namespace: ${targetNamespace}`);
-console.log(`Dry run: ${dryRun}`);
+console.log(`Create resources: ${createResources}`);
 console.log("OUTPUT: ");
 
-// const templates = [
-//     CaptureReplay,
-//     CaptureProxy,
-//     CreateOrGetSnapshot,
-//     CreateSnapshot,
-//     DocumentBulkLoad,
-//     FullMigration,
-//     LocalstackHelper,
-//     MetadataMigration,
-//     MigrationConsole,
-//     Replayer,
-//     SetupKafka,
-//     TargetLatchHelpers,
-// ];
-
 const templates = [
+    CaptureProxy,
+    CaptureReplay,
+    CreateOrGetSnapshot,
+    CreateSnapshot,
+    DocumentBulkLoad,
+    FullMigration,
+    LocalstackHelper,
+    MetadataMigration,
+    MigrationConsole,
+    Replayer,
+    SetupKafka,
     TargetLatchHelpers,
-    // CaptureReplay,
-    // CaptureProxy,
-    // CreateOrGetSnapshot,
-    // CreateSnapshot,
-    // DocumentBulkLoad,
-    // FullMigration,
-    // LocalstackHelper,
-    // MetadataMigration,
-    // MigrationConsole,
-    // Replayer,
-    // SetupKafka,
 ];
 
 // Initialize Kubernetes client
@@ -89,13 +90,32 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
         }
         workflowConfig.metadata.namespace = targetNamespace;
 
-        console.log(`Applying Argo WorkflowTemplate: ${workflowName} to namespace: ${targetNamespace}`);
+        console.log(`Processing Argo WorkflowTemplate: ${workflowName} in namespace: ${targetNamespace}`);
 
-        if (dryRun) {
-            console.log(`🔍 DRY RUN: Would apply WorkflowTemplate: ${workflowName}`);
+        if (!createResources) {
+            console.log(`CREATE_RESOURCES=false: Skipping WorkflowTemplate: ${workflowName}`);
             return;
         }
 
+        // First, try to delete the existing template (no error if it doesn't exist)
+        try {
+            await customObjectsApi.deleteNamespacedCustomObject({
+                group: 'argoproj.io',
+                version: 'v1alpha1',
+                namespace: targetNamespace,
+                plural: 'workflowtemplates',
+                name: workflowConfig.metadata.name
+            });
+            console.log(`🗑️  Deleted existing WorkflowTemplate: ${workflowName}`);
+        } catch (deleteError: any) {
+            if (deleteError.response?.statusCode === 404) {
+                console.log(`ℹ️  WorkflowTemplate ${workflowName} does not exist, proceeding with creation...`);
+            } else {
+                console.warn(`⚠️  Warning: Failed to delete existing WorkflowTemplate ${workflowName}:`, deleteError.message);
+            }
+        }
+
+        // Create the new template
         await customObjectsApi.createNamespacedCustomObject({
             group: 'argoproj.io',
             version: 'v1alpha1',
@@ -104,15 +124,11 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
             body: workflowConfig
         });
 
-        console.log(`Successfully applied WorkflowTemplate: ${workflowName}`);
+        console.log(`Successfully created WorkflowTemplate: ${workflowName}`);
 
     } catch (error: any) {
-        if (error.response?.statusCode === 409) {
-            console.log(`WorkflowTemplate ${workflowName} already exists, skipping...`);
-        } else {
-            console.error(`Failed to apply WorkflowTemplate ${workflowName}:`, error.message);
-            throw error;
-        }
+        console.error(`Failed to apply WorkflowTemplate ${workflowName}:`, error.message);
+        throw error;
     }
 }
 
@@ -123,8 +139,10 @@ async function deployAllWorkflows() {
         const finalConfig = renderWorkflowTemplate(wf);
 
         // Log the config for debugging
-        console.log(JSON.stringify(finalConfig, null, 2));
-        console.log("\n========\n");
+        if (showResources) {
+            console.log(JSON.stringify(finalConfig, null, 2));
+            console.log("\n---\n");
+        }
 
         const wfName = wf.metadata.k8sMetadata.name;
         // Apply to Kubernetes
