@@ -160,9 +160,11 @@ spec:
                   - |
                     set -e
                     echo "Creating Elasticsearch keystore and adding AWS credentials"
-                    echo 'y' | bin/elasticsearch-keystore create
+                    bin/elasticsearch-keystore create -f
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                    chown 1000:0 /usr/share/elasticsearch/config/elasticsearch.keystore
+                    chmod 600 /usr/share/elasticsearch/config/elasticsearch.keystore
                     # Copy keystore to shared volume location
                     cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
                     echo "Keystore created and saved to shared volume"
@@ -206,6 +208,173 @@ spec:
               --namespace {{inputs.parameters.namespace}}
             
             echo "Elasticsearch 7.10 cluster"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
+    # Elasticsearch 8.18 Single Node Template
+    - name: elasticsearch-8-18-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: bitnamisecure/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            
+            NS="{{inputs.parameters.namespace}}"
+            NAME="{{inputs.parameters.cluster-name}}"
+            ECK_NS="elastic-system"
+            ECK_VER="2.15.0"
+            
+            # Ensure target namespace exists
+            kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
+            
+            # --- Ensure ECK operator (CRDs + deployment) is installed (idempotent) ---
+            if ! kubectl get crd elasticsearches.elasticsearch.k8s.elastic.co >/dev/null 2>&1; then
+              echo "[ECK] Installing CRDs ${ECK_VER}…"
+              kubectl apply -f "https://download.elastic.co/downloads/eck/${ECK_VER}/crds.yaml"
+              
+              # Wait for key CRDs to be Established
+              kubectl wait --for=condition=Established --timeout=120s \
+                crd/elasticsearches.elasticsearch.k8s.elastic.co \
+                crd/kibanas.kibana.k8s.elastic.co \
+                crd/enterprisesearches.app.k8s.elastic.co || true
+            fi
+    
+            # Ensure operator namespace exists
+            kubectl get ns "${ECK_NS}" >/dev/null 2>&1 || kubectl create ns "${ECK_NS}"
+    
+            # Install/upgrade operator (safe if already present)
+            echo "[ECK] Installing/upgrading operator ${ECK_VER}…"
+            kubectl apply -f "https://download.elastic.co/downloads/eck/${ECK_VER}/operator.yaml"
+    
+            # Wait for operator to be available
+            kubectl rollout status deploy/elastic-operator -n "${ECK_NS}" --timeout=300s
+    
+            # Optional: wait for webhook registration (helps avoid admission races)
+            for i in $(seq 1 60); do
+              if kubectl get validatingwebhookconfiguration elastic-webhook.k8s.elastic.co >/dev/null 2>&1; then
+                echo "[ECK] Webhook registered."
+                break
+              fi
+              sleep 2
+            done
+            # --- ECK ready ---
+            
+            # Secret with S3 creds -> will be written into the keystore by ECK
+            cat > /tmp/es-s3-credentials.yaml <<EOF
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: ${NAME}-s3-credentials
+              namespace: ${NS}
+            type: Opaque
+            stringData:
+              s3.client.default.access_key: test
+              s3.client.default.secret_key: test
+            EOF
+            
+            # Elasticsearch CR
+            cat > /tmp/es.yaml <<EOF
+            apiVersion: elasticsearch.k8s.elastic.co/v1
+            kind: Elasticsearch
+            metadata:
+              name: ${NAME}
+              namespace: ${NS}
+            spec:
+              version: 8.18.4
+              http:
+                tls:
+                  selfSignedCertificate:
+                    disabled: true
+              nodeSets:
+              - name: default
+                count: 1
+                config:
+                  xpack.security.enabled: false
+                  xpack.security.enrollment.enabled: false
+                  xpack.security.http.ssl.enabled: false
+                  xpack.security.transport.ssl.enabled: false
+                  xpack.ml.enabled: false
+                  xpack.watcher.enabled: false
+                  discovery.type: single-node
+                  network.host: 0.0.0.0
+                  node.max_local_storage_nodes: 1
+            
+                  # LocalStack S3 client config
+                  s3.client.default.endpoint: http://localstack.${NS}.svc.cluster.local:4566
+                  s3.client.default.path_style_access: true
+                  s3.client.default.region: us-east-2
+                
+                secureSettings:
+                  - secretName: ${NAME}-s3-credentials
+                
+                podTemplate:
+                  spec:
+                    containers:
+                      - name: elasticsearch
+                        env:
+                          - name: ES_JAVA_OPTS
+                            value: "-Xms512m -Xmx512m"
+                          - name: "AWS_REGION"
+                            value: "us-east-2"
+                        volumeMounts:
+                          - name: elasticsearch-data
+                            mountPath: /usr/share/elasticsearch/data
+                    volumes:
+                      - name: elasticsearch-data
+                        emptyDir: {}
+                
+                # Force ephemeral data: no PVCs
+                volumeClaimTemplates: []
+            EOF
+
+            # Apply resources
+            kubectl apply -f /tmp/es-s3-credentials.yaml
+            kubectl apply -f /tmp/es.yaml
+            
+            # Wait for ECK to bring up the node
+            # Try 'ready' condition first, fall back to check health via service
+            SVC="${NAME}-es-http"
+            # Wait for service to exist
+            for i in $(seq 1 90); do
+              if kubectl -n "${NS}" get svc "${SVC}" >/dev/null 2>&1; then break; fi
+              sleep 2
+            done
+            
+            # Wait for HTTP 200 on /
+            for i in $(seq 1 120); do
+              if kubectl -n "${NS}" run --rm -i --restart=Never tmp-curl-$$ --image=curlimages/curl:8.8.0 -- \
+                -sS --max-time 2 "http://${SVC}.${NS}.svc:9200/" >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+            
+            # Emit cluster-config.json
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${SVC}:9200",
+              "allow_insecure": true,
+              "no_auth": null,
+              "version": "ES_8.18.4"
+            }
+            EOF
+
+            kubectl create configmap ${NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace ${NS} \
+              --dry-run=client -o yaml | kubectl apply -f -
+              
+            echo "Elasticsearch ${NAME} ready at http://${SVC}:9200"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:

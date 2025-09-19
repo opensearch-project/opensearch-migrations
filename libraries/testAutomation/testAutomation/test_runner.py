@@ -4,9 +4,11 @@ from dataclasses import dataclass, field
 import datetime
 from k8s_service import K8sService, HelmCommandFailed
 import logging
+import os
 import random
 import re
 import string
+import subprocess
 import sys
 from tabulate import tabulate
 from typing import List, Optional, Tuple
@@ -14,7 +16,7 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_7.10"]
+VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_7.10", "ES_8.18"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
 MA_RELEASE_NAME = "ma"
 
@@ -159,10 +161,52 @@ class TestRunner:
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
+    def rebuild_migration_console_image(self) -> None:
+        """Rebuild the migration console Docker image with latest changes."""
+        logger.info("Rebuilding migration console Docker image with latest changes...")
+        
+        import os
+        import subprocess
+        
+        # Get the project root directory (three levels up from testAutomation)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.join(current_dir, "..", "..", "..")
+        project_root = os.path.abspath(project_root)
+        
+        # Build the migration console image using Gradle
+        build_command = [
+            "./gradlew", 
+            ":TrafficCapture:dockerSolution:buildDockerImages",
+            "-x", "test"
+        ]
+        
+        logger.info(f"Running build command in directory: {project_root}")
+        logger.info(f"Command: {' '.join(build_command)}")
+        
+        try:
+            result = subprocess.run(
+                build_command,
+                cwd=project_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=True
+            )
+            logger.info("Migration console image rebuilt successfully")
+            logger.debug(f"Build output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to rebuild migration console image: {e}")
+            logger.error(f"Build output: {e.stdout}")
+            raise Exception(f"Failed to rebuild migration console image: {e}")
+
     def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
-            reuse_clusters: bool = False) -> None:
+            reuse_clusters: bool = False, rebuild_images: bool = False) -> None:
         for source_version, target_version in self.combinations:
             try:
+                # Rebuild migration console image if requested
+                if rebuild_images:
+                    self.rebuild_migration_console_image()
+                
                 logger.info(f"Performing helm deployment for migration testing environment "
                             f"from {source_version} to {target_version}")
 
@@ -297,6 +341,11 @@ def parse_args() -> argparse.Namespace:
         type=_parse_test_ids,
         default=[],
         help="Comma-separated list of test IDs to run (e.g. 0001,0003)"
+    )
+    parser.add_argument(
+        "--rebuild-images",
+        action="store_true",
+        help="If set, will rebuild the migration console Docker image before running tests"
     )
     return parser.parse_args()
 
