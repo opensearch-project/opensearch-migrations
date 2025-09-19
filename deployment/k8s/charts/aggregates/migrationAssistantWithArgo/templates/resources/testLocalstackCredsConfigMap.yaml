@@ -1,0 +1,16 @@
+{{- if .Values.conditionalPackageInstalls.localstack }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localstack-test-creds
+data:
+  active: "false" # true to enable this configuration for any pod that uses it
+  configuration: |
+    [DEFAULT]
+
+    [default]
+    aws_access_key_id=test
+    aws_secret_access_key=test
+    aws_session_token=test
+
+{{- end}}
