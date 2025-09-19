@@ -23,6 +23,18 @@ import type {
   SnapshotStatusData,
   SnapshotStatusResponses,
   SnapshotStatusErrors,
+  SnapshotConfigData,
+  SnapshotConfigResponses,
+  SnapshotConfigErrors,
+  SnapshotIndexesData,
+  SnapshotIndexesResponses,
+  SnapshotIndexesErrors,
+  SnapshotCreateData,
+  SnapshotCreateResponses,
+  SnapshotCreateErrors,
+  SnapshotDeleteData,
+  SnapshotDeleteResponses,
+  SnapshotDeleteErrors,
   MetadataMigrateData,
   MetadataMigrateResponses,
   MetadataMigrateErrors,
@@ -205,6 +217,70 @@ export const snapshotStatus = <ThrowOnError extends boolean = false>(
   >({
     responseTransformer: snapshotStatusResponseTransformer,
     url: "/sessions/{session_name}/snapshot/status",
+    ...options,
+  });
+};
+
+/**
+ * Get Snapshot Config
+ */
+export const snapshotConfig = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotConfigData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotConfigResponses,
+    SnapshotConfigErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/",
+    ...options,
+  });
+};
+
+/**
+ * Get Snapshot Indexes
+ */
+export const snapshotIndexes = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotIndexesData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    SnapshotIndexesResponses,
+    SnapshotIndexesErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/indexes",
+    ...options,
+  });
+};
+
+/**
+ * Snapshot Create
+ */
+export const snapshotCreate = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotCreateData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    SnapshotCreateResponses,
+    SnapshotCreateErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/create",
+    ...options,
+  });
+};
+
+/**
+ * Snapshot Delete
+ */
+export const snapshotDelete = <ThrowOnError extends boolean = false>(
+  options: Options<SnapshotDeleteData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    SnapshotDeleteResponses,
+    SnapshotDeleteErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/snapshot/delete",
     ...options,
   });
 };

@@ -69,7 +69,7 @@ export class MigrationAssistanceStack extends Stack {
 
         const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
-            kafkaVersion: KafkaVersion.V3_6_0,
+            kafkaVersion: KafkaVersion.V3_9_X,
             numberOfBrokerNodes: brokerNodesPerAZ,
             vpc: props.vpcDetails.vpc,
             vpcSubnets: props.vpcDetails.subnetSelection,
