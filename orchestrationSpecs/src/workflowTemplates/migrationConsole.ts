@@ -21,6 +21,116 @@ import {MissingField, PlainObject} from "@/schemas/plainObject";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
+function conditionalInclude<
+    T extends Record<string, any>,
+    U extends MissingField | T
+>(label: string, contents: BaseExpression<U>): BaseExpression<string> {
+    return expr.ternary(expr.equals(expr.asString(contents), expr.literal("")),
+        expr.literal(""), // do-nothing branch
+        expr.concat(
+            // Fill out the appropriate line(s) of the config.  Notice that yaml allows inlining JSON,
+            // which makes handling contents, especially at argo runtime, simpler
+            expr.literal(label+": "),
+            expr.recordToString(expr.cast(contents).to<T>()),
+            expr.literal("\n")
+        )
+    );
+}
+
+const KafkaServicesConfig = z.object({
+    broker_endpoints: z.string(),
+    standard: z.string()
+})
+
+const configComponentParameters = {
+    kafkaInfo: defineRequiredParam<z.infer<typeof KafkaServicesConfig>|MissingField>({
+        description: "Snapshot configuration information (JSON)"}),
+    sourceConfig: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
+        description: "Source cluster configuration (JSON)"}),
+    targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>|MissingField>({
+        description: "Target cluster configuration (JSON)"}),
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>|MissingField>({
+        description: "Snapshot configuration information (JSON)"}),
+};
+
+const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
+set -e -x
+
+# Save pod name to output path
+echo $HOSTNAME > /tmp/podname
+
+base64 -d > /config/migration_services.yaml << EOF
+{{FILE_CONTENTS}}
+EOF
+
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
+
+echo file dump
+echo ---
+cat /config/migration_services.yaml
+echo ---
+
+{{COMMAND}}
+`;
+
+function getConsoleDeploymentResource(
+    name: AllowLiteralOrExpression<string>,
+    migrationConsoleImage: AllowLiteralOrExpression<string>,
+    migrationConsolePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>,
+    base64ConfigContents: AllowLiteralOrExpression<string>,
+    command: AllowLiteralOrExpression<string>,
+) {
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": name
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": "user-environment"
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": "user-environment"
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "main",
+                            "image": migrationConsoleImage,
+                            "imagePullPolicy": migrationConsolePullPolicy,
+                            "command": [
+                                "/bin/sh",
+                                "-c",
+                                "set -e -x\n\nbase64 -d > /config/migration_services.yaml << EOF\n" +
+                                "" +
+                                base64ConfigContents +
+                                "EOF\n" +
+                                "" +
+                                ". /etc/profile.d/venv.sh\n" +
+                                "source /.venv/bin/activate\n" +
+                                "" +
+                                "echo file dump\necho ---\n" +
+                                "cat /config/migration_services.yaml\n" +
+                                "echo ---\n" +
+                                "" +
+                                command
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}
+
 
 export const MigrationConsole = WorkflowBuilder.create({
     k8sResourceName: "migration-console",
@@ -120,118 +230,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 }))
         )
         .addExpressionOutput("deploymentName",
-                c=>c.steps.getConsoleConfig.outputs.configContents)
+            c=>c.steps.getConsoleConfig.outputs.configContents)
     )
 
     .getFullScope();
-
-
-const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
-set -e -x
-
-# Save pod name to output path
-echo $HOSTNAME > /tmp/podname
-
-base64 -d > /config/migration_services.yaml << EOF
-{{FILE_CONTENTS}}
-EOF
-
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
-echo file dump
-echo ---
-cat /config/migration_services.yaml
-echo ---
-
-{{COMMAND}}
-`;
-
-function getConsoleDeploymentResource(
-    name: AllowLiteralOrExpression<string>,
-    migrationConsoleImage: AllowLiteralOrExpression<string>,
-    migrationConsolePullPolicy: AllowLiteralOrExpression<IMAGE_PULL_POLICY>,
-    base64ConfigContents: AllowLiteralOrExpression<string>,
-    command: AllowLiteralOrExpression<string>,
-) {
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {
-            "name": name
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": "user-environment"
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": "user-environment"
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": "main",
-                            "image": migrationConsoleImage,
-                            "imagePullPolicy": migrationConsolePullPolicy,
-                            "command": [
-                                "/bin/sh",
-                                "-c",
-                                "set -e -x\n\nbase64 -d > /config/migration_services.yaml << EOF\n" +
-                                "" +
-                                base64ConfigContents +
-                                "EOF\n" +
-                                "" +
-                                ". /etc/profile.d/venv.sh\n" +
-                                "source /.venv/bin/activate\n" +
-                                "" +
-                                "echo file dump\necho ---\n" +
-                                "cat /config/migration_services.yaml\n" +
-                                "echo ---\n" +
-                                "" +
-                                command
-                            ]
-                        }
-                    ]
-                }
-            }
-        }
-    }
-};
-
-function conditionalInclude<
-    T extends Record<string, any>,
-    U extends MissingField | T
->(label: string, contents: BaseExpression<U>): BaseExpression<string> {
-    return expr.ternary(expr.equals(expr.asString(contents), expr.literal("")),
-        expr.literal(""), // do-nothing branch
-        expr.concat(
-            // Fill out the appropriate line(s) of the config.  Notice that yaml allows inlining JSON,
-            // which makes handling contents, especially at argo runtime, simpler
-            expr.literal(label+": "),
-            expr.recordToString(expr.cast(contents).to<T>()),
-            expr.literal("\n")
-        )
-    );
-}
-
-const KafkaServicesConfig = z.object({
-    broker_endpoints: z.string(),
-    standard: z.string()
-})
-
-const configComponentParameters = {
-    kafkaInfo: defineRequiredParam<z.infer<typeof KafkaServicesConfig>|MissingField>({
-        description: "Snapshot configuration information (JSON)"}),
-    sourceConfig: defineRequiredParam<z.infer<typeof CLUSTER_CONFIG>|MissingField>({
-        description: "Source cluster configuration (JSON)"}),
-    targetConfig: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>|MissingField>({
-        description: "Target cluster configuration (JSON)"}),
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>|MissingField>({
-        description: "Snapshot configuration information (JSON)"}),
-};

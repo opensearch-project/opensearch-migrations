@@ -5,95 +5,6 @@ import {AllowLiteralOrExpression, BaseExpression, expr} from "@/schemas/expressi
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
-export const SetupKafka = WorkflowBuilder.create({
-    k8sResourceName: "setup-kafka",
-    serviceAccountName: "argo-workflow-executor",
-    k8sMetadata: {},
-    parallelism: 1
-})
-    .addParams(CommonWorkflowParameters)
-
-
-    .addTemplate("deployKafkaClusterZookeeper", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "create",
-                setOwnerReference: true,
-                successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterZookeeperManifest(b.inputs.kafkaName)
-            }))
-        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
-            typeToken<string>())
-    )
-
-
-    .addTemplate("deployKafkaNodePool", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: true,
-                manifest: makeDeployKafkaNodePool(b.inputs.kafkaName)
-            }))
-    )
-
-
-    .addTemplate("deployKafkaClusterKraft", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: true,
-                successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterKraftManifest(b.inputs.kafkaName)
-            }))
-        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
-            typeToken<string>())
-    )
-
-
-    .addTemplate("clusterDeploy", t=> t
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addOptionalInput("useKraft", s=>true)
-        .addDag(b=>b
-            .addTask("deployPool", INTERNAL,"deployKafkaNodePool", c =>
-                c.register({kafkaName: b.inputs.kafkaName}),
-                {when: b.inputs.useKraft})
-            .addTask("deployKafkaClusterKraft", INTERNAL, "deployKafkaClusterKraft", c=>
-                c.register(selectInputsForRegister(b,c)),
-                {when: b.inputs.useKraft})
-            .addTask("deployKafkaClusterZookeeper", INTERNAL, "deployKafkaClusterZookeeper", c=>
-                c.register(selectInputsForRegister(b,c)),
-                {when: expr.not(b.inputs.useKraft)})
-        )
-        .addExpressionOutput("kafkaName", c=>c.inputs.kafkaName)
-        .addExpressionOutput("bootstrapServers", c=>
-            expr.ternary(expr.equals(expr.literal("Skipped"), c.tasks.deployKafkaClusterKraft.status),
-                c.tasks.deployKafkaClusterZookeeper.outputs.brokers,
-                c.tasks.deployKafkaClusterKraft.outputs.brokers))
-
-    )
-
-    .addTemplate("createKafkaTopic", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addRequiredInput("topicName", typeToken<string>())
-        .addRequiredInput("topicPartitions", typeToken<number>())
-        .addRequiredInput("topicReplicas", typeToken<number>())
-
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: true,
-                successCondition: "status.topicName",
-                manifest: makeKafkaTopicManifest(b.inputs)
-            }))
-        .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
-    )
-
-
-    .getFullScope();
-
 
 function makeDeployKafkaClusterZookeeperManifest(kafkaName: BaseExpression<string>) {
     return{
@@ -255,3 +166,93 @@ function makeKafkaTopicManifest(args: {
         }
     };
 }
+
+
+export const SetupKafka = WorkflowBuilder.create({
+    k8sResourceName: "setup-kafka",
+    serviceAccountName: "argo-workflow-executor",
+    k8sMetadata: {},
+    parallelism: 1
+})
+    .addParams(CommonWorkflowParameters)
+
+
+    .addTemplate("deployKafkaClusterZookeeper", t => t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: true,
+                successCondition: "status.listeners",
+                manifest: makeDeployKafkaClusterZookeeperManifest(b.inputs.kafkaName)
+            }))
+        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
+            typeToken<string>())
+    )
+
+
+    .addTemplate("deployKafkaNodePool", t => t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: makeDeployKafkaNodePool(b.inputs.kafkaName)
+            }))
+    )
+
+
+    .addTemplate("deployKafkaClusterKraft", t => t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                successCondition: "status.listeners",
+                manifest: makeDeployKafkaClusterKraftManifest(b.inputs.kafkaName)
+            }))
+        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
+            typeToken<string>())
+    )
+
+
+    .addTemplate("clusterDeploy", t=> t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addOptionalInput("useKraft", s=>true)
+        .addDag(b=>b
+            .addTask("deployPool", INTERNAL,"deployKafkaNodePool", c =>
+                c.register({kafkaName: b.inputs.kafkaName}),
+                {when: b.inputs.useKraft})
+            .addTask("deployKafkaClusterKraft", INTERNAL, "deployKafkaClusterKraft", c=>
+                c.register(selectInputsForRegister(b,c)),
+                {when: b.inputs.useKraft})
+            .addTask("deployKafkaClusterZookeeper", INTERNAL, "deployKafkaClusterZookeeper", c=>
+                c.register(selectInputsForRegister(b,c)),
+                {when: expr.not(b.inputs.useKraft)})
+        )
+        .addExpressionOutput("kafkaName", c=>c.inputs.kafkaName)
+        .addExpressionOutput("bootstrapServers", c=>
+            expr.ternary(expr.equals(expr.literal("Skipped"), c.tasks.deployKafkaClusterKraft.status),
+                c.tasks.deployKafkaClusterZookeeper.outputs.brokers,
+                c.tasks.deployKafkaClusterKraft.outputs.brokers))
+
+    )
+
+    .addTemplate("createKafkaTopic", t => t
+        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("topicName", typeToken<string>())
+        .addRequiredInput("topicPartitions", typeToken<number>())
+        .addRequiredInput("topicReplicas", typeToken<number>())
+
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                successCondition: "status.topicName",
+                manifest: makeKafkaTopicManifest(b.inputs)
+            }))
+        .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
+    )
+
+
+    .getFullScope();

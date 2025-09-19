@@ -22,6 +22,15 @@ import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
+const latchCoordinationPrefixParam = {
+    latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})
+};
+
+const targetsArrayParam = {
+    targets: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>[]>({
+        description: "List of server configurations to direct migrated traffic toward"})
+};
+
 export const FullMigration = WorkflowBuilder.create({
         k8sResourceName: "full-migration",
         parallelism: 100,
@@ -202,13 +211,3 @@ export const FullMigration = WorkflowBuilder.create({
 
     .setEntrypoint("main")
     .getFullScope();
-
-
-const latchCoordinationPrefixParam = {
-    latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})
-};
-
-const targetsArrayParam = {
-    targets: defineRequiredParam<z.infer<typeof TARGET_CLUSTER_CONFIG>[]>({
-        description: "List of server configurations to direct migrated traffic toward"})
-};
