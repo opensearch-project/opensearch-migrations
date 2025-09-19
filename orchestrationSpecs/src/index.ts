@@ -1,7 +1,7 @@
 import * as k8s from '@kubernetes/client-node';
 import {renderWorkflowTemplate} from "@/renderers/argoResourceRenderer";
 import {CaptureReplay} from "@/workflowTemplates/captureReplay";
-import {CaptureProxy} from "@/workflowTemplates/proxy";
+import {CaptureProxy} from "@/workflowTemplates/captureProxy";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
@@ -49,7 +49,7 @@ function getCreateResources(): boolean {
 
 function getShowResources(): boolean {
     const args = process.argv.slice(2);
-    return args.indexOf('--showResources') !== -1;
+    return args.indexOf('--show') !== -1;
 }
 
 const targetNamespace = getNamespace();
@@ -109,9 +109,9 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
             console.log(`🗑️  Deleted existing WorkflowTemplate: ${workflowName}`);
         } catch (deleteError: any) {
             if (deleteError.response?.statusCode === 404) {
-                console.log(`ℹ️  WorkflowTemplate ${workflowName} does not exist, proceeding with creation...`);
+                console.log(`WorkflowTemplate ${workflowName} does not exist, proceeding with creation...`);
             } else {
-                console.warn(`⚠️  Warning: Failed to delete existing WorkflowTemplate ${workflowName}:`, deleteError.message);
+                console.info(`Failed to delete existing WorkflowTemplate ${workflowName}:`, deleteError.message);
             }
         }
 

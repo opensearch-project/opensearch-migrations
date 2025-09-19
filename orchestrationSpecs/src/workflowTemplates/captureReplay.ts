@@ -14,7 +14,7 @@ import {Replayer} from "@/workflowTemplates/replayer";
 import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {MISSING_FIELD} from "@/schemas/plainObject";
-import {CaptureProxy} from "@/workflowTemplates/proxy";
+import {CaptureProxy} from "@/workflowTemplates/captureProxy";
 
 
 export const CaptureReplay = WorkflowBuilder.create({
@@ -34,8 +34,7 @@ export const CaptureReplay = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("getUserApproval", t=>t
-        .addDag(b=>b))
+    .addSuspendTemplate("getUserApproval")
 
 
     .addTemplate("getBrokersList", t=>t

@@ -4,8 +4,9 @@ import {StepGroup} from "@/schemas/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {BaseExpression} from "@/schemas/expression";
+import {AllowLiteralOrExpression, BaseExpression} from "@/schemas/expression";
 import {NamedTask} from "@/schemas/sharedTypes";
+import {toEnvVarName} from "@/utils";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
@@ -23,11 +24,11 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any
             serviceAccountName: wf.metadata.serviceAccountName,
             entrypoint: wf.metadata.entrypoint,
             parallelism: 100,
-            ...(wf.workflowParameters != null && {args: formatParameters(wf.workflowParameters)}),
+            ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
             templates: (() => {
                 const list = [];
                 for (const k in wf.templates) {
-                    list.push({[k]: formatTemplate(wf.templates[k])});
+                    list.push(formatTemplate(wf.templates, k));
                 }
                 return list;
             })()
@@ -77,7 +78,7 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     } else if (loopWith.loopWith == "sequence") {
         return {withSequence: loopWith.count};
     } else if (loopWith.loopWith == "params") {
-        return {withParams: `${toArgoExpression(loopWith.value)}`};
+        return {withParam: `${toArgoExpression(loopWith.value)}`};
     } else {
         throw new Error(`Expected loopWith value; got ${loopWith}`);
     }
@@ -101,6 +102,14 @@ function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unk
     };
 }
 
+function formatContainerEnvs(envVars:Record<string, BaseExpression<any>>) {
+    const result: any[] = [];
+    Object.entries(envVars).forEach(([key, value]) => {
+        result.push({ name: key, value: transformExpressionsDeep(value) });
+    });
+    return result;
+}
+
 function formatBody(body: GenericScope) {
     if (body) {
         if (body.steps !== undefined ) {
@@ -109,7 +118,18 @@ function formatBody(body: GenericScope) {
                     .map(g => g.steps.map(s => formatStepOrTask(s)))
             };
         } else if (body.dag !== undefined) {
-            return { dag: (body.dag as []).map(t => formatStepOrTask(t)) };
+            return {dag: {tasks: (body.dag as []).map(t => formatStepOrTask(t))}};
+        } else if (body.container !== undefined) {
+            const c = body.container;
+            const {env, ...rest} = c;
+            return {
+                container: {
+                    ...(env === undefined ? {} : {env: formatContainerEnvs(env)}),
+                    ...transformExpressionsDeep(rest)
+                }
+            };
+        } else if (body.suspend !== undefined) {
+            return { suspend: {}};
         } else {
             return transformExpressionsDeep(body);
         }
@@ -159,9 +179,11 @@ function formatOutputParameters<OPR extends OutputParametersRecord>(outputs: OPR
     };
 }
 
-function formatTemplate(template: GenericScope) {
+function formatTemplate(templates: GenericScope, templateName: string) {
+    const template = templates[templateName];
     return {
-        inputs: formatParameters(template.inputs),
+        name: templateName,
+        ...(template.inputs === undefined ? {} : { inputs: formatParameters(template.inputs) } ),
         ...formatBody(template.body),
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
             {retryStrategy: template.retryStrategy} : {}),
@@ -212,7 +234,10 @@ export function transformExpressionsDeep<T>(input: T): ReplaceExpressions<T> {
             return (node as unknown[]).map(visit) as ReplaceExpressions<U>;
         }
 
-        assertPlainObject(node);
+        // sending destructured output into this function is useful & the runtime creates that object
+        // w/ a prototype function, hence the reason that this is commented out, at least for now
+
+        //assertPlainObject(node);
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
             out[k] = visit(v);

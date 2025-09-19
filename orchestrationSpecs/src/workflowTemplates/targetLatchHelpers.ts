@@ -44,7 +44,8 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
             .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", typeToken<number>())
         )
     )
-    //.templateSigScope.init.input
+
+
     .addTemplate("decrementLatch", t => t
         .addInputs(addCommonTargetLatchInputs)
         .addRequiredInput("targetName", typeToken<string>())
@@ -58,6 +59,8 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
             .addPathOutput("shouldFinalize", "/tmp/should-finalize", typeToken<boolean>())
         )
     )
+
+
     .addTemplate("cleanup", t => t
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b => b
