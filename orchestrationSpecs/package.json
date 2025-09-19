@@ -5,10 +5,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "npm run type-check && tsup",
-    "dev": "node --require source-map-support/register dev.cjs",
-    "start": "node dist/index.js",
-    "type-check": "tsc --noEmit"
+    "build": "npm run type-check",
+    "dev": "tsx dev.cjs",
+    "start": "npm run type-check && tsx src/index.ts",
+    "type-check": "npx tsgo --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +16,7 @@
   "type": "commonjs",
   "dependencies": {
     "@kubernetes/client-node": "^1.3.0",
+    "@typescript/native-preview": "^7.0.0-dev.20250919.1",
     "zod": "^4.0.5"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "tsconfig-paths": "^4.2.0",
     "tsd": "^0.33.0",
     "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
     "typescript": "^5.8.3"
   },
   "files": [
