@@ -438,7 +438,7 @@ export abstract class TaskBuilder<
     > {
         return {
             name,
-            templateRef: { name: templateKey, template: wf.metadata.k8sMetadata.name },
+            templateRef: { name: wf.metadata.k8sMetadata.name, template: templateKey },
             ...(loopWith ? { withLoop: loopWith } : {}),
             args: params
         } as any;

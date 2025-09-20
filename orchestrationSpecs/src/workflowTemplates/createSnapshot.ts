@@ -54,7 +54,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                    targetConfig: MISSING_FIELD
                }))
 
-            .addStep("", MigrationConsole, "runMigrationCommand", c=>
+            .addStep("createSnapshot", MigrationConsole, "runMigrationCommand", c=>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     configContents: c.steps.getConsoleConfig.outputs.configContents,

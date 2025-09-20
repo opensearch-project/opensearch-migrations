@@ -31,6 +31,10 @@ const targetsArrayParam = {
         description: "List of server configurations to direct migrated traffic toward"})
 };
 
+function lowercaseFirst(str: string): string {
+    return str.charAt(0).toLowerCase() + str.slice(1);
+}
+
 export const FullMigration = WorkflowBuilder.create({
         k8sResourceName: "full-migration",
         parallelism: 100,
@@ -116,11 +120,11 @@ export const FullMigration = WorkflowBuilder.create({
         )
     )
 
-    .addTemplate("pipelineSnapshot", t => t
+    .addTemplate("snapshotAndLoad", t => t
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotAndMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("sourcePipelineName", typeToken<string>())
-        .addInputsFromRecord({...dynamicSnapshotConfigParam, ...targetsArrayParam, ...ImageParameters})
+        .addInputsFromRecord({...targetsArrayParam, ...ImageParameters})
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addSteps(b=> b
@@ -128,6 +132,7 @@ export const FullMigration = WorkflowBuilder.create({
                     c=>c.register({
                         ...selectInputsForRegister(b, c),
                         indices: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "indices"),
+                        snapshotConfig: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "snapshotConfig"),
                         autocreateSnapshotName: b.inputs.sourcePipelineName
                     }))
 
@@ -143,24 +148,24 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("pipelineSourceMigration", t => t
+    .addTemplate("migrateEachSourceToTargets", t => t
         .addRequiredInput("sourceMigrationConfig", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>>())
         .addInputsFromRecord(targetsArrayParam) // "targetConfig"
-        .addInputsFromRecord(completeSnapshotConfigParam)
         .addRequiredInput("latchCoordinationPrefix", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b=>b
-            .addStep("pipelineSnapshot", INTERNAL, "pipelineSnapshot", c =>
+            .addStep("snapshotAndLoad", INTERNAL, "snapshotAndLoad", c =>
                     c.register({
                         ...selectInputsForRegister(b,c),
                         sourceConfig: expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
                         sourcePipelineName: expr.toBase64(expr.recordToString(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source")))
                     }),
-                {loopWith: makeParameterLoop(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "snapshotAndMigrationConfigs")
-                    )})
+                {loopWith: makeParameterLoop(expr.jsonPathLoose(b.inputs.sourceMigrationConfig,
+                        "snapshotExtractAndLoadConfigs"))}
+            )
         )
     )
 
@@ -169,17 +174,18 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>(),
             "List of server configurations to direct migrated traffic toward")
         .addInputsFromRecord(targetsArrayParam)
-        .addInputsFromRecord(completeSnapshotConfigParam)
         .addOptionalInput("useLocalStack", c=>false)
         .addInputsFromRecord( // These image configurations have defaults from the ConfigMap
             Object.fromEntries(LogicalOciImages.flatMap(k => [
                 [`image${k}Location`, defineParam({
                     type: typeToken<string>(),
-                    from: configMapKey(t.inputs.workflowParameters.imageConfigMapName, `${k}Location`)
+                    from: configMapKey(t.inputs.workflowParameters.imageConfigMapName,
+                        `${lowercaseFirst(k)}Location`)
                 })],
-                [`image${k}Location`, defineParam({
+                [`image${k}PullPolicy`, defineParam({
                     type: typeToken<string>(),
-                    from: configMapKey(t.inputs.workflowParameters.imageConfigMapName, `${k}PullPolicy`)
+                    from: configMapKey(t.inputs.workflowParameters.imageConfigMapName,
+                        `${lowercaseFirst(k)}PullPolicy`)
                 })]
             ])
             ) as Record<`image${typeof LogicalOciImages[number]}Location`, InputParamDef<string,false>> &
@@ -193,7 +199,7 @@ export const FullMigration = WorkflowBuilder.create({
                     prefix: expr.concat(expr.literal("workflow-"), expr.getWorkflowValue("uid")),
                     configuration: b.inputs.sourceMigrationConfigs
                 }))
-            .addStep("pipelineSourceMigration", INTERNAL, "pipelineSourceMigration",
+            .addStep("migrateEachSourceToTargets", INTERNAL, "migrateEachSourceToTargets",
                 c=>c.register({
                     ...selectInputsForRegister(b, c),
                     sourceMigrationConfig: c.item,

@@ -77,6 +77,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     indices: z.array(z.string()),
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG),
+    snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
 });
 
 export const REPLAYER_OPTIONS = z.object({
@@ -90,7 +91,7 @@ export const REPLAYER_OPTIONS = z.object({
 
 export const SOURCE_MIGRATION_CONFIG = z.object({
     source: CLUSTER_CONFIG,
-    snapshotAndMigrationConfigs: z.array(SNAPSHOT_MIGRATION_CONFIG),
+    snapshotExtractAndLoadConfigs: z.array(SNAPSHOT_MIGRATION_CONFIG),
     replayerConfig: REPLAYER_OPTIONS,
 });
 

@@ -1,6 +1,6 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
-    CommonWorkflowParameters, getParametersFromTargetConfig, makeRequiredImageParametersForKeys,
+    CommonWorkflowParameters, extractTargetKeysToExpressionMap, makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
@@ -183,10 +183,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
         .addSteps(b=>b
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c=>
-            c.register({
+                c.register({
                 ...selectInputsForRegister(b, c),
                 ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
-                ...(getParametersFromTargetConfig(b.inputs.targetConfig)),
+                ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
                 s3Endpoint:       expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "endpoint"),
                 s3Region:         expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "aws_region"),

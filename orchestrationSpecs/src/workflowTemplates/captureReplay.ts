@@ -1,7 +1,7 @@
 // TODO
 import { WorkflowBuilder, type Workflow } from "@/schemas/workflowBuilder";
 import {
-    CommonWorkflowParameters, getParametersFromTargetConfig,
+    CommonWorkflowParameters, extractTargetKeysToExpressionMap,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {typeToken} from "@/schemas/sharedTypes";

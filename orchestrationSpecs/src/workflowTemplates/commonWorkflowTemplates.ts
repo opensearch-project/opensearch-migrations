@@ -56,13 +56,20 @@ export const TargetClusterParameters = {
 
 export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<z.infer<typeof TARGET_CLUSTER_CONFIG>>) {
     return {
-        targetAwsRegion:        expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),
-        targetAwsSigningName:   expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "service"), ""),
-        targetCACert:           expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "caCert"), ""),
-        targetClientSecretName: expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "clientSecretName"), ""),
-        targetInsecure:         expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "allow_insecure"), false),
-        targetUsername:         expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "username"), ""),
-        targetPassword:         expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "password"), ""),
+        targetAwsRegion:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),
+        targetAwsSigningName:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "service"), ""),
+        targetCACert:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "caCert"), ""),
+        targetClientSecretName:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "clientSecretName"), ""),
+        targetInsecure:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "allow_insecure"), false),
+        targetUsername:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "username"), ""),
+        targetPassword:
+            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "password"), ""),
     };
 }
 
@@ -128,24 +135,4 @@ export function setupLog4jConfigForContainer(
             }
         ]
     }
-}
-
-export function getParametersFromTargetConfig<Self, BodyBound, ExpressionBuilderContext>(
-    targetConfig: FromParameterExpression<z.infer<typeof TARGET_CLUSTER_CONFIG>>) {
-    return {
-        targetAwsRegion:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),
-        targetAwsSigningName:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "service"), ""),
-        targetCACert:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "caCert"), ""),
-        targetClientSecretName:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "clientSecretName"), ""),
-        targetInsecure:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "allow_insecure"), false),
-        targetUsername:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "username"), ""),
-        targetPassword:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "password"), ""),
-    };
 }
