@@ -46,7 +46,8 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     .addTemplate("doNothing", t=>t
-        .addSteps(sb=>sb))
+        .addSteps(b=>b.addStepGroup(c=>c)))
+
 
 
     .addTemplate("runReplayerForTarget", t => t
@@ -180,7 +181,7 @@ export const FullMigration = WorkflowBuilder.create({
                 [`image${k}Location`, defineParam({
                     type: typeToken<string>(),
                     from: configMapKey(t.inputs.workflowParameters.imageConfigMapName,
-                        `${lowercaseFirst(k)}Location`)
+                        `${lowercaseFirst(k)}Image`)
                 })],
                 [`image${k}PullPolicy`, defineParam({
                     type: typeToken<string>(),

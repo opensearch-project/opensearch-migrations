@@ -142,7 +142,8 @@ export const MigrationConsole = WorkflowBuilder.create({
 
     .addTemplate("getConsoleConfig", b=>b
         .addInputsFromRecord(configComponentParameters)
-        .addSteps(s=>s)
+        .addSteps(s=>s
+            .addStepGroup(c=>c))
         .addExpressionOutput("configContents", c=>
             expr.stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
                 expr.concat(

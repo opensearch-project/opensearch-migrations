@@ -46,6 +46,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  etcdUtils:
+    repository: bitnami/etcd
+    tag: latest
+    pullPolicy: IfNotPresent
 
 snapshotBucketConfiguration:
   create: true

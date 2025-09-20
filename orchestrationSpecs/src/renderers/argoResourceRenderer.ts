@@ -119,9 +119,16 @@ function formatBody(body: GenericScope) {
             };
         } else if (body.dag !== undefined) {
             return {dag: {tasks: (body.dag as []).map(t => formatStepOrTask(t))}};
+        } else if (body.resource !== undefined) {
+            const {manifest, ...rest} = body.resource;
+            return {
+                resource: {
+                    manifest: JSON.stringify(manifest),
+                    ...transformExpressionsDeep(rest)
+                }
+            };
         } else if (body.container !== undefined) {
-            const c = body.container;
-            const {env, ...rest} = c;
+            const {env, ...rest} = body.container;
             return {
                 container: {
                     ...(env === undefined ? {} : {env: formatContainerEnvs(env)}),

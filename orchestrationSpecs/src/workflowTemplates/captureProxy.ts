@@ -20,7 +20,7 @@ export const CaptureProxy = WorkflowBuilder.create({
     .addTemplate("deployProxyService", t=>t
         .addRequiredInput("serviceName", typeToken<string>())
         .addRequiredInput("port", typeToken<number>())
-        .addSteps(b=>b)
+        .addSteps(b=>b.addStepGroup(c=>c))
     )
 
 
@@ -31,7 +31,7 @@ export const CaptureProxy = WorkflowBuilder.create({
         .addRequiredInput("kafkaTopic", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
-        .addSteps(b=>b) // TODO convert to a resource!
+        .addSteps(b=>b.addStepGroup(c=>c)) // TODO convert to a resource!
     )
 
     .getFullScope();

@@ -29,7 +29,7 @@ export const CaptureReplay = WorkflowBuilder.create({
 
     .addTemplate("idGenerator", t=>t
         .addRequiredInput("proxyEndpoint", typeToken<string>())
-        .addSteps(b=>b)
+        .addSteps(b=>b.addStepGroup(c=>c))
         .addExpressionOutput("proxyEndpoint", c=>c.inputs.proxyEndpoint)
     )
 
@@ -43,7 +43,7 @@ export const CaptureReplay = WorkflowBuilder.create({
         .addRequiredInput("providedKafkaBootstrapServers", typeToken<string>())
         .addRequiredInput("providedKafkaK8sName", typeToken<string>())
 
-        .addSteps(b=>b)
+        .addSteps(b=>b.addStepGroup(c=>c))
 
         .addExpressionOutput("kafkaName", b=>expr.ternary(
             expr.equals("", b.inputs.providedKafkaK8sName),
