@@ -2,7 +2,6 @@
 import expression, {
     ArithmeticExpression,
     ArrayIndexExpression,
-    ArrayLengthExpression,
     ArrayMakeExpression,
     AsStringExpression,
     BaseExpression,
@@ -98,16 +97,9 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
     if (isPathExpression(expr)) {
         const pe = expr as RecordFieldSelectExpression<any, any, any>;
         const inner = formatExpression(pe.source);
-        const needsFromJson = isParameterExpression(pe.source as AnyExpr);
-        const source = needsFromJson ? `fromJSON(${inner.text})` : inner.text;
+        const source = inner.text;
         const jsonPath = pe.path.replace(/\[(\d+)\]/g, "[$1]").replace(/^/, "$.");
         return formattedResult(`jsonpath(${source}, '${jsonPath}')`, true);
-    }
-
-    if (isArrayLengthExpression(expr)) {
-        const le = expr as ArrayLengthExpression<any>;
-        const arr = formatExpression(le.array);
-        return formattedResult(`(${arr.text} | length)`, true);
     }
 
     if (isArrayIndexExpression(expr)) {
@@ -142,9 +134,9 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         const pe = expr as FromParameterExpression<any,any>;
         switch (pe.source.kind) {
             case "workflow":
-                return formattedResult(`workflow.parameters.${pe.source.parameterName}`);
+                return formattedResult(`fromJSON(workflow.parameters.${pe.source.parameterName})`);
             case "input":
-                return formattedResult(`inputs.parameters.${pe.source.parameterName}`);
+                return formattedResult(`fromJSON(inputs.parameters.${pe.source.parameterName})`);
             case "steps_output":
                 return formattedResult(`steps.${pe.source.stepName}.outputs.parameters.${pe.source.parameterName}`);
             case "tasks_output":
@@ -192,7 +184,6 @@ export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any
 export function isFunction(e: AnyExpr): e is FunctionExpression<any, any> { return e.kind === "function"; }
 export function isArithmeticExpression(e: AnyExpr): e is ArithmeticExpression<any, any> { return e.kind === "arithmetic"; }
 export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> { return e.kind === "comparison"; }
-export function isArrayLengthExpression(e: AnyExpr): e is ArrayLengthExpression<any> { return e.kind === "array_length"; }
 export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> { return e.kind === "array_index"; }
 export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
 export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> { return e.kind === "dict_make"; }

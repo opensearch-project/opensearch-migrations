@@ -215,8 +215,7 @@ function autoDeserializedParam<T extends PlainObject>(
     source: ParameterSource,
     def?: InputParamDef<T, any>
 ) {
-    const p = new FromParameterExpression(source, def);
-    if (p._resultType)
+    return new FromParameterExpression(source, def);
 }
 
 function workflowParam<T extends PlainObject>(

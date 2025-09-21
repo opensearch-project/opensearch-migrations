@@ -20,7 +20,7 @@ spec:
                           "password": "admin"
                       }
                   },
-                  "snapshot-and-migration-configs": [
+                  "snapshotExtractAndLoadConfigs": [
                       {
                           "indices": [
                               "index_3",

@@ -240,13 +240,6 @@ type ValueAtSegsMissing<
 export type SegmentsValueMissing<T, S extends readonly unknown[]> =
     ValueAtSegsMissing<NonMissing<T>, S, HasMissing<T>>;
 
-export class ArrayLengthExpression<
-    E extends BaseExpression<any[], CE>,
-    CE extends ExpressionType = ExprC<E>
-> extends BaseExpression<number, CE> {
-    constructor(public readonly array: E) { super("array_length"); }
-}
-
 type ElemFromArrayExpr<A extends BaseExpression<any[], any>> =
     ResultOf<A> extends (infer U)[] ? Extract<U, PlainObject> : never;
 
@@ -287,15 +280,15 @@ export type TaskOutputSource = { kind: "tasks_output", taskName: string, paramet
 export type WORKFLOW_VALUES =
     "name"|"mainEntrypoint"|"serviceAccountName"|"uid"|"labels.json"|"creationTimestamp"|"priority"|"duration"|"scheduledTime";
 
-export type WrapSerialize<T> = T extends AggregateType ? Serialized<T> : T;
-export type UnwrapSerialize<T> = T extends Serialized<infer U> ? U : T;
+export type WrapSerialize<T extends PlainObject> = T extends AggregateType ? Serialized<T> : T;
+export type UnwrapSerialize<T extends PlainObject> = T extends Serialized<infer U> ? U : T;
 type ConditionalWrap<T extends PlainObject, S extends ParameterSource> =
     S extends WorkflowParameterSource | InputParameterSource ? WrapSerialize<T> : T;
 
 export class FromParameterExpression<
     T extends PlainObject,
     S extends ParameterSource
-> extends BaseExpression<ConditionalWrap<T, S>, "govaluate"> {
+> extends BaseExpression<T, "govaluate"> {
     constructor(
         public readonly source: S,
         public readonly paramDef?: InputParamDef<T, any> | OutputParamDef<T>
@@ -520,6 +513,10 @@ class ExprBuilder {
     }
 
     // JSON Handling
+    keys<T extends Record<string, any>>(obj: BaseExpression<T>) {
+        return fn<string[], ExpressionType, "complicatedExpression">("keys", obj);
+    }
+
     jsonPathLoose<
         T extends Record<string, any>,
         K extends Extract<keyof NonMissing<T>, string>
@@ -608,10 +605,6 @@ class ExprBuilder {
     }
 
     // Array operations
-    length<E extends BaseExpression<any[], any>>(arr: E): BaseExpression<number, ExprC<E>> {
-        return new ArrayLengthExpression(arr);
-    }
-
     index<
         A extends BaseExpression<any[], any>,
         I extends BaseExpression<number, any>
@@ -620,6 +613,10 @@ class ExprBuilder {
         i: I
     ): BaseExpression<ElemFromArrayExpr<A>, WidenComplexity2<ExprC<A>, ExprC<I>>> {
         return new ArrayIndexExpression(arr, i);
+    }
+
+    length<T extends PlainObject>(arr: BaseExpression<T[]>) {
+        return fn<number, ExpressionType, "complicatedExpression">("len", arr);
     }
 
     last<T extends PlainObject>(arr: BaseExpression<T[]>) {

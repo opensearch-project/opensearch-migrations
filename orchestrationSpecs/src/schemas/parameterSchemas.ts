@@ -45,8 +45,7 @@ export type RequiresSerializationCheck<T extends PlainObject> =
  */
 export type InputParamDef<
     T extends PlainObject,
-    REQ extends boolean,
-    RequiresSerialization extends RequiresSerializationType
+    REQ extends boolean
 > = {
     /** Phantom to preserve T and make it invariant. Never read or written. */
     readonly __param_input_brand?: T; // Use a simple branded property instead
@@ -54,16 +53,14 @@ export type InputParamDef<
     description?: string;
 } & (REQ extends false
     ? { _hasDefault: true; defaultValue: DefaultSpec<T> } // if this param is omitted by the caller, default is used
-    : {})                                           // param is required by caller
-& (RequiresSerialization extends "AggregateType" ? {_requiresSerialization: true} : {});
+    : {});                                           // param is required by caller
 
 export function defineParam<T extends PlainObject>(opts: {
     description?: string
-} & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false, RequiresSerializationCheck<T>> {
+} & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false> {
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
-        _requiresSerialization: true,
         description: opts.description,
         defaultValue: (opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} :
             (opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
@@ -73,7 +70,7 @@ export function defineParam<T extends PlainObject>(opts: {
 
 export function defineRequiredParam<T extends PlainObject>(opts?: {
     description?: string;
-}): InputParamDef<T, true, RequiresSerializationCheck<T>> {
+}): InputParamDef<T, true> {
     return {
         description: opts?.description,
     };

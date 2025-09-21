@@ -22,10 +22,14 @@ import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
 function conditionalInclude<
-    T extends Record<string, any>,
+    T extends Record<string, PlainObject>,
     U extends MissingField | T
 >(label: string, contents: BaseExpression<U>): BaseExpression<string> {
-    return expr.ternary(expr.equals(expr.asString(contents), expr.literal("")),
+    return expr.ternary(
+        expr.equals(expr.length(expr.keys(expr.nullCoalesce(
+            expr.cast(contents).to<Record<string, PlainObject> | MissingField>(),
+                {}
+            ))), expr.literal(0)),
         expr.literal(""), // do-nothing branch
         expr.concat(
             // Fill out the appropriate line(s) of the config.  Notice that yaml allows inlining JSON,

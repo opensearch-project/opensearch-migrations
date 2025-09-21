@@ -93,12 +93,12 @@ export class K8sResourceBuilder<
     ): K8sResourceBuilder<
         ContextualScope,
         InputParamsScope,
-        ResourceScope & { workflowDefinition: ResourceWorkflowDefinition },
+        ResourceScope & ResourceWorkflowDefinition,
         OutputParamsScope
     > {
         const newBody =
-            { ...(this.bodyScope as object), ...workflowDefinition } as unknown as
-                ResourceScope & { workflowDefinition: ResourceWorkflowDefinition };
+            { ...(this.bodyScope as object), ...workflowDefinition } as
+                ResourceScope & ResourceWorkflowDefinition;
 
         // Return a concrete instance (not rebind), like DagBuilder does in its own methods
         return new K8sResourceBuilder(
