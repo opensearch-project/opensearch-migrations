@@ -47,7 +47,7 @@ images:
     tag: latest
     pullPolicy: IfNotPresent
   etcdUtils:
-    repository: bitnami/etcd
+    repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
 

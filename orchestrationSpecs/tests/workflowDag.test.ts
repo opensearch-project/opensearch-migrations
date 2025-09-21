@@ -105,8 +105,8 @@ describe("paramsFns runtime validation", () => {
                                 },
                                 "name": "first",
                                 "templateRef": {
-                                    "name": "doNothing",
-                                    "template": "shared-do-nothing",
+                                    "name": "shared-do-nothing",
+                                    "template": "doNothing",
                                 },
                             },
                             {
