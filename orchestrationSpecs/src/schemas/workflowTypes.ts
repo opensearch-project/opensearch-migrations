@@ -11,7 +11,12 @@
  */
 
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {AllowLiteralOrExpression, BaseExpression, FromParameterExpression} from "@/schemas/expression";
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    FromParameterExpression,
+    InputParameterSource, ParameterSource, WorkflowParameterSource
+} from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
 
 // Specific scope types for different purposes
@@ -69,12 +74,15 @@ export type ParamsWithLiteralsOrExpressions<T> = {
           : InvalidType<T[K]>;
 };
 
-export type InputParamsToExpressions<InputParamsScope extends InputParametersRecord> = {
+export type InputParamsToExpressions<
+    InputParamsScope extends InputParametersRecord,
+    InputType extends ParameterSource = InputParameterSource
+> = {
     [K in keyof InputParamsScope]: InputParamsScope[K] extends InputParamDef<infer T, any>
         ? [T] extends [PlainObject]
             ? [T] extends [null | undefined]
                 ? never
-                : FromParameterExpression<T>
+                : FromParameterExpression<T,InputType>
             : never
         : never
 };
@@ -83,7 +91,7 @@ export type InputParamsToExpressions<InputParamsScope extends InputParametersRec
 export type WorkflowInputsToExpressions<ContextualScope extends { workflowParameters?: InputParametersRecord }> =
     ContextualScope extends { workflowParameters: infer WP }
         ? WP extends InputParametersRecord
-            ? InputParamsToExpressions<WP>
+            ? InputParamsToExpressions<WP, WorkflowParameterSource>
             : {}
         : {};
 

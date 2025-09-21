@@ -139,7 +139,7 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
     }
 
     if (isParameterExpression(expr)) {
-        const pe = expr as FromParameterExpression<any>;
+        const pe = expr as FromParameterExpression<any,any>;
         switch (pe.source.kind) {
             case "workflow":
                 return formattedResult(`workflow.parameters.${pe.source.parameterName}`);
@@ -196,8 +196,8 @@ export function isArrayLengthExpression(e: AnyExpr): e is ArrayLengthExpression<
 export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> { return e.kind === "array_index"; }
 export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
 export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> { return e.kind === "dict_make"; }
-export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "parameter"; }
-export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any> { return e.kind === "loop_item"; }
+export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "parameter"; }
+export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "loop_item"; }
 export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
 export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> { return e.kind === "task_data"; }
 function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }

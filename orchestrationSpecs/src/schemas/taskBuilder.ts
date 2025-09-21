@@ -18,7 +18,7 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr, FromParameterExpression, LoopItemExpression, ParameterSource,
-    SimpleExpression, TemplateExpression
+    SimpleExpression, StepOutputSource, TaskOutputSource, TemplateExpression
 } from "@/schemas/expression";
 import {
     buildDefaultsObject,
@@ -50,12 +50,12 @@ function taskOutput<T extends PlainObject, Label extends TaskType>(
     parameterName: string,
     def?: OutputParamDef<T>
 ): SimpleExpression<DeepWiden<T>> {
-    return new FromParameterExpression<DeepWiden<T>>(
+    return new FromParameterExpression<DeepWiden<T>,TaskOutputSource|StepOutputSource>(
         {
             kind: `${taskType}_output` as any,
             [`${taskType.substring(0,taskType.length-1)}Name`]: taskName,
             parameterName
-        } as ParameterSource,
+        } as (TaskOutputSource|StepOutputSource),
         def as any
     );
 }

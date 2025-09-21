@@ -2,11 +2,11 @@ import {InputParamDef, InputParametersRecord, OutputParamDef} from "@/schemas/pa
 import {
     BaseExpression,
     expr,
-    FromParameterExpression,
+    FromParameterExpression, ParameterSource,
     SimpleExpression,
     TaskDataExpression
 } from "@/schemas/expression";
-import {PlainObject} from "@/schemas/plainObject";
+import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
 import {StripUndefined, TaskType} from "@/schemas/sharedTypes";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
@@ -211,18 +211,26 @@ export function selectInputsFieldsAsExpressionRecord<
     return out as SelectedExprRecord<T, CB>;
 }
 
+function autoDeserializedParam<T extends PlainObject>(
+    source: ParameterSource,
+    def?: InputParamDef<T, any>
+) {
+    const p = new FromParameterExpression(source, def);
+    if (p._resultType)
+}
+
 function workflowParam<T extends PlainObject>(
     name: string,
     def?: InputParamDef<T, any>
 ) {
-    return new FromParameterExpression({ kind: "workflow", parameterName: name }, def);
+    return autoDeserializedParam({ kind: "workflow", parameterName: name }, def);
 }
 
 function inputParam<T extends PlainObject>(
     name: string,
     def: InputParamDef<T, any>
 ) {
-    return new FromParameterExpression({ kind: "input", parameterName: name }, def);
+    return autoDeserializedParam({ kind: "input", parameterName: name }, def);
 }
 
 /**

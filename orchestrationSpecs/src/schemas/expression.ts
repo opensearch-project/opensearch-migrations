@@ -1,4 +1,4 @@
-import {DeepWiden, MissingField, PlainObject} from "@/schemas/plainObject";
+import {AggregateType, DeepWiden, MissingField, PlainObject, Serialized} from "@/schemas/plainObject";
 import {StripUndefined, TaskType, TypeToken} from "@/schemas/sharedTypes";
 import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
 
@@ -279,13 +279,25 @@ export type ParameterSource =
     | { kind: "steps_output", stepName: string, parameterName: string }
     | { kind: "tasks_output", taskName: string, parameterName: string };
 
+export type WorkflowParameterSource = { kind: "workflow", parameterName: string };
+export type InputParameterSource = { kind: "input", parameterName: string };
+export type StepOutputSource = { kind: "steps_output", stepName: string, parameterName: string }
+export type TaskOutputSource = { kind: "tasks_output", taskName: string, parameterName: string };
+
 export type WORKFLOW_VALUES =
     "name"|"mainEntrypoint"|"serviceAccountName"|"uid"|"labels.json"|"creationTimestamp"|"priority"|"duration"|"scheduledTime";
 
-export class FromParameterExpression<T extends PlainObject>
-    extends BaseExpression<T, "govaluate"> {
+export type WrapSerialize<T> = T extends AggregateType ? Serialized<T> : T;
+export type UnwrapSerialize<T> = T extends Serialized<infer U> ? U : T;
+type ConditionalWrap<T extends PlainObject, S extends ParameterSource> =
+    S extends WorkflowParameterSource | InputParameterSource ? WrapSerialize<T> : T;
+
+export class FromParameterExpression<
+    T extends PlainObject,
+    S extends ParameterSource
+> extends BaseExpression<ConditionalWrap<T, S>, "govaluate"> {
     constructor(
-        public readonly source: ParameterSource,
+        public readonly source: S,
         public readonly paramDef?: InputParamDef<T, any> | OutputParamDef<T>
     ) { super("parameter"); }
 }

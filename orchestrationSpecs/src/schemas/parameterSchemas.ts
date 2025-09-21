@@ -10,9 +10,15 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {DeepWiden, PlainObject} from "@/schemas/plainObject";
-import {AllowLiteralOrExpression, BaseExpression, FromParameterExpression} from "@/schemas/expression";
+import {AggregateType, DeepWiden, PlainObject, Serialized} from "@/schemas/plainObject";
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    FromParameterExpression, StepOutputSource,
+    TaskOutputSource
+} from "@/schemas/expression";
 import {typeToken, TypeToken} from "@/schemas/sharedTypes";
+import {TasksOutputsScope} from "@/schemas/workflowTypes";
 
 type DefaultSpec<T extends PlainObject> =
     | {
@@ -26,27 +32,38 @@ type DefaultSpec<T extends PlainObject> =
     expression?: never
 };
 
+export type FieldIsRequired = "FieldRequired" | "FieldOptional";
+export type RequiresSerializationType = "AggregateType" | "PrimitiveType";
+export type RequiresSerializationCheck<T extends PlainObject> =
+    T extends AggregateType ? "AggregateType" : "PrimitiveType";
+
 /** A param definition for inputs.
  *
  * NOTE: This is *type-only*. There is intentionally no runtime validation.
  * - When `REQ = false`, a `defaultValue` must exist and the caller key is optional.
  * - When `REQ = true`, there is no default and the caller key is required.
  */
-export type InputParamDef<T extends PlainObject, REQ extends boolean> = {
+export type InputParamDef<
+    T extends PlainObject,
+    REQ extends boolean,
+    RequiresSerialization extends RequiresSerializationType
+> = {
     /** Phantom to preserve T and make it invariant. Never read or written. */
     readonly __param_input_brand?: T; // Use a simple branded property instead
     /** Optional doc string */
     description?: string;
 } & (REQ extends false
     ? { _hasDefault: true; defaultValue: DefaultSpec<T> } // if this param is omitted by the caller, default is used
-    : {});                                           // param is required by caller
+    : {})                                           // param is required by caller
+& (RequiresSerialization extends "AggregateType" ? {_requiresSerialization: true} : {});
 
 export function defineParam<T extends PlainObject>(opts: {
     description?: string
-} & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false> {
+} & DefaultSpec<T>): InputParamDef<DeepWiden<T>, false, RequiresSerializationCheck<T>> {
     return {
         // phantom is omitted at runtime; TS still sees it
         _hasDefault: true,
+        _requiresSerialization: true,
         description: opts.description,
         defaultValue: (opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} :
             (opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
@@ -56,7 +73,7 @@ export function defineParam<T extends PlainObject>(opts: {
 
 export function defineRequiredParam<T extends PlainObject>(opts?: {
     description?: string;
-}): InputParamDef<T, true> {
+}): InputParamDef<T, true, RequiresSerializationCheck<T>> {
     return {
         description: opts?.description,
     };
@@ -91,7 +108,7 @@ export type OutputParamDef<T extends PlainObject> = {
 } & (
     | { fromWhere: "path"; path: string }
     | { fromWhere: "expression"; expression: BaseExpression<T> }
-    | { fromWhere: "parameter"; parameter: FromParameterExpression<T> }
+    | { fromWhere: "parameter"; parameter: FromParameterExpression<T,TaskOutputSource|StepOutputSource> }
     | { fromWhere: "jsonPath"; jsonPath: string }
     | { fromWhere: "jqFilter"; jqFilter: string }
     | { fromWhere: "event"; event: string }
