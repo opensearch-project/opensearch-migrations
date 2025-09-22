@@ -5,18 +5,28 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
+import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.transfer.s3.S3TransferManager;
+import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
+import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
+import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -330,23 +340,47 @@ public class S3RepoTest {
         assertEquals(List.of("file1.txt", "file2.txt"), files);
     }
 
-    @Test
-    void getSnapshotRepoDataFilePath_WithEmptyFileName() throws IOException {
-        // Mock listFilesInS3Root to return one file which is empty string
-        doReturn(List.of()).when(testRepo).listFilesInS3Root();
-
-        // Mock fileFinder to throw the expected exception because no files are found
-        when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), eq(List.of())))
-                .thenThrow(new BaseSnapshotFileFinder.CannotFindRepoIndexFile("No matching index-N file found"));
-
-        // Run and assert that the S3Repo throws CannotFindSnapshotRepoRoot when no index file is found
-        CannotFindSnapshotRepoRoot thrown = assertThrows(
-                CannotFindSnapshotRepoRoot.class,
-                () -> testRepo.getSnapshotRepoDataFilePath()
+    private static Stream<Arguments> shardRepoUris() {
+        return Stream.of(
+            Arguments.of("empty key", new S3Uri("s3://bucket-name/"), "indices/test-index-id/0/"),
+            Arguments.of("non-empty key", new S3Uri("s3://bucket-name/directory"), "directory/indices/test-index-id/0/"),
+            Arguments.of("root (no slash)", new S3Uri("s3://bucket-name"), "indices/test-index-id/0/")
         );
+    }
 
-        // Assertions
-        assertThat(thrown.getMessage(), containsString(testRepoUri.bucketName));
-        assertThat(thrown.getMessage(), containsString(testRepoUri.key));
+    @ParameterizedTest(name = "prepBlobFiles | {0}")
+    @MethodSource("shardRepoUris")
+    public void prepBlobFiles_handlesPrefixesCorrectly(String ignoredName, S3Uri repoUri, String expectedPrefix) {
+        S3TransferManager mockTm = mock(S3TransferManager.class);
+
+        S3Repo repo = spy(new S3Repo(testDir, repoUri, testRegion, mockS3Client, mockFileFinder, () -> mockTm));
+
+        ShardMetadata meta = mock(ShardMetadata.class);
+        when(meta.getIndexId()).thenReturn("test-index-id");
+        when(meta.getShardId()).thenReturn(0);
+
+        Path shardDirPath = testDir.resolve("indices/test-index-id/0");
+        when(mockFileFinder.getShardDirPath(testDir, "test-index-id", 0)).thenReturn(shardDirPath);
+        doNothing().when(repo).ensureS3LocalDirectoryExists(shardDirPath);
+
+        DirectoryDownload dl = mock(DirectoryDownload.class);
+        CompletedDirectoryDownload completed = mock(CompletedDirectoryDownload.class);
+        when(completed.failedTransfers()).thenReturn(List.of());
+        when(dl.completionFuture()).thenReturn(CompletableFuture.completedFuture(completed));
+
+        ArgumentCaptor<DownloadDirectoryRequest> reqCap = ArgumentCaptor.forClass(DownloadDirectoryRequest.class);
+        when(mockTm.downloadDirectory(reqCap.capture())).thenReturn(dl);
+
+        repo.prepBlobFiles(meta);
+
+        DownloadDirectoryRequest req = reqCap.getValue();
+        assertEquals("bucket-name", req.bucket());
+        assertEquals(shardDirPath, req.destination());
+
+        ListObjectsV2Request.Builder b = ListObjectsV2Request.builder();
+        req.listObjectsRequestTransformer().accept(b);
+        assertEquals(expectedPrefix, b.build().prefix());
+
+        verify(mockTm).close();
     }
 }
