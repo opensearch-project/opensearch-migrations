@@ -27,10 +27,24 @@ export type ArgoFormatted = {
 
 const formattedResult = (text: string, compound = false): ArgoFormatted => ({ text, compound });
 
-export function toArgoExpression(expr: AnyExpr, useMarkers=true): string {
-    const rval = formatExpression(expr, true);
+function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, renderedResult: ArgoFormatted) {
     return (useMarkers && !(isLiteralExpression(expr)))
-        ? "{{" + (rval.compound ? "=" : "") + rval.text + "}}" : rval.text;
+        ? "{{" + (renderedResult.compound ? "=" : "") + renderedResult.text + "}}" : renderedResult.text;
+}
+
+export function toArgoExpression(expr: AnyExpr, useMarkers=true): string {
+    if (isTemplateExpression(expr)) {
+        const f = expr as TemplateReplacementExpression;
+        let result = f.template;
+        for (const [key, value] of Object.entries(f.replacements)) {
+            const expandedValue = formatArgoFormattedToString(true, expr, formatExpression(value));
+            result = result.replaceAll(`{{${key}}}`, `" + ${expandedValue} + "`);
+        }
+        return result;
+    }
+
+    const rval = formatExpression(expr, true);
+    return formatArgoFormattedToString(useMarkers, expr, rval);
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
@@ -161,17 +175,6 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         return formattedResult(`${e.taskType}.${e.name}.${e.key}`)
     }
 
-    if (isTemplateExpression(expr)) {
-        const f = expr as TemplateReplacementExpression;
-        let result = f.template;
-        for (const [key, value] of Object.entries(f.replacements)) {
-            const expandedValue = formatExpression(value).text;
-            result = result.replaceAll(`{{${key}}}`, `" + ${expandedValue} + "`);
-        }
-        result = `"${result}"`;
-        return formattedResult(result, true);
-    }
-
     throw new Error(`Unsupported expression kind: ${(expr as any).kind}`);
 }
 
@@ -192,4 +195,4 @@ export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "loop_item"; }
 export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
 export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> { return e.kind === "task_data"; }
-function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }
+export function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }
