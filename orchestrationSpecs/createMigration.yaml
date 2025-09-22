@@ -26,6 +26,14 @@ spec:
                               "index_3",
                               "index_4"
                           ],
+                          "snapshotConfig": {
+                              "snapshotName": "indices_3_and_4",
+                              "repoConfig": {
+                                  "aws_region": "us-east-2",
+                                  "endpoint": "http://localstack:4566",
+                                  "repoPath": "snapshot"
+                              }
+                          },
                           "migrations": [
                               {
                                   "metadata": {

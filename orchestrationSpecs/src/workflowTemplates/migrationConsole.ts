@@ -11,35 +11,14 @@ import {
 } from "@/schemas/expression";
 import {
     CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG,
-    CONSOLE_SERVICES_CONFIG_FILE,
-    TARGET_CLUSTER_CONFIG,
-    UNKNOWN
+    CONSOLE_SERVICES_CONFIG_FILE, KAFKA_SERVICES_CONFIG,
+    TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {INTERNAL} from "@/schemas/taskBuilder";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {MissingField, PlainObject, Serialized} from "@/schemas/plainObject";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
-import {typeToken} from "@/schemas/sharedTypes";
-
-function conditionalInclude<
-    T extends Serialized<Record<string, PlainObject>>,
-    U extends MissingField | T
->(label: string, contents: BaseExpression<U>): BaseExpression<string> {
-    return expr.ternary(
-        expr.equals(expr.length(expr.keys(expr.nullCoalesce(
-            expr.cast(contents).to<Record<string, PlainObject> | MissingField>(),
-                {}
-            ))), expr.literal(0)),
-        expr.literal(""), // do-nothing branch
-        expr.concat(
-            // Fill out the appropriate line(s) of the config.  Notice that yaml allows inlining JSON,
-            // which makes handling contents, especially at argo runtime, simpler
-            expr.literal(label+": "),
-            expr.recordToString(expr.cast(contents).to<T>()),
-            expr.literal("\n")
-        )
-    );
-}
+import {TypeToken, typeToken} from "@/schemas/sharedTypes";
 
 const KafkaServicesConfig = z.object({
     broker_endpoints: z.string(),
@@ -135,6 +114,14 @@ function getConsoleDeploymentResource(
     }
 }
 
+function makeOptionalDict<
+    T extends PlainObject,
+    SCHEMA extends PlainObject
+>(label:string, v: BaseExpression<T>, tt:TypeToken<SCHEMA>)
+{
+    return expr.ternary(expr.equals("", expr.asString(v)), expr.literal({}),
+        expr.makeDict({[label]: expr.stringToRecord(tt, expr.asString(v))}));
+}
 
 export const MigrationConsole = WorkflowBuilder.create({
     k8sResourceName: "migration-console",
@@ -149,15 +136,16 @@ export const MigrationConsole = WorkflowBuilder.create({
         .addSteps(s=>s
             .addStepGroup(c=>c))
         .addExpressionOutput("configContents", c=>
-            expr.stringToRecord(typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>(),
-                expr.concat(
-                    conditionalInclude("kafka", c.inputs.kafkaInfo),
-                    conditionalInclude("source_cluster", c.inputs.sourceConfig),
-                    conditionalInclude("target_cluster", c.inputs.targetConfig),
-                    conditionalInclude("target_cluster", c.inputs.targetConfig),
-                    conditionalInclude("snapshot", c.inputs.snapshotConfig),
-                    conditionalInclude("target_cluster", c.inputs.targetConfig)
-                ))
+            expr.recordToString(expr.mergeDicts(
+                expr.mergeDicts(
+                    makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
+                    makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
+                ),
+                expr.mergeDicts(
+                    makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),
+                    makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+                )
+            ))
         )
     )
 
@@ -172,7 +160,7 @@ export const MigrationConsole = WorkflowBuilder.create({
             .addCommand(["/bin/sh", "-c"])
             .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
-                    "FILE_CONTENTS": expr.toBase64(expr.recordToString(c.inputs.configContents)),
+                    "FILE_CONTENTS": expr.toBase64(expr.asString(c.inputs.configContents)),
                     "COMMAND": c.inputs.command
                 })]
             )
@@ -194,7 +182,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 manifest: getConsoleDeploymentResource(b.inputs.name,
                     b.inputs.imageMigrationConsoleLocation,
                     b.inputs.imageMigrationConsolePullPolicy,
-                    expr.toBase64(expr.recordToString(b.inputs.configContents)),
+                    expr.toBase64(expr.asString(b.inputs.configContents)),
                     b.inputs.command)
             }))
 

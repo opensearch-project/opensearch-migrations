@@ -75,8 +75,9 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     targetConfig: b.inputs.target,
-                    indices: expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"),
-                    metadataMigrationConfig: expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "options")
+                    indices: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"), []),
+                    metadataMigrationConfig:
+                        expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "options"), {})
                 }))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                 c.register({
@@ -162,7 +163,7 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b,c),
                         sourceConfig: expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        sourcePipelineName: expr.toBase64(expr.recordToString(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source")))
+                        sourcePipelineName: expr.toBase64(expr.asString(expr.recordToString(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"))))
                     }),
                 {loopWith: makeParameterLoop(expr.jsonPathLoose(b.inputs.sourceMigrationConfig,
                         "snapshotExtractAndLoadConfigs"))}

@@ -4,7 +4,7 @@ import {
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {CLUSTER_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
+import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/userSchemas";
 import {expr} from "@/schemas/expression";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/schemas/parameterConversions";
@@ -37,8 +37,11 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     }),
                 }), {when: expr.equals(b.inputs.alreadyDefinedName, expr.literal(""))})
         )
-         .addExpressionOutput("snapshotConfig",
-                 c=> c.steps.createSnapshot.outputs.snapshotConfig))
-
+        .addExpressionOutput("snapshotConfig", c=>
+            expr.ternary(
+                expr.equals(c.steps.createSnapshot.status, "Skipped"),
+                expr.cast(c.inputs.snapshotConfig).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
+                expr.cast(c.steps.createSnapshot.outputs.snapshotConfig).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>()))
+    )
 
     .getFullScope();

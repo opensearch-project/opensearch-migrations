@@ -570,8 +570,10 @@ class ExprBuilder {
         return fn<R>("fromJSON", toExpression(data));
     }
 
-    recordToString<T extends PlainObject>(data: AllowLiteralOrExpression<T>) {
-        return fn<string>("toJSON", toExpression(data));
+    recordToString<T extends AggregateType>(
+        data: AllowLiteralOrExpression<T>
+    ): BaseExpression<string, "complicatedExpression"> & BaseExpression<Serialized<T>, "complicatedExpression"> {
+        return fn<Serialized<T>>("toJSON", toExpression(data)) as any;
     }
 
     makeDict<R extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
@@ -606,7 +608,7 @@ class ExprBuilder {
             "complicatedExpression",
             "complicatedExpression",
             readonly [L, R]
-        >("merge", [left, right] as const);
+        >("sprig.merge", [left, right] as const);
     }
 
     // Array operations

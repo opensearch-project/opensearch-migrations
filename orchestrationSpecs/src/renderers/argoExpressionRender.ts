@@ -65,7 +65,7 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         const c = formatExpression(te.condition);
         const t = formatExpression(te.whenTrue);
         const f = formatExpression(te.whenFalse);
-        return formattedResult(`${c.text} ? ${t.text} : ${f.text}`, true);
+        return formattedResult(`((${c.text}) ? (${t.text}) : (${f.text}))`, true);
     }
 
     if (isFunction(expr)) {

@@ -1,6 +1,11 @@
 import {z} from "zod";
 import {transformZodObjectToParams} from "@/utils";
 
+export const KAFKA_SERVICES_CONFIG = z.object({
+    broker_endpoints: z.string(),
+    standard: z.string()
+});
+
 export const HTTP_AUTH_BASIC = z.object({
     username: z.string(),
     password: z.string(),
@@ -27,8 +32,6 @@ export const CLUSTER_CONFIG = z.object({
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint: z.string(), // override to required
 });
-
-export const UNKNOWN = z.object({});
 
 export const S3_REPO_CONFIG = z.object({
     aws_region: z.string(),
@@ -96,10 +99,10 @@ export const SOURCE_MIGRATION_CONFIG = z.object({
 });
 
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
-    kafka: z.string(), // TODO
-    source_cluster: CLUSTER_CONFIG,
-    snapshot: z.string(), // TODO
-    target_cluster: TARGET_CLUSTER_CONFIG
+    kafka: KAFKA_SERVICES_CONFIG.optional(),
+    source_cluster: CLUSTER_CONFIG.optional(),
+    snapshot: COMPLETE_SNAPSHOT_CONFIG.optional(),
+    target_cluster: TARGET_CLUSTER_CONFIG.optional()
 });
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
