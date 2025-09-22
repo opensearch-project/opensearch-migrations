@@ -15,6 +15,7 @@ import {
 import {BaseExpression, expr, FromParameterExpression} from "@/schemas/expression";
 import {typeToken} from "@/schemas/sharedTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {Serialized} from "@/schemas/plainObject";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints:        defineParam({ expression: "http://etcd.ma.svc.cluster.local:2379" }),
@@ -54,7 +55,7 @@ export const TargetClusterParameters = {
     targetPassword: defineRequiredParam<string>()
 }
 
-export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<z.infer<typeof TARGET_CLUSTER_CONFIG>>) {
+export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return {
         targetAwsRegion:
             expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),

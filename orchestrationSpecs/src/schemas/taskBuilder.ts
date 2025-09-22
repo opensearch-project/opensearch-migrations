@@ -4,6 +4,7 @@ import {
     IfNever,
     LoopWithUnion,
     ParamsWithLiteralsOrExpressions,
+    ParamsWithLiteralsOrExpressionsIncludingSerialized,
     TasksOutputsScope,
     TasksWithOutputs,
     TemplateSignaturesScope,
@@ -98,7 +99,7 @@ export type ParamProviderCallbackObject<
     LoopItemsType extends PlainObject = never
 > =
     {
-        register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol;
+        register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol;
         /** runtime copy of the keys to make it possible to narrow values, not just types */
         parameterKeys?: readonly (Extract<keyof Inputs, string>)[];
         defaults: DefaultsOfInputs<Inputs>;
@@ -288,11 +289,11 @@ export abstract class TaskBuilder<
         inputs: Inputs,
         fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>,
         loopWith?: LoopWithUnion<LoopT>
-    ): ParamsWithLiteralsOrExpressions<CallerParams<Inputs>> {
-        let capturedParams!: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>;
+    ): ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>> {
+        let capturedParams!: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>;
 
         const result = fn(this.buildParamProviderCallbackObject<Inputs, LoopT>(inputs,
-            (p: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => {
+            (p: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => {
                 capturedParams = p;
                 return PARAMS_PUSHED;
             }, loopWith));
@@ -379,7 +380,7 @@ export abstract class TaskBuilder<
         LoopT extends PlainObject = never
     >(
         inputs: Inputs,
-        register: (params: ParamsWithLiteralsOrExpressions<CallerParams<Inputs>>) => ParamsPushedSymbol,
+        register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol,
         loopWith?: LoopWithUnion<LoopT>
     ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
         const tasksByName = this.getTaskOutputsByTaskName();
@@ -407,7 +408,7 @@ export abstract class TaskBuilder<
     >(
         name: string,
         templateKey: TKey,
-        params: CallerParams<TemplateSignaturesScope[TKey]["inputs"]>,
+        params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<TemplateSignaturesScope[TKey]["inputs"]>>,
         loopWith?: LoopWithUnion<LoopT>
     ): NamedTask<
         TemplateSignaturesScope[TKey]["inputs"],

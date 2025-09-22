@@ -17,6 +17,11 @@ export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "compl
 export type AllowLiteralOrExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> =
     T | BaseExpression<T, C>;
 
+export type AllowLiteralOrExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+    T extends AggregateType
+        ? T | BaseExpression<T, C> | BaseExpression<Serialized<T>, C>
+        : T | BaseExpression<T, C>;
+
 export function isExpression(v: unknown): v is BaseExpression<any, any> {
     return v instanceof BaseExpression;
 }
@@ -288,10 +293,10 @@ type ConditionalWrap<T extends PlainObject, S extends ParameterSource> =
 export class FromParameterExpression<
     T extends PlainObject,
     S extends ParameterSource
-> extends BaseExpression<T, "govaluate"> {
+> extends BaseExpression<ConditionalWrap<T, S>, "govaluate"> {
     constructor(
         public readonly source: S,
-        public readonly paramDef?: InputParamDef<T, any> | OutputParamDef<T>
+        public readonly _paramDef?: InputParamDef<T, any> | OutputParamDef<T>
     ) { super("parameter"); }
 }
 
@@ -528,11 +533,11 @@ class ExprBuilder {
         T extends Record<string, any>,
         S extends KeySegments<T>
     >(
-        source: BaseExpression<T, any>,
+        source: BaseExpression<Serialized<T>, any>,
         ...segs: S
     ): BaseExpression<SegmentsValueMissing<T, S>, "complicatedExpression">;
     jsonPathLoose(
-        source: BaseExpression<any, any>,
+        source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
     ): BaseExpression<any, "complicatedExpression"> {
         const path = _segmentsToPath(segs);
@@ -543,18 +548,18 @@ class ExprBuilder {
         T extends Record<string, any>,
         K extends Extract<keyof NonMissing<T>, string>
     >(
-        source: BaseExpression<T, any>,
+        source: BaseExpression<Serialized<T>, any>,
         key: K
     ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression">;
     jsonPathStrict<
         T extends Record<string, any>,
         S extends KeySegments<T>
     >(
-        source: BaseExpression<T, any>,
+        source: BaseExpression<Serialized<T>, any>,
         ...segs: S
     ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
     jsonPathStrict(
-        source: BaseExpression<any, any>,
+        source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
     ): BaseExpression<any, "complicatedExpression"> {
         const path = _segmentsToPath(segs);

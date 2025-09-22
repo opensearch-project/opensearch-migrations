@@ -4,10 +4,23 @@ import {
     expr,
     FromParameterExpression, ParameterSource,
     SimpleExpression,
-    TaskDataExpression
+    TaskDataExpression,
+    WrapSerialize, ExpressionType, UnwrapSerialize
 } from "@/schemas/expression";
 import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
 import {StripUndefined, TaskType} from "@/schemas/sharedTypes";
+import {InvalidType, ParamsWithLiteralsOrExpressionsIncludingSerialized} from "@/schemas/workflowTypes";
+
+// Local definition to avoid circular import
+type AllowLiteralOrExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+    // If T is already Serialized<U>, support literals of U and expressions of both U and Serialized<U>
+    T extends Serialized<infer U>
+        ? U extends AggregateType
+            ? U | Serialized<U> | BaseExpression<U, C> | BaseExpression<Serialized<U>, C>
+            : T | BaseExpression<T, C>
+        : T extends AggregateType
+            ? T | BaseExpression<T, C> | BaseExpression<Serialized<T>, C>
+            : T | BaseExpression<T, C>;
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
 
@@ -153,7 +166,8 @@ type RegisterParamShape<CB> =
         : never;
 
 /** All keys (required + optional) the register consumes, intersected with T. */
-type KeysOfRegister<T, CB> = Extract<keyof T, keyof RegisterParamShape<CB>>;
+type KeysOfRegister<T extends PlainObject, CB> =
+    Extract<keyof UnwrapSerialize<T>, keyof RegisterParamShape<CB>>;
 
 /** Optional keys in a record type R (reuses your IsOptionalKey). */
 type OptionalKeys<R> = R extends object
@@ -161,9 +175,9 @@ type OptionalKeys<R> = R extends object
     : never;
 
 type _R<CB> = RegisterParamShape<CB>;
-type _AllKeys<T, CB> = KeysOfRegister<T, CB>;
-type _OptKeys<T, CB> = Extract<_AllKeys<T, CB>, OptionalKeys<_R<CB>>>;
-type _ReqKeys<T, CB> = Exclude<_AllKeys<T, CB>, _OptKeys<T, CB>>;
+type _AllKeys<T extends PlainObject, CB> = KeysOfRegister<T, CB>;
+type _OptKeys<T extends PlainObject, CB> = Extract<_AllKeys<T, CB>, OptionalKeys<_R<CB>>>;
+type _ReqKeys<T extends PlainObject, CB> = Exclude<_AllKeys<T, CB>, _OptKeys<T, CB>>;
 
 /** Collapse BaseExpression<T> | T → T (distributes over unions). */
 type PayloadOf<V> = V extends BaseExpression<infer U, any> ? U : V;
@@ -171,10 +185,21 @@ type PayloadOf<V> = V extends BaseExpression<infer U, any> ? U : V;
 /** Apply your helper to drop `| undefined` from the inner payload. */
 type CleanPayload<V> = StripUndefined<PayloadOf<V>>;
 
+/** Helper type for serialized expressions similar to AllowLiteralOrExpressionIncludingSerialized */
+type AllowExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+    // Handle both aggregate T and already-serialized T to ensure we return a union of BaseExpression<U> | BaseExpression<Serialized<U>>
+    T extends Serialized<infer U>
+        ? U extends AggregateType
+            ? BaseExpression<U, C> | BaseExpression<Serialized<U>, C>
+            : BaseExpression<T, C>
+        : T extends AggregateType
+            ? BaseExpression<T, C> | BaseExpression<Serialized<T>, C>
+            : BaseExpression<T, C>;
+
 /** Final, flattened return type: payloads come from register, undefined stripped. */
 type SelectedExprRecord<T extends Record<string, any>, CB> =
-    { [K in _ReqKeys<T, CB>]:  BaseExpression<CleanPayload<_R<CB>[K]>, any> } &
-    { [K in _OptKeys<T, CB>]?: BaseExpression<CleanPayload<_R<CB>[K]>, any> };
+    { [K in _ReqKeys<T, CB>]:  AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> } &
+    { [K in _OptKeys<T, CB>]?: AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> };
 
 export function selectInputsFieldsAsExpressionRecord<
     T extends Record<string, any>,
@@ -189,13 +214,17 @@ export function selectInputsFieldsAsExpressionRecord<
     P: BaseExpression<T>,
     c: CB
 ): SelectedExprRecord<T, CB> {
-    const fromCb = getAcceptedRegisterKeys<{ [K in keyof T]: unknown }>(c) as readonly (keyof T)[];
-    const keys = (fromCb && fromCb.length > 0
-        ? fromCb
-        : (Array.isArray(c.defaultKeys) ? c.defaultKeys : Object.keys(c.defaults))) as readonly (keyof T)[];
+    // Get the keys available in defaults (template input keys)  
+    const defaultKeys = Array.isArray(c.defaultKeys) ? c.defaultKeys : Object.keys(c.defaults);
+    
+    const callbackKeys = getAcceptedRegisterKeys(c);
+    // Choose keys: prefer the callback's declared parameter keys; otherwise fall back to defaults keys
+    const keys = callbackKeys.length > 0
+        ? callbackKeys
+        : defaultKeys;
 
     const out: any = {};
-    for (const k of keys as readonly string[]) {
+    for (const k of keys) {
         const dh = (c.defaults as any)[k];
 
         if (dh && typeof dh === "object" && "expression" in dh) {

@@ -12,12 +12,13 @@
 
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
-    AllowLiteralOrExpression,
+    AllowLiteralOrExpression, AllowLiteralOrExpressionIncludingSerialized,
     BaseExpression,
+    ExpressionType,
     FromParameterExpression,
     InputParameterSource, ParameterSource, WorkflowParameterSource
 } from "@/schemas/expression";
-import {PlainObject} from "@/schemas/plainObject";
+import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<
@@ -69,6 +70,17 @@ export type ParamsWithLiteralsOrExpressions<T> = {
       ? HasUndefined<T[K]> extends true
           ? AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
           : AllowLiteralOrExpression<StripUndefined<T[K]>>
+      : T[K] extends BaseExpression<any, any>
+          ? NormalizeBaseExpression<T[K]>
+          : InvalidType<T[K]>;
+};
+
+export type ParamsWithLiteralsOrExpressionsIncludingSerialized<T> = {
+  [K in keyof T]:
+    T[K] extends PlainObject | undefined
+      ? HasUndefined<T[K]> extends true
+          ? AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>> | undefined
+          : AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>>
       : T[K] extends BaseExpression<any, any>
           ? NormalizeBaseExpression<T[K]>
           : InvalidType<T[K]>;
@@ -134,7 +146,7 @@ export type LoopWithParam<T extends PlainObject> = {
     value: BaseExpression<T[]>
 }
 
-export function makeParameterLoop<T extends PlainObject>(expr: BaseExpression<T[]>) {
+export function makeParameterLoop<T extends PlainObject>(expr: AllowLiteralOrExpressionIncludingSerialized<T[]>) {
     return {
         loopWith: "params",
         value: expr

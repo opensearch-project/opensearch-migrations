@@ -17,12 +17,12 @@ import {
 } from "@/workflowTemplates/userSchemas";
 import {INTERNAL} from "@/schemas/taskBuilder";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
-import {MissingField, PlainObject} from "@/schemas/plainObject";
+import {MissingField, PlainObject, Serialized} from "@/schemas/plainObject";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
 function conditionalInclude<
-    T extends Record<string, PlainObject>,
+    T extends Serialized<Record<string, PlainObject>>,
     U extends MissingField | T
 >(label: string, contents: BaseExpression<U>): BaseExpression<string> {
     return expr.ternary(

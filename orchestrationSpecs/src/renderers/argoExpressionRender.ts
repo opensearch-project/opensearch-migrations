@@ -29,19 +29,20 @@ const formattedResult = (text: string, compound = false): ArgoFormatted => ({ te
 
 export function toArgoExpression(expr: AnyExpr, useMarkers=true): string {
     const rval = formatExpression(expr, true);
-    return useMarkers ? "{{=" + rval.text + "}}" : rval.text;
+    return (useMarkers && !(isLiteralExpression(expr)))
+        ? "{{" + (rval.compound ? "=" : "") + rval.text + "}}" : rval.text;
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
 function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
     if (isAsStringExpression(expr)) {
-        return formatExpression(expr.source);
+        return formatExpression(expr.source, true);
     }
 
     if (isLiteralExpression(expr)) {
         const le = expr as LiteralExpression<any>;
         if (typeof le.value === "string") {
-            return formattedResult(`"${le.value}"`);
+            return top ? formattedResult(le.value) : formattedResult(`"${le.value}"`);
         } else if (typeof le.value === "number" || typeof le.value === "boolean") {
             return formattedResult(String(le.value));
         } else if (le.value === null) {
