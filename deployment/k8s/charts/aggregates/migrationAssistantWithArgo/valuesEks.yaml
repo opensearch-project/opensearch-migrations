@@ -1,5 +1,6 @@
 conditionalPackageInstalls:
   localstack: false
+  jaeger: false
 
 aws:
   configureAwsEksResources: true
@@ -38,8 +39,6 @@ otelConfiguration:
         timeout: 10s
         send_batch_size: 8192
         send_batch_max_size: 10000
-      probabilistic_sampler/traces:
-        sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE:-1}
       cumulativetodelta:
       resource/metrics:
         attributes:
@@ -65,17 +64,11 @@ otelConfiguration:
         dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
         resource_to_telemetry_conversion:
           enabled: true
-      awsxray:
-        index_all_attributes: true
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
         metric_expiration: 5m
         enable_open_metrics: true
-      otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
-        endpoint: jaeger-collector:4317
-        tls:
-          insecure: true
     service:
       extensions: [health_check]
       pipelines:
@@ -83,10 +76,6 @@ otelConfiguration:
           receivers: [otlp]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
           exporters: [awsemf, prometheus]
-        traces:
-          receivers: [otlp]
-          processors: [probabilistic_sampler/traces, batch]
-          exporters: [awsxray, otlp/jaeger]
 
 charts:
   fluent-bit:

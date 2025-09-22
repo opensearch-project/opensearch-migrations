@@ -3,15 +3,16 @@
 # Bootstrap EKS Environment for OpenSearch Migration Assistant
 #
 # This script prepares an existing EKS cluster to use the Migration Assistant tooling.
-# If desired it has the ability to kick-off a buildImages chart which will build required
-# images for the Migration Assistant inside of an EKS pod and push these images to a
-# private ECR, otherwise this step can be skipped with the 'skip_image_build' flag and
-# public images can be utilized
+# As a default public images will be used from https://gallery.ecr.aws/opensearchproject.
+# However, images can also be built from source with the --build-images=true flag
+# which kicks-off a buildImages chart which will build required images for the
+# Migration Assistant inside of an EKS pod and push these images to a private ECR for use.
 #
 # Usage:
 #   Run directly: curl -s https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh | bash
 #   Save & run:   curl -s -o aws-bootstrap.sh https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/deployment/k8s/aws/aws-bootstrap.sh && chmod +x aws-bootstrap.sh && ./aws-bootstrap.sh
 # -----------------------------------------------------------------------------
+# --- defaults ---
 org_name="opensearch-project"
 repo_name="opensearch-migrations"
 branch="main"
@@ -22,12 +23,58 @@ base_dir="./opensearch-migrations"
 build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
 ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
-skip_image_build=true
+build_images=false
 use_public_images=true
 keep_build_images_job_alive=false
 
 RELEASE_VERSION=$(<"$base_dir/VERSION")
 RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
+
+# --- argument parsing ---
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --org-name) org_name="$2"; shift 2 ;;
+    --repo-name) repo_name="$2"; shift 2 ;;
+    --branch) branch="$2"; shift 2 ;;
+    --tag) tag="$2"; shift 2 ;;
+    --skip-git-pull) skip_git_pull="$2"; shift 2 ;;
+    --base-dir) base_dir="$2"; shift 2 ;;
+    --build-images-chart-dir) build_images_chart_dir="$2"; shift 2 ;;
+    --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
+    --namespace) namespace="$2"; shift 2 ;;
+    --build-images) build_images="$2"; shift 2 ;;
+    --use-public-images) use_public_images="$2"; shift 2 ;;
+    --keep-build-images-job-alive) keep_build_images_job_alive="$2"; shift 2 ;;
+    --release-version) RELEASE_VERSION="$2"; shift 2 ;;
+    -h|--help)
+      echo "Usage: $0 [options]"
+      echo "Options:"
+      echo "  --org-name <val>                          (default: $org_name)"
+      echo "  --repo-name <val>                         (default: $repo_name)"
+      echo "  --branch <val>                            (default: $branch)"
+      echo "  --tag <val>                               (default: $tag)"
+      echo "  --skip-git-pull <true|false>              (default: $skip_git_pull)"
+      echo "  --base-dir <path>                         (default: $base_dir)"
+      echo "  --build-images-chart-dir <path>           (default: $build_images_chart_dir)"
+      echo "  --ma-chart-dir <path>                     (default: $ma_chart_dir)"
+      echo "  --namespace <val>                         (default: $namespace)"
+      echo "  --build-images <true|false>               (default: $build_images)"
+      echo "  --use-public-images <true|false>          (default: $use_public_images)"
+      echo "  --keep-build-images-job-alive <true|false>(default: $keep_build_images_job_alive)"
+      echo "  --release-version <val>                   (default: $RELEASE_VERSION)"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$build_images" == "true" && "$use_public_images" == "true" ]]; then
+  echo "Note: --build-images is enabled, so public images will NOT be used."
+  use_public_images=false
+fi
 
 TOOLS_ARCH=$(uname -m)
 case "$TOOLS_ARCH" in
@@ -153,7 +200,7 @@ if [[ "$skip_git_pull" == "false" ]]; then
   popd > /dev/null || exit
 fi
 
-if [[ "$skip_image_build" == "false" ]]; then
+if [[ "$build_images" == "true" ]]; then
   if helm status build-images -n "$namespace" >/dev/null 2>&1; then
     read -rp "Helm release 'build-images' already exists in namespace '$namespace', would you like to uninstall it? (y/n): " answer
     if [[ "$answer" == [Yy]* ]]; then
