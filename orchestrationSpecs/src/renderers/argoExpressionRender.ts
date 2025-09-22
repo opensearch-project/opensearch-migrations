@@ -135,9 +135,9 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         const pe = expr as FromParameterExpression<any,any>;
         switch (pe.source.kind) {
             case "workflow":
-                return formattedResult(`fromJSON(workflow.parameters.${pe.source.parameterName})`);
+                return formattedResult(`workflow.parameters.${pe.source.parameterName}`);
             case "input":
-                return formattedResult(`fromJSON(inputs.parameters.${pe.source.parameterName})`);
+                return formattedResult(`inputs.parameters.${pe.source.parameterName}`);
             case "steps_output":
                 return formattedResult(`steps.${pe.source.stepName}.outputs.parameters.${pe.source.parameterName}`);
             case "tasks_output":
@@ -158,7 +158,7 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
     if (isTaskData(expr)) {
         const e = expr as TaskDataExpression<any>;
-        return formattedResult(`${e.taskType}.${e.name}['${e.key}']`)
+        return formattedResult(`${e.taskType}.${e.name}.${e.key}`)
     }
 
     if (isTemplateExpression(expr)) {

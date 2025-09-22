@@ -123,7 +123,7 @@ function formatBody(body: GenericScope) {
             const {manifest, ...rest} = body.resource;
             return {
                 resource: {
-                    manifest: JSON.stringify(manifest),
+                    manifest: JSON.stringify(transformExpressionsDeep(manifest)),
                     ...transformExpressionsDeep(rest)
                 }
             };
