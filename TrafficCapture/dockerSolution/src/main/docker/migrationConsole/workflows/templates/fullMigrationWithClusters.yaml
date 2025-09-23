@@ -246,7 +246,7 @@ spec:
               --ignore-not-found || true
 
             echo "Removing source cluster configmap"
-            kubectl delete configmap ${SOURCE_CLUSTER_NAME}-migration-config
+            kubectl delete configmap ${SOURCE_CLUSTER_NAME}-migration-config --ignore-not-found || true
             
             # Cleanup target cluster  
             echo "Uninstalling target cluster: ${TARGET_CLUSTER_NAME}"
@@ -255,6 +255,17 @@ spec:
               --ignore-not-found || true
             
             echo "Removing target cluster configmap"
-            kubectl delete configmap ${TARGET_CLUSTER_NAME}-migration-config
+            kubectl delete configmap ${TARGET_CLUSTER_NAME}-migration-config --ignore-not-found || true
+            
+            # Cleanup non-Helm resources for ES 1.x and 2.x clusters
+            echo "Cleaning up Kubernetes resources for ${SOURCE_CLUSTER_NAME}"
+            kubectl delete all,configmap,secret -l migration-test=true,cluster-name=${SOURCE_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
+
+            echo "Cleaning up Kubernetes resources for ${TARGET_CLUSTER_NAME}"  
+            kubectl delete all,configmap,secret -l migration-test=true,cluster-name=${TARGET_CLUSTER_NAME} \
+              --namespace {{workflow.parameters.cluster-namespace}} \
+              --ignore-not-found || true
             
             echo "Cluster cleanup completed successfully"
