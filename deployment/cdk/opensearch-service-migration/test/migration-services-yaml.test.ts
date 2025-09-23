@@ -357,7 +357,7 @@ describe('Migration Services YAML Tests', () => {
             migrationAssistanceEnabled: true,
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
-                "version": "ES_7.10",
+                "version": "ES_7.9",
                 "disabled": true
             },
             targetCluster: {
@@ -391,7 +391,7 @@ describe('Migration Services YAML Tests', () => {
         const parsedFromYaml = yaml.parse(yamlFileContents);
 
         expect(parsedFromYaml.metadata_migration).toBeDefined();
-        expect(parsedFromYaml.metadata_migration.source_cluster_version).toBe("ES_7.10")
+        expect(parsedFromYaml.metadata_migration.source_cluster_version).toBe("ES_7.9")
 
         expect(parsedFromYaml.target_cluster).toBeDefined();
         expect(parsedFromYaml.target_cluster.basic_auth).toBeDefined();
