@@ -42,9 +42,67 @@ set -e -x
 # Save pod name to output path
 echo $HOSTNAME > /tmp/podname
 
-base64 -d > /config/migration_services.yaml << EOF
+echo File contents...
+ 
+base64 -d > /config/migration_services.yaml_ << EOF
 {{FILE_CONTENTS}}
 EOF
+
+cat /config/migration_services.yaml_ | jq 'def normalizeAuthConfig:
+  if has("authConfig") then
+    if (.authConfig | has("username") and has("password")) then
+      .basic_auth = .authConfig
+    elif (.authConfig | has("region")) then
+      .sigv4_auth = .authConfig
+    elif (.authConfig | has("caCert") and has("clientSecretName")) then
+      .mtls_auth = .authConfig
+    else
+      .
+    end
+    | del(.authConfig)
+  else
+    .
+  end;
+
+def normalizeAllowInsecure:
+  if has("allowInsecure") then
+    .allow_insecure = .allowInsecure | del(.allowInsecure)
+  else
+    .
+  end;
+
+def normalizeRepoPath:
+  if has("repoPath") then
+    .repo_uri = .repoPath | del(.repoPath)
+  else
+    .
+  end;
+
+def normalizeSnapshotName:
+  if has("snapshotName") then
+    .snapshot_name = .snapshotName | del(.snapshotName)
+  else
+    .
+  end;
+
+def normalizeRepoConfig:
+  if has("repoConfig") then
+    .s3 = .repoConfig | del(.repoConfig)
+  else
+    .
+  end;
+
+# Apply recursively to catch nested objects
+def recurseNormalize:
+  (normalizeAuthConfig
+   | normalizeAllowInsecure
+   | normalizeRepoPath
+   | normalizeSnapshotName
+   | normalizeRepoConfig)
+  | with_entries(.value |= (if type=="object" then (.|recurseNormalize) else . end));
+
+. | recurseNormalize
+' > /config/migration_services.yaml
 
 . /etc/profile.d/venv.sh
 source /.venv/bin/activate

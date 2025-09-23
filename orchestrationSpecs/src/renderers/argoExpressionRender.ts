@@ -38,7 +38,7 @@ export function toArgoExpression(expr: AnyExpr, useMarkers=true): string {
         let result = f.template;
         for (const [key, value] of Object.entries(f.replacements)) {
             const expandedValue = formatArgoFormattedToString(true, expr, formatExpression(value));
-            result = result.replaceAll(`{{${key}}}`, `" + ${expandedValue} + "`);
+            result = result.replaceAll(`{{${key}}}`, expandedValue);
         }
         return result;
     }
@@ -91,8 +91,7 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
         }
         const formattedArgs = e.args.map(a=>formatExpression(a));
         const combinedFormatted = formattedArgs.map(f=>f.text).join(", ");
-        const compound = formattedArgs.map(f=>f.compound).some(v=>v);
-        return formattedResult(`${e.functionName}(${combinedFormatted})`, compound);
+        return formattedResult(`${e.functionName}(${combinedFormatted})`, true);
     }
 
     if (isComparisonExpression(expr)) {
