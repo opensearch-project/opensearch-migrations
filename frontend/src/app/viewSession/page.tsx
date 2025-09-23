@@ -21,6 +21,11 @@ export default function ViewSessionPage() {
 function ViewSessionPageInner() {
   const searchParams = useSearchParams();
   const sessionName = searchParams.get("sessionName");
+  const {
+    isLoading: snapshotIsLoading,
+    data: snapshotData,
+    error: snapshotError,
+  } = useSnapshotStatus(sessionName!);
 
   if (!sessionName) {
     return (
@@ -29,12 +34,6 @@ function ViewSessionPageInner() {
       </Alert>
     );
   }
-
-  const {
-    isLoading: snapshotIsLoading,
-    data: snapshotData,
-    error: snapshotError,
-  } = useSnapshotStatus(sessionName!);
 
   return (
     <SpaceBetween size="m">

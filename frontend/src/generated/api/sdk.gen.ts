@@ -336,7 +336,7 @@ export const metadataStatus = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Get Metadata Status
+ * Get Backfill Status
  */
 export const backfillStatus = <ThrowOnError extends boolean = false>(
   options: Options<BackfillStatusData, ThrowOnError>,

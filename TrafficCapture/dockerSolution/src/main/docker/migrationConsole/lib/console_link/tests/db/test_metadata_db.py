@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import patch
 from console_link.db.metadata_db import (
-    get_latest, create_entry, clear_all, MetadataEntry, MetadataNotAvailable
+    get_latest, create_entry, MetadataEntry, MetadataNotAvailable
 )
 
 
@@ -67,10 +67,3 @@ def test_create_entry(mock_db, valid_metadata_entry):
     
     create_entry(valid_metadata_entry)
     mock_table.insert.assert_called_once_with(valid_metadata_entry.model_dump())
-
-
-def test_clear_all(mock_db):
-    _, mock_table, _ = mock_db
-    
-    clear_all()
-    mock_table.truncate.assert_called_once()

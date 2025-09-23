@@ -33,7 +33,7 @@ def _get_backfill(session_name):
 @backfill_router.get("/status",
                      response_model=backfill.BackfillOverallStatus,
                      operation_id="backfillStatus")
-def get_metadata_status(session_name: str):
+def get_backfill_status(session_name: str):
     backfill_obj = _get_backfill(session_name)
 
     try:

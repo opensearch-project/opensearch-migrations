@@ -75,12 +75,6 @@ export default function MetadataMigrateView({
         cell: (item) => item.successful,
         sortingField: "successful",
       },
-      // {
-      //   id: 'error-type',
-      //   header: 'Error Type',
-      //   cell: (item) => item.failure?.type ?? "",
-      //   sortingField: "failure?.type"
-      // },
       {
         id: "error-details",
         header: "Error Type",
