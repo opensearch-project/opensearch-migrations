@@ -93,10 +93,12 @@ function formatArguments(passedParameters: {parameters?: Record<string, any> | u
 }
 
 function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unknown }>(step: T) {
-    const {withLoop, when, args, ...rest} = step;
+    const {templateRef:{template:trTemplate,...trRest}={}, template=undefined, withLoop, when, args, ...rest} = step;
     return {
-        ...(undefined === when     ? {} : { when: `${toArgoExpression(when)}` }),
-        ...(undefined === withLoop ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
+        ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
+        ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
+        ...(undefined === when       ? {} : { when: `${toArgoExpression(when)}` }),
+        ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...rest,
         ...{ "arguments": { parameters: (formatArguments(args) as object) } }
     };
@@ -186,10 +188,14 @@ function formatOutputParameters<OPR extends OutputParametersRecord>(outputs: OPR
     };
 }
 
+function convertTemplateName(n:string) {
+    return n.toLowerCase();
+}
+
 function formatTemplate(templates: GenericScope, templateName: string) {
     const template = templates[templateName];
     return {
-        name: templateName,
+        name: convertTemplateName(templateName),
         ...(template.inputs === undefined ? {} : { inputs: formatParameters(template.inputs) } ),
         ...formatBody(template.body),
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?

@@ -19,6 +19,7 @@ import {
     InputParameterSource, ParameterSource, WorkflowParameterSource
 } from "@/schemas/expression";
 import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
+import {TypescriptError} from "@/utils";
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<

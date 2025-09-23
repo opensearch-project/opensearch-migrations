@@ -37,4 +37,7 @@ export type NamedTask<
     OUT extends OutputParametersRecord = OutputParametersRecord,
     LoopT extends PlainObject = never,
     Extra extends Record<string, any> = {}
-> = { name: string } & WorkflowTask<IN, OUT, LoopT> & Extra;
+> = { name: string} & (
+    | { template: string;  templateRef?: never }
+    | { template?: never;  templateRef: {template: string, name: string} }) &
+WorkflowTask<IN, OUT, LoopT> & Extra;
