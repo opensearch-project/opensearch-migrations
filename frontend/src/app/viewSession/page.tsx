@@ -25,7 +25,7 @@ function ViewSessionPageInner() {
     isLoading: snapshotIsLoading,
     data: snapshotData,
     error: snapshotError,
-  } = useSnapshotStatus(sessionName!);
+  } = useSnapshotStatus(sessionName ?? "");
 
   if (!sessionName) {
     return (
