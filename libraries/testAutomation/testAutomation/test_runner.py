@@ -171,6 +171,16 @@ class TestRunner:
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
             reuse_clusters: bool = False) -> None:
+        if developer_mode:
+            workflow_templates_dir = (
+                "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
+                "workflows/templates/"
+            )
+            self.k8s_service.exec_migration_console_cmd([
+                "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
+            ])
+            logger.info("Applied workflow templates directory")
+        
         for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "
@@ -182,15 +192,6 @@ class TestRunner:
                     raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
-
-                workflow_yaml = (
-                    "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
-                    "workflows/templates/fullMigrationWithClusters.yaml"
-                )
-                self.k8s_service.exec_migration_console_cmd([
-                    "kubectl", "apply", "-f", workflow_yaml, "-n", "ma"
-                ])
-                logger.info("Re-applied fullMigrationWithClusters workflow template")
 
                 tests_passed = self.run_tests(source_version=source_version,
                                               target_version=target_version,
