@@ -2,12 +2,11 @@
 Guidance for developing components of the Migration Assistant helm chart
 
 
-
 ### Configuring OpenTelemetry (OTEL) metrics and traces
 The OTEL configuration for this chart can be modified by changing the `otelConfiguration` value this chart defines. It includes a `collectorConfig` value which is the OTEL core configuration, and allows the user to update aspects like which processors and exporters should be used.
 
 
-#### AWS X-Ray
+#### AWS X-Ray traces
 Traces, as a default, are not enabled for the EKS deployment configured by `valuesEks.yaml` in this directory. The following reference could be used to modify these values and enable tracing to AWS X-Ray
 ```yaml
     processors:

@@ -278,7 +278,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
-  "$IMAGE_FLAGS" \
+  $IMAGE_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
