@@ -149,6 +149,16 @@ class TestRunner:
         for configmap in self.k8s_service.get_configmaps():
             if pattern.match(configmap) and configmap.endswith("migration-config"):
                 self.k8s_service.delete_configmap(configmap_name=configmap)
+        
+        # Cleanup non-Helm Kubernetes resources (ES 1.x and 2.x)
+        try:
+            self.k8s_service.exec_migration_console_cmd([
+                "kubectl", "delete", "all,configmap,secret", 
+                "-l", "migration-test=true", 
+                "--ignore-not-found"
+            ])
+        except Exception as e:
+            logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
     def cleanup_deployment(self) -> None:
         self.cleanup_clusters()

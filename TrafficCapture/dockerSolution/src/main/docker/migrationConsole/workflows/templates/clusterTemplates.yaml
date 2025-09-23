@@ -55,6 +55,10 @@ spec:
             metadata:
               name: ${CLUSTER_NAME}
               namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
             spec:
               replicas: 1
               selector:
@@ -64,6 +68,8 @@ spec:
                 metadata:
                   labels:
                     app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
                 spec:
                   securityContext:
                     runAsUser: 1000
@@ -161,6 +167,10 @@ spec:
             metadata:
               name: ${CLUSTER_NAME}
               namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
             spec:
               selector:
                 app: ${CLUSTER_NAME}
@@ -190,6 +200,10 @@ spec:
               --from-file=cluster-config=/tmp/cluster-config.json \
               -n ${NAMESPACE} \
               --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl label configmap "${CLUSTER_NAME}-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
+            kubectl label secret "${CLUSTER_NAME}-aws" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
+            kubectl label configmap "${CLUSTER_NAME}-migration-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
 
             echo "Elasticsearch 1.5 cluster created successfully (ARM-compatible with correct paths)."
             echo "Cluster config:"
@@ -249,6 +263,10 @@ spec:
             metadata:
               name: ${CLUSTER_NAME}
               namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
             spec:
               replicas: 1
               selector:
@@ -258,6 +276,8 @@ spec:
                 metadata:
                   labels:
                     app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
                 spec:
                   securityContext:
                     runAsUser: 1000
@@ -346,6 +366,10 @@ spec:
             metadata:
               name: ${CLUSTER_NAME}
               namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
             spec:
               selector:
                 app: ${CLUSTER_NAME}
@@ -375,6 +399,10 @@ spec:
               --from-file=cluster-config=/tmp/cluster-config.json \
               -n ${NAMESPACE} \
               --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl label configmap "${CLUSTER_NAME}-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
+            kubectl label secret "${CLUSTER_NAME}-aws" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
+            kubectl label configmap "${CLUSTER_NAME}-migration-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
 
             echo "Elasticsearch 2.4 cluster created successfully (manifests inline)."
             echo "Cluster config:"
