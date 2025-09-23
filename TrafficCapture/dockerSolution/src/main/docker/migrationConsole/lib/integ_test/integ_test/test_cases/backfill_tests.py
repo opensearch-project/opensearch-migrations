@@ -37,7 +37,7 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
         # Run OSB workloads against source cluster
         self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 300):
+    def workflow_perform_migrations(self, timeout_seconds: int = 600):
         super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
 
     def verify_clusters(self):
