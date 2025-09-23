@@ -1,7 +1,7 @@
 # Elastic docker registry does not seem to include 2.x versions and thus being pulled from docker hub
 elasticsearch:
-  imageTag: "2.4.0"
-  image: "jritsema/rpi-elasticsearch:2.4.0"
+  imageTag: "2.4.5"
+  image: "elasticsearch"
   antiAffinity: "soft"
   esJavaOpts: "-Xmx128m -Xms128m"
   protocol: http
