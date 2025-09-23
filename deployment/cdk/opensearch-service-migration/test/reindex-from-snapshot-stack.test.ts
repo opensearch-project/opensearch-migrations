@@ -532,4 +532,59 @@ describe('ReindexFromSnapshotStack Tests', () => {
       /Your max shard size of 81 GiB is too large to migrate in GovCloud, the max supported is 80 GiB/
     );
   });
+
+  test('ReindexFromSnapshotStack sets correct RFS command when source cluster is disabled', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      sourceCluster: {
+        "disabled": true,
+        "version": "ES_7.9"
+      },
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      migrationAssistanceEnabled: true,
+      nodeToNodeEncryptionEnabled: true,
+      encryptionAtRestEnabled: true,
+      enforceHTTPS: true
+    };
+
+    const stacks = createStackComposer(contextOptions);
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    const template = Template.fromStack(reindexStack);
+
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
+      {
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --target-insecure --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir \"/storage/lucene\" --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.9\""
+            ],
+          ],
+        }
+      },
+      {
+        Name: 'SHARED_LOGS_DIR_PATH',
+        Value: '/shared-logs-output/reindex-from-snapshot-default'
+      }
+    ]);
+  });
 });
