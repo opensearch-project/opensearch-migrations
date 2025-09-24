@@ -82,12 +82,16 @@ class RFSBackfill(Backfill):
         source_version = rfs_config.get("source_cluster_version")
         
         if not source_version:
-            logger.error("source_cluster_version is required for RFS backfill operations when source cluster is disabled.")
+            logger.error(
+                "source_cluster_version is required for RFS backfill operations "
+                "when source cluster is disabled."
+            )
             raise ValueError(
                 "source_cluster_version is required for RFS backfill operations. "
                 "Please specify source_cluster_version in your migration configuration by:\n"
                 "1. Adding 'version' field to 'sourceCluster' in cdk.context.json and redeploying, or\n"
-                "2. Adding 'source_cluster_version' to the 'reindex_from_snapshot' section in /config/migration_services.yaml"
+                "2. Adding 'source_cluster_version' to the 'reindex_from_snapshot' section "
+                "in /config/migration_services.yaml"
             )
 
     def create(self, *args, **kwargs) -> CommandResult:
