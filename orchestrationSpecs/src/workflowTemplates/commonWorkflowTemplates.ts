@@ -58,19 +58,19 @@ export const TargetClusterParameters = {
 export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return {
         targetAwsRegion:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "region"), ""),
+            expr.dig(expr.deserializeRecord(targetConfig), "", "authConfig", "region"),
         targetAwsSigningName:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "service"), ""),
+            expr.dig(expr.deserializeRecord(targetConfig), "", "authConfig", "service"),
         targetCACert:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "caCert"), ""),
+            expr.dig(expr.deserializeRecord(targetConfig), "", "authConfig", "caCert"),
         targetClientSecretName:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "clientSecretName"), ""),
+            expr.dig(expr.deserializeRecord(targetConfig), "", "authConfig", "clientSecretName"),
         targetInsecure:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "allow_insecure"), false),
+            expr.dig(expr.deserializeRecord(targetConfig), false, "allow_insecure"),
         targetUsername:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "username"), ""),
+            expr.dig(expr.deserializeRecord(targetConfig), "", "authConfig", "username"),
         targetPassword:
-            expr.nullCoalesce(expr.jsonPathLoose(targetConfig, "authConfig", "password"), ""),
+            expr.dig(expr.deserializeRecord(targetConfig), "", "authConfig", "password"),
     };
 }
 

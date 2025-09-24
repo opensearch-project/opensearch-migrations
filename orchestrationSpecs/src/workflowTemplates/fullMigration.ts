@@ -75,7 +75,7 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     targetConfig: b.inputs.target,
-                    indices: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"), []),
+                    indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), '', "metadata", "indices"),
                     metadataMigrationConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), "", "metadata", "options")
                 }))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
@@ -83,14 +83,14 @@ export const FullMigration = WorkflowBuilder.create({
                     ...(selectInputsForRegister(b, c)),
                     sessionName: c.steps.idGenerator.id,
                     targetConfig: b.inputs.target,
-                    indices: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "documentBackfillConfigs", "indices"), []),
+                    indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), '', "documentBackfillConfigs", "indices"),
                     backfillConfig:  expr.jsonPathStrict(b.inputs.migrationConfig, "documentBackfillConfigs", "options")
                 }))
             .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c=>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     prefix: b.inputs.latchCoordinationPrefix,
-                    targetName: expr.jsonPathLoose(b.inputs.target, "name"),
+                    targetName: expr.jsonPathStrict(b.inputs.target, "name"),
                     processorId: c.steps.idGenerator.id
                 }))
             .addStep("runReplayerForTarget", INTERNAL, "runReplayerForTarget", c=>
@@ -132,8 +132,8 @@ export const FullMigration = WorkflowBuilder.create({
                 .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                     c=>c.register({
                         ...selectInputsForRegister(b, c),
-                        indices: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "indices"),
-                        snapshotConfig: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "snapshotConfig"),
+                        indices: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig), '', "indices"),
+                        snapshotConfig: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig), '', "snapshotConfig"),
                         autocreateSnapshotName: b.inputs.sourcePipelineName
                     }))
 
@@ -141,7 +141,7 @@ export const FullMigration = WorkflowBuilder.create({
                     c=> c.register({
                         ...selectInputsForRegister(b, c),
                         snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                        migrationConfigs: expr.jsonPathLoose(b.inputs.snapshotAndMigrationConfig, "migrations"),
+                        migrationConfigs: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig), '', "migrations"),
                         target: c.item
                     }),
                     {loopWith: makeParameterLoop(b.inputs.targets)})
@@ -160,12 +160,11 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("snapshotAndLoad", INTERNAL, "snapshotAndLoad", c =>
                     c.register({
                         ...selectInputsForRegister(b,c),
-                        sourceConfig: expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"),
+                        sourceConfig: expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "source"),
                         snapshotAndMigrationConfig: c.item,
-                        sourcePipelineName: expr.toBase64(expr.asString(expr.recordToString(expr.jsonPathLoose(b.inputs.sourceMigrationConfig, "source"))))
+                        sourcePipelineName: expr.toBase64(expr.asString(expr.recordToString(expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "source"))))
                     }),
-                {loopWith: makeParameterLoop(expr.jsonPathLoose(b.inputs.sourceMigrationConfig,
-                        "snapshotExtractAndLoadConfigs"))}
+                {loopWith: makeParameterLoop(expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "snapshotExtractAndLoadConfigs"))}
             )
         )
     )

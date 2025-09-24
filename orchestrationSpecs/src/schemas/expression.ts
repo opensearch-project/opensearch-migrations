@@ -578,28 +578,6 @@ class ExprBuilder {
         ) as any;
     }
 
-    jsonPathLoose<
-        T extends Record<string, any>,
-        K extends Extract<keyof NonMissing<T>, string>
-    >(
-        source: BaseExpression<T, any>,
-        key: K
-    ): BaseExpression<SegmentsValueMissing<T, readonly [K]>, "complicatedExpression">;
-    jsonPathLoose<
-        T extends Record<string, any>,
-        S extends KeySegments<T>
-    >(
-        source: BaseExpression<Serialized<T>, any>,
-        ...segs: S
-    ): BaseExpression<SegmentsValueMissing<T, S>, "complicatedExpression">;
-    jsonPathLoose(
-        source: BaseExpression<Serialized<any>, any>,
-        ...segs: readonly unknown[]
-    ): BaseExpression<any, "complicatedExpression"> {
-        const path = _segmentsToPath(segs);
-        return new RecordFieldSelectExpression(source, path) as any;
-    }
-
     jsonPathStrict<
         T extends Record<string, any>,
         K extends Extract<keyof NonMissing<T>, string>

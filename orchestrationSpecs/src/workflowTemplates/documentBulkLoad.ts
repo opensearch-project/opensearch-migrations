@@ -188,10 +188,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
                 ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
-                s3Endpoint:       expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "endpoint"),
-                s3Region:         expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "aws_region"),
-                snapshotRepoPath: expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig", "repoPath"),
-                snapshotName:     expr.jsonPathLoose(b.inputs.snapshotConfig, "snapshotName"),
+                s3Endpoint:       expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "endpoint"),
+                s3Region:         expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "aws_region"),
+                snapshotName:     expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "snapshotName"),
+                    snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "repoPath")
             })))
     )
 

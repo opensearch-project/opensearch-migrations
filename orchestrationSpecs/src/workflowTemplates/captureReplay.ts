@@ -11,7 +11,7 @@ import {INTERNAL} from "@/schemas/taskBuilder";
 import {SetupKafka} from "@/workflowTemplates/setupKafka";
 import expr from "@/schemas/expression";
 import {Replayer} from "@/workflowTemplates/replayer";
-import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
+import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {MISSING_FIELD} from "@/schemas/plainObject";
 import {CaptureProxy} from "@/workflowTemplates/captureProxy";

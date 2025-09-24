@@ -7,7 +7,7 @@ import {
     TaskDataExpression,
     WrapSerialize, ExpressionType, UnwrapSerialize
 } from "@/schemas/expression";
-import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
+import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "@/schemas/plainObject";
 import {StripUndefined, TaskType} from "@/schemas/sharedTypes";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
@@ -190,7 +190,7 @@ type SelectedExprRecord<T extends Record<string, any>, CB> =
     { [K in _OptKeys<T, CB>]?: AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> };
 
 export function selectInputsFieldsAsExpressionRecord<
-    T extends Record<string, any>,
+    T extends Serialized<Record<string, NonSerializedPlainObject>>,
     D extends Record<string, any>,
     CB extends {
         defaults: D;
@@ -216,10 +216,7 @@ export function selectInputsFieldsAsExpressionRecord<
         const dh = (c.defaults as any)[k];
 
         if (dh && typeof dh === "object" && "expression" in dh) {
-            out[k] = expr.nullCoalesce(
-                expr.jsonPathLoose(P as any, k as any),
-                dh.expression
-            );
+            out[k] = expr.dig(expr.deserializeRecord(P), "", k as any);
         } else {
             out[k] = expr.jsonPathStrict(P as any, k as any);
         }
