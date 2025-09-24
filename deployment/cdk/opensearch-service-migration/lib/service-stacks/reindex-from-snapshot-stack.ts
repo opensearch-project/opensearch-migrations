@@ -213,6 +213,5 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.rfsBackfillYaml = new RFSBackfillYaml();
         this.rfsBackfillYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
         this.rfsBackfillYaml.ecs.service_name = `migration-${props.stage}-reindex-from-snapshot`;
-        this.rfsBackfillYaml.source_cluster_version = props.sourceClusterVersion;
     }
 }
