@@ -10,15 +10,15 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {AggregateType, DeepWiden, PlainObject, Serialized} from "@/schemas/plainObject";
+import {AggregateType, DeepWiden, PlainObject} from "@/schemas/plainObject";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
-    FromParameterExpression, StepOutputSource,
+    FromParameterExpression,
+    StepOutputSource,
     TaskOutputSource
 } from "@/schemas/expression";
 import {typeToken, TypeToken} from "@/schemas/sharedTypes";
-import {TasksOutputsScope} from "@/schemas/workflowTypes";
 
 type DefaultSpec<T extends PlainObject> =
     | {
@@ -64,7 +64,9 @@ export function defineParam<T extends PlainObject>(opts: {
         description: opts.description,
         defaultValue: (opts.expression !== undefined ? {expression: opts.expression as DeepWiden<T>} :
             (opts.from !== undefined ? {from: opts.from, type: typeToken<DeepWiden<T>>()} :
-                (() => { throw new Error("Invalid DefaultSpec: neither expression nor from provided") })()))
+                (() => {
+                    throw new Error("Invalid DefaultSpec: neither expression nor from provided")
+                })()))
     };
 }
 
@@ -88,9 +90,9 @@ export type ConfigMapKeySelector = {
 };
 
 export function configMapKey(
-  name: AllowLiteralOrExpression<string>,
-  key: string,
-  optional?: boolean
+    name: AllowLiteralOrExpression<string>,
+    key: string,
+    optional?: boolean
 ): ConfigMapKeySelector {
     return {'name': name, 'key': key, 'optional': optional};
 }
@@ -105,7 +107,7 @@ export type OutputParamDef<T extends PlainObject> = {
 } & (
     | { fromWhere: "path"; path: string }
     | { fromWhere: "expression"; expression: BaseExpression<T> }
-    | { fromWhere: "parameter"; parameter: FromParameterExpression<T,TaskOutputSource|StepOutputSource> }
+    | { fromWhere: "parameter"; parameter: FromParameterExpression<T, TaskOutputSource | StepOutputSource> }
     | { fromWhere: "jsonPath"; jsonPath: string }
     | { fromWhere: "jqFilter"; jqFilter: string }
     | { fromWhere: "event"; event: string }

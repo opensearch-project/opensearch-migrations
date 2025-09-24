@@ -6,7 +6,7 @@ import {
     PlainObject,
     Serialized
 } from "@/schemas/plainObject";
-import {StripUndefined, TaskType, typeToken, TypeToken} from "@/schemas/sharedTypes";
+import {StripUndefined, TaskType, TypeToken} from "@/schemas/sharedTypes";
 import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
@@ -14,10 +14,11 @@ export type ExpressionType = "govaluate" | "complicatedExpression";
 export abstract class BaseExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> {
     readonly _resultType!: T; // phantom only
     readonly _complexity!: C; // phantom only
-    constructor(public readonly kind: string) {}
+    constructor(public readonly kind: string) {
+    }
 }
 
-export type SimpleExpression<T extends PlainObject>   = BaseExpression<T, "govaluate">;
+export type SimpleExpression<T extends PlainObject> = BaseExpression<T, "govaluate">;
 export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "complicatedExpression">;
 
 // Helper type to allow both literal values and expressions
@@ -41,9 +42,9 @@ export function toExpression<T extends PlainObject, C extends ExpressionType>(
 
 type Scalar = number | string;
 type ResultOf<E> = E extends BaseExpression<infer U, any> ? U : never;
-type ExprC<E>    = E extends BaseExpression<any, infer C> ? C : never;
-export type IsAny<T>    = 0 extends (1 & T) ? true : false;
-export type NoAny<T>    =  IsAny<ResultOf<T>> extends true ? never : T;
+type ExprC<E> = E extends BaseExpression<any, infer C> ? C : never;
+export type IsAny<T> = 0 extends (1 & T) ? true : false;
+export type NoAny<T> = IsAny<ResultOf<T>> extends true ? never : T;
 
 type WidenComplexity2<A extends ExpressionType, B extends ExpressionType> =
     A extends "complicatedExpression" ? "complicatedExpression" :
@@ -60,14 +61,18 @@ export function widenComplexity<T extends PlainObject>(
 
 export class LiteralExpression<T extends PlainObject>
     extends BaseExpression<T, "govaluate"> {
-    constructor(public readonly value: T) { super("literal"); }
+    constructor(public readonly value: T) {
+        super("literal");
+    }
 }
 
 export class AsStringExpression<
     E extends BaseExpression<any, CE>,
     CE extends ExpressionType = ExprC<E>
 > extends BaseExpression<string, CE> {
-    constructor(public readonly source: E) { super("as_string"); }
+    constructor(public readonly source: E) {
+        super("as_string");
+    }
 }
 
 export class ConcatExpression<
@@ -92,7 +97,9 @@ export class TernaryExpression<
         public readonly condition: B,
         public readonly whenTrue:  L,
         public readonly whenFalse: R
-    ) { super("ternary"); }
+    ) {
+        super("ternary");
+    }
 }
 
 export class ComparisonExpression<
@@ -107,25 +114,29 @@ export class ComparisonExpression<
         public readonly operator: "==" | "!=" | "<" | ">" | "<=" | ">=",
         public readonly left: L,
         public readonly right: R
-    ) { super("comparison"); }
+    ) {
+        super("comparison");
+    }
 }
 
 export class InfixExpression<
     T extends PlainObject,
     CL extends ExpressionType,
     CR extends ExpressionType
-> extends BaseExpression<T,WidenExpressionComplexity2<CL,CR>> {
+> extends BaseExpression<T, WidenExpressionComplexity2<CL, CR>> {
     constructor(
         public readonly operator: "+" | "-" | "*" | "/" | "%" | "||" | "&&",
-        public readonly left: BaseExpression<T,  CL>,
-        public readonly right: BaseExpression<T,  CR>
-    ) { super("infix"); }
+        public readonly left: BaseExpression<T, CL>,
+        public readonly right: BaseExpression<T, CR>
+    ) {
+        super("infix");
+    }
 }
 
 // Helper types for dict operations
 type NormalizeValue<V> =
     V extends BaseExpression<infer U, infer C> ? BaseExpression<U, C> :
-        V extends PlainObject                     ? SimpleExpression<DeepWiden<V>> :
+        V extends PlainObject ? SimpleExpression<DeepWiden<V>> :
             never;
 
 type NormalizeRecord<R extends Record<string, unknown>> = {
@@ -171,8 +182,11 @@ type DictKeySegmentsCore<T> =
 
 // JSON path helper types
 export class RecordFieldSelectExpression<T, P, E> extends BaseExpression<any, "complicatedExpression"> {
-    constructor(public readonly source: E, public readonly path: P) { super("path"); }
+    constructor(public readonly source: E, public readonly path: P) {
+        super("path");
+    }
 }
+
 type AnyTrue<U> = Extract<U, true> extends never ? false : true;
 type MissingInAny<T, K extends PropertyKey> =
     AnyTrue<T extends any ? (K extends keyof T ? false : true) : never>;
@@ -190,7 +204,8 @@ type SegsFor<T> =
     T extends readonly (infer U)[]
         ? readonly [number, ...SegsFor<U>] | readonly [number]
         : T extends object
-            ? { [K in SegKey<T>]:
+            ? {
+                [K in SegKey<T>]:
                 readonly [K, ...SegsFor<T[K]>] | readonly [K]
             }[SegKey<T>]
             : readonly [];
@@ -252,14 +267,16 @@ type ElemFromArrayExpr<A extends BaseExpression<any[], any>> =
     ResultOf<A> extends (infer U)[] ? Extract<U, PlainObject> : never;
 
 export class ArrayIndexExpression<
-    A  extends BaseExpression<any[], CA>,
-    I  extends BaseExpression<number, CI>,
+    A extends BaseExpression<any[], CA>,
+    I extends BaseExpression<number, CI>,
     CA extends ExpressionType = ExprC<A>,
     CI extends ExpressionType = ExprC<I>,
     Elem extends PlainObject = ElemFromArrayExpr<A>,
-    C  extends ExpressionType = WidenComplexity2<CA, CI>
+    C extends ExpressionType = WidenComplexity2<CA, CI>
 > extends BaseExpression<Elem, C> {
-    constructor(public readonly array: A, public readonly index: I) { super("array_index"); }
+    constructor(public readonly array: A, public readonly index: I) {
+        super("array_index");
+    }
 }
 
 type WidenComplexityOfArray<ES extends readonly BaseExpression<any, any>[]> =
@@ -271,12 +288,14 @@ export class ArrayMakeExpression<
     ES extends readonly BaseExpression<any, any>[],
     Elem extends PlainObject = ResultOf<ES[number]>
 > extends BaseExpression<Elem[], WidenComplexityOfArray<ES>> {
-    constructor(public readonly elements: ES) { super("array_make"); }
+    constructor(public readonly elements: ES) {
+        super("array_make");
+    }
 }
 
 export type ParameterSource =
-    | { kind: "workflow",     parameterName: string }
-    | { kind: "input",        parameterName: string }
+    | { kind: "workflow", parameterName: string }
+    | { kind: "input", parameterName: string }
     | { kind: "steps_output", stepName: string, parameterName: string }
     | { kind: "tasks_output", taskName: string, parameterName: string };
 
@@ -286,7 +305,15 @@ export type StepOutputSource = { kind: "steps_output", stepName: string, paramet
 export type TaskOutputSource = { kind: "tasks_output", taskName: string, parameterName: string };
 
 export type WORKFLOW_VALUES =
-    "name"|"mainEntrypoint"|"serviceAccountName"|"uid"|"labels.json"|"creationTimestamp"|"priority"|"duration"|"scheduledTime";
+    "name"
+    | "mainEntrypoint"
+    | "serviceAccountName"
+    | "uid"
+    | "labels.json"
+    | "creationTimestamp"
+    | "priority"
+    | "duration"
+    | "scheduledTime";
 
 export type WrapSerialize<T extends PlainObject> = T extends AggregateType ? Serialized<T> : T;
 export type UnwrapSerialize<T extends PlainObject> = T extends Serialized<infer U> ? U : T;
@@ -300,16 +327,18 @@ export class FromParameterExpression<
     constructor(
         public readonly source: S,
         public readonly _paramDef?: InputParamDef<T, any> | OutputParamDef<T>
-    ) { super("parameter"); }
+    ) {
+        super("parameter");
+    }
 }
 
 export class TaskDataExpression<T extends PlainObject> extends BaseExpression<T, "govaluate"> {
-    constructor(public readonly taskType: TaskType,  public readonly name: string, public readonly key: string) {
+    constructor(public readonly taskType: TaskType, public readonly name: string, public readonly key: string) {
         super("task_data");
     }
 }
 
-export class WorkflowValueExpression extends BaseExpression<string,  "govaluate"> {
+export class WorkflowValueExpression extends BaseExpression<string, "govaluate"> {
     constructor(public readonly variable: WORKFLOW_VALUES) {
         super("workflow_value");
     }
@@ -317,10 +346,12 @@ export class WorkflowValueExpression extends BaseExpression<string,  "govaluate"
 
 export class LoopItemExpression<T extends PlainObject>
     extends BaseExpression<T, "complicatedExpression"> {
-    constructor() { super("loop_item"); }
+    constructor() {
+        super("loop_item");
+    }
 }
 
-export class TemplateReplacementExpression extends BaseExpression<string,  "complicatedExpression"> {
+export class TemplateReplacementExpression extends BaseExpression<string, "complicatedExpression"> {
     constructor(public readonly template: string,
                 public readonly replacements: Record<string, BaseExpression<string>>) {
         super("fillTemplate");
@@ -360,7 +391,7 @@ export class FunctionExpression<
 // Helper types for toArray
 type NormalizeOne<E> =
     E extends BaseExpression<infer U, infer C> ? BaseExpression<U, C>
-        : E extends PlainObject                       ? SimpleExpression<DeepWiden<E>>
+        : E extends PlainObject ? SimpleExpression<DeepWiden<E>>
             : never;
 type NormalizeTuple<ES extends readonly unknown[]> = {
     [K in keyof ES]: NormalizeOne<ES[K]>;
@@ -480,17 +511,17 @@ class ExprBuilder {
         L extends BaseExpression<number, any>,
         R extends BaseExpression<number, any>
     >(l: L, r: R): BaseExpression<boolean, WidenComplexity2<ExprC<L>, ExprC<R>>> {
-        return new ComparisonExpression<number,L,R>("<", l, r);
+        return new ComparisonExpression<number, L, R>("<", l, r);
     }
 
     greaterThan<
         L extends BaseExpression<number, any>,
         R extends BaseExpression<number, any>
     >(l: L, r: R): BaseExpression<boolean, WidenComplexity2<ExprC<L>, ExprC<R>>> {
-        return new ComparisonExpression<number,L,R>(">", l, r);
+        return new ComparisonExpression<number, L, R>(">", l, r);
     }
 
-    not<C extends ExpressionType="govaluate">(data: AllowLiteralOrExpression<boolean, C>) {
+    not<C extends ExpressionType = "govaluate">(data: AllowLiteralOrExpression<boolean, C>) {
         return fn<boolean, C>("!", toExpression(data));
     }
 
@@ -509,7 +540,6 @@ class ExprBuilder {
         R extends BaseExpression<boolean, CR>,
         CL extends ExpressionType = ExprC<L>,
         CR extends ExpressionType = ExprC<R>,
-
     >(l: L, r: R) {
         return new InfixExpression("-", l, r);
     }
@@ -665,7 +695,7 @@ class ExprBuilder {
     }
 
     last<T extends PlainObject>(arr: BaseExpression<T[]>) {
-        return fn<T,ExpressionType,"complicatedExpression">("last", arr);
+        return fn<T, ExpressionType, "complicatedExpression">("last", arr);
     }
 
     // Parameter functions
@@ -680,7 +710,7 @@ class ExprBuilder {
 
     // Utility
     split(arr: AllowLiteralOrExpression<string>, delim: AllowLiteralOrExpression<string>) {
-        return fn<string[],ExpressionType,"complicatedExpression">("split", toExpression(arr), toExpression(delim));
+        return fn<string[], ExpressionType, "complicatedExpression">("split", toExpression(arr), toExpression(delim));
     }
 
     getWorkflowValue(value: WORKFLOW_VALUES) {

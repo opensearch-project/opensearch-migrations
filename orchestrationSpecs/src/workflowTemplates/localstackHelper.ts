@@ -1,5 +1,4 @@
 import expr, {BaseExpression} from "@/schemas/expression";
-import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
 import {typeToken} from "@/schemas/sharedTypes";
@@ -48,10 +47,10 @@ export const LocalstackHelper = WorkflowBuilder.create({
     k8sResourceName: "localstack-helper",
     serviceAccountName: "argo-workflow-executor"
 })
-    .addTemplate("resolveS3Endpoint", t=>t
+    .addTemplate("resolveS3Endpoint", t => t
         .addRequiredInput("s3Endpoint", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addContainer(b=>b
+        .addContainer(b => b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["sh", "-c"])
             .addArgs([getS3EndpointResolverContainer(b.inputs.s3Endpoint)])

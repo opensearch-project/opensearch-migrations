@@ -1,7 +1,5 @@
 import {extendZodWithOpenApi, OpenApiGeneratorV3, OpenAPIRegistry} from "@asteasolutions/zod-to-openapi";
-import {
-    OVERALL_MIGRATION_CONFIG
-} from "@/workflowTemplates/userSchemas";
+import {OVERALL_MIGRATION_CONFIG} from "@/workflowTemplates/userSchemas";
 import {z} from "zod";
 
 extendZodWithOpenApi(z);

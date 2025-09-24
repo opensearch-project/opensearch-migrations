@@ -10,13 +10,13 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import { InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
+    InputParamsToExpressions,
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope,
-    InputParamsToExpressions,
 } from "@/schemas/workflowTypes";
 import {
     AllTasksAsOutputReferenceable,
@@ -29,8 +29,8 @@ import {
     TaskRebinder
 } from "@/schemas/taskBuilder";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
-import { PlainObject } from "@/schemas/plainObject";
-import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
+import {PlainObject} from "@/schemas/plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {NamedTask} from "@/schemas/sharedTypes";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
@@ -57,7 +57,7 @@ class DagTaskBuilder<
         return {
             ...super.onTaskPushed(task, opts),
             ...((isDagTaskOpts<TaskScope, LoopT>(opts) && opts.dependencies?.length)
-                ? { dependencies: opts.dependencies } : {})
+                ? {dependencies: opts.dependencies} : {})
         };
     }
 }
@@ -168,6 +168,6 @@ export class DagBuilder<
     }
 
     protected getBody() {
-        return { dag: this.taskBuilder.getTasks().taskList };
+        return {dag: this.taskBuilder.getTasks().taskList};
     }
 }

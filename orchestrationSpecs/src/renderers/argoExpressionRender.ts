@@ -1,18 +1,21 @@
 // Type-safe visitor pattern for conversion
-import expression, {
+import {
     ArrayIndexExpression,
     ArrayMakeExpression,
     AsStringExpression,
     BaseExpression,
     ComparisonExpression,
     ConcatExpression,
+    DictMakeExpression,
     FromParameterExpression,
+    FunctionExpression,
+    InfixExpression,
     LiteralExpression,
-    WorkflowValueExpression,
     RecordFieldSelectExpression,
+    TaskDataExpression,
+    TemplateReplacementExpression,
     TernaryExpression,
-    TemplateReplacementExpression, TaskDataExpression, DictMakeExpression,
-    FunctionExpression, InfixExpression,
+    WorkflowValueExpression,
 } from "@/schemas/expression";
 
 /** Lightweight erased type to avoid deep generic instantiation */
@@ -24,7 +27,7 @@ export type ArgoFormatted = {
     compound: boolean;
 };
 
-const formattedResult = (text: string, compound = false): ArgoFormatted => ({ text, compound });
+const formattedResult = (text: string, compound = false): ArgoFormatted => ({text, compound});
 
 function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, renderedResult: ArgoFormatted) {
     return (useMarkers && !(isLiteralExpression(expr)))
@@ -33,7 +36,7 @@ function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, rendere
 
 export type MarkerStyle = "Outer" | "None" | "IdentifierOnly";
 
-export function toArgoExpression(expr: AnyExpr, useMarkers:MarkerStyle="Outer"): string {
+export function toArgoExpression(expr: AnyExpr, useMarkers: MarkerStyle = "Outer"): string {
     if (isTemplateExpression(expr)) {
         const f = expr as TemplateReplacementExpression;
         let result = f.template;
@@ -49,7 +52,7 @@ export function toArgoExpression(expr: AnyExpr, useMarkers:MarkerStyle="Outer"):
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
-function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false): ArgoFormatted {
+function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = false): ArgoFormatted {
     if (isAsStringExpression(expr)) {
         return formatExpression(expr.source, useIdentifierMarkers, true);
     }
@@ -69,7 +72,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false
 
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
-        const parts = ce.expressions.map(e=>formatExpression(e, useIdentifierMarkers));
+        const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers));
         const text = parts.map(p => p.text).join(ce.separator ? " + " + ce.separator + " + " : "+");
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
@@ -91,8 +94,8 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false
             return formatExpression(e.args[0], useIdentifierMarkers);
         }
         const formattedArgs =
-            e.args.map(a=>formatExpression(a, useIdentifierMarkers));
-        const combinedFormatted = formattedArgs.map(f=>f.text).join(", ");
+            e.args.map(a => formatExpression(a, useIdentifierMarkers));
+        const combinedFormatted = formattedArgs.map(f => f.text).join(", ");
         return formattedResult(`${e.functionName}(${combinedFormatted})`, true);
     }
 
@@ -128,7 +131,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false
     if (isArrayMakeExpression(expr)) {
         const ae = expr as ArrayMakeExpression<any>;
         const inner = ae.elements
-            .map((e: AnyExpr)=>formatExpression(e, useIdentifierMarkers).text).join(", ");
+            .map((e: AnyExpr) => formatExpression(e, useIdentifierMarkers).text).join(", ");
         return formattedResult(`[${inner}]`, true);
     }
 
@@ -147,7 +150,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false
     }
 
     if (isParameterExpression(expr)) {
-        const pe = expr as FromParameterExpression<any,any>;
+        const pe = expr as FromParameterExpression<any, any>;
         const expandedName = (() => {
             switch (pe.source.kind) {
                 case "workflow":
@@ -188,19 +191,66 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false
 
 /* ───────────────── Type guards ───────────────── */
 
-export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> { return e.kind === "array_index"; }
-export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
-export function isAsStringExpression(e: AnyExpr): e is AsStringExpression<any> { return e.kind === "as_string"; }
-export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> { return e.kind === "comparison"; }
-export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> { return e.kind === "concat"; }
-export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> { return e.kind === "dict_make"; }
-export function isFunctionExpression(e: AnyExpr): e is FunctionExpression<any, any> { return e.kind === "function"; }
-export function isInfixExpression(e: AnyExpr): e is InfixExpression<any, any, any> { return e.kind === "infix"; }
-export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> { return e.kind === "literal"; }
-export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "loop_item"; }
-export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "parameter"; }
-export function isPathExpression(e: AnyExpr): e is RecordFieldSelectExpression<any, any, any> { return e.kind === "path"; }
-export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> { return e.kind === "task_data"; }
-export function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }
-export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> { return e.kind === "ternary"; }
-export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
+export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> {
+    return e.kind === "array_index";
+}
+
+export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> {
+    return e.kind === "array_make";
+}
+
+export function isAsStringExpression(e: AnyExpr): e is AsStringExpression<any> {
+    return e.kind === "as_string";
+}
+
+export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> {
+    return e.kind === "comparison";
+}
+
+export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> {
+    return e.kind === "concat";
+}
+
+export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> {
+    return e.kind === "dict_make";
+}
+
+export function isFunctionExpression(e: AnyExpr): e is FunctionExpression<any, any> {
+    return e.kind === "function";
+}
+
+export function isInfixExpression(e: AnyExpr): e is InfixExpression<any, any, any> {
+    return e.kind === "infix";
+}
+
+export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> {
+    return e.kind === "literal";
+}
+
+export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any, any> {
+    return e.kind === "loop_item";
+}
+
+export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any, any> {
+    return e.kind === "parameter";
+}
+
+export function isPathExpression(e: AnyExpr): e is RecordFieldSelectExpression<any, any, any> {
+    return e.kind === "path";
+}
+
+export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> {
+    return e.kind === "task_data";
+}
+
+export function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression {
+    return e.kind === "fillTemplate";
+}
+
+export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> {
+    return e.kind === "ternary";
+}
+
+export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression {
+    return e.kind === "workflow_value";
+}

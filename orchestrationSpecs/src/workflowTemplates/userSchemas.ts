@@ -1,5 +1,4 @@
 import {z} from "zod";
-import {transformZodObjectToParams} from "@/utils";
 
 export const KAFKA_SERVICES_CONFIG = z.object({
     broker_endpoints: z.string(),
@@ -107,5 +106,5 @@ export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
     targets: z.array(TARGET_CLUSTER_CONFIG),
-    sourceMigrationConfigs: SOURCE_MIGRATION_CONFIG
+    sourceMigrationConfigs: z.array(SOURCE_MIGRATION_CONFIG)
 });

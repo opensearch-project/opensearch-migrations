@@ -1,13 +1,13 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 import {INTERNAL} from "@/schemas/taskBuilder";
-import {AllowLiteralOrExpression, BaseExpression, expr} from "@/schemas/expression";
+import {BaseExpression, expr} from "@/schemas/expression";
 import {selectInputsForRegister} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
 
 function makeDeployKafkaClusterZookeeperManifest(kafkaName: BaseExpression<string>) {
-    return{
+    return {
         apiVersion: "kafka.strimzi.io/v1beta2",
         kind: "Kafka",
         metadata: {
@@ -216,26 +216,25 @@ export const SetupKafka = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("clusterDeploy", t=> t
+    .addTemplate("clusterDeploy", t => t
         .addRequiredInput("kafkaName", typeToken<string>())
-        .addOptionalInput("useKraft", s=>true)
-        .addDag(b=>b
-            .addTask("deployPool", INTERNAL,"deployKafkaNodePool", c =>
-                c.register({kafkaName: b.inputs.kafkaName}),
+        .addOptionalInput("useKraft", s => true)
+        .addDag(b => b
+            .addTask("deployPool", INTERNAL, "deployKafkaNodePool", c =>
+                    c.register({kafkaName: b.inputs.kafkaName}),
                 {when: b.inputs.useKraft})
-            .addTask("deployKafkaClusterKraft", INTERNAL, "deployKafkaClusterKraft", c=>
-                c.register(selectInputsForRegister(b,c)),
+            .addTask("deployKafkaClusterKraft", INTERNAL, "deployKafkaClusterKraft", c =>
+                    c.register(selectInputsForRegister(b, c)),
                 {when: b.inputs.useKraft})
-            .addTask("deployKafkaClusterZookeeper", INTERNAL, "deployKafkaClusterZookeeper", c=>
-                c.register(selectInputsForRegister(b,c)),
+            .addTask("deployKafkaClusterZookeeper", INTERNAL, "deployKafkaClusterZookeeper", c =>
+                    c.register(selectInputsForRegister(b, c)),
                 {when: expr.not(b.inputs.useKraft)})
         )
-        .addExpressionOutput("kafkaName", c=>c.inputs.kafkaName)
-        .addExpressionOutput("bootstrapServers", c=>
+        .addExpressionOutput("kafkaName", c => c.inputs.kafkaName)
+        .addExpressionOutput("bootstrapServers", c =>
             expr.ternary(expr.equals(expr.literal("Skipped"), c.tasks.deployKafkaClusterKraft.status),
                 c.tasks.deployKafkaClusterZookeeper.outputs.brokers,
                 c.tasks.deployKafkaClusterKraft.outputs.brokers))
-
     )
 
     .addTemplate("createKafkaTopic", t => t

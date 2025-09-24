@@ -1,28 +1,20 @@
-import {
-    defineParam,
-    defineRequiredParam,
-    InputParamDef,
-    InputParametersRecord
-} from "@/schemas/parameterSchemas";
+import {defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
 import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {z} from "zod";
 import {
-    DYNAMIC_SNAPSHOT_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
-    TARGET_CLUSTER_CONFIG,
-    CONSOLE_SERVICES_CONFIG_FILE
+    DYNAMIC_SNAPSHOT_CONFIG,
+    TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
-import {BaseExpression, expr, FromParameterExpression} from "@/schemas/expression";
-import {typeToken} from "@/schemas/sharedTypes";
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {BaseExpression, expr} from "@/schemas/expression";
 import {Serialized} from "@/schemas/plainObject";
 
 export const CommonWorkflowParameters = {
-    etcdEndpoints:        defineParam({ expression: "http://etcd.ma.svc.cluster.local:2379" }),
-    etcdUser:             defineParam({ expression: "root" }),
-    etcdPassword:         defineParam({ expression: "password" }),
-    s3SnapshotConfigMap:  defineParam({ expression: "s3-snapshot-config" }),
-    imageConfigMapName:   defineParam({ expression: "migration-image-config"})
+    etcdEndpoints: defineParam({expression: "http://etcd.ma.svc.cluster.local:2379"}),
+    etcdUser: defineParam({expression: "root"}),
+    etcdPassword: defineParam({expression: "password"}),
+    s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
+    imageConfigMapName: defineParam({expression: "migration-image-config"})
 } as const;
 
 export const LogicalOciImages = [
@@ -40,9 +32,10 @@ export function makeRequiredImageParametersForKeys<K extends LogicalOciImagesKey
             [`image${k}Location`, defineRequiredParam<string>()],
             [`image${k}PullPolicy`, defineRequiredParam<IMAGE_PULL_POLICY>()]
         ])
-    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string,true>> &
-        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY,true>>;
+    ) as Record<`image${typeof keys[number]}Location`, InputParamDef<string, true>> &
+        Record<`image${typeof keys[number]}PullPolicy`, InputParamDef<IMAGE_PULL_POLICY, true>>;
 }
+
 export const ImageParameters = makeRequiredImageParametersForKeys(LogicalOciImages);
 
 export const TargetClusterParameters = {
@@ -76,11 +69,15 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Se
 
 export const dynamicSnapshotConfigParam = {
     snapshotConfig: defineRequiredParam<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"})};
+        description: "Snapshot storage details (region, endpoint, etc)"
+    })
+};
 
 export const completeSnapshotConfigParam = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"})};
+        description: "Snapshot storage details (region, endpoint, etc)"
+    })
+};
 
 export function safeSpread<T>(list: T[]) {
     return list === undefined ? [] : list;
@@ -88,14 +85,13 @@ export function safeSpread<T>(list: T[]) {
 
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
-    containerDef: Record<string, any>)
-{
+    containerDef: Record<string, any>) {
     const {volumeMounts, env, ...restOfContainer} = containerDef;
     return {
         ...restOfContainer,
         env: [
             ...safeSpread(env),
-            { name: "AWS_SHARED_CREDENTIALS_FILE", value: expr.literal("/config/credentials") }
+            {name: "AWS_SHARED_CREDENTIALS_FILE", value: expr.literal("/config/credentials")}
         ],
         volumeMounts: [
             ...safeSpread(volumeMounts),
@@ -112,8 +108,7 @@ export function setupTestCredsForContainer(
 
 export function setupLog4jConfigForContainer(
     loggingConfigMapName: BaseExpression<string>,
-    containerDef: Record<string, any>)
-{
+    containerDef: Record<string, any>) {
     const {volumeMounts, env, ...restOfContainer} = containerDef;
     const configIsEmpty = expr.equals(expr.literal(""), loggingConfigMapName);
     return {

@@ -12,10 +12,13 @@
 
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
-    AllowLiteralOrExpression, AllowLiteralOrExpressionIncludingSerialized,
+    AllowLiteralOrExpression,
+    AllowLiteralOrExpressionIncludingSerialized,
     BaseExpression,
     FromParameterExpression,
-    InputParameterSource, ParameterSource, WorkflowParameterSource
+    InputParameterSource,
+    ParameterSource,
+    WorkflowParameterSource
 } from "@/schemas/expression";
 import {PlainObject} from "@/schemas/plainObject";
 
@@ -23,10 +26,10 @@ import {PlainObject} from "@/schemas/plainObject";
 export type WorkflowAndTemplatesScope<
     TemplateSignatures extends TemplateSignaturesScopeTyped<Record<string, { inputs: any; outputs?: any }>> =
         TemplateSignaturesScopeTyped<Record<string, { inputs: any; outputs?: any }>>> =
-{
-    workflowParameters?: InputParametersRecord,
-    templates?: TemplateSignatures
-};
+    {
+        workflowParameters?: InputParametersRecord,
+        templates?: TemplateSignatures
+    };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type GenericScope = Record<string, any>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
@@ -35,7 +38,10 @@ export type TemplateSignaturesScopeTyped<Sigs extends Record<string, { inputs: a
 };
 
 // Keep a permissive alias for backward compatibility where exact keys aren't needed
-export type TemplateSignaturesScope = TemplateSignaturesScopeTyped<Record<string, { inputs: InputParametersRecord; outputs?: OutputParametersRecord }>>;
+export type TemplateSignaturesScope = TemplateSignaturesScopeTyped<Record<string, {
+    inputs: InputParametersRecord;
+    outputs?: OutputParametersRecord
+}>>;
 
 export type ScopeFn<S extends Record<string, any>, ADDITIONS extends Record<string, any>> = (scope: Readonly<S>) => ADDITIONS;
 
@@ -50,39 +56,39 @@ export type TemplateSigEntry<T extends { inputs: any; outputs?: any }> = {
 // Helper types for extracting output types and creating step references
 export type ExtractOutputParamType<OPD> = OPD extends OutputParamDef<infer T> ? T : never;
 
-export type InvalidType<T> = {INVALID_TYPE: T};
+export type InvalidType<T> = { INVALID_TYPE: T };
 
 type StripUndefined<T> = Exclude<T, undefined>;
 type HasUndefined<T> = undefined extends T ? true : false;
 
 type NormalizeBaseExpression<T> =
-  T extends BaseExpression<infer R, infer C>
-    ? HasUndefined<R> extends true
-        ? BaseExpression<StripUndefined<R>, C> | undefined
-        : BaseExpression<StripUndefined<R>, C>
-    : T;
+    T extends BaseExpression<infer R, infer C>
+        ? HasUndefined<R> extends true
+            ? BaseExpression<StripUndefined<R>, C> | undefined
+            : BaseExpression<StripUndefined<R>, C>
+        : T;
 
 // Apply the literal-or-expression transformation to parameter schemas
 export type ParamsWithLiteralsOrExpressions<T> = {
-  [K in keyof T]:
+    [K in keyof T]:
     T[K] extends PlainObject | undefined
-      ? HasUndefined<T[K]> extends true
-          ? AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
-          : AllowLiteralOrExpression<StripUndefined<T[K]>>
-      : T[K] extends BaseExpression<any, any>
-          ? NormalizeBaseExpression<T[K]>
-          : InvalidType<T[K]>;
+        ? HasUndefined<T[K]> extends true
+            ? AllowLiteralOrExpression<StripUndefined<T[K]>> | undefined
+            : AllowLiteralOrExpression<StripUndefined<T[K]>>
+        : T[K] extends BaseExpression<any, any>
+            ? NormalizeBaseExpression<T[K]>
+            : InvalidType<T[K]>;
 };
 
 export type ParamsWithLiteralsOrExpressionsIncludingSerialized<T> = {
-  [K in keyof T]:
+    [K in keyof T]:
     T[K] extends PlainObject | undefined
-      ? HasUndefined<T[K]> extends true
-          ? AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>> | undefined
-          : AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>>
-      : T[K] extends BaseExpression<any, any>
-          ? NormalizeBaseExpression<T[K]>
-          : InvalidType<T[K]>;
+        ? HasUndefined<T[K]> extends true
+            ? AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>> | undefined
+            : AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>>
+        : T[K] extends BaseExpression<any, any>
+            ? NormalizeBaseExpression<T[K]>
+            : InvalidType<T[K]>;
 };
 
 export type InputParamsToExpressions<
@@ -93,7 +99,7 @@ export type InputParamsToExpressions<
         ? [T] extends [PlainObject]
             ? [T] extends [null | undefined]
                 ? never
-                : FromParameterExpression<T,InputType>
+                : FromParameterExpression<T, InputType>
             : never
         : never
 };

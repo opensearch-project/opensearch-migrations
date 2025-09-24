@@ -1,18 +1,18 @@
 import {
+    ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
-    ExtendScope,
 } from "@/schemas/workflowTypes";
-import { ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
 import {
-    InputParametersRecord,
-    OutputParamDef,
-    OutputParametersRecord
-} from "@/schemas/parameterSchemas";
-import { PlainObject } from "@/schemas/plainObject";
-import {AllowLiteralOrExpression, expr, toExpression} from "@/schemas/expression";
+    ScopeIsEmptyConstraint,
+    UniqueNameConstraintAtDeclaration,
+    UniqueNameConstraintOutsideDeclaration
+} from "@/schemas/scopeConstraints";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {PlainObject} from "@/schemas/plainObject";
+import {AllowLiteralOrExpression, toExpression} from "@/schemas/expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterConversions";
 
 export type RetryParameters = GenericScope;
@@ -125,7 +125,7 @@ export abstract class TemplateBodyBuilder<
      * additional context like steps or tasks.
      */
     protected getExpressionBuilderContext(): ExpressionBuilderContext {
-        return { inputs: this.inputs } as ExpressionBuilderContext;
+        return {inputs: this.inputs} as ExpressionBuilderContext;
     }
 
     public addExpressionOutput<

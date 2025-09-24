@@ -60,7 +60,7 @@ export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpressio
 export function inputsToEnvVarsList<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
     inputs: T
 ) {
-    return Object.entries(inputsToEnvVars(inputs)).map(([name, value]) => ({ name, value }));
+    return Object.entries(inputsToEnvVars(inputs)).map(([name, value]) => ({name, value}));
 }
 
 // Helper to check if a Zod type has a default value
@@ -124,13 +124,13 @@ export function transformZodObjectToParams<T extends z.ZodRawShape>(
             // Field has a default value
             const defaultValue = getDefaultValue(zodType);
             result[key] = defineParam({
-                ...(description && { description }),
+                ...(description && {description}),
                 expression: expr.literal(defaultValue)
             });
         } else {
             // Field is required (no default)
             result[key] = defineRequiredParam({
-                ...(description && { description })
+                ...(description && {description})
             });
         }
     }

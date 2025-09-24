@@ -10,21 +10,17 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {
-    defineParam,
-    InputParamDef,
-    InputParametersRecord,
-    OutputParametersRecord
-} from "@/schemas/parameterSchemas";
+import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
-    InputParamsToExpressions, WorkflowAndTemplatesScope,
+    InputParamsToExpressions,
+    WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
 } from "@/schemas/workflowTypes";
-import {TypescriptError} from "@/utils";
 import {
-    extendScope, FieldGroupConstraint,
+    extendScope,
+    FieldGroupConstraint,
     ScopeIsEmptyConstraint,
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
@@ -178,7 +174,7 @@ export class TemplateBuilder<
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope, (
             b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
-        factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+        factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder
     {
         const fn = builderFn as (b: StepsBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
@@ -191,8 +187,8 @@ export class TemplateBuilder<
         FirstBuilder extends DagBuilder<ContextualScope, InputParamsScope, any, any>,
         FinalBuilder extends DagBuilder<ContextualScope, InputParamsScope, any, any>
     >(builderFn: ScopeIsEmptyConstraint<BodyScope,
-        (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
-      factory?: (context:ContextualScope, inputs:InputParamsScope) => FirstBuilder
+          (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
+      factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
     ): FinalBuilder
     {
         const fn = builderFn as (b: DagBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
@@ -208,7 +204,8 @@ export class TemplateBuilder<
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder>,
         factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
-    ): FinalBuilder {
+    ): FinalBuilder
+    {
         const fn = builderFn as (b: K8sResourceBuilder<ContextualScope, InputParamsScope, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new K8sResourceBuilder(c, i, {}, {}, {})))
@@ -222,7 +219,8 @@ export class TemplateBuilder<
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, OutputParamsScope>) => FinalBuilder>,
         factory?: (context: ContextualScope, inputs: InputParamsScope) => FirstBuilder
-    ): FinalBuilder {
+    ): FinalBuilder
+    {
         const fn = builderFn as (b: ContainerBuilder<ContextualScope, InputParamsScope, {}, {}, {}>) => FinalBuilder;
         return fn((factory ??
             ((c, i) => new ContainerBuilder(c, i, {}, {}, {}, {})))

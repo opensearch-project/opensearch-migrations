@@ -11,12 +11,7 @@
  */
 
 import {InputParametersRecord} from "@/schemas/parameterSchemas";
-import {
-    ExtendScope,
-    GenericScope,
-    TemplateSigEntry,
-    TemplateSignaturesScopeTyped
-} from "@/schemas/workflowTypes";
+import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScopeTyped} from "@/schemas/workflowTypes";
 import {TypescriptError} from "@/utils";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
@@ -32,7 +27,7 @@ type MetadataScopeBase = {
 type LowercaseOnly<S extends string> =
     S extends Lowercase<S> ? S : never;
 
-type SuspendTemplateBodyT = { body: { suspend: {}}, inputs: [], outputs?: [] };
+type SuspendTemplateBodyT = { body: { suspend: {} }, inputs: [], outputs?: [] };
 
 export class WorkflowBuilder<
     MetadataScope extends MetadataScopeBase,

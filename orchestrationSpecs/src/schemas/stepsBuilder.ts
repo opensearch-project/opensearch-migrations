@@ -10,23 +10,28 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import { InputParametersRecord, OutputParamDef, OutputParametersRecord } from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {
     ExtendScope,
+    GenericScope,
+    InputParamsToExpressions,
     TasksOutputsScope,
     TasksWithOutputs,
-    WorkflowAndTemplatesScope,
-    InputParamsToExpressions, GenericScope
+    WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import { TemplateBodyBuilder, TemplateRebinder } from "@/schemas/templateBodyBuilder";
-import { UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration } from "@/schemas/scopeConstraints";
-import { PlainObject } from "@/schemas/plainObject";
+import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
+import {PlainObject} from "@/schemas/plainObject";
 import {
-    AllTasksAsOutputReferenceable, getTaskOutputsByTaskName,
-    InputsFrom, KeyFor, OutputsFrom, ParamsTuple,
-    TaskBuilder, TaskRebinder
+    AllTasksAsOutputReferenceable,
+    getTaskOutputsByTaskName,
+    InputsFrom,
+    KeyFor,
+    OutputsFrom,
+    ParamsTuple,
+    TaskBuilder,
+    TaskRebinder
 } from "@/schemas/taskBuilder";
-import { SimpleExpression } from "@/schemas/expression";
 import {NamedTask} from "@/schemas/sharedTypes";
 
 export interface StepGroup {

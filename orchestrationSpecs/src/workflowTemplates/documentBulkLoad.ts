@@ -1,12 +1,18 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
-    CommonWorkflowParameters, extractTargetKeysToExpressionMap, makeRequiredImageParametersForKeys,
-    setupLog4jConfigForContainer, setupTestCredsForContainer, TargetClusterParameters
+    CommonWorkflowParameters,
+    extractTargetKeysToExpressionMap,
+    makeRequiredImageParametersForKeys,
+    setupLog4jConfigForContainer,
+    setupTestCredsForContainer,
+    TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {BaseExpression, expr, FromParameterExpression} from "@/schemas/expression";
+import {BaseExpression, expr} from "@/schemas/expression";
 import {
-    CONSOLE_SERVICES_CONFIG_FILE, RFS_OPTIONS, COMPLETE_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG,
+    CONSOLE_SERVICES_CONFIG_FILE,
+    RFS_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
@@ -30,15 +36,14 @@ function getRfsReplicasetManifest
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     inputsAsEnvList: Record<string, any>[],
-})
-{
+}) {
     const baseContainerDefinition = {
         name: "bulk-loader",
         image: args.rfsImageName,
         imagePullPolicy: args.rfsImagePullPolicy,
         env: [
             ...args.inputsAsEnvList,
-            {name: "LUCENE_DIR", value: expr.literal("/tmp") }
+            {name: "LUCENE_DIR", value: expr.literal("/tmp")}
         ]
     };
     const finalContainerDefinition =
@@ -102,11 +107,12 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("deleteReplicaSet", t=>t
+    .addTemplate("deleteReplicaSet", t => t
         .addRequiredInput("name", typeToken<string>())
-        .addResourceTask(b=>b
-            .setDefinition({action: "delete", flags: ["--ignore-not-found"],
-                 manifest: {
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete", flags: ["--ignore-not-found"],
+                manifest: {
                     "apiVersion": "apps/v1",
                     "kind": "ReplicaSet",
                     "metadata": {
@@ -117,16 +123,16 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         ))
 
 
-    .addTemplate("waitForCompletion", t=>t
+    .addTemplate("waitForCompletion", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(b=>b
+        .addSteps(b => b
             .addStep("checkRfsCompletion", MigrationConsole, "runMigrationCommand", c =>
-            c.register({
-                ...selectInputsForRegister(b, c),
-                command: getCheckRfsCompletionScript(b.inputs.sessionName)
-            }))
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    command: getCheckRfsCompletionScript(b.inputs.sessionName)
+                }))
         )
         .addRetryParameters({
             limit: "200",
@@ -136,9 +142,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("createReplicaset", t=>t
+    .addTemplate("createReplicaset", t => t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addOptionalInput("numPods", c=>1)
+        .addOptionalInput("numPods", c => 1)
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
 
         .addRequiredInput("snapshotName", typeToken<string>())
@@ -150,78 +156,78 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addInputsFromRecord(transformZodObjectToParams(RFS_OPTIONS))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
-        .addResourceTask(b=>b
-        .setDefinition({
-            action: "create",
-            setOwnerReference: true,
-            manifest: getRfsReplicasetManifest({
-                numPods: b.inputs.numPods,
-                loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
-                useLocalstackAwsCreds: b.inputs.useLocalStack,
-                sessionName: b.inputs.sessionName,
-                rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
-                rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
-                inputsAsEnvList: [
-                    ...inputsToEnvVarsList({...b.inputs})
-                ],
-                workflowName: expr.getWorkflowValue("name")
-            })
-        }))
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "create",
+                setOwnerReference: true,
+                manifest: getRfsReplicasetManifest({
+                    numPods: b.inputs.numPods,
+                    loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
+                    useLocalstackAwsCreds: b.inputs.useLocalStack,
+                    sessionName: b.inputs.sessionName,
+                    rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
+                    rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
+                    inputsAsEnvList: [
+                        ...inputsToEnvVarsList({...b.inputs})
+                    ],
+                    workflowName: expr.getWorkflowValue("name")
+                })
+            }))
     )
 
 
-    .addTemplate("createReplicasetFromConfig", t=>t
+    .addTemplate("createReplicasetFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
-        .addOptionalInput("numPods", c=>1)
+        .addOptionalInput("numPods", c => 1)
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
 
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
-        .addOptionalInput("backfillConfig", c=> ({} as z.infer<typeof RFS_OPTIONS>))
+        .addOptionalInput("backfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
-        .addSteps(b=>b
-            .addStep("createReplicaset", INTERNAL, "createReplicaset", c=>
+        .addSteps(b => b
+            .addStep("createReplicaset", INTERNAL, "createReplicaset", c =>
                 c.register({
-                ...selectInputsForRegister(b, c),
-                ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
-                ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
+                    ...selectInputsForRegister(b, c),
+                    ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
+                    ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
-                s3Endpoint:       expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "endpoint"),
-                s3Region:         expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "aws_region"),
-                snapshotName:     expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "snapshotName"),
+                    s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "endpoint"),
+                    s3Region: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "aws_region"),
+                    snapshotName: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "snapshotName"),
                     snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "repoPath")
-            })))
+                })))
     )
 
 
-    .addTemplate("runBulkLoad", t=>t
+    .addTemplate("runBulkLoad", t => t
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
-        .addOptionalInput("indices", c=>[] as readonly string[])
-        .addOptionalInput("backfillConfig", c=> ({} as z.infer<typeof RFS_OPTIONS>))
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot","MigrationConsole"]))
+        .addOptionalInput("indices", c => [] as readonly string[])
+        .addOptionalInput("backfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
-        .addSteps(b=>b
-            .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c=>
+        .addSteps(b => b
+            .addStep("createReplicasetFromConfig", INTERNAL, "createReplicasetFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
                 }))
-            .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c=>
+            .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
-                    ...selectInputsForRegister(b,c),
+                    ...selectInputsForRegister(b, c),
                     kafkaInfo: MISSING_FIELD,
                     sourceConfig: MISSING_FIELD
                 }))
-            .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c=>
+            .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
-                    ...selectInputsForRegister(b,c),
+                    ...selectInputsForRegister(b, c),
                     configContents: c.steps.setupWaitForCompletion.outputs.configContents
                 }))
-            .addStep("deleteReplicaSet", INTERNAL, "deleteReplicaSet", c=>
+            .addStep("deleteReplicaSet", INTERNAL, "deleteReplicaSet", c =>
                 c.register({name: b.inputs.sessionName}))
         )
     )

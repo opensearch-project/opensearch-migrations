@@ -1,14 +1,14 @@
-import {InputParamDef, InputParametersRecord, OutputParamDef} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
 import {
     BaseExpression,
     expr,
-    FromParameterExpression, ParameterSource,
-    SimpleExpression,
-    TaskDataExpression,
-    WrapSerialize, ExpressionType, UnwrapSerialize
+    ExpressionType,
+    FromParameterExpression,
+    ParameterSource,
+    UnwrapSerialize
 } from "@/schemas/expression";
 import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "@/schemas/plainObject";
-import {StripUndefined, TaskType} from "@/schemas/sharedTypes";
+import {StripUndefined} from "@/schemas/sharedTypes";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
 
@@ -98,8 +98,7 @@ export function selectInputsForRegister<
 >(
     builder: BuilderT,
     callback: ParamsCallbackT
-): Pick<BuilderT["inputs"], Extract<keyof BuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>>
-{
+): Pick<BuilderT["inputs"], Extract<keyof BuilderT["inputs"], RequiredKeysOfRegister<ParamsCallbackT["register"]>>> {
     const keysToKeep = getAcceptedRegisterKeys(callback) as readonly (keyof BuilderT["inputs"])[];
     return selectInputsForKeys(builder, keysToKeep) as any;
 }
@@ -186,7 +185,7 @@ type AllowExpressionIncludingSerialized<T extends PlainObject, C extends Express
 
 /** Final, flattened return type: payloads come from register, undefined stripped. */
 type SelectedExprRecord<T extends Record<string, any>, CB> =
-    { [K in _ReqKeys<T, CB>]:  AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> } &
+    { [K in _ReqKeys<T, CB>]: AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> } &
     { [K in _OptKeys<T, CB>]?: AllowExpressionIncludingSerialized<CleanPayload<_R<CB>[K]>, any> };
 
 export function selectInputsFieldsAsExpressionRecord<
@@ -204,7 +203,7 @@ export function selectInputsFieldsAsExpressionRecord<
 ): SelectedExprRecord<T, CB> {
     // Get the keys available in defaults (template input keys)  
     const defaultKeys = Array.isArray(c.defaultKeys) ? c.defaultKeys : Object.keys(c.defaults);
-    
+
     const callbackKeys = getAcceptedRegisterKeys(c);
     // Choose keys: prefer the callback's declared parameter keys; otherwise fall back to defaults keys
     const keys = callbackKeys.length > 0
@@ -236,14 +235,14 @@ function workflowParam<T extends PlainObject>(
     name: string,
     def?: InputParamDef<T, any>
 ) {
-    return autoDeserializedParam({ kind: "workflow", parameterName: name }, def);
+    return autoDeserializedParam({kind: "workflow", parameterName: name}, def);
 }
 
 function inputParam<T extends PlainObject>(
     name: string,
     def: InputParamDef<T, any>
 ) {
-    return autoDeserializedParam({ kind: "input", parameterName: name }, def);
+    return autoDeserializedParam({kind: "input", parameterName: name}, def);
 }
 
 /**

@@ -18,25 +18,25 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("createOrGetSnapshot", t=>t
+    .addTemplate("createOrGetSnapshot", t => t
         .addRequiredInput("autocreateSnapshotName", typeToken<string>())
         .addRequiredInput("indices", typeToken<string[]>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
-        .addOptionalInput("alreadyDefinedName", c=>
+        .addOptionalInput("alreadyDefinedName", c =>
             expr.dig(expr.deserializeRecord(c.inputParameters.snapshotConfig), "", "snapshotName"))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(b=>b
-            .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow", c=>c
+        .addSteps(b => b
+            .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow", c => c
                 .register({
                     ...selectInputsForKeys(b, getAcceptedRegisterKeys(c)),
                     snapshotConfig: expr.makeDict({
                         repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
                         snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName)
                     }),
-                }), {when: expr.cast(b.inputs.alreadyDefinedName).to<boolean>() })
+                }), {when: expr.cast(b.inputs.alreadyDefinedName).to<boolean>()})
         )
-        .addExpressionOutput("snapshotConfig", c=>
+        .addExpressionOutput("snapshotConfig", c =>
             expr.ternary(
                 expr.equals(c.steps.createSnapshot.status, "Skipped"),
                 expr.cast(c.inputs.snapshotConfig).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),

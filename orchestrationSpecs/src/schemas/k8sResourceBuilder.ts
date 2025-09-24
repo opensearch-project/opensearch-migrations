@@ -14,7 +14,7 @@ import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/s
 import {ExtendScope, GenericScope, WorkflowAndTemplatesScope} from "@/schemas/workflowTypes";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
 import {PlainObject} from "@/schemas/plainObject";
-import { UniqueNameConstraintAtDeclaration } from "@/schemas/scopeConstraints";
+import {UniqueNameConstraintAtDeclaration} from "@/schemas/scopeConstraints";
 import {AllowLiteralOrExpression} from "@/schemas/expression";
 import {TypeToken} from "@/schemas/sharedTypes";
 
@@ -84,7 +84,7 @@ export class K8sResourceBuilder<
     }
 
     protected getBody() {
-        return { resource: this.bodyScope };
+        return {resource: this.bodyScope};
     }
 
     // SUBCLASS METHOD: return the concrete subclass directly
@@ -97,7 +97,7 @@ export class K8sResourceBuilder<
         OutputParamsScope
     > {
         const newBody =
-            { ...(this.bodyScope as object), ...workflowDefinition } as
+            {...(this.bodyScope as object), ...workflowDefinition} as
                 ResourceScope & ResourceWorkflowDefinition;
 
         // Return a concrete instance (not rebind), like DagBuilder does in its own methods

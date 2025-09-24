@@ -1,7 +1,8 @@
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {
     CommonWorkflowParameters,
-    completeSnapshotConfigParam, makeRequiredImageParametersForKeys
+    completeSnapshotConfigParam,
+    makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {z} from "zod";
@@ -18,7 +19,7 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("migrateMetaData", t=>t
+    .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
         .addRequiredInput("indices", typeToken<string[]>())
         .addInputsFromRecord(completeSnapshotConfigParam)
@@ -28,13 +29,13 @@ export const MetadataMigration = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
 
-        .addSteps(b=>b
-            .addStep("migrateMetadataFromConfig", MigrationConsole, "getConsoleConfig", c=>
+        .addSteps(b => b
+            .addStep("migrateMetadataFromConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     kafkaInfo: MISSING_FIELD
                 }))
-            .addStep("runMetadataMigration", MigrationConsole, "runMigrationCommand", c=>
+            .addStep("runMetadataMigration", MigrationConsole, "runMigrationCommand", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     // TODO - eventually funnel all of the options into the command -

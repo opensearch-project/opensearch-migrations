@@ -1,12 +1,14 @@
 import {z} from 'zod';
-import {CLUSTER_CONFIG, SNAPSHOT_MIGRATION_CONFIG, SOURCE_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
-import {CommonWorkflowParameters, makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
+import {CLUSTER_CONFIG, SOURCE_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
+import {
+    CommonWorkflowParameters,
+    makeRequiredImageParametersForKeys
+} from "@/workflowTemplates/commonWorkflowTemplates";
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
 import {TemplateBuilder} from "@/schemas/templateBuilder";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
 import {typeToken} from "@/schemas/sharedTypes";
 
 function addCommonTargetLatchInputs<
@@ -24,11 +26,11 @@ function addCommonTargetLatchInputs<
 }
 
 export const TargetLatchHelpers = WorkflowBuilder.create({
-        k8sResourceName: "target-latch-helpers",
-        serviceAccountName: "argo-workflow-executor",
-        k8sMetadata: {},
-        parallelism: 1
-    })
+    k8sResourceName: "target-latch-helpers",
+    serviceAccountName: "argo-workflow-executor",
+    k8sMetadata: {},
+    parallelism: 1
+})
     .addParams(CommonWorkflowParameters)
     .addTemplate("init", t => t
         .addInputs(addCommonTargetLatchInputs)

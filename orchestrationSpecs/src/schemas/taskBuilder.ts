@@ -3,7 +3,6 @@ import {
     ExtractOutputParamType,
     IfNever,
     LoopWithUnion,
-    ParamsWithLiteralsOrExpressions,
     ParamsWithLiteralsOrExpressionsIncludingSerialized,
     TasksOutputsScope,
     TasksWithOutputs,
@@ -18,8 +17,13 @@ import {NamedTask, TaskType} from "@/schemas/sharedTypes";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
-    expr, FromParameterExpression, LoopItemExpression, ParameterSource,
-    SimpleExpression, StepOutputSource, TaskOutputSource, TemplateExpression
+    expr,
+    FromParameterExpression,
+    LoopItemExpression,
+    SimpleExpression,
+    StepOutputSource,
+    TaskOutputSource,
+    TemplateExpression
 } from "@/schemas/expression";
 import {
     buildDefaultsObject,
@@ -51,12 +55,12 @@ function taskOutput<T extends PlainObject, Label extends TaskType>(
     parameterName: string,
     def?: OutputParamDef<T>
 ): SimpleExpression<DeepWiden<T>> {
-    return new FromParameterExpression<DeepWiden<T>,TaskOutputSource|StepOutputSource>(
+    return new FromParameterExpression<DeepWiden<T>, TaskOutputSource | StepOutputSource>(
         {
             kind: `${taskType}_output` as any,
-            [`${taskType.substring(0,taskType.length-1)}Name`]: taskName,
+            [`${taskType.substring(0, taskType.length - 1)}Name`]: taskName,
             parameterName
-        } as (TaskOutputSource|StepOutputSource),
+        } as (TaskOutputSource | StepOutputSource),
         def as any
     );
 }
@@ -179,7 +183,7 @@ export function unpackParams<
             ? first
             : ((ctx: { register: (v: {}) => ParamsPushedSymbol }) => ctx.register({})) as any;
     const opts = typeof first === "function" ? second : first;
-    return { paramsFn, opts };
+    return {paramsFn, opts};
 }
 
 export type InputsOf<T> =
@@ -279,7 +283,7 @@ export abstract class TaskBuilder<
 
     /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
     protected onTaskPushed<LoopT extends PlainObject, OptsType extends TaskOpts<LoopT>>(task: NamedTask, opts?: OptsType): NamedTask {
-        return opts?.when !== undefined ? { ...task, when: opts?.when } : task;
+        return opts?.when !== undefined ? {...task, when: opts?.when} : task;
     }
 
     protected getParamsFromCallback<
@@ -323,9 +327,9 @@ export abstract class TaskBuilder<
     > {
         const keyStr = key as unknown as string;
         const inputs = (source === INTERNAL) ?
-             (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
-             (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
-        const { paramsFn, opts } = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
+            (this.contextualScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
+            (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
+        const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, Label, LoopT>(args);
         const params =
             this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, opts?.loopWith);
 
@@ -394,12 +398,12 @@ export abstract class TaskBuilder<
             defaults: defaultsRecord as DefaultsOfInputs<Inputs>,
             defaultKeys,
             [this.label]: tasksByName,
-            ...(loopWith ? { item: loopItem<LoopT>() } : {})
+            ...(loopWith ? {item: loopItem<LoopT>()} : {})
         } as unknown as ParamProviderCallbackObject<S, Label, Inputs, LoopT>;
     }
 
     public getTasks() {
-        return { scope: this.tasksScope, taskList: this.orderedTaskList };
+        return {scope: this.tasksScope, taskList: this.orderedTaskList};
     }
 
     protected callTemplate<
@@ -417,7 +421,7 @@ export abstract class TaskBuilder<
         return {
             name,
             template: templateKey,
-            ...(loopWith ? { withLoop: loopWith } : {}),
+            ...(loopWith ? {withLoop: loopWith} : {}),
             args: params
         };
     }
@@ -439,8 +443,8 @@ export abstract class TaskBuilder<
     > {
         return {
             name,
-            templateRef: { name: wf.metadata.k8sMetadata.name, template: templateKey },
-            ...(loopWith ? { withLoop: loopWith } : {}),
+            templateRef: {name: wf.metadata.k8sMetadata.name, template: templateKey},
+            ...(loopWith ? {withLoop: loopWith} : {}),
             args: params
         } as any;
     }

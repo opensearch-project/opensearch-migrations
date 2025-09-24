@@ -18,10 +18,10 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
 } from "@/schemas/workflowTypes";
-import { inputsToEnvVars, toEnvVarName, TypescriptError } from "@/utils";
+import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
-import { ScopeIsEmptyConstraint } from "@/schemas/scopeConstraints";
-import { PlainObject } from "@/schemas/plainObject";
+import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
+import {PlainObject} from "@/schemas/plainObject";
 import {AllowLiteralOrExpression} from "@/schemas/expression";
 import {TypeToken} from "@/schemas/sharedTypes";
 
@@ -94,7 +94,7 @@ export class ContainerBuilder<
     }
 
     protected getBody() {
-        return { container: this.bodyScope };
+        return {container: this.bodyScope};
     }
 
     // Update existing methods to preserve EnvScope type parameter
@@ -114,7 +114,7 @@ export class ContainerBuilder<
         return new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
-            { ...this.bodyScope, image, pullPolicy },
+            {...this.bodyScope, image, pullPolicy},
             this.envScope,
             this.outputsScope,
             this.retryParameters
@@ -233,7 +233,7 @@ export class ContainerBuilder<
         return new ContainerBuilder(
             this.contextualScope,
             this.inputsScope,
-            { ...this.bodyScope, env: { ...currentEnv, [name as string]: value } },
+            {...this.bodyScope, env: {...currentEnv, [name as string]: value}},
             newEnvScope,
             this.outputsScope,
             this.retryParameters

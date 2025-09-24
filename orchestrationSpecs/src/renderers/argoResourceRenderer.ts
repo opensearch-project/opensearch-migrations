@@ -4,9 +4,8 @@ import {StepGroup} from "@/schemas/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {AllowLiteralOrExpression, BaseExpression} from "@/schemas/expression";
+import {BaseExpression} from "@/schemas/expression";
 import {NamedTask} from "@/schemas/sharedTypes";
-import {toEnvVarName} from "@/utils";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
@@ -84,8 +83,11 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
     }
 }
 
-function formatArguments(passedParameters: {parameters?: Record<string, any> | undefined} | undefined) {
-    if (passedParameters == undefined) { return {}};
+function formatArguments(passedParameters: { parameters?: Record<string, any> | undefined } | undefined) {
+    if (passedParameters == undefined) {
+        return {}
+    }
+    
     return Object.entries(passedParameters).map(([key, value]) => ({
         name: key,
         value: (value as any === MISSING_FIELD ? "" : transformExpressionsDeep(value))
@@ -93,28 +95,35 @@ function formatArguments(passedParameters: {parameters?: Record<string, any> | u
 }
 
 function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unknown }>(step: T) {
-    const {templateRef:{template:trTemplate,...trRest}={}, template=undefined, withLoop, when, args, ...rest} = step;
+    const {
+        templateRef: {template: trTemplate, ...trRest} = {},
+        template = undefined,
+        withLoop,
+        when,
+        args,
+        ...rest
+    } = step;
     return {
         ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
         ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
         ...(undefined === when       ? {} : { when: `${toArgoExpression(when, "IdentifierOnly")}` }),
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...rest,
-        ...{ "arguments": { parameters: (formatArguments(args) as object) } }
+        ...{"arguments": {parameters: (formatArguments(args) as object)}}
     };
 }
 
-function formatContainerEnvs(envVars:Record<string, BaseExpression<any>>) {
+function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     const result: any[] = [];
     Object.entries(envVars).forEach(([key, value]) => {
-        result.push({ name: key, value: transformExpressionsDeep(value) });
+        result.push({name: key, value: transformExpressionsDeep(value)});
     });
     return result;
 }
 
 function formatBody(body: GenericScope) {
     if (body) {
-        if (body.steps !== undefined ) {
+        if (body.steps !== undefined) {
             return {
                 steps: (body.steps as StepGroup[])
                     .map(g => g.steps.map(s => formatStepOrTask(s)))
@@ -138,7 +147,7 @@ function formatBody(body: GenericScope) {
                 }
             };
         } else if (body.suspend !== undefined) {
-            return { suspend: {}};
+            return {suspend: {}};
         } else {
             return transformExpressionsDeep(body);
         }
@@ -188,7 +197,7 @@ function formatOutputParameters<OPR extends OutputParametersRecord>(outputs: OPR
     };
 }
 
-function convertTemplateName(n:string) {
+function convertTemplateName(n: string) {
     return n.toLowerCase();
 }
 
@@ -196,7 +205,7 @@ function formatTemplate(templates: GenericScope, templateName: string) {
     const template = templates[templateName];
     return {
         name: convertTemplateName(templateName),
-        ...(template.inputs === undefined ? {} : { inputs: formatParameters(template.inputs) } ),
+        ...(template.inputs === undefined ? {} : {inputs: formatParameters(template.inputs)}),
         ...formatBody(template.body),
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
             {retryStrategy: template.retryStrategy} : {}),
