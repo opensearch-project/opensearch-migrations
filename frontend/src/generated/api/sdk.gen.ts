@@ -44,6 +44,15 @@ import type {
   BackfillStatusData,
   BackfillStatusResponses,
   BackfillStatusErrors,
+  BackfillStartData,
+  BackfillStartResponses,
+  BackfillStartErrors,
+  BackfillPauseData,
+  BackfillPauseResponses,
+  BackfillPauseErrors,
+  BackfillStopData,
+  BackfillStopResponses,
+  BackfillStopErrors,
   ClusterSourceData,
   ClusterSourceResponses,
   ClusterSourceErrors,
@@ -327,7 +336,7 @@ export const metadataStatus = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Get Metadata Status
+ * Get Backfill Status
  */
 export const backfillStatus = <ThrowOnError extends boolean = false>(
   options: Options<BackfillStatusData, ThrowOnError>,
@@ -339,6 +348,54 @@ export const backfillStatus = <ThrowOnError extends boolean = false>(
   >({
     responseTransformer: backfillStatusResponseTransformer,
     url: "/sessions/{session_name}/backfill/status",
+    ...options,
+  });
+};
+
+/**
+ * Start Backfill
+ */
+export const backfillStart = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillStartData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    BackfillStartResponses,
+    BackfillStartErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/backfill/start",
+    ...options,
+  });
+};
+
+/**
+ * Pause Backfill
+ */
+export const backfillPause = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillPauseData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    BackfillPauseResponses,
+    BackfillPauseErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/backfill/pause",
+    ...options,
+  });
+};
+
+/**
+ * Stop Backfill
+ */
+export const backfillStop = <ThrowOnError extends boolean = false>(
+  options: Options<BackfillStopData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    BackfillStopResponses,
+    BackfillStopErrors,
+    ThrowOnError
+  >({
+    url: "/sessions/{session_name}/backfill/stop",
     ...options,
   });
 };
