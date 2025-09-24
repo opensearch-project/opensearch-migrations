@@ -49,12 +49,12 @@ export const COMPLETE_SNAPSHOT_CONFIG = DYNAMIC_SNAPSHOT_CONFIG.extend({
 });
 
 export const METADATA_OPTIONS = z.object({
-
+    loggingConfigurationOverrideConfigMap: z.string().default("")
 });
 
 export const RFS_OPTIONS = z.object({
     requiredThing: z.number(),
-    loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
     docTransformerBase64: z.string().default("not a transform"),
     documentsPerBulkRequest: z.number().default(0),
@@ -87,7 +87,7 @@ export const REPLAYER_OPTIONS = z.object({
     speedupFactor: z.number(),
     podReplicas: z.number(),
     authHeaderOverride: z.optional(z.string()),
-    loggingConfigurationOverrideConfigMap: z.string().default("default-log4j-config"),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
     docTransformerBase64: z.string().default("not a transform"),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });

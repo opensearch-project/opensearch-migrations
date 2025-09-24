@@ -121,8 +121,8 @@ export function setupLog4jConfigForContainer(
         env: [
             ...safeSpread(env),
             {
-                name: "LOGGING_CONFIGURATION",
-                value: expr.ternary(configIsEmpty, expr.literal(""), expr.literal("/config/logConfiguration"))
+                name: "JAVA_OPTS",
+                value: expr.ternary(configIsEmpty, expr.literal(""), expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"))
             }
         ],
         volumeMounts: [
