@@ -587,4 +587,66 @@ describe('ReindexFromSnapshotStack Tests', () => {
       }
     ]);
   });
+
+  test('ReindexFromSnapshotStack fails when source cluster version is missing with external snapshot', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      sourceCluster: {
+        "disabled": true
+        // Missing version field
+      },
+      snapshot: {
+        "snapshotName": "test-snapshot",
+        "snapshotRepoName": "test-repo",
+        "s3Uri": "s3://snapshot-bucket/snapshot-repo",
+        "s3Region": "us-east-1"
+      },
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      migrationAssistanceEnabled: true
+    };
+
+    expect(() => createStackComposer(contextOptions)).toThrow(
+      /The `sourceCluster` object must be provided with a `version` field when using an external snapshot/
+    );
+  });
+
+  test('ReindexFromSnapshotStack omits source-version parameter when source cluster version is missing', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      sourceCluster: {
+        "disabled": true
+        // Missing version field - should result in --source-version being omitted
+      },
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      migrationAssistanceEnabled: true
+    };
+
+    const stacks = createStackComposer(contextOptions);
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    const template = Template.fromStack(reindexStack);
+
+    // Find the task definition resource
+    const taskDefinitions = template.findResources('AWS::ECS::TaskDefinition');
+    const taskDefinitionKeys = Object.keys(taskDefinitions);
+    expect(taskDefinitionKeys.length).toBe(1);
+
+    const taskDefinition = taskDefinitions[taskDefinitionKeys[0]];
+    const containerDefinitions = taskDefinition.Properties.ContainerDefinitions;
+    expect(containerDefinitions.length).toBe(1);
+    
+    // Verify that the RFS command does NOT include --source-version parameter
+    // This will cause the Java application to fail at runtime with JCommander error
+    const rfsCommand = containerDefinitions[0].Environment.find((env: any) => env.Name === 'RFS_COMMAND');
+    expect(rfsCommand).toBeDefined();
+    
+    // The command should NOT include --source-version, which will cause RFS to fail with required parameter error
+    const commandValue = rfsCommand.Value['Fn::Join'][1].join('');
+    expect(commandValue).not.toContain('--source-version');
+    
+    // This demonstrates that RFS will fail at runtime with:
+    // "The following option is required: [--source-version, --sourceVersion]"
+  });
 });

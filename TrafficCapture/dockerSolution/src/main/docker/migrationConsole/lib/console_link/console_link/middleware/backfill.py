@@ -25,6 +25,9 @@ handle_backfill_errors = partial(handle_errors, service_type="backfill")
                on_success=lambda result: (ExitCode.SUCCESS, "Backfill started successfully." + "\n" + result))
 def start(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
     logger.info("Starting backfill")
+    # Validate source cluster version is present before starting
+    if hasattr(backfill, '_validate_source_cluster_version'):
+        backfill._validate_source_cluster_version()
     return backfill.start(*args, **kwargs)
 
 

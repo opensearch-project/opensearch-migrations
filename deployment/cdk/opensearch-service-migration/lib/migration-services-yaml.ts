@@ -47,13 +47,17 @@ export class ECSService {
 export class RFSBackfillYaml {
     ecs: ECSService;
     scale = 5;
+    source_cluster_version?: string;
     constructor() {
         this.ecs = new ECSService();
     }
 
     toDict() {
         return {
-            reindex_from_snapshot: {ecs: this.ecs}
+            reindex_from_snapshot: {
+                ecs: this.ecs,
+                ...(this.source_cluster_version && { source_cluster_version: this.source_cluster_version })
+            }
         };
     }
 }
