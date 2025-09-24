@@ -59,6 +59,9 @@ public class IndexMetadataData_ES_7_10 implements IndexMetadata {
         if (settings != null) {
             return settings;
         }
+        if (rawJson == null) {
+            throw new IllegalStateException("Cannot read index metadata: snapshot format may not match ES 7.10. Ensure --source-version is correctly specified.");
+        }
         ObjectNode treeSettings = TransformFunctions.convertFlatSettingsToTree((ObjectNode) rawJson.get("settings"));
         settings = treeSettings;
         return settings;
