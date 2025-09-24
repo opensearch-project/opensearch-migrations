@@ -53,9 +53,7 @@ export class RFSBackfillYaml {
 
     toDict() {
         return {
-            reindex_from_snapshot: {
-                ecs: this.ecs
-            }
+            reindex_from_snapshot: {ecs: this.ecs}
         };
     }
 }

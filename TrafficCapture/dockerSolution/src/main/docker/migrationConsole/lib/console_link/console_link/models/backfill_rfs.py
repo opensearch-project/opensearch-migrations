@@ -74,7 +74,7 @@ class RFSBackfill(Backfill):
         v = Validator(RFS_BACKFILL_SCHEMA)
         if not v.validate(self.config):
             raise ValueError("Invalid config file for RFS backfill", v.errors)
-    
+
     def create(self, *args, **kwargs) -> CommandResult:
         return CommandResult(1, "no-op")
 
