@@ -9,18 +9,6 @@ import {
 } from "@/schemas/expression";
 import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
 import {StripUndefined, TaskType} from "@/schemas/sharedTypes";
-import {InvalidType, ParamsWithLiteralsOrExpressionsIncludingSerialized} from "@/schemas/workflowTypes";
-
-// Local definition to avoid circular import
-type AllowLiteralOrExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
-    // If T is already Serialized<U>, support literals of U and expressions of both U and Serialized<U>
-    T extends Serialized<infer U>
-        ? U extends AggregateType
-            ? U | Serialized<U> | BaseExpression<U, C> | BaseExpression<Serialized<U>, C>
-            : T | BaseExpression<T, C>
-        : T extends AggregateType
-            ? T | BaseExpression<T, C> | BaseExpression<Serialized<T>, C>
-            : T | BaseExpression<T, C>;
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
 

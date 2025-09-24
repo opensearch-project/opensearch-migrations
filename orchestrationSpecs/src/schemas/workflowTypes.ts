@@ -14,12 +14,10 @@ import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRe
 import {
     AllowLiteralOrExpression, AllowLiteralOrExpressionIncludingSerialized,
     BaseExpression,
-    ExpressionType,
     FromParameterExpression,
     InputParameterSource, ParameterSource, WorkflowParameterSource
 } from "@/schemas/expression";
-import {AggregateType, PlainObject, Serialized} from "@/schemas/plainObject";
-import {TypescriptError} from "@/utils";
+import {PlainObject} from "@/schemas/plainObject";
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<

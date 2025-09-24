@@ -1,5 +1,12 @@
-import {AggregateType, DeepWiden, MissingField, PlainObject, Serialized} from "@/schemas/plainObject";
-import {StripUndefined, TaskType, TypeToken} from "@/schemas/sharedTypes";
+import {
+    AggregateType,
+    DeepWiden,
+    MissingField,
+    NonSerializedPlainObject,
+    PlainObject,
+    Serialized
+} from "@/schemas/plainObject";
+import {StripUndefined, TaskType, typeToken, TypeToken} from "@/schemas/sharedTypes";
 import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
@@ -63,19 +70,6 @@ export class AsStringExpression<
     constructor(public readonly source: E) { super("as_string"); }
 }
 
-export class NullCoalesce<
-    T extends PlainObject
-> extends BaseExpression<DeepWiden<T>, "complicatedExpression"> {
-    public readonly defaultValue: BaseExpression<DeepWiden<T>>;
-    constructor(
-        public readonly preferredValue: BaseExpression<T|MissingField>,
-        d: AllowLiteralOrExpression<DeepWiden<T>>
-    ) {
-        super("sprig.coalesce");
-        this.defaultValue = toExpression(d);
-    }
-}
-
 export class ConcatExpression<
     ES extends readonly BaseExpression<string, any>[]
 > extends BaseExpression<string, "govaluate"> {
@@ -116,17 +110,16 @@ export class ComparisonExpression<
     ) { super("comparison"); }
 }
 
-export class ArithmeticExpression<
-    L extends BaseExpression<number, CL>,
-    R extends BaseExpression<number, CR>,
-    CL extends ExpressionType = ExprC<L>,
-    CR extends ExpressionType = ExprC<R>
-> extends BaseExpression<number, WidenComplexity2<CL, CR>> {
+export class InfixExpression<
+    T extends PlainObject,
+    CL extends ExpressionType,
+    CR extends ExpressionType
+> extends BaseExpression<T,WidenExpressionComplexity2<CL,CR>> {
     constructor(
-        public readonly operator: "+" | "-" | "*" | "/" | "%",
-        public readonly left: L,
-        public readonly right: R
-    ) { super("arithmetic"); }
+        public readonly operator: "+" | "-" | "*" | "/" | "%" | "||" | "&&",
+        public readonly left: BaseExpression<T,  CL>,
+        public readonly right: BaseExpression<T,  CR>
+    ) { super("infix"); }
 }
 
 // Helper types for dict operations
@@ -165,11 +158,21 @@ export class DictMakeExpression<
     }
 }
 
+// Helper for dig
+// Stop on arrays; recurse only on plain object keys.
+type DictKeySegmentsCore<T> =
+    T extends readonly any[] ? readonly [] :
+        T extends object
+            ? {
+                [K in Extract<keyof T, string>]:
+                readonly [K] | readonly [K, ...DictKeySegmentsCore<PropTypeNoUndef<T, K>>]
+            }[Extract<keyof T, string>]
+            : readonly [];
+
+// JSON path helper types
 export class RecordFieldSelectExpression<T, P, E> extends BaseExpression<any, "complicatedExpression"> {
     constructor(public readonly source: E, public readonly path: P) { super("path"); }
 }
-
-// JSON path helper types
 type AnyTrue<U> = Extract<U, true> extends never ? false : true;
 type MissingInAny<T, K extends PropertyKey> =
     AnyTrue<T extends any ? (K extends keyof T ? false : true) : never>;
@@ -354,24 +357,6 @@ export class FunctionExpression<
     }
 }
 
-export class BinaryFunctionExpression<
-    ResultT extends PlainObject,
-    Input1T extends PlainObject = PlainObject,
-    Input2T extends PlainObject = PlainObject,
-    C1 extends ExpressionType = "complicatedExpression",
-    C2 extends ExpressionType = "complicatedExpression"
-> extends BaseExpression<ResultT, WidenComplexity2<C1, C2>> {
-    constructor(
-        public readonly functionName: string,
-        public readonly arg1: BaseExpression<Input1T, C1>,
-        public readonly arg2: BaseExpression<Input2T, C2>,
-        // convenience args for callers that would rather infer types
-        _typeToken?: TypeToken<ResultT>
-    ) {
-        super("function");
-    }
-}
-
 // Helper types for toArray
 type NormalizeOne<E> =
     E extends BaseExpression<infer U, infer C> ? BaseExpression<U, C>
@@ -420,6 +405,7 @@ class ExprBuilder {
         };
     }
 
+    // String functions
     concat<ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> {
         return new ConcatExpression(es);
     }
@@ -440,6 +426,14 @@ class ExprBuilder {
     >(cond: B, whenTrue: L, whenFalse: R): BaseExpression<ResultOf<R>, WidenComplexity3<ExprC<B>, ExprC<L>, ExprC<R>>>;
     ternary(cond: any, whenTrue: any, whenFalse: any): BaseExpression<any, any> {
         return new TernaryExpression(cond, whenTrue, whenFalse);
+    }
+
+    toLowerCase(data: BaseExpression<string, any>) {
+        return fn<string>("lower", toExpression(data));
+    }
+
+    toUpperCase(data: BaseExpression<string, any>) {
+        return fn<string>("upper", toExpression(data));
     }
 
     toArray<ES extends readonly unknown[]>(
@@ -464,7 +458,7 @@ class ExprBuilder {
         v: BaseExpression<T | MissingField, any>,
         d: AllowLiteralOrExpression<DeepWiden<T>>
     ) {
-        return fn<DeepWiden<T>>("sprig.coalesce", v, toExpression(d));
+        return fn<DeepWiden<T>>("nullCoalesce", v, toExpression(d));
     }
 
     // Comparisons
@@ -502,24 +496,86 @@ class ExprBuilder {
 
     // Arithmetic
     add<
-        L extends BaseExpression<number, any>,
-        R extends BaseExpression<number, any>
-    >(l: L, r: R): BaseExpression<number, WidenComplexity2<ExprC<L>, ExprC<R>>> {
-        return new ArithmeticExpression<L, R>("+", l, r);
+        L extends BaseExpression<boolean, CL>,
+        R extends BaseExpression<boolean, CR>,
+        CL extends ExpressionType = ExprC<L>,
+        CR extends ExpressionType = ExprC<R>,
+    >(l: L, r: R) {
+        return new InfixExpression("+", l, r);
     }
 
     subtract<
-        L extends BaseExpression<number, CL>,
-        R extends BaseExpression<number, CR>,
+        L extends BaseExpression<boolean, CL>,
+        R extends BaseExpression<boolean, CR>,
         CL extends ExpressionType = ExprC<L>,
-        CR extends ExpressionType = ExprC<R>
-    >(l: L, r: R): BaseExpression<number, WidenComplexity2<CL, CR>> {
-        return new ArithmeticExpression("-", l, r);
+        CR extends ExpressionType = ExprC<R>,
+
+    >(l: L, r: R) {
+        return new InfixExpression("-", l, r);
+    }
+
+    and<
+        L extends BaseExpression<boolean, CL>,
+        R extends BaseExpression<boolean, CR>,
+        CL extends ExpressionType = ExprC<L>,
+        CR extends ExpressionType = ExprC<R>,
+    >(l: L, r: R) {
+        return new InfixExpression("&&", l, r);
+    }
+
+    or<
+        L extends BaseExpression<boolean, CL>,
+        R extends BaseExpression<boolean, CR>,
+        CL extends ExpressionType = ExprC<L>,
+        CR extends ExpressionType = ExprC<R>,
+    >(l: L, r: R) {
+        return new InfixExpression("||", l, r);
     }
 
     // JSON Handling
     keys<T extends Record<string, any>>(obj: BaseExpression<T>) {
         return fn<string[], ExpressionType, "complicatedExpression">("keys", obj);
+    }
+
+    /**
+     * sprig.dig — safely look up nested fields by key segments.
+     * If a default is provided, it's returned when any segment is missing.
+     *
+     * Examples:
+     *   expr.dig(userExpr, "profile", "email")
+     *   expr.dig(userExpr, "profile", "email", expr.literal("n/a"))
+     */
+    dig<
+        T extends Record<string, NonSerializedPlainObject>,
+        // D is T unwrapped & non-missing, fixed once so recursion stays shallow
+        D extends Record<string, any> = UnwrapSerialize<NonMissing<T>>,
+        S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>
+    >(
+        sourceDict: AllowLiteralOrExpression<T, any>,
+        defaultValue: AllowLiteralOrExpression<
+            DeepWiden<NonMissing<SegmentsValueMissing<D, S>>>
+        >,
+        ...segs: S
+    ): BaseExpression<
+        DeepWiden<NonMissing<SegmentsValueMissing<D, S>>>,
+        "complicatedExpression"
+    > {
+        const source = toExpression(sourceDict);
+        // keys are strings only for dict paths; widen every arg to "complicatedExpression"
+        const keyExprs = (segs as readonly string[]).map(seg =>
+            widenComplexity(this.literal(seg))
+        ) as readonly BaseExpression<string, "complicatedExpression">[];
+
+        const argsComp: readonly BaseExpression<any, "complicatedExpression">[] = [
+            ...keyExprs,
+            widenComplexity(toExpression(defaultValue as any)),
+            widenComplexity(source)
+        ];
+
+        return new FunctionExpression<any, any, "complicatedExpression", "complicatedExpression">(
+            "sprig.dig",
+            argsComp
+        ) as any;
     }
 
     jsonPathLoose<
@@ -564,6 +620,10 @@ class ExprBuilder {
     ): BaseExpression<any, "complicatedExpression"> {
         const path = _segmentsToPath(segs);
         return new RecordFieldSelectExpression(source, path) as any;
+    }
+
+    deserializeRecord<R extends AggregateType>(data: BaseExpression<Serialized<R>>) {
+        return fn<R>("fromJSON", toExpression(data));
     }
 
     stringToRecord<R extends PlainObject>(capture: TypeToken<R>, data: AllowLiteralOrExpression<string>) {

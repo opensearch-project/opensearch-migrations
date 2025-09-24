@@ -1,6 +1,5 @@
 // Type-safe visitor pattern for conversion
 import expression, {
-    ArithmeticExpression,
     ArrayIndexExpression,
     ArrayMakeExpression,
     AsStringExpression,
@@ -13,7 +12,7 @@ import expression, {
     RecordFieldSelectExpression,
     TernaryExpression,
     TemplateReplacementExpression, TaskDataExpression, DictMakeExpression,
-    FunctionExpression,
+    FunctionExpression, InfixExpression,
 } from "@/schemas/expression";
 
 /** Lightweight erased type to avoid deep generic instantiation */
@@ -32,31 +31,33 @@ function formatArgoFormattedToString(useMarkers: boolean, expr: AnyExpr, rendere
         ? "{{" + (renderedResult.compound ? "=" : "") + renderedResult.text + "}}" : renderedResult.text;
 }
 
-export function toArgoExpression(expr: AnyExpr, useMarkers=true): string {
+export type MarkerStyle = "Outer" | "None" | "IdentifierOnly";
+
+export function toArgoExpression(expr: AnyExpr, useMarkers:MarkerStyle="Outer"): string {
     if (isTemplateExpression(expr)) {
         const f = expr as TemplateReplacementExpression;
         let result = f.template;
         for (const [key, value] of Object.entries(f.replacements)) {
-            const expandedValue = formatArgoFormattedToString(true, expr, formatExpression(value));
+            const expandedValue = formatArgoFormattedToString(true, expr, formatExpression(value, false));
             result = result.replaceAll(`{{${key}}}`, expandedValue);
         }
         return result;
     }
 
-    const rval = formatExpression(expr, true);
-    return formatArgoFormattedToString(useMarkers, expr, rval);
+    const rval = formatExpression(expr, useMarkers === "IdentifierOnly", true);
+    return formatArgoFormattedToString(useMarkers === "Outer", expr, rval);
 }
 
 /** Returns the Argo-formatted string plus whether the expression was compound. */
-function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
+function formatExpression(expr: AnyExpr, useIdentifierMarkers:boolean, top=false): ArgoFormatted {
     if (isAsStringExpression(expr)) {
-        return formatExpression(expr.source, true);
+        return formatExpression(expr.source, useIdentifierMarkers, true);
     }
 
     if (isLiteralExpression(expr)) {
         const le = expr as LiteralExpression<any>;
         if (typeof le.value === "string") {
-            return top ? formattedResult(le.value) : formattedResult(`"${le.value}"`);
+            return top ? formattedResult(le.value) : formattedResult(`'${le.value}'`);
         } else if (typeof le.value === "number" || typeof le.value === "boolean") {
             return formattedResult(String(le.value));
         } else if (le.value === null) {
@@ -68,7 +69,7 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
-        const parts = ce.expressions.map(e=>formatExpression(e));
+        const parts = ce.expressions.map(e=>formatExpression(e, useIdentifierMarkers));
         const text = parts.map(p => p.text).join(ce.separator ? " + " + ce.separator + " + " : "+");
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
@@ -76,41 +77,42 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
     if (isTernaryExpression(expr)) {
         const te = expr as TernaryExpression<any, any, any, any>;
-        const c = formatExpression(te.condition);
-        const t = formatExpression(te.whenTrue);
-        const f = formatExpression(te.whenFalse);
+        const c = formatExpression(te.condition, useIdentifierMarkers);
+        const t = formatExpression(te.whenTrue, useIdentifierMarkers);
+        const f = formatExpression(te.whenFalse, useIdentifierMarkers);
         return formattedResult(`((${c.text}) ? (${t.text}) : (${f.text}))`, true);
     }
 
-    if (isFunction(expr)) {
+    if (isFunctionExpression(expr)) {
         const e = expr as FunctionExpression<any, any>;
         if (e.functionName === "toJSON" && isParameterExpression(e.args[0] as AnyExpr)) {
-            return formatExpression(e.args[0]);
+            return formatExpression(e.args[0], useIdentifierMarkers);
         } else if (e.functionName === "fromJSON" && top) {
-            return formatExpression(e.args[0]);
+            return formatExpression(e.args[0], useIdentifierMarkers);
         }
-        const formattedArgs = e.args.map(a=>formatExpression(a));
+        const formattedArgs =
+            e.args.map(a=>formatExpression(a, useIdentifierMarkers));
         const combinedFormatted = formattedArgs.map(f=>f.text).join(", ");
         return formattedResult(`${e.functionName}(${combinedFormatted})`, true);
     }
 
     if (isComparisonExpression(expr)) {
         const ce = expr as ComparisonExpression<any, any, any>;
-        const l = formatExpression(ce.left);
-        const r = formatExpression(ce.right);
+        const l = formatExpression(ce.left, useIdentifierMarkers);
+        const r = formatExpression(ce.right, useIdentifierMarkers);
         return formattedResult(`${l.text} ${ce.operator} ${r.text}`, true);
     }
 
-    if (isArithmeticExpression(expr)) {
-        const ae = expr as ArithmeticExpression<any, any>;
-        const l = formatExpression(ae.left);
-        const r = formatExpression(ae.right);
+    if (isInfixExpression(expr)) {
+        const ae = expr as InfixExpression<any, any, any>;
+        const l = formatExpression(ae.left, useIdentifierMarkers);
+        const r = formatExpression(ae.right, useIdentifierMarkers);
         return formattedResult(`${l.text} ${ae.operator} ${r.text}`, true);
     }
 
     if (isPathExpression(expr)) {
         const pe = expr as RecordFieldSelectExpression<any, any, any>;
-        const inner = formatExpression(pe.source);
+        const inner = formatExpression(pe.source, useIdentifierMarkers);
         const source = inner.text;
         const jsonPath = pe.path.replace(/\[(\d+)\]/g, "[$1]").replace(/^/, "$.");
         return formattedResult(`jsonpath(${source}, '${jsonPath}')`, true);
@@ -118,23 +120,23 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
     if (isArrayIndexExpression(expr)) {
         const ie = expr as ArrayIndexExpression<any, any, any>;
-        const arr = formatExpression(ie.array);
-        const idx = formatExpression(ie.index);
+        const arr = formatExpression(ie.array, useIdentifierMarkers);
+        const idx = formatExpression(ie.index, useIdentifierMarkers);
         return formattedResult(`${arr.text}[${idx.text}]`, true);
     }
 
     if (isArrayMakeExpression(expr)) {
         const ae = expr as ArrayMakeExpression<any>;
-        const inner = ae.elements.map((e: AnyExpr)=>formatExpression(e).text).join(", ");
+        const inner = ae.elements
+            .map((e: AnyExpr)=>formatExpression(e, useIdentifierMarkers).text).join(", ");
         return formattedResult(`[${inner}]`, true);
     }
 
-    // ---- NEW: Dict make ----------------------------------------------------
     if (isDictMakeExpression(expr)) {
         const de = expr as DictMakeExpression<Record<string, AnyExpr>>;
         const parts: string[] = [];
         for (const [k, v] of Object.entries(de.entries)) {
-            const fv = formatExpression(v as any);
+            const fv = formatExpression(v as any, useIdentifierMarkers);
             parts.push(`"${k}"`, fv.text);
         }
         const args = parts.join(", ");
@@ -146,32 +148,39 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
     if (isParameterExpression(expr)) {
         const pe = expr as FromParameterExpression<any,any>;
-        switch (pe.source.kind) {
-            case "workflow":
-                return formattedResult(`workflow.parameters.${pe.source.parameterName}`);
-            case "input":
-                return formattedResult(`inputs.parameters.${pe.source.parameterName}`);
-            case "steps_output":
-                return formattedResult(`steps.${pe.source.stepName}.outputs.parameters.${pe.source.parameterName}`);
-            case "tasks_output":
-                return formattedResult(`tasks.${pe.source.taskName}.outputs.parameters.${pe.source.parameterName}`);
-            default:
-                throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
-        }
+        const expandedName = (() => {
+            switch (pe.source.kind) {
+                case "workflow":
+                    return `workflow.parameters.${pe.source.parameterName}`;
+                case "input":
+                    return (`inputs.parameters.${pe.source.parameterName}`);
+                case "steps_output":
+                    return (`steps.${pe.source.stepName}.outputs.parameters.${pe.source.parameterName}`);
+                case "tasks_output":
+                    return (`tasks.${pe.source.taskName}.outputs.parameters.${pe.source.parameterName}`);
+                default:
+                    throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
+            }
+        }).call({});
+        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
     if (isLoopItem(expr)) {
-        return formattedResult("item");
+        // item won't be available for when conditions, but to be complete,
+        // it is an identifier and should be considered as a parameter
+        return formattedResult(useIdentifierMarkers ? `{{item}}` : "item", false);
     }
 
     if (isWorkflowValue(expr)) {
         const e = expr as WorkflowValueExpression;
-        return formattedResult("workflow." + e.variable);
+        const expandedName = "workflow." + e.variable;
+        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
     if (isTaskData(expr)) {
         const e = expr as TaskDataExpression<any>;
-        return formattedResult(`${e.taskType}.${e.name}.${e.key}`)
+        const expandedName = `${e.taskType}.${e.name}.${e.key}`;
+        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
     }
 
     throw new Error(`Unsupported expression kind: ${(expr as any).kind}`);
@@ -179,19 +188,19 @@ function formatExpression(expr: AnyExpr, top=false): ArgoFormatted {
 
 /* ───────────────── Type guards ───────────────── */
 
-export function isAsStringExpression(e: AnyExpr): e is AsStringExpression<any> { return e.kind === "as_string"; }
-export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> { return e.kind === "literal"; }
-export function isPathExpression(e: AnyExpr): e is RecordFieldSelectExpression<any, any, any> { return e.kind === "path"; }
-export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> { return e.kind === "concat"; }
-export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> { return e.kind === "ternary"; }
-export function isFunction(e: AnyExpr): e is FunctionExpression<any, any> { return e.kind === "function"; }
-export function isArithmeticExpression(e: AnyExpr): e is ArithmeticExpression<any, any> { return e.kind === "arithmetic"; }
-export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> { return e.kind === "comparison"; }
 export function isArrayIndexExpression(e: AnyExpr): e is ArrayIndexExpression<any, any, any> { return e.kind === "array_index"; }
 export function isArrayMakeExpression(e: AnyExpr): e is ArrayMakeExpression<any> { return e.kind === "array_make"; }
+export function isAsStringExpression(e: AnyExpr): e is AsStringExpression<any> { return e.kind === "as_string"; }
+export function isComparisonExpression(e: AnyExpr): e is ComparisonExpression<any, any, any> { return e.kind === "comparison"; }
+export function isConcatExpression(e: AnyExpr): e is ConcatExpression<any> { return e.kind === "concat"; }
 export function isDictMakeExpression(e: AnyExpr): e is DictMakeExpression<any> { return e.kind === "dict_make"; }
-export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "parameter"; }
+export function isFunctionExpression(e: AnyExpr): e is FunctionExpression<any, any> { return e.kind === "function"; }
+export function isInfixExpression(e: AnyExpr): e is InfixExpression<any, any, any> { return e.kind === "infix"; }
+export function isLiteralExpression(e: AnyExpr): e is LiteralExpression<any> { return e.kind === "literal"; }
 export function isLoopItem(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "loop_item"; }
-export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }
+export function isParameterExpression(e: AnyExpr): e is FromParameterExpression<any,any> { return e.kind === "parameter"; }
+export function isPathExpression(e: AnyExpr): e is RecordFieldSelectExpression<any, any, any> { return e.kind === "path"; }
 export function isTaskData(e: AnyExpr): e is TaskDataExpression<any> { return e.kind === "task_data"; }
 export function isTemplateExpression(e: AnyExpr): e is TemplateReplacementExpression { return e.kind === "fillTemplate"; }
+export function isTernaryExpression(e: AnyExpr): e is TernaryExpression<any, any, any, any> { return e.kind === "ternary"; }
+export function isWorkflowValue(e: AnyExpr): e is WorkflowValueExpression { return e.kind === "workflow_value"; }

@@ -10,6 +10,7 @@ export class Serialized<OutputT> {
 
 // PlainObject type system for constraining values to serializable plain objects
 export type Primitive = string | number | boolean | MissingField;
+export type NonSerializedPlainObject = Primitive | AggregateType;
 export type AggregateType = readonly PlainObject[] | { [key: string]: PlainObject };
 export type PlainObject = Primitive | AggregateType | Serialized<AggregateType>;
 

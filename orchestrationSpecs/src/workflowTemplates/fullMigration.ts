@@ -76,8 +76,7 @@ export const FullMigration = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     targetConfig: b.inputs.target,
                     indices: expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "indices"), []),
-                    metadataMigrationConfig:
-                        expr.nullCoalesce(expr.jsonPathLoose(b.inputs.migrationConfig, "metadata", "options"), {})
+                    metadataMigrationConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), "", "metadata", "options")
                 }))
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                 c.register({

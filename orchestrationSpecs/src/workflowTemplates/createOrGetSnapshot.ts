@@ -23,9 +23,8 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("indices", typeToken<string[]>())
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
-        .addOptionalInput("alreadyDefinedName",
-                c=>
-                    expr.nullCoalesce(expr.jsonPathLoose(c.inputParameters.snapshotConfig, "snapshotName"), ""))
+        .addOptionalInput("alreadyDefinedName", c=>
+            expr.dig(expr.deserializeRecord(c.inputParameters.snapshotConfig), "", "snapshotName"))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b=>b
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow", c=>c
@@ -33,7 +32,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                     ...selectInputsForKeys(b, getAcceptedRegisterKeys(c)),
                     snapshotConfig: expr.makeDict({
                         repoConfig: expr.jsonPathLoose(b.inputs.snapshotConfig, "repoConfig"),
-                        snapshotName: b.inputs.autocreateSnapshotName
+                        snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName)
                     }),
                 }), {when: expr.equals(b.inputs.alreadyDefinedName, expr.literal(""))})
         )

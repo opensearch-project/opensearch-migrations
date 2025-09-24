@@ -61,13 +61,13 @@ describe("expression type contracts", () => {
             c: [{ c2: { c3: "foundIt" }}]
         });
 
-        const v1 = expr.jsonPathLoose(obj, "c");
+        const v1 = expr.jsonPathLoose(expr.recordToString(obj), "c");
         const v2 = expr.index(v1, expr.literal(0));
-        const v3 = expr.jsonPathLoose(expr.jsonPathLoose(v2, "c2"), "c3");
+        const v3 = expr.jsonPathLoose(expr.recordToString(v2), "c2", "c3");
         expectTypeOf(v3).toExtend<BaseExpression<string>>();
         expectTypeOf(v3).not.toBeAny();
 
-        const result = expr.jsonPathLoose(obj, "a");
+        const result = expr.jsonPathLoose(expr.recordToString(obj), "a");
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
         console.log(result);
     });

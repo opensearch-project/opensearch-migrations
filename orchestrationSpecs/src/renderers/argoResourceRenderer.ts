@@ -97,7 +97,7 @@ function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unk
     return {
         ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
         ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
-        ...(undefined === when       ? {} : { when: `${toArgoExpression(when)}` }),
+        ...(undefined === when       ? {} : { when: `${toArgoExpression(when, "IdentifierOnly")}` }),
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...rest,
         ...{ "arguments": { parameters: (formatArguments(args) as object) } }
@@ -154,7 +154,7 @@ function formatOutputSource(def: OutputParamDef<any>) {
                 case "path":
                     return {path: def.path};
                 case "expression":
-                    return {expression: toArgoExpression(def.expression, false)};
+                    return {expression: toArgoExpression(def.expression, "None")};
                 case "parameter":
                     return {parameter: toArgoExpression(def.parameter)};
                 case "jsonPath":
