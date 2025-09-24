@@ -7,6 +7,9 @@ import { useSearchParams } from "next/navigation";
 
 jest.mock("next/navigation", () => ({
   useSearchParams: jest.fn(),
+  useRouter: () => ({
+    push: jest.fn(),
+  }),
 }));
 
 describe("ViewSessionPage", () => {
@@ -157,10 +160,8 @@ describe("ViewSessionPage", () => {
 
     render(<ViewSessionPage />);
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      /Migration Session -/
-    );
-
+    expect(screen.getByText("Unable to find an associated session")).toBeInTheDocument();
+    expect(screen.getByText("Please create a session or adjust the sessionName parameter in the url.")).toBeInTheDocument();
     expect(screen.queryByText("Session Overview")).not.toBeInTheDocument();
     expect(screen.queryByText("Snapshot")).not.toBeInTheDocument();
   });
