@@ -10,7 +10,6 @@ import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
 import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/schemas/parameterConversions";
 import {typeToken} from "@/schemas/sharedTypes";
 
-const MISSING_SNAPSHOT_SENTINEL = "___missing___";
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-or-get-snapshot",
     serviceAccountName: "argo-workflow-executor"
@@ -25,7 +24,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceConfig", typeToken<z.infer<typeof CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>())
         .addOptionalInput("alreadyDefinedName", c=>
-            expr.dig(expr.deserializeRecord(c.inputParameters.snapshotConfig), MISSING_SNAPSHOT_SENTINEL, "snapshotName"))
+            expr.dig(expr.deserializeRecord(c.inputParameters.snapshotConfig), "", "snapshotName"))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b=>b
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow", c=>c
@@ -35,7 +34,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                         repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
                         snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName)
                     }),
-                }), {when: expr.equals(b.inputs.alreadyDefinedName, expr.literal(MISSING_SNAPSHOT_SENTINEL))})
+                }), {when: expr.cast(b.inputs.alreadyDefinedName).to<boolean>() })
         )
         .addExpressionOutput("snapshotConfig", c=>
             expr.ternary(

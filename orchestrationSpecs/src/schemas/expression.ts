@@ -397,10 +397,10 @@ class ExprBuilder {
         return new AsStringExpression(e);
     }
 
-    cast<FROM extends PlainObject>(v: BaseExpression<FROM>) {
+    cast<FROM extends BaseExpression<any, any>>(v: FROM) {
         return {
-            to<TO extends PlainObject>(): BaseExpression<TO> {
-                return v as unknown as BaseExpression<TO>;
+            to<TO extends PlainObject>(): BaseExpression<TO, ExprC<FROM>> {
+                return v as unknown as BaseExpression<TO, ExprC<FROM>>;
             }
         };
     }
