@@ -55,23 +55,27 @@ function useFetchData<T>(
   return { isLoading, data, error };
 }
 
+const defaultArgs = (name: string) => {
+  return { path: { session_name: name } };
+};
+
 export function useSourceCluster(sessionName: string) {
   const fetchSourceCluster = async (name: string) => {
-    return await clusterSource({ path: { session_name: name } });
+    return await clusterSource(defaultArgs(name));
   };
   return useFetchData(fetchSourceCluster, sessionName, "source cluster");
 }
 
 export function useTargetCluster(sessionName: string) {
   const fetchTargetCluster = async (name: string) => {
-    return await clusterTarget({ path: { session_name: name } });
+    return await clusterTarget(defaultArgs(name));
   };
   return useFetchData(fetchTargetCluster, sessionName, "target cluster");
 }
 
 export function useSessionOverview(sessionName: string) {
   const fetchSession = async (name: string) => {
-    return await sessionGet({ path: { session_name: name } });
+    return await sessionGet(defaultArgs(name));
   };
 
   return useFetchData(fetchSession, sessionName, "session overview");
@@ -79,7 +83,7 @@ export function useSessionOverview(sessionName: string) {
 
 export function useSnapshotStatus(sessionName: string) {
   const fetchSnapshot = async (name: string) => {
-    return await snapshotStatus({ path: { session_name: name } });
+    return await snapshotStatus(defaultArgs(name));
   };
 
   return useFetchData(fetchSnapshot, sessionName, "snapshot status");
@@ -87,7 +91,7 @@ export function useSnapshotStatus(sessionName: string) {
 
 export function useSnapshotConfig(sessionName: string) {
   const fetchSnapshotConfig = async (name: string) => {
-    return await snapshotConfig({ path: { session_name: name } });
+    return await snapshotConfig(defaultArgs(name));
   };
 
   return useFetchData(
@@ -99,7 +103,7 @@ export function useSnapshotConfig(sessionName: string) {
 
 export function useMetadataStatus(sessionName: string) {
   const fetchMetadata = async (name: string) => {
-    return await metadataStatus({ path: { session_name: name } });
+    return await metadataStatus(defaultArgs(name));
   };
 
   return useFetchData(fetchMetadata, sessionName, "metadata status");
@@ -107,7 +111,7 @@ export function useMetadataStatus(sessionName: string) {
 
 export function useBackfillStatus(sessionName: string) {
   const fetchBackfill = async (name: string) => {
-    return await backfillStatus({ path: { session_name: name } });
+    return await backfillStatus(defaultArgs(name));
   };
 
   return useFetchData(fetchBackfill, sessionName, "backfill status");
@@ -116,7 +120,7 @@ export function useBackfillStatus(sessionName: string) {
 export function useSnapshotIndexes(sessionName: string, indexPattern?: string) {
   const fetchSnapshotIndexes = async (name: string) => {
     return await snapshotIndexes({
-      path: { session_name: name },
+      ...defaultArgs(name),
       query: indexPattern ? { index_pattern: indexPattern } : undefined,
     });
   };
@@ -126,14 +130,14 @@ export function useSnapshotIndexes(sessionName: string, indexPattern?: string) {
 
 export function useSnapshotCreate(sessionName: string) {
   const fetchSnapshotCreate = async (name: string) => {
-    return await snapshotCreate({ path: { session_name: name } });
+    return await snapshotCreate(defaultArgs(name));
   };
   return useFetchData(fetchSnapshotCreate, sessionName, "snapshot create");
 }
 
 export function useSnapshotDelete(sessionName: string) {
   const fetchSnapshotDelete = async (name: string) => {
-    return await snapshotDelete({ path: { session_name: name } });
+    return await snapshotDelete(defaultArgs(name));
   };
   return useFetchData(fetchSnapshotDelete, sessionName, "snapshot create");
 }
