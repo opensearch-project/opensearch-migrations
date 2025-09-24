@@ -639,7 +639,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
     
     // Verify that the RFS command does NOT include --source-version parameter
     // This will cause the Java application to fail at runtime with JCommander error
-    const rfsCommand = containerDefinitions[0].Environment.find((env: any) => env.Name === 'RFS_COMMAND');
+    const rfsCommand = containerDefinitions[0].Environment.find((env: {Name: string, Value: unknown}) => env.Name === 'RFS_COMMAND');
     expect(rfsCommand).toBeDefined();
     
     // The command should NOT include --source-version, which will cause RFS to fail with required parameter error
