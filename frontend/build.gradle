@@ -33,17 +33,44 @@ def buildOutputs = [
     'out'
 ]
 
+// Register copy version file task
+CommonUtils.copyVersionFileToDockerStaging(project, "frontend", "build/")
+
+def backendApiProject = project(':console_link')
+tasks.register('syncBackendClientDefinition', Sync) {
+    dependsOn backendApiProject.tasks.named('generateOpenApiSpec')
+    from backendApiProject.layout.buildDirectory.file('openapi.json')
+    into layout.buildDirectory.dir('openapi')
+
+    outputs.file(layout.buildDirectory.file('openapi/openapi.json'))
+}
+
+tasks.register('generateBackendClient', NpmTask) {
+    dependsOn 'npmInstall'
+    dependsOn 'syncBackendClientDefinition'
+    dependsOn 'copyVersionFile_frontend'
+    group = 'build'
+    description = 'Generates the TypeScript API client from openapi.json'
+
+    args = ['run', 'openapi-ts']
+    inputs.file layout.buildDirectory.file('openapi/openapi.json')
+    outputs.dir layout.projectDirectory.dir('src/generated')
+}
+
 tasks.register('buildFrontend', NpmTask) {
     dependsOn 'npmInstall'
+    dependsOn 'generateBackendClient'
+    group = 'build'
     args = ['run', 'build']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.files fileTree(dir: '.', include: buildOutputs, exclude: buildExclusions)
 }
 
 tasks.register('lintFrontend', NpmTask) {
+    dependsOn 'buildFrontend'
+    group = 'check'
     args =  ['run', 'lint']
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
-    dependsOn 'buildFrontend'
 }
 
 tasks.register('cleanFrontend', Delete) {
@@ -52,6 +79,7 @@ tasks.register('cleanFrontend', Delete) {
 
 tasks.register('buildDockerImage', DockerBuildImage) {
     dependsOn 'buildFrontend'
+    dependsOn 'copyVersionFile_frontend'
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
     outputs.file(imageIdFile)
 

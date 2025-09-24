@@ -8,13 +8,10 @@ import uuid
 import logging
 from typing import List
 
-from .test_cases.ma_test_base import ClusterVersionCombinationUnsupported
+from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, MATestBase, MATestUserArguments
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
-
-from console_link.cli import Context
-from console_link.environment import Environment
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +31,12 @@ def pytest_addoption(parser):
     parser.addoption("--stage", action="store", default="dev")
     parser.addoption("--test_ids", action="store", default=[], type=_split_test_ids,
                      help="Specify test IDs like '0001,0003' to filter tests to execute")
+    parser.addoption("--source_version", action="store", default=None)
+    parser.addoption("--target_version", action="store", default=None)
+    parser.addoption("--keep_workflows", action="store_true", default=False,
+                     help="If set, will not delete Argo workflows created by tests")
+    parser.addoption("--reuse_clusters", action="store_true", default=False,
+                     help="If set, will reuse source and target clusters if they already exist")
     parser.addoption("--config_file_path", action="store", default="/config/migration_services.yaml",
                      help="Path to config file for console library")
     parser.addoption("--source_proxy_alb_endpoint", action="store", default=None,
@@ -55,14 +58,20 @@ def pytest_configure(config):
 
 def pytest_generate_tests(metafunc):
     if metafunc.function.__name__ == "test_migration_assistant_workflow":
-        console_config_path = metafunc.config.getoption("config_file_path")
-        console_link_env: Environment = Context(console_config_path).env
+        source_version = metafunc.config.getoption("source_version")
+        target_version = metafunc.config.getoption("target_version")
+        reuse_clusters = metafunc.config.getoption("reuse_clusters")
+        if not source_version or not target_version:
+            raise ValueError("The migration_assistant_workflow test requires both a '--source_version' "
+                             "and '--target_version' parameter")
         unique_id = metafunc.config.getoption("unique_id")
-        metafunc.config.test_summary["source_version"] = console_link_env.source_cluster.version
-        metafunc.config.test_summary["target_version"] = console_link_env.target_cluster.version
+        metafunc.config.test_summary["source_version"] = source_version
+        metafunc.config.test_summary["target_version"] = target_version
         test_ids_list = metafunc.config.getoption("test_ids")
-        test_cases_param = _generate_test_cases(console_config_path, console_link_env, unique_id, test_ids_list)
-        metafunc.parametrize("test_cases", test_cases_param)
+        user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
+                                        unique_id=unique_id, reuse_clusters=reuse_clusters)
+        test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
+        metafunc.parametrize("test_case", test_cases_param)
 
 
 def _filter_test_cases(test_ids_list: List[str]) -> List:
@@ -75,30 +84,21 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
     return filtered_cases
 
 
-def _generate_test_cases(console_config_path: str, console_link_env: Environment, unique_id: str,
-                         test_ids_list: List[str]):
-    aggregated_test_cases_to_run = []
-    isolated_test_cases_to_run = []
+def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):
+    test_cases_to_run = []
     unsupported_test_cases = []
     cases = _filter_test_cases(test_ids_list)
     for test_case in cases:
         try:
-            valid_case = test_case(console_config_path=console_config_path, console_link_env=console_link_env,
-                                   unique_id=unique_id)
-            if valid_case.run_isolated:
-                isolated_test_cases_to_run.append([valid_case])
-            else:
-                aggregated_test_cases_to_run.append(valid_case)
+            valid_case: MATestBase = test_case(user_args=user_args)
+            test_cases_to_run.append(valid_case)
         except ClusterVersionCombinationUnsupported:
             unsupported_test_cases.append(test_case)
-    logger.info(f"Aggregated test cases to run ({len(aggregated_test_cases_to_run)}) - {aggregated_test_cases_to_run}")
-    logger.info(f"Isolated test cases to run ({len(isolated_test_cases_to_run)}) - {isolated_test_cases_to_run}")
-    if aggregated_test_cases_to_run:
-        isolated_test_cases_to_run.append(aggregated_test_cases_to_run)
+    logger.info(f"Test cases to run ({len(test_cases_to_run)}) - {test_cases_to_run}")
     if unsupported_test_cases:
         logger.info(f"The following tests are incompatible with the cluster version specified and will be "
                     f"skipped: {unsupported_test_cases}")
-    return isolated_test_cases_to_run
+    return test_cases_to_run
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -148,3 +148,8 @@ def record_data(request):
 @pytest.fixture
 def unique_id(pytestconfig):
     return pytestconfig.getoption("unique_id")
+
+
+@pytest.fixture
+def keep_workflows(pytestconfig):
+    return pytestconfig.getoption("keep_workflows")

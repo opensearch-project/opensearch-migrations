@@ -14,6 +14,10 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -29,9 +33,7 @@ import reactor.util.retry.Retry;
 
 @Slf4j
 public abstract class OpenSearchClient {
-
-    protected static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
-
+    protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
     private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
     private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
@@ -57,15 +59,17 @@ public abstract class OpenSearchClient {
     protected final RestClient client;
     protected final FailedRequestsLogger failedRequestsLogger;
     private final Version version;
+    private final CompressionMode compressionMode;
 
-    protected OpenSearchClient(ConnectionContext connectionContext, Version version) {
-        this(new RestClient(connectionContext), new FailedRequestsLogger(), version);
+    protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
+        this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
     }
 
-    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version) {
+    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
         this.client = client;
         this.failedRequestsLogger = failedRequestsLogger;
         this.version = version;
+        this.compressionMode = compressionMode;
     }
 
     public Version getClusterVersion() {
@@ -79,6 +83,8 @@ public abstract class OpenSearchClient {
 
     public AwarenessAttributeSettings getAwarenessAttributeSettings() {
         String settingsPath = "_cluster/settings?flat_settings&include_defaults";
+        log.info("Starting getAwarenessAttributeSettings call to path={}", settingsPath);
+        long startTime = System.currentTimeMillis();
         var getResponse = client.getAsync(settingsPath, null)
             .flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK)
@@ -92,6 +98,10 @@ public abstract class OpenSearchClient {
             .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             .block();
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Completed getAwarenessAttributeSettings in {} ms with statusCode={}",
+                    duration,
+                    getResponse != null ? getResponse.statusCode : "null");
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or " +
             "an exception should have been thrown.");
         ObjectNode settings;
@@ -99,7 +109,7 @@ public abstract class OpenSearchClient {
         String balanceIsEnabledSetting = "cluster.routing.allocation.awareness.balance";
 
         try {
-            settings = objectMapper.readValue(getResponse.body, ObjectNode.class);
+            settings = OBJECT_MAPPER.readValue(getResponse.body, ObjectNode.class);
         } catch (Exception e) {
             throw new OperationFailed("Could not parse settings values", getResponse);
         }
@@ -213,10 +223,12 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        log.info("Starting createObjectIdempotent for path={} with settings={}", objectPath, settings);
         var objectDoesNotExist = !hasObjectCheck(objectPath, context);
         if (objectDoesNotExist) {
+            long startTime = System.currentTimeMillis();
             var putRequestContext = context == null ? null : context.createCheckRequestContext();
-            client.putAsync(objectPath, settings.toString(), putRequestContext).flatMap(resp -> {
+            var putResponse = client.putAsync(objectPath, settings.toString(), putRequestContext).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {
@@ -231,6 +243,10 @@ public abstract class OpenSearchClient {
                 .doOnError(e -> log.error(e.getMessage()))
                 .retryWhen(CREATE_ITEM_EXISTS_RETRY_STRATEGY)
                 .block();
+            
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("Completed createObjectIdempotent for path={} in {} ms with statusCode={}",
+                        objectPath, duration, putResponse != null ? putResponse.statusCode : "null");
 
             return Optional.of(settings);
         } else {
@@ -253,6 +269,8 @@ public abstract class OpenSearchClient {
         String objectPath,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        log.info("Starting hasObjectCheck for path={}", objectPath);
+        long startTime = System.currentTimeMillis();
         var requestContext = Optional.ofNullable(context)
             .map(IRfsContexts.ICheckedIdempotentPutRequestContext::createCheckRequestContext)
             .orElse(null);
@@ -271,6 +289,9 @@ public abstract class OpenSearchClient {
             .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             .block();
 
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Completed hasObjectCheck for path={} with status={} in {} ms",
+                    objectPath, getResponse.statusCode, duration);
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or " +
             "an exception should have been thrown.");
         return getResponse.statusCode == HttpURLConnection.HTTP_OK;
@@ -285,7 +306,9 @@ public abstract class OpenSearchClient {
         IRfsContexts.ICreateSnapshotContext context
     ) {
         String targetPath = SNAPSHOT_PREFIX_STR + repoName;
-        client.putAsync(targetPath, settings.toString(), context.createRegisterRequest()).flatMap(resp -> {
+        log.info("Starting registerSnapshotRepo for repoName={}", repoName);
+        long startTime = System.currentTimeMillis();
+        var putResponse = client.putAsync(targetPath, settings.toString(), context.createRegisterRequest()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
@@ -296,6 +319,9 @@ public abstract class OpenSearchClient {
             .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(SNAPSHOT_RETRY_STRATEGY)
             .block();
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Completed registerSnapshotRepo for repoName={} in {} ms with statusCode={}",
+                    repoName, duration, putResponse != null ? putResponse.statusCode : "null");
     }
 
     /*
@@ -308,7 +334,9 @@ public abstract class OpenSearchClient {
         IRfsContexts.ICreateSnapshotContext context
     ) {
         String targetPath = SNAPSHOT_PREFIX_STR + repoName + "/" + snapshotName;
-        client.putAsync(targetPath, settings.toString(), context.createSnapshotContext()).flatMap(resp -> {
+        log.info("Starting createSnapshot for repoName={}, snapshotName={}", repoName, snapshotName);
+        long startTime = System.currentTimeMillis();
+        var putResponse = client.putAsync(targetPath, settings.toString(), context.createSnapshotContext()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
@@ -319,6 +347,9 @@ public abstract class OpenSearchClient {
             .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(SNAPSHOT_RETRY_STRATEGY)
             .block();
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Completed createSnapshot for repoName={}, snapshotName={} in {} ms with statusCode={}",
+                    repoName, snapshotName, duration, putResponse != null ? putResponse.statusCode : "null");
     }
 
     /*
@@ -331,6 +362,8 @@ public abstract class OpenSearchClient {
         IRfsContexts.ICreateSnapshotContext context
     ) {
         String targetPath = SNAPSHOT_PREFIX_STR + repoName + "/" + snapshotName;
+        log.info("Starting getSnapshotStatus for repoName={}, snapshotName={}", repoName, snapshotName);
+        long startTime = System.currentTimeMillis();
         var getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK || resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
                 return Mono.just(resp);
@@ -348,11 +381,15 @@ public abstract class OpenSearchClient {
             .retryWhen(SNAPSHOT_RETRY_STRATEGY)
             .block();
 
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Completed getSnapshotStatus for repoName={}, snapshotName={} in {} ms with statusCode={}",
+                    repoName, snapshotName, duration, getResponse != null ? getResponse.statusCode : "null");
+
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an "
             + "exception should have been thrown.");
         if (getResponse.statusCode == HttpURLConnection.HTTP_OK) {
             try {
-                return Optional.of(objectMapper.readValue(getResponse.body, ObjectNode.class));
+                return Optional.of(OBJECT_MAPPER.readValue(getResponse.body, ObjectNode.class));
             } catch (Exception e) {
                 String errorMessage = "Could not parse response for: _snapshot/" + repoName + "/" + snapshotName;
                 throw new OperationFailed(errorMessage, getResponse);
@@ -384,18 +421,18 @@ public abstract class OpenSearchClient {
         return head + "... [truncated] ..." + tail;
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
                                               IRfsContexts.IRequestContext context)
     {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-        final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
+        final var docsMap = docs.stream().collect(Collectors.toMap(o ->
+            ((BaseMetadata) o.getOperation()).getId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
-            var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
+            var body = BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER);
             var additionalHeaders = new HashMap<String, List<String>>();
-            // Reduce network bandwidth by attempting request and response compression
-            if (client.supportsGzipCompression()) {
+            if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
                 RestClient.addGzipRequestHeaders(additionalHeaders);
                 RestClient.addGzipResponseHeaders(additionalHeaders);
             }
@@ -428,7 +465,7 @@ public abstract class OpenSearchClient {
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     docsMap::size,
-                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                    () -> BulkNdjson.toBulkNdjson(docsMap.values(), OBJECT_MAPPER),
                     error
                 );
             } else {

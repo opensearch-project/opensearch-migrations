@@ -8,7 +8,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo.CantParseRepoFile;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo.CannotParseRepoFile;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,33 +18,13 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
 public class SnapshotRepoData_ES_6_8 {
-
-    public static SnapshotRepoData_ES_6_8 fromRepoFile(Path filePath) {
-        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
-        try {
-            SnapshotRepoData_ES_6_8 data = mapper.readValue(
-                new File(filePath.toString()),
-                SnapshotRepoData_ES_6_8.class
-            );
-            data.filePath = filePath;
-            return data;
-        } catch (IOException e) {
-            throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
-        }
-    }
-
-    public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
-        Path file = repo.getSnapshotRepoDataFilePath();
-        if (file == null) {
-            throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
-        }
-        return fromRepoFile(file);
-    }
-
+    
     @Getter
     private Path filePath;
+    
     @Getter
     private List<Snapshot> snapshots;
+
     @Getter
     private Map<String, RawIndex> indices;
 
@@ -80,5 +60,27 @@ public class SnapshotRepoData_ES_6_8 {
         private final String name;
         private final String id;
         private final List<String> snapshots;
+    }
+
+    public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
+        Path file = repo.getSnapshotRepoDataFilePath();
+        if (file == null) {
+            throw new CannotParseRepoFile(repo);
+        }
+        return fromRepoFile(file);
+    }
+
+    public static SnapshotRepoData_ES_6_8 fromRepoFile(Path filePath) {
+        ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
+        try {
+            SnapshotRepoData_ES_6_8 data = mapper.readValue(
+                new File(filePath.toString()),
+                SnapshotRepoData_ES_6_8.class
+            );
+            data.filePath = filePath;
+            return data;
+        } catch (IOException e) {
+            throw new CannotParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
+        }
     }
 }

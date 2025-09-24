@@ -1,7 +1,11 @@
+import base64
+import json
 import time
 import logging
+
+import requests
 from requests.exceptions import ConnectionError, SSLError
-from console_link.middleware.clusters import call_api
+from console_link.middleware.clusters import call_api, CallAPIResult
 from console_link.models.cluster import HttpMethod, Cluster
 
 logger = logging.getLogger(__name__)
@@ -21,6 +25,8 @@ EXPECTED_BENCHMARK_DOCS = {
     "nyc_taxis": {"count": 1000}
 }
 
+API_ENDPOINT = "http://127.0.0.1:80/api"
+
 
 class ClusterAPIRequestError(Exception):
     pass
@@ -38,8 +44,11 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
     last_response = None
     for _ in range(1, max_attempts + 1):
         try:
-            response = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers, timeout=timeout,
-                                session=session, raise_error=False)
+            result: CallAPIResult = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers,
+                                             timeout=timeout, session=session, raise_error=False)
+            if result.error_message:
+                logger.info("Exception occurred when using call_api on cluster: ", exc_info=True)
+            response = result.http_response
             last_response = response
             if response.status_code == expected_status_code:
                 break
@@ -84,3 +93,21 @@ def wait_for_service_status(status_func, desired_status, max_attempts: int = 25,
             error_message = ""
             time.sleep(delay)
     raise ServiceStatusError(error_message)
+
+
+def convert_to_b64(data) -> str:
+    # Convert dict -> JSON string -> bytes
+    json_bytes = json.dumps(data, separators=(',', ':')).encode("utf-8")
+    # Base64 encode and return as UTF-8 string
+    return base64.b64encode(json_bytes).decode("utf-8")
+
+
+def check_ma_system_health():
+    uriSystemHealth = API_ENDPOINT + "/system/health"
+    resp = requests.get(uriSystemHealth)
+    logger.info(f"Request GET {uriSystemHealth} returned response {resp.status_code}, body: {resp.json()}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "checks" in data
+    assert all(val == "ok" for val in data["checks"].values())

@@ -99,7 +99,7 @@ public interface GlobalMetadata {
         SnapshotRepo.Provider getRepoDataProvider();
     }
 
-     class CantFindSnapshotInRepo extends RfsException {
+    class CantFindSnapshotInRepo extends RfsException {
         public CantFindSnapshotInRepo(String snapshotName) {
             super("Can't find snapshot in repo: " + snapshotName);
         }

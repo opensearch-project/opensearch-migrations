@@ -4,9 +4,10 @@ from kubernetes import client, config, stream
 from kubernetes.client import V1Pod
 from kubernetes.stream.ws_client import WSClient
 import logging
+import shlex
 import subprocess
 import time
-from typing import List
+from typing import Dict, List
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,20 +40,37 @@ class K8sService:
             return None
 
     def wait_for_all_healthy_pods(self, timeout: int = 180) -> bool:
-        """Waits for all pods in the namespace to be in a ready state, fails after the specified timeout in seconds."""
+        """Waits for all pods in the namespace to be in a ready state,
+        ignoring completed pods, and fails after the specified timeout in seconds.
+        """
         logger.info("Waiting for pods to become ready...")
         start_time = time.time()
 
+        # Exclude Argo workflow pods by label (pods without the label only)
+        argo_exclude_selector = '!workflows.argoproj.io/workflow'
+
         while time.time() - start_time < timeout:
-            pods = self.k8s_client.list_namespaced_pod(self.namespace).items
-            unhealthy_pods = [pod.metadata.name for pod in pods if not self._is_pod_ready(pod)]
+            pods = self.k8s_client.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector=argo_exclude_selector
+            ).items
+
+            # Exclude pods that are in the "Succeeded" phase (Completed jobs)
+            unhealthy_pods = [
+                pod.metadata.name
+                for pod in pods
+                if pod.status.phase != "Succeeded" and not self._is_pod_ready(pod)
+            ]
             if not unhealthy_pods:
-                logger.info("All pods are healthy.")
+                logger.info("All non-workflow pods are healthy.")
                 return True
+            logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pods)}]")
             time.sleep(3)
 
-        raise TimeoutError(f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
-                           f"Unhealthy pods: {', '.join(unhealthy_pods)}")
+        raise TimeoutError(
+            f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
+            f"Unhealthy pods: {', '.join(unhealthy_pods)}"
+        )
 
     def _is_pod_ready(self, pod: V1Pod) -> bool:
         """Checks if a pod is in a Ready state."""
@@ -65,7 +83,7 @@ class K8sService:
         logger.debug("Retrieving the latest migration console pod...")
         pods = self.k8s_client.list_namespaced_pod(
             namespace=self.namespace,
-            label_selector=f"app={self.namespace}-migration-console",
+            label_selector="app=migration-console",
             field_selector="status.phase=Running",
             limit=1
         ).items
@@ -79,7 +97,8 @@ class K8sService:
     def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
         console_pod_id = self.get_migration_console_pod_id()
-        logger.info(f"Executing command in pod: {console_pod_id}")
+        printable_cmd = " ".join(command_list)
+        logger.info(f"Executing command [{printable_cmd}] in pod: {console_pod_id}")
 
         # Open a streaming connection
         resp = stream.stream(
@@ -105,6 +124,18 @@ class K8sService:
                 if resp.peek_stderr():
                     print(resp.read_stderr(), end="")
         return resp
+
+    def copy_log_files(self, destination: str):
+        console_pod_id = self.get_migration_console_pod_id()
+        command_list = [
+            "sh",
+            "-c",
+            f"rm -rf {destination} && mkdir -p {destination} && "
+            f"kubectl -n ma exec {console_pod_id} -- sh -c "
+            f"'cd /shared-logs-output && tar -cf - fluentbit-*' | "
+            f"tar -xf - -C {destination}"
+        ]
+        self.run_command(command=command_list, ignore_errors=True)
 
     def delete_all_pvcs(self) -> None:
         """Deletes all PersistentVolumeClaims (PVCs) in the namespace."""
@@ -150,13 +181,8 @@ class K8sService:
             command.extend(["-f", values_file])
         return self.run_command(command)
 
-    def helm_dependency_update(self, script_path: str) -> CompletedProcess:
-        logger.info("Updating Helm dependencies")
-        command = [script_path]
-        return self.run_command(command, stdout=None, stderr=None)
-
     def helm_install(self, chart_path: str, release_name: str,
-                     values_file: str = None) -> CompletedProcess | bool:
+                     values_file: str = None, values: Dict[str, str] = None) -> CompletedProcess | bool:
         helm_release_exists = self.check_helm_release_exists(release_name=release_name)
         if helm_release_exists:
             logger.info(f"Helm release {release_name} already exists, skipping install")
@@ -165,6 +191,9 @@ class K8sService:
         command = ["helm", "install", release_name, chart_path, "-n", self.namespace, "--create-namespace"]
         if values_file:
             command.extend(["-f", values_file])
+        if values:
+            for key, value in values.items():
+                command.extend(["--set", f"{key}={shlex.quote(str(value))}"])
         return self.run_command(command)
 
     def helm_uninstall(self, release_name: str) -> CompletedProcess | bool:
@@ -175,3 +204,60 @@ class K8sService:
 
         logger.info(f"Uninstalling {release_name}...")
         return self.run_command(["helm", "uninstall", release_name, "-n", self.namespace])
+
+    def get_helm_installations(self) -> List[str]:
+        target_namespace = self.namespace
+        # Use helm list with short output format to get just the release names
+        command = ["helm", "list", "-n", target_namespace, "--short"]
+        
+        try:
+            result = self.run_command(command)
+            if result and result.stdout:
+                # Split the output by lines and filter out empty lines
+                release_names = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+                logger.info(f"Found {len(release_names)} helm installations in "
+                            f"namespace '{target_namespace}': {release_names}")
+                return release_names
+            else:
+                logger.info(f"No helm installations found in namespace '{target_namespace}'")
+                return []
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to list helm installations in namespace '{target_namespace}': {e.stderr}")
+            raise HelmCommandFailed(f"Helm list command failed: {e.stderr}")
+
+    def get_configmaps(self) -> List[str]:
+        target_namespace = self.namespace
+        # Use kubectl get configmaps to get just the ConfigMap names
+        command = ["kubectl", "get", "configmaps", "-n", target_namespace, "--no-headers", "-o",
+                   "custom-columns=:metadata.name"]
+        
+        try:
+            result = self.run_command(command)
+            if result and result.stdout:
+                # Split the output by lines and filter out empty lines
+                configmap_names = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+                logger.info(f"Found {len(configmap_names)} ConfigMaps in "
+                            f"namespace '{target_namespace}': {configmap_names}")
+                return configmap_names
+            else:
+                logger.info(f"No ConfigMaps found in namespace '{target_namespace}'")
+                return []
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to list ConfigMaps in namespace '{target_namespace}': {e.stderr}")
+            raise subprocess.CalledProcessError(e.returncode, e.cmd, e.stderr)
+
+    def delete_configmap(self, configmap_name: str) -> CompletedProcess | bool:
+        target_namespace = self.namespace
+        
+        # Check if ConfigMap exists first
+        check_command = ["kubectl", "get", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"]
+        check_result = self.run_command(check_command, ignore_errors=True)
+        
+        if not check_result or not check_result.stdout.strip():
+            logger.info(f"ConfigMap '{configmap_name}' doesn't exist in namespace '{target_namespace}', "
+                        f"skipping delete")
+            return True
+        
+        logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
+        delete_command = ["kubectl", "delete", "configmap", configmap_name, "-n", target_namespace]
+        return self.run_command(delete_command)

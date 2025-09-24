@@ -50,18 +50,17 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 ### Migration Paths
 
-| **Source Version**   | **OpenSearch 1.3**                                                                     | **OpenSearch 2.19**                                                                    | **OpenSearch 3.0**                                                                     |
-| -------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Elasticsearch 5.6    | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 6.8    | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 7.10.2 | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 7.17   | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| Elasticsearch 8.x      |                                                                                        | :white_check_mark:                                                                     | :white_check_mark:                                                                     |:white_check_mark:                                                                     |
-| OpenSearch 1.3       | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| OpenSearch 2.19      |                                                                                        | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
-| OpenSearch 3.x       |                                                                                        |                                                                                        | :soon: [link](https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207)                                                                     |
-| Elasticsearch 2.3    | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1069) |
-| Elasticsearch 1.5    | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1070) | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1070) | :soon: [link](https://github.com/opensearch-project/opensearch-migrations/issues/1070) |
+| **Source Version** | **OpenSearch 1.3**                                                                     | **OpenSearch 2.19**                                                                    | **OpenSearch 3.0**                                                                     |
+|-------------------| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Elasticsearch 1.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 2.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 5.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 6.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 7.x | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| Elasticsearch 8.x |                                                                                        | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| OpenSearch 1.3    | :white_check_mark:                                                                     | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| OpenSearch 2.19   |                                                                                        | :white_check_mark:                                                                     | :white_check_mark:                                                                     |
+| OpenSearch 3.x    |                                                                                        |                                                                                        | :soon: [link](https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207)                                                                     |
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
@@ -110,7 +109,7 @@ https://opensearch.atlassian.net/
 
 ## User Guide Documentation
 
-User guide documentation is available in the [OpenSearch Migrations Wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
+User guide documentation is available in the [OpenSearch Migration Assistant documentation](https://docs.opensearch.org/latest/migration-assistant/).
 
 ## Getting Started
 

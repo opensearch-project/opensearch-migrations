@@ -428,7 +428,7 @@ function routeHttpRequest(source_document, context) {
 }
 
 function processBulkIndex(docBackfillPair, context) {
-    const parameters = docBackfillPair.index
+    const parameters = docBackfillPair.operation;
     const sourceIndexName = parameters._index;
     const typeName = parameters._type ?? "_doc";
 
@@ -441,7 +441,7 @@ function processBulkIndex(docBackfillPair, context) {
 
     if (!targetIndex) return [];
 
-    docBackfillPair.index = retargetCommandParameters(parameters, targetIndex);
+    docBackfillPair.operation = retargetCommandParameters(parameters, targetIndex);
     return docBackfillPair;
 }
 
@@ -462,7 +462,7 @@ function detectAndTransform(document, context) {
         return processMetadataRequest(document, context);
     } else if (document.has("method") && document.has("URI")) {
         return routeHttpRequest(document, context);
-    } else if (document.has("index") && document.has("source")) {
+    } else if (document.has("schema") && document.get("schema") === "rfs-opensearch-bulk-v1") {
         return processBulkIndex(document, context);
     } else {
         return document;
@@ -486,5 +486,10 @@ function main(context) {
     };
 }
 
+// Visibility for testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = main;
+}
+
 // Entrypoint function
-(() => main)()
+(() => main)();

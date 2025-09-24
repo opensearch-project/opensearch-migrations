@@ -30,8 +30,10 @@ class DataGeneratorEndToEndTest {
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.supportedSourcesOrTargets(true)
                 .stream()
-                // Exclude ES 5 from DataGenerator as not currently supported
+                // Exclude ES 5 and ES 2 from DataGenerator as not currently supported
                 .filter(version -> !VersionMatchers.isES_5_X.test(version.getVersion()))
+                .filter(version -> !VersionMatchers.isES_2_X.test(version.getVersion()))
+                .filter(version -> !VersionMatchers.isES_1_X.test(version.getVersion()))
                 .map(Arguments::of);
     }
 

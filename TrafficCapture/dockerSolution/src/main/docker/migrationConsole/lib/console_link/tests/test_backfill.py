@@ -1,16 +1,17 @@
 import json
 import os
 import pathlib
-from unittest.mock import ANY
+from unittest.mock import ANY, MagicMock
+from datetime import datetime, timezone
 
 import pytest
 import requests
-import requests_mock
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.step_state import StepStateWithPause
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
-                                              WorkingIndexDoesntExist)
+                                              WorkingIndexDoesntExist, compute_dervived_values)
 from console_link.models.ecs_service import ECSService
 from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
 from console_link.models.utils import DeploymentStatus
@@ -42,17 +43,6 @@ def test_get_backfill_valid_docker_rfs():
     docker_rfs_backfill = get_backfill(docker_rfs_config, target_cluster=create_valid_cluster())
     assert isinstance(docker_rfs_backfill, DockerRFSBackfill)
     assert isinstance(docker_rfs_backfill, Backfill)
-
-
-def test_get_backfill_rfs_missing_target_cluster():
-    docker_rfs_config = {
-        "reindex_from_snapshot": {
-            "docker": None
-        }
-    }
-    with pytest.raises(ValueError) as excinfo:
-        get_backfill(docker_rfs_config, None)
-    assert "target_cluster" in str(excinfo.value.args[0])
 
 
 def test_get_backfill_valid_ecs_rfs():
@@ -199,24 +189,32 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(e
 
 
 def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
-    target = create_valid_cluster()
     mocked_instance_status = DeploymentStatus(
         desired=1,
         running=1,
         pending=0
     )
-    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_instance_status)
     with open(TEST_DATA_DIRECTORY / "migrations_working_state_search.json") as f:
         data = json.load(f)
         total_shards = data['hits']['total']['value']
-    with requests_mock.Mocker() as rm:
-        rm.get(f"{target.endpoint}/.migrations_working_state", status_code=200)
-        rm.get(f"{target.endpoint}/.migrations_working_state/_search",
-               status_code=200,
-               json=data)
-        value = ecs_rfs_backfill.get_status(deep_check=True)
+    
+    # Mock the deployment status retrieval
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                               return_value=mocked_instance_status)
+    
+    # Mock the detailed status function to return a known value
+    mocked_detailed_status = f"Work items total: {total_shards}"
+    mock_detailed = mocker.patch('console_link.models.backfill_rfs.get_detailed_status',
+                                 autospec=True, return_value=mocked_detailed_status)
 
+    # Call the function being tested
+    value = ecs_rfs_backfill.get_status(deep_check=True)
+
+    # Verify the mocks were called
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    mock_detailed.assert_called_once()
+    
+    # Verify the output
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
     assert str(mocked_instance_status) in value.value[1]
@@ -232,10 +230,18 @@ def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
     mock_ecs = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                    return_value=mocked_instance_status)
     mock_api = mocker.patch.object(Cluster, 'call_api', side_effect=requests.exceptions.RequestException())
+
+    # Call function being tested
     result = ecs_rfs_backfill.get_status(deep_check=True)
-    assert "Working state index does not yet exist" in caplog.text
-    mock_ecs.assert_called_once()
+    
+    # Verify the logs contain failure message
+    assert "Failed to get detailed status" in caplog.text
+    
+    # Verify mock calls
+    mock_ecs.assert_called_once_with(ecs_rfs_backfill.ecs_client)
     mock_api.assert_called_once()
+    
+    # Verify result
     assert result.success
     assert result.value[0] == BackfillStatus.RUNNING
 
@@ -320,3 +326,81 @@ def test_docker_backfill_not_implemented_commands():
 
     with pytest.raises(NotImplementedError):
         docker_rfs_backfill.scale(units=3)
+
+
+class TestComputeDerivedValues:
+    
+    def setup_method(self):
+        # Create a mock for the target_cluster
+        self.mock_cluster = MagicMock()
+        self.mock_cluster.call_api.return_value.json.return_value = {
+            "aggregations": {"max_completed": {"value": 1000000000}}
+        }
+        
+        # Test index name
+        self.test_index = ".migrations_working_state"
+    
+    def test_zero_indices(self):
+        """Test compute_dervived_values when there are 0 indices to migrate."""
+        # When total=0, it should report as COMPLETED
+        total = 0
+        completed = 0
+        started_epoch = None
+        active_workers = False
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
+        )
+        
+        assert status == StepStateWithPause.COMPLETED
+        assert percentage_completed == 100.0
+        assert eta_ms is None
+        assert finished_iso is not None  # Should have a timestamp for completion
+    
+    def test_all_completed(self):
+        """Test compute_dervived_values when all indices are completed."""
+        total = 10
+        completed = 10
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        active_workers = False
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
+        )
+        
+        assert status == StepStateWithPause.COMPLETED
+        assert percentage_completed == 100.0
+        assert eta_ms is None
+        assert finished_iso is not None
+    
+    def test_partially_completed(self):
+        """Test compute_dervived_values when some indices are still in progress."""
+        total = 10
+        completed = 5
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        active_workers = True
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
+        )
+        
+        assert status == StepStateWithPause.RUNNING
+        assert percentage_completed == 50.0
+        assert eta_ms is not None  # Should have an ETA
+        assert finished_iso is None  # Not completed yet
+    
+    def test_partially_completed_paused(self):
+        """Test compute_dervived_values when some indices are completed but workers are paused."""
+        total = 10
+        completed = 5
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600  # Started 1 hour ago
+        active_workers = False
+        
+        finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, total, completed, started_epoch, active_workers
+        )
+        
+        assert status == StepStateWithPause.PAUSED
+        assert percentage_completed == 50.0
+        assert eta_ms is None  # No ETA when paused
+        assert finished_iso is None  # Not completed yet

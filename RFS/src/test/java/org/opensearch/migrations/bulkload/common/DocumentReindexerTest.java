@@ -1,11 +1,12 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -13,7 +14,6 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,7 +78,7 @@ class DocumentReindexerTest {
         verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkOperationSpec>>)(Class<?>) List.class);
         verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getAllValues();
@@ -116,7 +116,7 @@ class DocumentReindexerTest {
         verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkOperationSpec>>)(Class<?>) List.class);
         verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getAllValues();
@@ -133,7 +133,7 @@ class DocumentReindexerTest {
         var replacedSourceDoc = Map.of("simpleKey", "simpleValue");
         IJsonTransformer transformer = originalJsons -> {
             ((List<Map<String, Object>>) originalJsons)
-                    .forEach(json -> json.put("source", replacedSourceDoc));
+                    .forEach(json -> json.put("document", replacedSourceDoc));
             return originalJsons;
         };
         int numDocs = 5;
@@ -166,15 +166,16 @@ class DocumentReindexerTest {
         // Capture the bulk request to verify its contents
         @SuppressWarnings("unchecked")
         var bulkRequestCaptor = ArgumentCaptor.forClass(
-            (Class<List<BulkDocSection>>)(Class<?>) List.class
+            (Class<List<BulkOperationSpec>>)(Class<?>) List.class
         );
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(numDocs, capturedBulkRequests.size(),
             "All documents should be in a single bulk request after transformation");
-        assertTrue(BulkDocSection.convertToBulkRequestBody(capturedBulkRequests).contains(
-                new ObjectMapper().writeValueAsString(replacedSourceDoc)));
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        assertTrue(BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper).contains(
+            mapper.writeValueAsString(replacedSourceDoc)));
     }
 
     @Test
@@ -197,11 +198,13 @@ class DocumentReindexerTest {
         verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkOperationSpec>>)(Class<?>) List.class);
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
-        assertTrue(capturedBulkRequests.get(0).asBulkIndexString().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES_PER_BULK_REQUEST, "Bulk request should be larger than max bulk size");
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var actualBulkRequestSize = BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper).length();
+        assertTrue(actualBulkRequestSize > MAX_BYTES_PER_BULK_REQUEST, "Bulk request should be larger than max bulk size");
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
     }
 
@@ -225,12 +228,14 @@ class DocumentReindexerTest {
         verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkOperationSpec>>)(Class<?>) List.class);
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
-        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asBulkIndexString());    }
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var bulkNdjson = BulkNdjson.toBulkNdjson(capturedBulkRequests, mapper);
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", bulkNdjson);    }
 
     @Test
     void reindex_shouldRespectMaxConcurrentRequests() {
@@ -303,36 +308,37 @@ class DocumentReindexerTest {
 
         // Capture the bulk requests sent to the mock client
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkOperationSpec>>)(Class<?>) List.class);
         verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(3, capturedBulkRequests.size(), "Should contain 3 transformed documents");
 
         // Verify that the transformation was applied correctly
-        BulkDocSection transformedDoc1 = capturedBulkRequests.get(0);
-        BulkDocSection transformedDoc2 = capturedBulkRequests.get(1);
-        BulkDocSection transformedDoc3 = capturedBulkRequests.get(2);
+        var transformedDoc1 = capturedBulkRequests.get(0);
+        var transformedDoc2 = capturedBulkRequests.get(1);
+        var transformedDoc3 = capturedBulkRequests.get(2);
 
-        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc1.asBulkIndexString(),
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", BulkNdjson.toBulkNdjson(List.of(transformedDoc1), mapper),
                 "Document 1 should have _type removed");
-        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc2.asBulkIndexString(),
+        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", BulkNdjson.toBulkNdjson(List.of(transformedDoc2), mapper),
                 "Document 2 should remain unchanged as _type is not defined");
-        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc3.asBulkIndexString(),
+        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}\n", BulkNdjson.toBulkNdjson(List.of(transformedDoc3), mapper),
                 "Document 3 should have _type removed");
     }
 
     private RfsLuceneDocument createTestDocument(int id) {
-        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"value\"}", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"value\"}", null, RfsDocumentOperation.INDEX);
     }
 
     private RfsLuceneDocument createTestDocumentWithWhitespace(int id) {
-        return new RfsLuceneDocument(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null, RfsDocumentOperation.INDEX);
     }
 
     private RfsLuceneDocument createLargeTestDocument(int id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null, RfsDocumentOperation.INDEX);
     }
 
     /**
@@ -344,6 +350,6 @@ class DocumentReindexerTest {
      */
     private RfsLuceneDocument createTestDocumentWithType(int id, String type) {
         String source = "{\"field\":\"value\"}";
-        return new RfsLuceneDocument(id, String.valueOf(id), type, source, null);
+        return new RfsLuceneDocument(id, String.valueOf(id), type, source, null, RfsDocumentOperation.INDEX);
     }
 }

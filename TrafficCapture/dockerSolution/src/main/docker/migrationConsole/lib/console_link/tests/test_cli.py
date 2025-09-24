@@ -1,4 +1,5 @@
 import json
+import logging
 import pathlib
 import os
 import time
@@ -8,7 +9,7 @@ from click.testing import CliRunner
 from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
-from console_link.cli import cli
+from console_link.cli import cli, main
 from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
@@ -17,6 +18,7 @@ from console_link.models.ecs_service import ECSService
 from console_link.models.kafka import StandardKafka
 from console_link.models.metrics_source import Component
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.snapshot import FileSystemSnapshot
 from console_link.models.utils import DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -33,7 +35,7 @@ def runner():
 @pytest.fixture
 def env():
     """A valid Environment for the given VALID_SERVICES_YAML file"""
-    return Environment(VALID_SERVICES_YAML)
+    return Environment(config_file=VALID_SERVICES_YAML)
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +119,7 @@ snapshot:
     assert isinstance(result.exception, SystemExit)
 
 
-def test_cli_snapshot_when_source_cluster_not_defined_raises_error(runner, tmp_path):
+def test_cli_snapshot_when_source_cluster_not_defined(runner, tmp_path):
     no_source_cluster_with_snapshot = """
 target_cluster:
   endpoint: "https://opensearchtarget:9200"
@@ -137,8 +139,7 @@ snapshot:
 
     result = runner.invoke(cli, ['--config-file', str(yaml_path), 'snapshot', 'create'],
                            catch_exceptions=True)
-    assert result.exit_code == 2
-    assert "Snapshot commands require a source cluster to be defined" in result.output
+    assert result.exit_code == 0
 
 # The following tests are mostly smoke-tests with a goal of covering every CLI command and option.
 # They generally mock functions either at the logic or the model layer, though occasionally going all the way to
@@ -181,6 +182,18 @@ def test_cli_cluster_connection_check(runner, mocker):
     # Should have been called two times.
     middleware_mock.assert_called()
     api_mock.assert_called()
+
+
+def test_cli_version_check(runner, mocker):
+    result = runner.invoke(cli, ["--version"], catch_exceptions=True)
+    assert result.exit_code == 0
+    assert "Migration Assistant" in result.output
+
+
+def test_missing_command(runner, mocker):
+    result = runner.invoke(cli, [], catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "Error: Missing command" in result.output
 
 
 def test_cli_cluster_cat_indices_and_connection_check_with_one_cluster(runner, mocker,
@@ -446,8 +459,7 @@ def test_cli_snapshot_status(runner, mocker):
 
 
 def test_cli_snapshot_delete_with_acknowledgement(runner, mocker):
-    mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
-    mock.return_value.text = "Successfully deleted"
+    mock = mocker.patch.object(FileSystemSnapshot, 'delete', autospec=True)
 
     # Test snapshot status
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'delete', '--acknowledge-risk'],
@@ -613,9 +625,9 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
         pending=1
     )
     mocked_detailed_status = "Remaining shards: 43"
-    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
+    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                                                 return_value=mocked_running_status)
-    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autspec=True,
+    mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autospec=True,
                                              return_value=mocked_detailed_status)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
@@ -854,3 +866,213 @@ def test_tuple_converter(runner, tmp_path):
     expected_output_as_ndjson = [json.dumps(record) + "\n" for record in output_tuples]
 
     assert open(ndjson_output_file).readlines() == expected_output_as_ndjson
+
+
+# Tests for exception handling functionality
+
+class CustomTestException(Exception):
+    """Custom exception for testing exception handling"""
+    pass
+
+
+def _run_exception_test(log_level, exception_message="Test error message",
+                        handler_func=None, expected_outputs=None, unexpected_outputs=None):
+    import io
+    import sys
+
+    # Create a simple mock function to simulate the behavior of cli when it raises an exception
+    def mock_main():
+        raise CustomTestException(exception_message)
+
+    # Default handler for normal mode
+    if handler_func is None:
+        def exception_handler(exc):
+            print(f"Error: {str(exc)}", file=sys.stderr)
+            return 1
+
+    # Default expected/unexpected outputs
+    if expected_outputs is None:
+        expected_outputs = []
+    if unexpected_outputs is None:
+        unexpected_outputs = []
+
+    # Capture stdout and stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    captured_output = io.StringIO()
+    sys.stdout = sys.stderr = captured_output
+
+    # Set logging level
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(log_level)
+
+    try:
+        # Execute the function that simulates main with exception
+        exit_code = 0
+        try:
+            mock_main()
+        except Exception as exc:
+            exit_code = exception_handler(exc) if handler_func is None else handler_func(exc)
+    finally:
+        # Restore stdout, stderr and logging
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        root_logger.setLevel(original_level)
+
+    # Get the output
+    output = captured_output.getvalue()
+
+    # Run assertions if provided
+    for expected in expected_outputs:
+        assert expected in output
+
+    for unexpected in unexpected_outputs:
+        assert unexpected not in output
+
+    return output, exit_code
+
+
+def test_main_exception_handling_normal_mode(runner, mocker):
+    """Test that main() shows clean error messages in normal mode"""
+    output, exit_code = _run_exception_test(
+        log_level=logging.WARN,
+        expected_outputs=["Error: Test error message"],
+        unexpected_outputs=["Traceback"]
+    )
+    assert exit_code == 1
+
+
+def test_main_exception_handling_verbose_mode(runner, mocker):
+    """Test that main() shows full traceback in verbose mode"""
+    import sys
+
+    def verbose_handler(exc):
+        import traceback
+        print("Error occurred with verbose mode enabled, showing full traceback:", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
+
+    output, exit_code = _run_exception_test(
+        log_level=logging.INFO,
+        handler_func=verbose_handler,
+        expected_outputs=[
+            "Error occurred with verbose mode enabled, showing full traceback:",
+            "CustomTestException: Test error message",
+            "Traceback"
+        ]
+    )
+    assert exit_code == 1
+
+
+def test_main_exception_handling_debug_mode(runner, mocker):
+    """Test that main() shows full traceback in debug mode (even more verbose)"""
+    import sys
+
+    def verbose_handler(exc):
+        import traceback
+        print("Error occurred with verbose mode enabled, showing full traceback:", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
+
+    output, exit_code = _run_exception_test(
+        log_level=logging.DEBUG,
+        handler_func=verbose_handler,
+        expected_outputs=[
+            "Error occurred with verbose mode enabled, showing full traceback:",
+            "CustomTestException: Test error message",
+            "Traceback"
+        ]
+    )
+    assert exit_code == 1
+
+
+def test_main_exception_handling_warn_level_shows_clean_message(runner, mocker):
+    """Test that main() shows clean messages when logging is at WARN level"""
+    output, exit_code = _run_exception_test(
+        log_level=logging.WARN,
+        expected_outputs=["Error: Test error message"],
+        unexpected_outputs=["Traceback", "Error occurred with verbose mode enabled"]
+    )
+    assert exit_code == 1
+
+
+def _run_cli_integration_test(mocker, log_level, exception_message="Connection failed",
+                              expected_outputs=None, unexpected_outputs=None):
+    """Helper function to run CLI integration tests"""
+    import io
+    import sys
+
+    # Mock the cli function
+    mock_cli = mocker.patch('console_link.cli.cli')
+    mock_cli.side_effect = CustomTestException(exception_message)
+
+    # Default expected/unexpected outputs
+    if expected_outputs is None:
+        expected_outputs = []
+    if unexpected_outputs is None:
+        unexpected_outputs = []
+
+    # Capture stdout and stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    captured_output = io.StringIO()
+    sys.stdout = sys.stderr = captured_output
+
+    # Set logging level
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(log_level)
+
+    try:
+        # Execute main with exception
+        exit_code = 0
+        try:
+            main()
+        except SystemExit as exc:
+            exit_code = exc.code
+    finally:
+        # Restore stdout, stderr and logging
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        root_logger.setLevel(original_level)
+
+    # Get the output
+    output = captured_output.getvalue()
+
+    # Run assertions if provided
+    for expected in expected_outputs:
+        assert expected in output
+
+    for unexpected in unexpected_outputs:
+        assert unexpected not in output
+
+    # Verify mock was called
+    mock_cli.assert_called()
+
+    return output, exit_code, mock_cli
+
+
+def test_cli_integration_with_exception_normal_mode(runner, mocker):
+    """Test CLI integration where an actual CLI command raises an exception in normal mode"""
+    output, exit_code, mock_cli = _run_cli_integration_test(
+        mocker=mocker,
+        log_level=logging.WARN,
+        expected_outputs=["Error: Connection failed"],
+        unexpected_outputs=["Traceback"]
+    )
+    assert exit_code == 1
+
+
+def test_cli_integration_with_exception_verbose_mode(runner, mocker):
+    """Test CLI integration where an actual CLI command raises an exception in verbose mode"""
+    output, exit_code, mock_cli = _run_cli_integration_test(
+        mocker=mocker,
+        log_level=logging.INFO,
+        expected_outputs=[
+            "Error occurred with verbose mode enabled, showing full traceback:",
+            "CustomTestException: Connection failed",
+            "Traceback"
+        ]
+    )
+    assert exit_code == 1

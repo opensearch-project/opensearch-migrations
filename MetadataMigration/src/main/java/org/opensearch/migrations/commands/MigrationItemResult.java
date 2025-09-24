@@ -6,13 +6,17 @@ import java.util.List;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
+import org.opensearch.migrations.cli.Transformers;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.apache.logging.log4j.util.Strings;
 
 /** All shared cli result information */
 public interface MigrationItemResult extends Result {
     Clusters getClusters();
     Items getItems();
+    Transformers getTransformations();
 
     default List<String> collectErrors() {
         var errors = new ArrayList<String>();
@@ -37,6 +41,9 @@ public interface MigrationItemResult extends Result {
         if (getItems() != null) {
             sb.append(getItems().asCliOutput() + System.lineSeparator());
         }
+        if (getTransformations() != null) {
+            sb.append(getTransformations().asCliOutput()).append(System.lineSeparator());
+        }
         sb.append("Results:" + System.lineSeparator());
         var innerErrors = collectErrors();
         if (Strings.isNotBlank(getErrorMessage()) || !innerErrors.isEmpty()) {
@@ -52,5 +59,37 @@ public interface MigrationItemResult extends Result {
             sb.append(Format.indentToLevel(1) + getExitCode() + " issue(s) detected" + System.lineSeparator());
         }
         return sb.toString();
+    }
+    
+    @Override
+    default JsonNode asJsonOutput() {
+        var root = JsonNodeFactory.instance.objectNode();
+
+        if (getClusters() != null) {
+            root.set("clusters", getClusters().asJsonOutput());
+        }
+
+        if (getItems() != null) {
+            root.set("items", getItems().asJsonOutput());
+        }
+
+        if (getTransformations() != null) {
+            root.set("transformations", getTransformations().asJsonOutput());
+        }
+
+        var errors = collectErrors();
+        var errorsArray = root.putArray("errors");
+        for (var err : errors) {
+            errorsArray.add(err);
+        }
+
+        int exitCode = getExitCode();
+        root.put("errorCode", exitCode);
+        if (Strings.isNotBlank(getErrorMessage())) {
+            String errorMessage = getErrorMessage();
+            root.put("errorMessage", errorMessage);
+        }
+
+        return root;
     }
 }

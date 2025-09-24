@@ -1,4 +1,4 @@
-const { main } = require("../src/metadataUpdater.js");
+const main = require("../src/metadataUpdater");
 
 let templateDescription = {
   template: {
@@ -192,7 +192,16 @@ describe("Metadata updater internals", () => {
   });
 
   test("Decomposes Maps", () => {
-    const updaterInstance = main(simpleConfig);
+    let simpleConfigMap = new Map([
+        [
+        "rules", Array.of(new Map( [
+            ["when", new Map([["a", 1]])],
+          ["set", new Map([["a", 2]])],
+          ["remove", Array.of("c")]
+      ]))]]
+    );
+
+    const updaterInstance = main(simpleConfigMap);
 
     const testObj = new Map([
       ["a", 1],

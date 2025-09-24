@@ -38,7 +38,7 @@ class MigrateTest {
         var result = meta.migrate(args).execute(context);
 
         assertThat(result.getExitCode(), equalTo(Migrate.UNEXPECTED_FAILURE_CODE));
-        assertThat(result.getErrorMessage(), containsString("Unexpected failure: host is null"));
+        assertThat(result.getErrorMessage(), containsString("Unexpected failure: No host was found"));
     }
 
     @Test

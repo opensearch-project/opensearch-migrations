@@ -1,7 +1,10 @@
 package org.opensearch.migrations;
 
+import java.util.ArrayList;
 import java.util.List;
 
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
@@ -64,6 +67,12 @@ public class CreateSnapshot {
                 description = "The AWS Region the S3 bucket is in, like: us-east-2")
         public String s3Region;
 
+        @Parameter(
+                names = {"--s3-endpoint" },
+                required = false,
+                description = "The S3 endpoint setting to specify when creating a snapshot repository")
+        public String s3Endpoint;
+
         @ParametersDelegate
         public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 
@@ -99,6 +108,28 @@ public class CreateSnapshot {
         String otelCollectorEndpoint;
     }
 
+    public static class EnvParameters {
+
+        private EnvParameters() {
+            throw new IllegalStateException("EnvParameters utility class should not instantiated");
+        }
+
+        public static void injectFromEnv(Args args) {
+            List<String> addedEnvParams = new ArrayList<>();
+            if (args.sourceArgs.username == null && System.getenv(ArgNameConstants.SOURCE_USERNAME_ENV_ARG) != null) {
+                args.sourceArgs.username = System.getenv(ArgNameConstants.SOURCE_USERNAME_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.SOURCE_USERNAME_ENV_ARG);
+            }
+            if (args.sourceArgs.password == null && System.getenv(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG) != null) {
+                args.sourceArgs.password = System.getenv(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.SOURCE_PASSWORD_ENV_ARG);
+            }
+            if (!addedEnvParams.isEmpty()) {
+                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            }
+        }
+    }
+
     @Getter
     @AllArgsConstructor
     public static class S3RepoInfo {
@@ -107,10 +138,11 @@ public class CreateSnapshot {
     }
 
     public static void main(String[] args) throws Exception {
-        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_SOURCE_ARGS)));
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
+        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();
@@ -160,6 +192,7 @@ public class CreateSnapshot {
                 client,
                 arguments.s3RepoUri,
                 arguments.s3Region,
+                arguments.s3Endpoint,
                 arguments.indexAllowlist,
                 arguments.maxSnapshotRateMBPerNode,
                 arguments.s3RoleArn,

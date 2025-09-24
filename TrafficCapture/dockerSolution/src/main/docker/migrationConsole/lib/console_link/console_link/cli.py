@@ -13,6 +13,7 @@ import console_link.middleware.replay as replay_
 import console_link.middleware.kafka as kafka_
 import console_link.middleware.tuples as tuples_
 
+from console_link.models.container_utils import get_version_str
 from console_link.models.cluster import HttpMethod
 from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
@@ -31,22 +32,52 @@ class Context(object):
     def __init__(self, config_file) -> None:
         self.config_file = config_file
         try:
-            self.env = Environment(config_file)
+            self.env = Environment(config_file=config_file)
         except Exception as e:
             raise click.ClickException(str(e))
         self.json = False
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--config-file", default="/config/migration_services.yaml", help="Path to config file")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
+@click.option("--version", is_flag=True, is_eager=True, help="Show the Migration Assistant version.")
 @click.pass_context
-def cli(ctx, config_file, json, verbose):
+def cli(ctx, config_file, json, verbose, version):
+    if version:
+        click.echo(get_version_str())
+        ctx.exit(0)
+
+    # Enforce command required unless --version was passed
+    if ctx.invoked_subcommand is None:
+        click.echo("Error: Missing command.", err=True)
+        click.echo(cli.get_help(ctx))
+        ctx.exit(2)
+
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
     ctx.obj = Context(config_file)
     ctx.obj.json = json
+
+
+# Create a wrapper to handle exceptions for the CLI
+def main():
+    try:
+        cli()
+    except Exception as e:
+        # Check if verbose mode is enabled by looking at the root logger level
+        # Verbose mode sets logging level to INFO (20) or DEBUG (10), default is WARN (30)
+        root_logger = logging.getLogger()
+        if root_logger.getEffectiveLevel() <= logging.INFO:
+            # Verbose mode is enabled, show full traceback
+            import traceback
+            click.echo("Error occurred with verbose mode enabled, showing full traceback:", err=True)
+            click.echo(traceback.format_exc(), err=True)
+        else:
+            # Normal mode, show clean error message
+            click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
 
 
 # ##################### CLUSTERS ###################
@@ -192,10 +223,15 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     if path[0] != '/':
         path = '/' + path
 
-    response = clusters_.call_api(cluster, path, method=HttpMethod[request], headers=headers, data=data)
-    if not response.ok:
-        click.echo(f"Error: {response.status_code}")
-    click.echo(response.text)
+    result: clusters_.CallAPIResult = clusters_.call_api(cluster, path, method=HttpMethod[request],
+                                                         headers=headers, data=data)
+    if result.error_message:
+        click.echo(result.error_message)
+    else:
+        response = result.http_response
+        if not response.ok:
+            click.echo(f"Error: {response.status_code}")
+        click.echo(response.text)
 
 
 # ##################### SNAPSHOT ###################
@@ -215,8 +251,6 @@ def snapshot_group(ctx):
     """All actions related to snapshot creation"""
     if ctx.env.snapshot is None:
         raise click.UsageError("Snapshot is not set")
-    if ctx.env.source_cluster is None:
-        raise click.UsageError("Snapshot commands require a source cluster to be defined")
     _external_snapshots_check(ctx.env.snapshot)
 
 
@@ -631,4 +665,4 @@ def show(inputfile, outputfile):
 #################################################
 
 if __name__ == "__main__":
-    cli()
+    main()

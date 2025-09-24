@@ -147,4 +147,81 @@ public interface RfsContexts extends IRfsContexts {
 
     }
 
+    class DeltaStreamContext extends BaseSpanContext<BaseRootRfsContext>
+        implements
+            IRfsContexts.IDeltaStreamContext {
+
+        public static final AttributeKey<Long> SEGMENTS_SEEN_ATTR = AttributeKey.longKey("segmentsSeen");
+        public static final AttributeKey<Long> DELTA_ADDITIONS_ATTR = AttributeKey.longKey("deltaAdditions");
+        public static final AttributeKey<Long> DELTA_DELETIONS_ATTR = AttributeKey.longKey("deltaDeletions");
+
+        @Getter
+        public final IScopedInstrumentationAttributes enclosingScope;
+        private long segmentsSeen;
+        private long deltaAdditions;
+        private long deltaDeletions;
+
+        public DeltaStreamContext(
+            BaseRootRfsContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
+            super(rootScope);
+            initializeSpan(rootScope);
+            this.enclosingScope = enclosingScope;
+        }
+
+        @Override
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public final LongCounter segmentsSeenCounter;
+            public final LongCounter deltaAdditionsCounter;
+            public final LongCounter deltaDeletionsCounter;
+
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
+                segmentsSeenCounter = meter.counterBuilder("deltaSegmentsSeen").setUnit(COUNT_UNITS).build();
+                deltaAdditionsCounter = meter.counterBuilder("deltaAdditions").setUnit(COUNT_UNITS).build();
+                deltaDeletionsCounter = meter.counterBuilder("deltaDeletions").setUnit(COUNT_UNITS).build();
+            }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        @Override
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().deltaStreamInstruments;
+        }
+
+        @Override
+        public AttributesBuilder fillExtraAttributesForThisSpan(AttributesBuilder builder) {
+            return super.fillExtraAttributesForThisSpan(builder)
+                .put(SEGMENTS_SEEN_ATTR, segmentsSeen)
+                .put(DELTA_ADDITIONS_ATTR, deltaAdditions)
+                .put(DELTA_DELETIONS_ATTR, deltaDeletions);
+        }
+
+        @Override
+        public void recordSegmentsSeen(long count) {
+            segmentsSeen += count;
+            meterIncrementEvent(getMetrics().segmentsSeenCounter, count);
+        }
+
+        @Override
+        public void recordDeltaAdditions(long count) {
+            deltaAdditions += count;
+            meterIncrementEvent(getMetrics().deltaAdditionsCounter, count);
+        }
+
+        @Override
+        public void recordDeltaDeletions(long count) {
+            deltaDeletions += count;
+            meterIncrementEvent(getMetrics().deltaDeletionsCounter, count);
+        }
+    }
+
 }

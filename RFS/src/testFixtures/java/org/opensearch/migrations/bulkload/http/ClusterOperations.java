@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -73,7 +74,11 @@ public class ClusterOperations {
     }
 
     public void createDocument(final String index, final String docId, final String body, final String routing, final String type) {
-        var response = put("/" + index + "/" + docTypePathOrDefault(type) + docId + "?routing=" + routing, body);
+        String path = "/" + index + "/" + docTypePathOrDefault(type) + docId;
+        if (routing != null) {
+            path += "?routing=" + routing;
+        }
+        var response = put(path, body);
         assertThat(response.getValue(), response.getKey(), anyOf(equalTo(201), equalTo(200)));
     }
 
@@ -111,31 +116,69 @@ public class ClusterOperations {
         createIndex(index, body);
     }
 
-    // Bloom Filter is a relatively new default index setting introduced in ES 8x
-    @SneakyThrows
-    public void disableBloom(final String index) {
-        final String body = "{" +
-                "  \"index\": {" +
-                "    \"bloom_filter_for_id_field\": {" +
-                "      \"enabled\": false" +
-                "    }" +
-                "  }" +
-                "}";
-
-        var response = put("/" + index + "/_settings", body);
-        assertThat(response.getKey(), equalTo(200));
-    }
-
     @SneakyThrows
     public void createIndex(final String index, final String body) {
         var response = put("/" + index, body);
-        assertThat(response.getKey(), anyOf(equalTo(201), equalTo(200)));
+        assertThat("Expected status code 200 or 201 for index creation of " + index + " but got: "
+                + response.getKey() + " " + response.getValue(),
+            response.getKey(), anyOf(equalTo(201), equalTo(200)));
+    }
 
-        // Automatically apply ES 8.x specific index tweaks
-        if (VersionMatchers.isES_8_X.test(clusterVersion)) {
-            log.info("Cluster is ES 8.x — applying disableBloom setting on index: {}", index);
-            disableBloom(index);
-        }
+    @SneakyThrows
+    public void createIndexWithCompletionField(String indexName, int numberOfShards) {
+        boolean useTypedMappings = UnboundVersionMatchers.isBelowES_8_X.test(clusterVersion);
+        boolean needsTypeNameParam = (VersionMatchers.equalOrGreaterThanES_6_7
+                .or(VersionMatchers.isES_7_X))
+                .test(clusterVersion);
+
+        boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(clusterVersion);
+        String typeName = defaultDocType();
+
+        String mappingsSection = useTypedMappings
+            ? String.format(
+            "{\n" +
+            "  \"%s\": {\n" +
+            "    \"properties\": {\n" +
+            "      \"completion\": {\n" +
+            "        \"type\": \"completion\",\n" +
+            "        \"analyzer\": \"simple\",\n" +
+            "        \"preserve_separators\": true,\n" +
+            "        \"preserve_position_increments\": true,\n" +
+            "        \"max_input_length\": 50\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}", typeName)
+            : "{\n" +
+            "  \"properties\": {\n" +
+            "    \"completion\": {\n" +
+            "      \"type\": \"completion\",\n" +
+            "      \"analyzer\": \"simple\",\n" +
+            "      \"preserve_separators\": true,\n" +
+            "      \"preserve_position_increments\": true,\n" +
+            "      \"max_input_length\": 50\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        String body = String.format(
+            "{\n" +
+                    "  \"settings\": {\n" +
+                    "    \"number_of_shards\": %d,\n" +
+                    "    \"number_of_replicas\": 0,%s\n" +
+                    "    \"refresh_interval\": -1\n" +
+                    "  },\n" +
+                    "  \"mappings\": %s\n" +
+                    "}",
+            numberOfShards,
+            supportsSoftDeletes ? "\n    \"index.soft_deletes.enabled\": true," : "",
+            mappingsSection
+        );
+
+        String path = "/"+indexName + (needsTypeNameParam ? "?include_type_name=true" : "");
+        var response = put(path, body);
+
+        assertThat("Failed to create index with completion field", response.getKey(), equalTo(200));
     }
 
     @SneakyThrows
@@ -223,14 +266,16 @@ public class ClusterOperations {
      */
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
-        boolean useTypedMappings = !VersionMatchers.isES_8_X.test(clusterVersion);
+        boolean useTypedMappings = UnboundVersionMatchers.isBelowES_8_X.test(clusterVersion);
 
-        var matchPatternClause = VersionMatchers.isES_5_X.test(clusterVersion)
+        var matchPatternClause = (UnboundVersionMatchers.isBelowES_6_X)
+            .test(clusterVersion)
             ? "\"template\":\"" + pattern + "\","
             : "\"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
             "  ],\r\n";
-        final var templateJson = "{\r\n" + //
+        
+        final var templateJson = "{\r\n" +
             "  " + matchPatternClause +
             "  \"settings\": {\r\n" +
             "    \"number_of_shards\": 1\r\n" +
@@ -244,25 +289,22 @@ public class ClusterOperations {
             "        \"enabled\": true\r\n" +
             "      },\r\n" +
             "      \"properties\": {\r\n" +
-            "        \"host_name\": {\r\n" +
-            "          \"type\": \"keyword\"\r\n" +
+            "        \"age\": {\r\n" +
+            "          \"type\": \"integer\"\r\n" +
             "        },\r\n" +
-            "        \"created_at\": {\r\n" +
-            "          \"type\": \"date\",\r\n" +
-            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" +
+            "        \"is_active\": {\r\n" +
+            "          \"type\": \"boolean\"\r\n" +
             "        }\r\n" +
             "      }\r\n" +
             (useTypedMappings ? "    }\r\n" : "") +
             "  }\r\n" +
             "}";
 
-        var extraParameters = (
-                VersionMatchers.isES_5_X
-                        .or(VersionMatchers.isES_8_X)
-                        .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_6)
-            ).test(clusterVersion)
-                    ? ""
-                    : "?include_type_name=true";
+        boolean needsTypeName = (
+                VersionMatchers.equalOrGreaterThanES_6_7
+                .or(VersionMatchers.isES_7_X)
+            ).test(clusterVersion);
+        var extraParameters = needsTypeName ? "?include_type_name=true" : "";
         var response = put("/_template/" + templateName + extraParameters, templateJson);
 
         assertThat(response.getKey(), equalTo(200));
@@ -381,9 +423,8 @@ public class ClusterOperations {
         assertThat(response.getKey(), equalTo(200));
     }
 
-    private String defaultDocType() {
-        if (VersionMatchers.isES_5_X
-            .or(VersionMatchers.isES_2_X)
+    public String defaultDocType() {
+        if (UnboundVersionMatchers.isBelowES_6_X
             .or(VersionMatchers.equalOrBetween_ES_6_0_and_6_1)
             .test(clusterVersion)) {
             return "doc";
@@ -393,7 +434,7 @@ public class ClusterOperations {
 
     private String docTypePathOrDefault(final String typeOverride) {
         var defaultDocType = defaultDocType();
-        if (VersionMatchers.isES_5_X.or(VersionMatchers.isES_2_X).test(clusterVersion)) {
+        if (UnboundVersionMatchers.isBelowES_6_X.test(clusterVersion)) {
             return Optional.ofNullable(typeOverride).orElse(defaultDocType) + "/";
         } else {
             return defaultDocType + "/";

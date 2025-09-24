@@ -12,9 +12,17 @@ ext {
 }
 
 configurations {
+    lucene5
     lucene6
     lucene7
     lucene9
+}
+
+task shadowLucene5(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene5]
+    archiveClassifier.set('lucene5-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene5.org.apache.lucene'
 }
 
 task shadowLucene6(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
@@ -39,7 +47,7 @@ task shadowLucene9(type: com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
 }
 
 tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene6, shadowLucene7, shadowLucene9
+    dependsOn shadowLucene5, shadowLucene6, shadowLucene7, shadowLucene9
 }
 
 tasks.named('build') {
@@ -69,26 +77,38 @@ dependencies {
     implementation libs.netty.codec.http
     implementation libs.httpclient5
 
+    implementation libs.zstd.jni
+
     implementation libs.slf4j.api
+
+    lucene5 libs.lucene.v5.core
+    lucene5 libs.lucene.v5.backward.codecs
+    lucene5 libs.lucene.v5.suggest
 
     lucene6 libs.lucene.v6.core
     lucene6 libs.lucene.v6.backward.codecs
+    lucene6 libs.lucene.v6.suggest
 
     lucene7 libs.lucene.v7.core
     lucene7 libs.lucene.v7.backward.codecs
+    lucene7 libs.lucene.v7.suggest
 
     lucene9 libs.lucene.v9.core
     lucene9 libs.lucene.v9.analysis.common
     lucene9 libs.lucene.v9.backward.codecs
+    lucene9 libs.lucene.v9.suggest
 
+    implementation shadowLucene5.outputs.files
     implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
 
+    testImplementation shadowLucene5.outputs.files
     testImplementation shadowLucene6.outputs.files
     testImplementation shadowLucene7.outputs.files
     testImplementation shadowLucene9.outputs.files
 
+    testFixturesImplementation shadowLucene5.outputs.files
     testFixturesImplementation shadowLucene6.outputs.files
     testFixturesImplementation shadowLucene7.outputs.files
     testFixturesImplementation shadowLucene9.outputs.files

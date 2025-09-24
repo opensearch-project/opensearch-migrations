@@ -31,7 +31,7 @@ spec:
             - -c
             - |
               #!/bin/sh
-              set -e -x
+              set -e
 
       {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
                   (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}
@@ -45,10 +45,11 @@ spec:
               echo "Starting Helm installation sequence..."
 
       {{- range $name, $chart := .Values.charts }}
-        {{- if (index $.Values.conditionalPackageInstalls $name) }}
+          {{- $repo := $chart.repository }}
+          {{- if and (index $.Values.conditionalPackageInstalls $name) (ne (substr 0 6 $repo) "oci://") }}
               echo "Adding chart repository..."
-              helm repo add chart-repo-{{ $name }} {{ $chart.repository }}
-        {{- end }}
+              helm repo add chart-repo-{{ $name }} {{ $repo }}
+          {{- end }}
       {{- end }}
 
       {{- if .Values.charts }}
@@ -102,10 +103,20 @@ spec:
                 check_dependency "{{ $chart.dependsOn }}"
           {{- end }}
 
-                echo "Installing chart: {{ $name }}"
+          {{- $repo := $chart.repository }}
+          {{- $version := $chart.version }}
+          {{- if hasPrefix "oci://" $repo }}
+                echo "Installing OCI chart: {{ $name }}"
+                helm upgrade --install \
+                  {{ $name }} \
+                  {{ $repo }} \
+          {{- else }}
+                echo "Installing chart from Helm repo: {{ $name }}"
                 helm upgrade --install \
                   {{ $name }} \
                   chart-repo-{{ $name }}/{{ $name }} \
+          {{- end }}
+
           {{- if $chart.version }}
                   --version {{ $chart.version }} \
           {{- end }}

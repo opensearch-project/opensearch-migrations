@@ -49,7 +49,7 @@ spec:
                   value: "{{steps.get-console-config.outputs.parameters.config-contents}}"
                 - name: command
                   value: |
-                    set -x && 
+                    set -e && 
                     console --config-file=/config/migration_services.yaml -v snapshot delete --acknowledge-risk ;
                     console --config-file=/config/migration_services.yaml -v snapshot create
                 - name: migration-console-image
@@ -92,7 +92,7 @@ spec:
                   value: "{{inputs.parameters.config-contents}}"
                 - name: command
                   value: |
-                    set -x && 
+                    set -e && 
                     [ "$(console --config-file=/config/migration_services.yaml snapshot status)" = "SUCCESS" ] && exit 0 || exit 1
                 - name: migration-console-image
                   value: "{{inputs.parameters.migration-console-image}}"

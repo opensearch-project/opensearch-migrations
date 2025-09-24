@@ -1,7 +1,7 @@
 function applyRulesToMap(when, set, remove, map) {
-  const matches = Object.entries(when).every(([k, v]) => map.get(k) === v);
+  const matches = [...when.entries()].every( ([k, v]) => map.get(k) === v);
   if (matches) {
-    Object.entries(set).every(([k, v]) => map.set(k, v));
+    [...set.entries()].every(([k, v]) => map.set(k, v));
     remove.forEach((key) => map.delete(key));
   }
 }
@@ -18,7 +18,10 @@ function applyRules(node, rules) {
   if (Array.isArray(node)) {
     node.forEach((child) => applyRules(child, rules));
   } else if (node instanceof Map) {
-    for (const { when, set, remove = [] } of rules) {
+    for (const rule of rules) {
+      let when = rule.get("when");
+      let set = rule.get("set");
+      let remove = rule.get("remove") || [];
       applyRulesToMap(when, set, remove, node);
     }
     // recurse
@@ -35,7 +38,7 @@ function applyRules(node, rules) {
 }
 
 function main(context) {
-  if (!context.rules) {
+  if (!context.rules && !context.get("rules")) {
     throw Error(
       "Expected rules to be defined in the context.  Example: " +
         JSON.stringify(
@@ -46,6 +49,15 @@ function main(context) {
     );
   }
 
+  if (context instanceof Map) {
+    return (doc) => {
+      if (doc && doc.type && doc.name && doc.body) {
+        applyRules(doc.body, context.get("rules"));
+      }
+      return doc;
+    };
+  }
+
   return (doc) => {
     if (doc && doc.type && doc.name && doc.body) {
       applyRules(doc.body, context.rules);
@@ -54,4 +66,10 @@ function main(context) {
   };
 }
 
-module.exports = { main };
+// Visibility for testing
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = main;
+}
+
+// Entrypoint function
+(() => main)();

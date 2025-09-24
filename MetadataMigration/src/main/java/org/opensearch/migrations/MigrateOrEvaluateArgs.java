@@ -5,6 +5,7 @@ package org.opensearch.migrations;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.transformers.MetadataTransformerParams;
+import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
@@ -16,6 +17,10 @@ import lombok.Getter;
 public class MigrateOrEvaluateArgs {
     @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
     public boolean help;
+ 
+    @Parameter(names = { "--output" }, description = "Output format: human-readable (default) or json", 
+            converter = OutputFormat.OutputFormatConverter.class)
+    public OutputFormat outputFormat = OutputFormat.HUMAN_READABLE;
 
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate")
     public String snapshotName;
@@ -35,6 +40,12 @@ public class MigrateOrEvaluateArgs {
     @Parameter(names = {
         "--s3-region" }, description = "The AWS Region the S3 bucket is in, like: us-east-2")
     public String s3Region;
+
+    @Parameter(required = false,
+            names = { "--s3-endpoint", "--s3Endpoint" },
+            description = ("The endpoint URL to use for S3 calls.  " +
+                    "For use when the default AWS ones won't work for a particular context."))
+    public String s3Endpoint = null;
 
     @ParametersDelegate
     public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();

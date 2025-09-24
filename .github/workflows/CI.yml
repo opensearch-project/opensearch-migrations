@@ -22,7 +22,7 @@ jobs:
     outputs:
       docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Generate Docker Cache Key
         id: generate_docker_cache_key
         run: |
@@ -61,14 +61,8 @@ jobs:
           - spotlessCheck
           - publishToMavenLocal
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: "corretto"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - name: Run Gradle Build
         run: gradle ${{matrix.tasks}}
         env:
@@ -77,10 +71,8 @@ jobs:
   python-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
@@ -105,13 +97,14 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
+          pipenv graph
+
+      - run: |
           pipenv run test
           pipenv run coverage xml
       - name: Get Sanitized Name
@@ -147,15 +140,8 @@ jobs:
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-          gradle-home-cache-cleanup: true
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -212,20 +198,13 @@ jobs:
     needs: [ gradle-tests ]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - name: Create clean .exec directory
         run: rm -rf build/jacocoMerged && mkdir -p build/jacocoMerged
 
       - name: Download all JaCoCo .exec files into directory expected by jacocoAggregateReport
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: build/jacocoMerged
           pattern: coverage-exec-artifacts-gradle-tests-*
@@ -247,17 +226,8 @@ jobs:
     needs: [ generate-cache-key ]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.java-version }}
-          distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.gradle-version }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - name: Cache Docker Images
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -309,10 +279,8 @@ jobs:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.node-version }}
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
       - name: Run CDK Jest Tests (using mocked images)
@@ -322,7 +290,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: lychee Link Checker
         id: lychee
         uses: lycheeverse/lychee-action@v2
@@ -335,7 +303,6 @@ jobs:
             --exclude "http://capture-proxy*"
             --exclude "https://capture-proxy*"
             --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
-            --exclude-mail
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}

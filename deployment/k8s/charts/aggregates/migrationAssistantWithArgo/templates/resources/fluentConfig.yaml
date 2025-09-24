@@ -3,6 +3,9 @@ kind: ConfigMap
 metadata:
   name: log-aggregation-config
   namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1" # Make accessible earlier for charts that mount
 data:
   # plain or template
   OUTPUT_FORMAT:
@@ -12,13 +15,26 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: fluentbit-lua-scripts
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1" # Make accessible earlier for charts that mount
 data:
   trim.lua: |
     function trim_log(tag, timestamp, record)
-        local log = record["log"]
-        if log then
-            log = string.gsub(log, "(\r?\n)$", "")
-            record["log"] = log
+        if record["log_processed"] then
+            if record["log_processed"]["msg"] then
+                record["orig_log"] = record["log"]
+                record["log"] = record["log_processed"]["msg"]
+            end
+            if record["log_processed"]["level"] then
+                record["level"] = record["log_processed"]["level"]
+            end
+        elseif record["log"] then
+            if record["msg"] then
+                record["orig_log"] = record["log"]
+                record["log"] = record["msg"]
+            end
+            record["log"] = string.gsub(record["log"], "(\r?\n)$", "")
         end
         return 1, timestamp, record
     end

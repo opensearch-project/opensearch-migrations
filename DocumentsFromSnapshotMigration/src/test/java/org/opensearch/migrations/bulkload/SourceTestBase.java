@@ -27,6 +27,7 @@ import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -43,7 +44,7 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
-import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
@@ -192,11 +193,41 @@ public class SourceTestBase {
         Version targetVersion,
         String transformationConfig
     ) {
+        return migrateDocumentsSequentially(
+            sourceRepo,
+            null,
+            snapshotName,
+            indexAllowlist,
+            target,
+            runCounter,
+            clockJitter,
+            testContext,
+            sourceVersion,
+            targetVersion,
+            transformationConfig
+        );
+    }
+
+
+    public static int migrateDocumentsSequentially(
+        FileSystemRepo sourceRepo,
+        String previousSnapshotName,
+        String snapshotName,
+        List<String> indexAllowlist,
+        SearchClusterContainer target,
+        AtomicInteger runCounter,
+        Random clockJitter,
+        DocumentMigrationTestContext testContext,
+        Version sourceVersion,
+        Version targetVersion,
+        String transformationConfig
+    ) {
         for (int runNumber = 1; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(
                     sourceRepo,
                     snapshotName,
+                    previousSnapshotName,
                     indexAllowlist,
                     target.getUrl(),
                     clockJitter,
@@ -205,7 +236,7 @@ public class SourceTestBase {
                     targetVersion,
                     transformationConfig
                 );
-                if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
+                if (workResult == CompletionStatus.NOTHING_DONE) {
                     return runNumber;
                 } else {
                     runCounter.incrementAndGet();
@@ -228,9 +259,10 @@ public class SourceTestBase {
 
     @SuppressWarnings("unchecked")
     @SneakyThrows
-    public static DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(
+    public static CompletionStatus migrateDocumentsWithOneWorker(
         SourceRepo sourceRepo,
         String snapshotName,
+        String previousSnapshotName,
         List<String> indexAllowlist,
         String targetAddress,
         Random clockJitter,
@@ -269,7 +301,7 @@ public class SourceTestBase {
             var readerFactory = spy(new LuceneIndexReader.Factory(sourceResourceProvider));
             when(readerFactory.getReader(any())).thenAnswer(inv -> {
                 var reader = (LuceneIndexReader)spy(inv.callRealMethod());
-                when(reader.readDocuments()).thenAnswer(inv2 -> {
+                when(reader.readDocuments(any())).thenAnswer(inv2 -> {
                     var flux = (Flux<RfsLuceneDocument>)inv2.callRealMethod();
                     return flux.map(terminatingDocumentFilter);
                 });
@@ -286,7 +318,6 @@ public class SourceTestBase {
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
             var connectionContext = ConnectionContextTestParams.builder()
                     .host(targetAddress)
-                    .compressionEnabled(true)
                     .build()
                     .toConnectionContext();
             var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
@@ -308,6 +339,8 @@ public class SourceTestBase {
                     processManager,
                     sourceResourceProvider.getIndexMetadata(),
                     snapshotName,
+                    previousSnapshotName,
+                    previousSnapshotName != null ? DeltaMode.UPDATES_AND_DELETES : null,
                     indexAllowlist,
                     sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,

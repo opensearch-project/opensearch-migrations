@@ -12,6 +12,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
 
     private final String s3Uri;
     private final String s3Region;
+    private final String s3Endpoint;
     private final Integer maxSnapshotRateMBPerNode;
     private final String snapshotRoleArn;
 
@@ -24,7 +25,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        this(snapshotName, snapshotRepoName, client, s3Uri, s3Region, indexAllowlist, null, null, context);
+        this(snapshotName, snapshotRepoName, client, s3Uri, s3Region, null, indexAllowlist, null, null, context);
     }
 
     public S3SnapshotCreator(
@@ -33,6 +34,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         OpenSearchClient client,
         String s3Uri,
         String s3Region,
+        String s3Endpoint,
         List<String> indexAllowlist,
         Integer maxSnapshotRateMBPerNode,
         String snapshotRoleArn,
@@ -41,6 +43,7 @@ public class S3SnapshotCreator extends SnapshotCreator {
         super(snapshotName, snapshotRepoName, indexAllowlist, client, context);
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
+        this.s3Endpoint = s3Endpoint;
         this.maxSnapshotRateMBPerNode = maxSnapshotRateMBPerNode;
         this.snapshotRoleArn = snapshotRoleArn;
     }
@@ -55,6 +58,10 @@ public class S3SnapshotCreator extends SnapshotCreator {
         settings.put("compress", false);
         if (snapshotRoleArn != null) {
             settings.put("role_arn", snapshotRoleArn);
+        }
+
+        if (s3Endpoint != null) {
+            settings.put("endpoint", s3Endpoint);
         }
 
         if (maxSnapshotRateMBPerNode != null) {

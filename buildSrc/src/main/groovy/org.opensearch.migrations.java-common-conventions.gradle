@@ -5,12 +5,68 @@
 plugins {
     // Apply the java Plugin to add support for Java.
     id 'java'
+    id 'java-test-fixtures'
+}
+
+// Force resolution of all versions of dependencies explicitly listed in the version catalog even if
+// transitive dependency calls for it with a different (higher or lower) version
+// Update java-library-conventions if updated
+def libVersions = extensions.getByType(VersionCatalogsExtension).named('libs')
+def bomAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('boms.') }
+// Exclude lucene aliases since multiple versions are used in this project
+def luceneAliases = libVersions.libraryAliases.findAll { alias -> alias.startsWith('lucene.') }
+def depAliases = libVersions.libraryAliases - bomAliases - luceneAliases
+
+configurations.configureEach {
+    resolutionStrategy.preferProjectModules()
+}
+
+// Extend resolvable *classpath* configs (excluding lucene ones)
+configurations {
+    // Define configuration that will be tied to all locked versions
+    enforcedAlignment {
+        canBeResolved = false
+        canBeConsumed = false
+        visible = false
+    }
+
+    configureEach {
+        if (
+            // Avoid infinite loop with enforcedAlignment configuration
+            name != "enforcedAlignment" &&
+            canBeResolved &&
+            // Exclude configurations involved with shadow lucene jar
+            !name.toLowerCase().contains("lucene") &&
+            !name.toLowerCase().contains("shadow")
+         ) {
+            extendsFrom(enforcedAlignment)
+        }
+    }
 }
 
 dependencies {
-    // Use JUnit Jupiter for testing.
-    testImplementation libs.junit.jupiter
-    testRuntimeOnly libs.junit.platform.launcher
+    bomAliases.each { alias ->
+        def lib = libVersions.findLibrary(alias).get().get()
+        enforcedAlignment(enforcedPlatform(lib)) {
+            because("Align versions using BOM from alias '$alias'")
+        }
+    }
+    constraints {
+        depAliases.each { alias ->
+            def lib = libVersions.findLibrary(alias).get().get()
+            def g = lib.module.group
+            def a = lib.module.name
+            def v = lib.versionConstraint.requiredVersion ?: lib.version
+            add("enforcedAlignment", "${g}:${a}:${v}") {
+                version { strictly(v) }   // ← this is the “forced” flavor for constraints
+                because("Pinned from version catalog alias '${alias}'")
+            }
+        }
+    }
+
+    // JUnit Jupiter
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks.named('test') {

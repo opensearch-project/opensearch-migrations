@@ -12,10 +12,14 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import org.opensearch.migrations.arguments.ArgLogUtils;
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -25,6 +29,7 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.delta.DeltaDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -35,7 +40,9 @@ import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
+import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
@@ -66,7 +73,10 @@ import org.slf4j.MDC;
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
-    public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+
+    // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
+    // observed on production clusters during migrations
+    public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 15;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
     // Decrease successor nextAcquisitionLeaseExponent if shard setup takes less than 2.5% of total lease time
@@ -84,6 +94,20 @@ public class RfsMigrateDocuments {
         @Override
         public Duration convert(String value) {
             return Duration.parse(value);
+        }
+    }
+
+    public static class DeltaModeConverter implements IStringConverter<DeltaMode> {
+        @Override
+        public DeltaMode convert(String value) {
+            try {
+                return DeltaMode.valueOf(value.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                throw new ParameterException("Invalid delta mode: " + value + ". Valid values are: " + 
+                    String.join(", ", java.util.Arrays.stream(DeltaMode.values())
+                        .map(Enum::name)
+                        .toArray(String[]::new)));
+            }
         }
     }
 
@@ -204,6 +228,26 @@ public class RfsMigrateDocuments {
 
         @ParametersDelegate
         private VersionStrictness versionStrictness = new VersionStrictness();
+
+        @ParametersDelegate
+        private ExperimentalArgs experimental = new ExperimentalArgs();
+    }
+
+    public static class ExperimentalArgs {
+        @Parameter(required = false,
+            names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
+            description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
+            hidden = true
+        )
+        public String previousSnapshotName = null;
+
+        @Parameter(required = false,
+            names = { "--experimental-delta-mode" },
+            converter = DeltaModeConverter.class,
+            description = "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
+            hidden = true
+        )
+        public DeltaMode experimentalDeltaMode = null;
     }
 
 
@@ -254,6 +298,28 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
+    public static class EnvParameters {
+
+        private EnvParameters() {
+            throw new IllegalStateException("EnvParameters utility class should not instantiated");
+        }
+
+        public static void injectFromEnv(Args args) {
+            List<String> addedEnvParams = new ArrayList<>();
+            if (args.targetArgs.username == null && System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG) != null) {
+                args.targetArgs.username = System.getenv(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_USERNAME_ENV_ARG);
+            }
+            if (args.targetArgs.password == null && System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG) != null) {
+                args.targetArgs.password = System.getenv(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
+                addedEnvParams.add(ArgNameConstants.TARGET_PASSWORD_ENV_ARG);
+            }
+            if (!addedEnvParams.isEmpty()) {
+                log.info("Adding parameters from the following expected environment variables: {}", addedEnvParams);
+            }
+        }
+    }
+
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
@@ -282,13 +348,29 @@ public class RfsMigrateDocuments {
                 "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region."
             );
         }
+        
+        // Validate delta mode parameters
+        if (args.experimental.experimentalDeltaMode != null) {
+            if (args.experimental.previousSnapshotName == null) {
+                throw new ParameterException(
+                    "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
+                );
+            }
+            log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
+                    "This feature is experimental and should not be used in production.", 
+                    args.experimental.experimentalDeltaMode);
+        } else if (args.experimental.previousSnapshotName != null) {
+            log.error("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.");
+            throw new ParameterException(
+                "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
+            );
+        }
 
     }
 
     public static void main(String[] args) throws Exception {
-        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
-        System.err.println("Starting program with: " + String.join(" ", args));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
         // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
         // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
         System.setProperty("log4j2.shutdownHookEnabled", "false");
@@ -297,6 +379,7 @@ public class RfsMigrateDocuments {
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
+        EnvParameters.injectFromEnv(arguments);
 
         if (arguments.help) {
             jCommander.usage();
@@ -373,17 +456,19 @@ public class RfsMigrateDocuments {
                 arguments.maxConnections,
                 docTransformerSupplier);
 
-            SourceRepo sourceRepo;
-            if (snapshotLocalDirPath == null) {
-                sourceRepo = S3Repo.create(
+            var finder = ClusterProviderRegistry.getSnapshotFileFinder(
+                    arguments.sourceVersion,
+                    arguments.versionStrictness.allowLooseVersionMatches);
+
+            SourceRepo sourceRepo = (snapshotLocalDirPath == null)
+                ? S3Repo.create(
                     Paths.get(arguments.s3LocalDir),
                     new S3Uri(arguments.s3RepoUri),
                     arguments.s3Region,
-                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
-                );
-            } else {
-                sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
-            }
+                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                    finder)
+                : new FileSystemRepo(snapshotLocalDirPath, finder);
+
             var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
             var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
@@ -403,6 +488,8 @@ public class RfsMigrateDocuments {
                 processManager,
                 sourceResourceProvider.getIndexMetadata(),
                 arguments.snapshotName,
+                arguments.experimental.previousSnapshotName,
+                arguments.experimental.experimentalDeltaMode,
                 arguments.indexAllowlist,
                 sourceResourceProvider.getShardMetadata(),
                 unpackerFactory,
@@ -412,7 +499,7 @@ public class RfsMigrateDocuments {
                 workItemTimeProvider);
             cleanShutdownCompleted.set(true);
         } catch (NoWorkLeftException e) {
-            log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+            log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
@@ -595,21 +682,24 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(LuceneIndexReader.Factory readerFactory,
-                                                       DocumentReindexer reindexer,
-                                                       AtomicReference<WorkItemCursor> progressCursor,
-                                                       IWorkCoordinator workCoordinator,
-                                                       Duration maxInitialLeaseDuration,
-                                                       LeaseExpireTrigger leaseExpireTrigger,
-                                                       IndexMetadata.Factory indexMetadataFactory,
-                                                       String snapshotName,
-                                                       List<String> indexAllowlist,
-                                                       ShardMetadata.Factory shardMetadataFactory,
-                                                       SnapshotShardUnpacker.Factory unpackerFactory,
-                                                       long maxShardSizeBytes,
-                                                       RootDocumentMigrationContext rootDocumentContext,
-                                                       AtomicReference<Runnable> cancellationRunnable,
-                                                       WorkItemTimeProvider timeProvider)
+
+    public static CompletionStatus run(LuceneIndexReader.Factory readerFactory,
+                                       DocumentReindexer reindexer,
+                                       AtomicReference<WorkItemCursor> progressCursor,
+                                       IWorkCoordinator workCoordinator,
+                                       Duration maxInitialLeaseDuration,
+                                       LeaseExpireTrigger leaseExpireTrigger,
+                                       IndexMetadata.Factory indexMetadataFactory,
+                                       String snapshotName,
+                                       String previousSnapshotName,
+                                       DeltaMode deltaMode,
+                                       List<String> indexAllowlist,
+                                       ShardMetadata.Factory shardMetadataFactory,
+                                       SnapshotShardUnpacker.Factory unpackerFactory,
+                                       long maxShardSizeBytes,
+                                       RootDocumentMigrationContext rootDocumentContext,
+                                       AtomicReference<Runnable> cancellationRunnable,
+                                       WorkItemTimeProvider timeProvider)
         throws IOException, InterruptedException, NoWorkLeftException
     {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
@@ -624,24 +714,36 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        BiFunction<String, Integer, ShardMetadata> shardMetadataSupplier = (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+        Function<String, BiFunction<String, Integer, ShardMetadata>> shardMetadataSupplierFactory = snapshot -> (indexName, shardId) -> {
+            var shardMetadata = shardMetadataFactory.fromRepo(snapshot, indexName, shardId);
+            log.atInfo()
+                .setMessage("Shard size: {} for snapshotName={} indexName={} shardId={}")
+                .addArgument(shardMetadata.getTotalSizeBytes())
+                .addArgument(snapshot)
+                .addArgument(indexName)
+                .addArgument(shardId)
+                .log();
             if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
                 throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
             }
             return shardMetadata;
         };
 
-        var runner = new DocumentsRunner(scopedWorkCoordinator,
+        var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
+        var strategy = (previousSnapshotName == null)
+            ? new RegularDocumentReaderEngine(shardMetadataSupplier)
+            : new DeltaDocumentReaderEngine(
+                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
+
+        DocumentsRunner runner = new DocumentsRunner(scopedWorkCoordinator,
             maxInitialLeaseDuration,
             reindexer,
             unpackerFactory,
-            shardMetadataSupplier,
             readerFactory,
             progressCursor::set,
             cancellationRunnable::set,
-            timeProvider);
+            timeProvider,
+            strategy);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 

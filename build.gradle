@@ -4,8 +4,8 @@ import groovy.json.JsonOutput
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '7.0.4'
-    id 'io.freefair.lombok' version '8.14' apply false
+    id "com.diffplug.spotless" version '7.2.1'
+    id 'io.freefair.lombok' version '8.14.2' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
@@ -120,34 +120,6 @@ subprojects {
     apply plugin: 'jacoco'
     apply plugin: 'maven-publish'
 
-    configurations.all {
-        resolutionStrategy {
-            // Force specific versions of transitive dependencies to handle CVEs
-            force "com.fasterxml.jackson.core:jackson-databind:${libs.versions.jackson.get()}"
-            force "com.google.guava:guava:${libs.versions.guava.get()}"
-            force "io.netty:netty-codec:${libs.versions.netty.get()}"
-            force "io.netty:netty-codec-http:${libs.versions.netty.get()}"
-            force "io.netty:netty-common:${libs.versions.netty.get()}"
-            force "io.netty:netty-handler:${libs.versions.netty.get()}"
-            force 'org.apache.httpcomponents:httpclient:4.5.14'
-            force "org.bouncycastle:bcpkix-jdk18on:${libs.versions.bouncycastle.get()}"
-            force "org.bouncycastle:bcprov-jdk18on:${libs.versions.bouncycastle.get()}"
-            force 'com.jayway.jsonpath:json-path:2.9.0'
-            force 'com.thoughtworks.xstream:xstream:1.4.21'
-            force "commons-io:commons-io:2.19.0"
-            force 'commons-net:commons-net:3.11.1'
-            force 'dnsjava:dnsjava:3.6.3'
-            force 'net.minidev:json-smart:2.5.2'
-            force 'org.apache.tika:tika-core:3.2.0'
-            force 'org.glassfish.jersey.core:jersey-common:3.1.10'
-            force 'org.jsoup:jsoup:1.21.1'
-            force 'org.xerial.snappy:snappy-java:1.1.10.7'
-            force 'xalan:xalan:2.7.3'
-
-            preferProjectModules()
-        }
-    }
-
     // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
     // though what '#' does is still undocumented from what I can tell
     spotless {
@@ -192,11 +164,11 @@ subprojects {
         if (!sourceSets.test.allSource.files.isEmpty()) {
             tasks.withType(Test) {
                 testLogging {
-                    events "passed", "skipped", "failed"
-                    exceptionFormat "full"
-                    showExceptions true
-                    showCauses true
-                    showStackTraces true
+                    events = ["passed", "skipped", "failed"]
+                    exceptionFormat = "full"
+                    showExceptions = true
+                    showCauses = true
+                    showStackTraces = true
                 }
                 maxParallelForks = gradle.startParameter.maxWorkerCount
 

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.cluster;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
@@ -24,4 +25,15 @@ public interface ClusterSnapshotReader extends ClusterReader {
 
     /** gets the soft deletes can field data */
     String getSoftDeletesFieldData();
+
+    /** Get the source repo for the snapshot */
+    SourceRepo getSourceRepo();
+
+     /** Returns the appropriate SnapshotFileFinder implementation for version specific SnapshotReader */
+    SnapshotFileFinder getSnapshotFileFinder();
+
+    @Override
+    default String getFriendlyTypeName() {
+        return "Snapshot";
+    }
 }

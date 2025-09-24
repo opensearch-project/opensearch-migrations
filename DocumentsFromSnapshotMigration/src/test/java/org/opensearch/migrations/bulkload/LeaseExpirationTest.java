@@ -44,6 +44,9 @@ public class LeaseExpirationTest extends SourceTestBase {
         return Stream.concat(
                 // Test with all pairs with forceMoreSegments=false
                 SupportedClusters.supportedPairs(true).stream()
+                        // Skiping ES 2 as it requires the javascript transformer to convert "string"
+                        .filter(migrationPair -> !VersionMatchers.isES_2_X.test(migrationPair.source().getVersion()))
+                        .filter(migrationPair -> !VersionMatchers.isES_1_X.test(migrationPair.source().getVersion()))
                         .map(migrationPair ->
                                 Arguments.of(false, migrationPair.source(), migrationPair.target())),
                 // Add test for ES 7 -> OS 2 with forceMoreSegments=true

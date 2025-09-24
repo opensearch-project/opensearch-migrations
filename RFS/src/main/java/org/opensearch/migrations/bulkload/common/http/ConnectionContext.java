@@ -4,10 +4,16 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import org.opensearch.migrations.arguments.ArgNameConstants;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import com.beust.jcommander.converters.PathConverter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -25,17 +31,26 @@ public class ConnectionContext {
         HTTPS
     }
 
+    @JsonProperty("uri")
     private final URI uri;
+    @JsonProperty("protocol")
     private final Protocol protocol;
+    @JsonProperty("insecure")
     private final boolean insecure;
+    @JsonIgnore
     private final RequestTransformer requestTransformer;
-    private final boolean compressionSupported;
+    @JsonProperty("awsSpecificAuthentication")
     private final boolean awsSpecificAuthentication;
+    @JsonProperty("disableCompression")
+    private final boolean disableCompression;
 
+    @JsonIgnore
     private TlsCredentialsProvider tlsCredentialsProvider;
 
     private ConnectionContext(IParams params) {
-        assert params.getHost() != null : "host is null";
+        if (params.getHost() == null) {
+            throw new IllegalArgumentException("No host was found");
+        }
 
         this.insecure = params.isInsecure();
 
@@ -82,7 +97,6 @@ public class ConnectionContext {
         else {
             requestTransformer = new NoAuthTransformer();
         }
-        compressionSupported = params.isCompressionEnabled();
 
         validateClientCertPairPresence(params);
 
@@ -92,6 +106,20 @@ public class ConnectionContext {
                 params.getClientCert(),
                 params.getClientCertKey());
         }
+
+        this.disableCompression = params.isDisableCompression();
+    }
+
+    // Used for presentation to user facing output
+    public Map<String, String> toUserFacingData() {
+        var dataBuilder = new LinkedHashMap<String, String>();
+        dataBuilder.put("Uri", getUri().toString());
+        dataBuilder.put("Protocol", getProtocol().toString());
+        dataBuilder.put("TLS Verification", isInsecure() ? "Disabled" : "Enabled");
+        if (awsSpecificAuthentication) {
+            dataBuilder.put("AWS Auth", "Enabled");
+        }
+        return dataBuilder;
     }
 
     /**
@@ -119,7 +147,7 @@ public class ConnectionContext {
 
         Path getClientCertKey();
 
-        boolean isCompressionEnabled();
+        boolean isDisableCompression();
 
         boolean isInsecure();
 
@@ -137,13 +165,13 @@ public class ConnectionContext {
         public String host;
 
         @Parameter(
-            names = {"--target-username", "--targetUsername" },
+            names = {ArgNameConstants.TARGET_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.TARGET_USERNAME_ARG_KEBAB_CASE },
             description = "Optional.  The target username; if not provided, will assume no auth on target",
             required = false)
         public String username = null;
 
         @Parameter(
-            names = {"--target-password", "--targetPassword" },
+            names = {ArgNameConstants.TARGET_PASSWORD_ARG_CAMEL_CASE, ArgNameConstants.TARGET_PASSWORD_ARG_KEBAB_CASE },
             description = "Optional.  The target password; if not provided, will assume no auth on target",
             required = false)
         public String password = null;
@@ -192,18 +220,18 @@ public class ConnectionContext {
         TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
 
         @Override
-        public boolean isCompressionEnabled() {
-            return advancedArgs.isCompressionEnabled();
+        public boolean isDisableCompression() {
+            return advancedArgs.isDisableCompression();
         }
     }
 
     // Flags that require more testing and validation before recommendations are made
     @Getter
     public static class TargetAdvancedArgs {
-        @Parameter(names = {"--target-compression", "--targetCompression" },
-            description = "**Advanced**. Allow request compression to target",
-            required = false)
-        public boolean compressionEnabled = false;
+        @Parameter(names = {"--disable-compression", "--disableCompression" },
+            description = "**Advanced**. Disable request body compression even if supported on the target cluster."
+        )
+        public boolean isDisableCompression = false;
     }
 
     @Getter
@@ -215,13 +243,13 @@ public class ConnectionContext {
         public String host = null;
 
         @Parameter(
-            names = {"--source-username", "--sourceUsername" },
+            names = {ArgNameConstants.SOURCE_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.SOURCE_USERNAME_ARG_KEBAB_CASE },
             description = "The source username; if not provided, will assume no auth on source",
             required = false)
         public String username = null;
 
         @Parameter(
-            names = {"--source-password", "--sourcePassword" },
+            names = {ArgNameConstants.SOURCE_PASSWORD_ARG_CAMEL_CASE, ArgNameConstants.SOURCE_PASSWORD_ARG_KEBAB_CASE },
             description = "The source password; if not provided, will assume no auth on source",
             required = false)
         public String password = null;
@@ -267,9 +295,10 @@ public class ConnectionContext {
             required = false)
         public boolean insecure = false;
 
-        public boolean isCompressionEnabled() {
-            // No compression on source due to no ingestion
-            return false;
+        @Override
+        public boolean isDisableCompression() {
+            // No need to interrogate source cluster for compression information
+             return true;
         }
     }
 

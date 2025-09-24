@@ -1,11 +1,16 @@
 package org.opensearch.migrations.bulkload.version_es_5_6;
 
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
@@ -59,7 +64,7 @@ class OpenSearchClient_ES_5_6_Test {
 
     @BeforeEach
     void beforeTest() {
-        openSearchClient = spy(new OpenSearchClient_ES_5_6(restClient, failedRequestLogger, Version.fromString("ES_5_6")));
+        openSearchClient = spy(new OpenSearchClient_ES_5_6(restClient, failedRequestLogger, Version.fromString("ES_5_6"), CompressionMode.UNCOMPRESSED));
     }
 
     @SneakyThrows
@@ -94,7 +99,6 @@ class OpenSearchClient_ES_5_6_Test {
         var successResponse = bulkItemResponse(false, List.of(itemEntry(docId1), itemEntry(docId2)));
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(successResponse));
-        when(restClient.supportsGzipCompression()).thenReturn(false);
 
         var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
 
@@ -108,10 +112,14 @@ class OpenSearchClient_ES_5_6_Test {
         return new HttpResponse(200, "", null, responseBody);
     }
 
-    private BulkDocSection createBulkDoc(String docId) {
-        var bulkDoc = mock(BulkDocSection.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
-        when(bulkDoc.getDocId()).thenReturn(docId);
-        when(bulkDoc.asBulkIndexString()).thenReturn("BULK-INDEX\nBULK_BODY");
+    private BulkOperationSpec createBulkDoc(String docId) {
+        var bulkDoc = mock(IndexOp.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
+        var operation = mock(IndexOperationMeta.class);
+        when(operation.getId()).thenReturn(docId);
+        when(bulkDoc.getOperation()).thenReturn(operation);
+        when(bulkDoc.getOperationType()).thenReturn(OperationType.INDEX);
+        when(bulkDoc.isIncludeDocument()).thenReturn(true);
+        when(bulkDoc.getDocument()).thenReturn(Map.of("field", "value"));
         return bulkDoc;
     }
 

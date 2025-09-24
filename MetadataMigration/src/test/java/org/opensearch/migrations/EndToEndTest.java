@@ -142,12 +142,15 @@ class EndToEndTest extends BaseMigrationTest {
 
             // Create documents that use the templates
             String blogIndexName = "blog_" + uniqueSuffix + "_2023";
-            sourceOperations.createDocument(blogIndexName, "222", "{\"" + fieldName + "\":\"Tobias Funke\"}");
+            sourceOperations.createDocument(blogIndexName, "222",
+                "{ \"name\": \"bob\", \"is_active\": true }");
             testData.blogIndexNames.add(blogIndexName);
         }
 
-        sourceOperations.createDocument(testData.movieIndexName, "123", "{\"title\":\"This is Spinal Tap\"}");
-        sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{}");
+        sourceOperations.createDocument(testData.movieIndexName, "123",
+            "{ \"age\": 55, \"is_active\": false }");
+        sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66",
+            "{ \"age\": 99, \"is_active\": true }");
 
         sourceOperations.createAlias(testData.aliasName, "movies*");
         testData.aliasNames.add(testData.aliasName);

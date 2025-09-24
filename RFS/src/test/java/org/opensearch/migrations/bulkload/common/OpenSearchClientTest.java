@@ -7,6 +7,11 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
@@ -73,7 +78,7 @@ class OpenSearchClientTest {
     void beforeTest() {
         when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
-        openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11")));
+        openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
     }
 
     @Test
@@ -227,10 +232,14 @@ class OpenSearchClientTest {
         return new HttpResponse(200, "", null, responseBody);
     }
 
-    private BulkDocSection createBulkDoc(String docId) {
-        var bulkDoc = mock(BulkDocSection.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
-        when(bulkDoc.getDocId()).thenReturn(docId);
-        when(bulkDoc.asBulkIndexString()).thenReturn("BULK-INDEX\nBULK_BODY");
+    private BulkOperationSpec createBulkDoc(String docId) {
+        var bulkDoc = mock(IndexOp.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
+        var operation = mock(IndexOperationMeta.class);
+        when(operation.getId()).thenReturn(docId);
+        when(bulkDoc.getOperation()).thenReturn(operation);
+        when(bulkDoc.getOperationType()).thenReturn(OperationType.INDEX);
+        when(bulkDoc.isIncludeDocument()).thenReturn(true);
+        when(bulkDoc.getDocument()).thenReturn(java.util.Map.of("field", "value"));
         return bulkDoc;
     }
 
@@ -245,8 +254,9 @@ class OpenSearchClientTest {
         var docId = "tt1979320";
         var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
 
-        when(restClient.supportsGzipCompression()).thenReturn(true);
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
+        openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11"),
+                CompressionMode.GZIP_BODY_COMPRESSION));
 
         var bulkDoc = createBulkDoc(docId);
         var indexName = "testIndex";
@@ -272,7 +282,8 @@ class OpenSearchClientTest {
         var docId = "tt1979320";
         var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
 
-        when(restClient.supportsGzipCompression()).thenReturn(false);
+        openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11"),
+                CompressionMode.UNCOMPRESSED));
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
 
         var bulkDoc = createBulkDoc(docId);

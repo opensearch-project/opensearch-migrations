@@ -20,6 +20,9 @@
   - [Development](#development)
     - [Unit Tests](#unit-tests)
     - [Coverage](#coverage)
+    - [Backend APIs](#backend-apis)
+      - [Locally testing](#locally-testing)
+      - [Deployment](#deployment)
 
 The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app and a web API, for instance.
 
@@ -98,7 +101,9 @@ Exactly one of the following blocks must be present:
 - `no_auth`: may be empty, no authorization to use.
 - `basic_auth`:
     - `username`
-    - `password` OR `password_from_secret_arn`
+    - `password` \
+    OR 
+    - `user_from_secret_arn`: A secrets manager secret containing both a `username` and `password` key within the secret
 - `sigv4`:
     - `region`: Optional, specify a region for the sigv4 signing, the default is the current region.
     - `service`: Optional, specify a service signing name for the cluster, e.g `es` for Amazon OpenSearch Service and `aoss` for Amazon OpenSearch Serverless. Defaults to `es`
@@ -202,7 +207,8 @@ The metadata migration moves indices, components, and templates from a snapshot 
 - `index_allowlist`: optional, a list of index names. If this key is provided, only the named indices will be migrated. If the field is not provided, all non-system indices will be migrated.
 - `index_template_allowlist`: optional, a list of index template names. If this key is provided, only the named templates will be migrated. If the field is not provided, all templates will be migrated.
 - `component_template_allowlist`: optional, a list of component template names. If this key is provided, only the named component templates will be migrated. If the field is not provided, all component templates will be migrated.
-- `source_cluster_version`: optional, defaults to `ES_7.10.2`, which should work for closely related versions. Version of the source cluster from which the snapshot was taken and used for handling incompatible settings between versions.
+- `source_cluster_version`: optional, if not provided the specified version in the source_cluster object will be used. Version of the source cluster from which the snapshot was taken and used for handling incompatible settings between versions.
+- `transformer_config_base64`: optional, the transformation config (as a base64 encoded string) to apply during a metadata migration.
 - `from_snapshot`: required. As mentioned above, `from_snapshot` is the only allowable source for a metadata migration at this point. This key must be present, but if it's value is null/empty, the snapshot details will be pulled from the top-level `snapshot` object. If a `snapshot` object does not exist, this block must be populated.
     - `snapshot_name`: required, as described in the Snapshot section
     - `s3` or `fs` block: exactly one must be present, as described in the Snapshot section
@@ -322,3 +328,42 @@ or generated as HTML:
 ```shell
 pipenv run coverage html
 ```
+
+### Backend APIs
+
+As part of the Migration console many console commands are available for use by the frontend website or by workflow management tools.  This is a sub-set of the console_link library, ensuring the command line and backend functionality is passing through the same systems. 
+
+#### Locally testing
+
+For local development, you can use the API development script:
+
+```shell
+pipenv run api-dev
+```
+
+*Website passthrough*
+
+To test the api when the the web frontend is running without deploying in AWS or kubernetes, make the following updates:
+
+1. Update `frontend/nginx.conf` to allow communication to the local host
+`        proxy_pass         http://127.0.0.1:8000/;` -> 
+`        proxy_pass         http://host.docker.internal:8000/;`
+
+1. Rebuild the website docker image
+```shell
+./gradlew :frontend:buildDockerImage
+```
+
+1. Run the website with the additional host
+```shell
+docker run -p 8080:80 --add-host=host.docker.internal:host-gateway migrations/website
+```
+
+1. Access the api through the website passthrough
+```shell
+curl http://localhost:8080/api/docs
+```
+
+#### Deployment
+
+Consult the [frontend readme](../../../../../../../../frontend/README.md) for access when hosted in AWS or kubernetes.

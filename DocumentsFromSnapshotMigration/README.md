@@ -95,9 +95,9 @@ To see the default shard size, use the `--help` CLI option:
 
 These arguments should be carefully considered before setting, can include experimental features, and can impact security posture of the solution. Tread with caution.
 
-| Argument                          | Description                                                                                                            |
-|-----------------------------------|:-----------------------------------------------------------------------------------------------------------------------|
-| --target-compression              | Flag to enable request compression for target cluster. Default: false                                                  |
-| --documents-per-bulk-request      | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size)   |
-| --max-connections                 | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                     |
-| --target-insecure                 | Flag to allow untrusted SSL certificates for target cluster. Default: false                                            |
+| Argument                    | Description                                                                                                          |
+|-----------------------------|:---------------------------------------------------------------------------------------------------------------------|
+| --disable-compression  | Flag to disable request compression for target cluster. Default: false                                               |
+| --documents-per-bulk-request | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size) |
+| --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
+| --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |

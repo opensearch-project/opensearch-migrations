@@ -9,7 +9,8 @@ assignees: ''
 _A clear and concise description of the bug._
 
 ### What are your migration environments?
-_What versions of Elasticsearch / Opensearch, what version of the Migration Assistant._
+_What versions of Elasticsearch / Opensearch._<br/>
+_What version of the Migration Assistant (this can be determined by running `console --version` on the Migration Console)._
 
 ### How can one reproduce the bug?
 _Steps to reproduce the behavior._

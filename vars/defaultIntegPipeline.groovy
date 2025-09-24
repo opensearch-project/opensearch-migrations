@@ -38,6 +38,7 @@ def call(Map config = [:]) {
             lock(label: params.STAGE, quantity: 1, variable: 'stage')
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
+            skipDefaultCheckout(true)
         }
 
         triggers {
@@ -62,6 +63,16 @@ def call(Map config = [:]) {
                         if (config.checkoutStep) {
                             config.checkoutStep()
                         } else {
+                            sh 'sudo chown -R $(whoami) .'
+                            sh 'sudo chmod -R u+w .'
+                            // If in an existing git repository, remove any additional files in git tree that are not listed in .gitignore
+                            if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
+                                echo 'Cleaning any existing git files in workspace'
+                                sh 'git reset --hard'
+                                sh 'git clean -fd'
+                            } else {
+                                echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
+                            }
                             git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
                         }
                     }
@@ -105,7 +116,7 @@ def call(Map config = [:]) {
                             if (config.buildStep) {
                                 config.buildStep()
                             } else {
-                                sh 'sudo --preserve-env ./gradlew clean build --no-daemon'
+                                sh './gradlew clean build --no-daemon --stacktrace'
                             }
                         }
                     }
@@ -122,9 +133,7 @@ def call(Map config = [:]) {
                                     config.deployStep()
                                 } else {
                                     echo "Acquired deployment stage: ${stage}"
-                                    sh 'sudo usermod -aG docker $USER'
-                                    sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                    def baseCommand = "./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
@@ -164,7 +173,7 @@ def call(Map config = [:]) {
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                            sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
+                                            sh "./awsRunIntegTests.sh --command '${command}' " +
                                                     "--test-result-file ${test_result_file} " +
                                                     "--stage ${stage}"
                                         }

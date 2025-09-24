@@ -7,9 +7,12 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionStrictness;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.version_es_1_7.SnapshotReader_ES_1_7;
+import org.opensearch.migrations.bulkload.version_es_2_4.SnapshotReader_ES_2_4;
 import org.opensearch.migrations.bulkload.version_es_5_4.SnapshotReader_ES_5_4;
 import org.opensearch.migrations.bulkload.version_es_6_8.RemoteWriter_ES_6_8;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
@@ -27,6 +30,8 @@ public class ClusterProviderRegistry {
     /** Ensure we are always getting fresh providers when searching for one */
     private List<VersionSpecificCluster> getProviders() {
         return List.of(
+            new SnapshotReader_ES_1_7(),
+            new SnapshotReader_ES_2_4(),
             new SnapshotReader_ES_5_4(),
             new SnapshotReader_ES_6_8(),
             new SnapshotReader_ES_7_10(),
@@ -65,6 +70,28 @@ public class ClusterProviderRegistry {
             .addArgument(version)
             .log();
         return snapshotProvider;
+    }
+
+    /**
+     * Gets the SnapshotFileFinder associated with the appropriate SnapshotReader for the given version.
+     * This allows you to construct the SourceRepo before instantiating the full SnapshotReader.
+     */
+    public SnapshotFileFinder getSnapshotFileFinder(Version version, boolean looseMatch) {
+        return getProviders()
+            .stream()
+            .filter(p -> looseMatch ? p.looseCompatibleWith(version) : p.compatibleWith(version))
+            .filter(ClusterSnapshotReader.class::isInstance)
+            .map(ClusterSnapshotReader.class::cast)
+            .map(p -> p.initialize(version))
+            .findFirst()
+            .map(ClusterSnapshotReader::getSnapshotFileFinder)
+            .orElseThrow(() -> {
+                var message = "No SnapshotFileFinder found for version: " + version;
+                if (!looseMatch) {
+                    message = message + " " + VersionStrictness.REMEDIATION_MESSAGE;
+                }
+                return new UnsupportedVersionException(message);
+            });
     }
 
     /**
