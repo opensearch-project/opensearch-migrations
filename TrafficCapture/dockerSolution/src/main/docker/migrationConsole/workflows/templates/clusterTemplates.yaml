@@ -39,14 +39,18 @@ spec:
             kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
               -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | kubectl apply -f -
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 2) Create/update AWS creds secret (for the ES 1.5 cloud-aws plugin to pick up)
             kubectl create secret generic "${CLUSTER_NAME}-aws" \
               --from-literal=AWS_ACCESS_KEY_ID=test \
               --from-literal=AWS_SECRET_ACCESS_KEY=test \
               -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | kubectl apply -f -
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 3) Apply the Deployment + Service with PATHS for carlchinatomby/elasticsearch:1.5.2-arm64
             cat <<EOF | kubectl apply -f -
@@ -201,10 +205,6 @@ spec:
               -n ${NAMESPACE} \
               --dry-run=client -o yaml | kubectl apply -f -
 
-            kubectl label configmap "${CLUSTER_NAME}-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
-            kubectl label secret "${CLUSTER_NAME}-aws" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
-            kubectl label configmap "${CLUSTER_NAME}-migration-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
-
             echo "Elasticsearch 1.5 cluster created successfully (ARM-compatible with correct paths)."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
@@ -247,14 +247,18 @@ spec:
             kubectl create configmap "${CLUSTER_NAME}-config" \
               --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
               -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | kubectl apply -f -
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 2) Create/update AWS creds secret (for the ES 2.4 cloud-aws plugin to pick up)
             kubectl create secret generic "${CLUSTER_NAME}-aws" \
               --from-literal=AWS_ACCESS_KEY_ID=test \
               --from-literal=AWS_SECRET_ACCESS_KEY=test \
               -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | kubectl apply -f -
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             # 3) Apply the Deployment + Service that mirror our proven setup
             cat <<EOF | kubectl apply -f -
@@ -399,10 +403,6 @@ spec:
               --from-file=cluster-config=/tmp/cluster-config.json \
               -n ${NAMESPACE} \
               --dry-run=client -o yaml | kubectl apply -f -
-
-            kubectl label configmap "${CLUSTER_NAME}-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
-            kubectl label secret "${CLUSTER_NAME}-aws" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
-            kubectl label configmap "${CLUSTER_NAME}-migration-config" migration-test=true cluster-name=${CLUSTER_NAME} -n "${NAMESPACE}" --overwrite
 
             echo "Elasticsearch 2.4 cluster created successfully (manifests inline)."
             echo "Cluster config:"
