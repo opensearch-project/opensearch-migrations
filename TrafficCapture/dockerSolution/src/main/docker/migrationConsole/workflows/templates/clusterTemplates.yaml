@@ -549,6 +549,8 @@ spec:
                 value: ""
               - name: "node.roles"
                 value: ""
+              - name: "AWS_REGION"
+                value: "us-east-2"
             persistence:
               enabled: false
             
@@ -559,14 +561,36 @@ spec:
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
+              - name: inject-aws-creds
+                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                command:
+                  - sh
+                  - -c
+                  - |
+                    set -e
+                    echo "Creating Elasticsearch keystore and adding AWS credentials"
+                    echo 'y' | bin/elasticsearch-keystore create
+                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
+                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                    # Copy keystore to shared volume location
+                    cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                    echo "Keystore created and saved to shared volume"
+                volumeMounts:
+                  - name: elasticsearch-keystore
+                    mountPath: /shared
             
             extraVolumes:
               - name: plugins
+                emptyDir: {}
+              - name: elasticsearch-keystore
                 emptyDir: {}
             
             extraVolumeMounts:
               - name: plugins
                 mountPath: /usr/share/elasticsearch/plugins
+              - name: elasticsearch-keystore
+                mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+                subPath: elasticsearch.keystore
             EOF
             
             # Install Elasticsearch 6.8.23
