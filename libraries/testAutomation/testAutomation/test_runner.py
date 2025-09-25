@@ -207,7 +207,7 @@ class TestRunner:
                 "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
                 "workflows/templates/"
             )
-            self.k8s_service.exec_migration_console_cmd([
+            self.k8s_service.run_command([
                 "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
             ])
             logger.info("Applied workflow templates directory")

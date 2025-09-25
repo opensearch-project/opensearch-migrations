@@ -483,6 +483,7 @@ spec:
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/es-values.yaml \
               --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
+              --
             
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
