@@ -89,12 +89,12 @@ spec:
                           cd /tmp
                           wget https://download.elastic.co/elasticsearch/elasticsearch-cloud-aws/elasticsearch-cloud-aws-2.5.1.zip
                           unzip elasticsearch-cloud-aws-2.5.1.zip
-                          mkdir -p /elasticsearch/plugins/cloud-aws
-                          cp *.jar /elasticsearch/plugins/cloud-aws/
+                          mkdir -p /usr/share/elasticsearch/plugins/cloud-aws
+                          cp *.jar /usr/share/elasticsearch/plugins/cloud-aws/
                           echo "S3 plugin installed successfully"
                       volumeMounts:
                         - name: plugins
-                          mountPath: /elasticsearch/plugins
+                          mountPath: /usr/share/elasticsearch/plugins
                       securityContext:
                         runAsUser: 1000
                         runAsGroup: 1000
@@ -112,10 +112,10 @@ spec:
                       command: ["/bin/sh","-lc"]
                       args:
                         - >
-                          exec /elasticsearch/bin/elasticsearch
-                            -Des.path.conf=/elasticsearch/config
-                            -Des.path.data=/elasticsearch/data
-                            -Des.path.logs=/elasticsearch/logs
+                          exec /usr/share/elasticsearch/bin/elasticsearch
+                            -Des.path.conf=/usr/share/elasticsearch/config
+                            -Des.path.data=/usr/share/elasticsearch/data
+                            -Des.path.logs=/usr/share/elasticsearch/logs
                             -Des.network.host=0.0.0.0
                             -Des.http.host=0.0.0.0
                             -Des.transport.host=0.0.0.0
@@ -145,16 +145,16 @@ spec:
                       volumeMounts:
                         # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
                         - name: elasticsearch-config
-                          mountPath: /elasticsearch/config/elasticsearch.yml
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
                           subPath: elasticsearch.yml
                         # Writable locations
                         - name: elasticsearch-data
-                          mountPath: /elasticsearch/data
+                          mountPath: /usr/share/elasticsearch/data
                         - name: elasticsearch-logs
-                          mountPath: /elasticsearch/logs
+                          mountPath: /usr/share/elasticsearch/logs
                         # Persist the plugin installed in init container
                         - name: plugins
-                          mountPath: /elasticsearch/plugins
+                          mountPath: /usr/share/elasticsearch/plugins
                   volumes:
                     - name: elasticsearch-config
                       configMap:
@@ -292,10 +292,10 @@ spec:
                       image: elasticsearch:2.4.6
                       command: ["sh","-c"]
                       args:
-                        - cd /elasticsearch-2.4.0 && ./bin/plugin install cloud-aws
+                        - /usr/share/elasticsearch/bin/plugin install cloud-aws
                       volumeMounts:
                         - name: plugins
-                          mountPath: /elasticsearch-2.4.0/plugins
+                          mountPath: /usr/share/elasticsearch/plugins
                       securityContext:
                         runAsUser: 1000
                         runAsGroup: 1000
@@ -310,12 +310,8 @@ spec:
                       command: ["/bin/sh","-lc"]
                       args:
                         - >
-                          ES_BIN="/elasticsearch-2.4.0/bin/elasticsearch";
-                          if [ ! -x "\$ES_BIN" ]; then
-                            echo "ERROR: elasticsearch binary not found"; ls -la /elasticsearch-2.4.0/bin; sleep 3600;
-                          fi;
-                          exec "\$ES_BIN"
-                            -Des.path.conf=/elasticsearch-2.4.0/config
+                          exec /usr/share/elasticsearch/bin/elasticsearch
+                            -Des.path.conf=/usr/share/elasticsearch/config
                             -Des.network.host=0.0.0.0
                             -Des.http.host=0.0.0.0
                             -Des.transport.host=0.0.0.0
@@ -344,16 +340,16 @@ spec:
                       volumeMounts:
                         # Mount ONLY the file (ConfigMap is read-only; avoids scripts/dir creation error)
                         - name: elasticsearch-config
-                          mountPath: /elasticsearch-2.4.0/config/elasticsearch.yml
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
                           subPath: elasticsearch.yml
                         # Writable locations
                         - name: elasticsearch-data
-                          mountPath: /elasticsearch-2.4.0/data
+                          mountPath: /usr/share/elasticsearch/data
                         - name: elasticsearch-logs
-                          mountPath: /elasticsearch-2.4.0/logs
+                          mountPath: /usr/share/elasticsearch/logs
                         # Persist the plugin installed in init container
                         - name: plugins
-                          mountPath: /elasticsearch-2.4.0/plugins
+                          mountPath: /usr/share/elasticsearch/plugins
                   volumes:
                     - name: elasticsearch-config
                       configMap:
