@@ -86,12 +86,23 @@ spec:
                       args:
                         - |
                           set -e
+                          echo "Starting plugin installation as user $(id)"
                           cd /tmp
-                          wget https://download.elastic.co/elasticsearch/elasticsearch-cloud-aws/elasticsearch-cloud-aws-2.5.1.zip
-                          unzip elasticsearch-cloud-aws-2.5.1.zip
+                          echo "Downloading plugin..."
+                          wget --no-check-certificate --timeout=30 --tries=3 https://download.elastic.co/elasticsearch/elasticsearch-cloud-aws/elasticsearch-cloud-aws-2.5.1.zip || {
+                            echo "wget failed, trying curl..."
+                            curl -k -L -o elasticsearch-cloud-aws-2.5.1.zip https://download.elastic.co/elasticsearch/elasticsearch-cloud-aws/elasticsearch-cloud-aws-2.5.1.zip
+                          }
+                          echo "Extracting plugin..."
+                          unzip -q elasticsearch-cloud-aws-2.5.1.zip
+                          echo "Creating plugin directory..."
                           mkdir -p /usr/share/elasticsearch/plugins/cloud-aws
+                          echo "Copying plugin files..."
                           cp *.jar /usr/share/elasticsearch/plugins/cloud-aws/
+                          echo "Setting permissions..."
+                          chmod -R 755 /usr/share/elasticsearch/plugins/cloud-aws
                           echo "S3 plugin installed successfully"
+                          ls -la /usr/share/elasticsearch/plugins/cloud-aws/
                       volumeMounts:
                         - name: plugins
                           mountPath: /usr/share/elasticsearch/plugins
