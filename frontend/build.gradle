@@ -73,6 +73,30 @@ tasks.register('lintFrontend', NpmTask) {
     inputs.files fileTree(dir: '.', include: buildInputs, exclude: buildExclusions)
 }
 
+tasks.register('checkGeneratedFilesTracked', Exec) {
+    dependsOn 'buildFrontend'
+    group = 'check'
+    description = 'Verifies there are no untracked files in src/generated directory'
+    workingDir = rootProject.rootDir
+   
+    standardOutput = System.out
+    errorOutput = System.err
+    
+    commandLine 'bash', '-c', '''
+        changed=$(git diff --name-only -- frontend/src/generated/)
+        untracked=$(git ls-files --others --exclude-standard -- frontend/src/generated/)
+        if [ -n "$changed$untracked" ]; then
+            echo "Error: Unstaged or untracked files under frontend/src/generated/:"
+            [ -n "$changed" ] && echo "$changed"
+            [ -n "$untracked" ] && echo "$untracked"
+            echo "Please run ./gradlew frontend:generateBackendClient and commit the updated files"
+            exit 1
+        else
+            echo "OK: No unstaged or untracked files under frontend/src/generated/"
+        fi
+        '''
+}
+
 tasks.register('cleanFrontend', Delete) {
     delete buildOutputs
 }
@@ -104,4 +128,5 @@ The following is a list of npm commands to execute:
 
 assemble.dependsOn 'buildFrontend'
 check.dependsOn 'lintFrontend'
+check.dependsOn 'checkGeneratedFilesTracked'
 clean.dependsOn 'cleanFrontend'
