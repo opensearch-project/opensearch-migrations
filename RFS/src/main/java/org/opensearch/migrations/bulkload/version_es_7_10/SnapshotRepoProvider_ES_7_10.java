@@ -38,7 +38,8 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         if (targetSnapshot != null) {
             var indexMetadataLookup = targetSnapshot.getIndexMetadataLookup();
             if (indexMetadataLookup == null) {
-                throw new IllegalStateException("Cannot read snapshot metadata: snapshot format may not match ES 7.10. Ensure --source-version is correctly specified.");
+                throw new IllegalStateException("Cannot read snapshot metadata: snapshot format may not match the specified source version. " +
+                    "Verify --source-version matches your source cluster version and ensure snapshot was created without compression.");
             }
             indexMetadataLookup.keySet().forEach(indexId ->
                 getRepoData().getIndices().forEach((indexName, rawIndex) -> {

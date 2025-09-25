@@ -52,6 +52,10 @@ public class IndexMetadataData_OS_2_11 implements IndexMetadata {
 
     @Override
     public ObjectNode getSettings() {
+        if (root == null) {
+            throw new IllegalStateException("Cannot read index metadata: snapshot format may not match the specified source version. " +
+                "Verify --source-version matches your source cluster version and ensure snapshot was created without compression.");
+        }
         return (ObjectNode) root.get("settings");
     }
 

@@ -271,18 +271,8 @@ class Metadata:
                             f"snapshot when performing metadata migrations")
                 version = source_cluster.version
             else:
-                logger.error(
-                    "source_cluster_version is required for metadata migration "
-                    "when source cluster is disabled. Please specify "
-                    "source_cluster_version in your migration configuration "
-                    "(e.g., 'ES 7.10', 'ES 6.8', etc.)"
-                )
-                raise ValueError(
-                    "source_cluster_version is required for metadata migration "
-                    "when source cluster is disabled. Please specify "
-                    "source_cluster_version in your migration configuration "
-                    "to avoid relying on potentially incorrect version defaults."
-                )
+                raise ValueError("A version field in the source_cluster object, or source_cluster_version in the "
+                                 "metadata object is required to perform metadata migrations e.g. version: \"ES_6.8\" ")
         return version
 
     def _add_s3_args(self, command_args: Dict[str, Any]) -> None:

@@ -58,7 +58,9 @@ public interface IndexMetadata extends Index {
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
             } catch (Exception e) {
-                throw new RfsException("Could not load index metadata file: " + filePath.toString(), e);
+                throw new RfsException("Cannot read index metadata: snapshot format may not match the specified source version. " +
+                    "Verify --source-version matches your source cluster version and ensure snapshot was created without compression. " +
+                    "File: " + filePath.toString(), e);
             }
         }
 

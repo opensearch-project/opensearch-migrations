@@ -60,6 +60,10 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
         if (settings != null) {
             return settings;
         }
+        if (rawJson == null) {
+            throw new IllegalStateException("Cannot read index metadata: snapshot format may not match the specified source version. " +
+                "Verify --source-version matches your source cluster version and ensure snapshot was created without compression.");
+        }
         ObjectNode treeSettings = TransformFunctions.convertFlatSettingsToTree((ObjectNode) rawJson.get("settings"));
         settings = treeSettings;
         return settings;
