@@ -1019,6 +1019,108 @@ export type BackfillStatusResponses = {
 export type BackfillStatusResponse =
   BackfillStatusResponses[keyof BackfillStatusResponses];
 
+export type BackfillStartData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/start";
+};
+
+export type BackfillStartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillStartError = BackfillStartErrors[keyof BackfillStartErrors];
+
+export type BackfillStartResponses = {
+  /**
+   * Response Backfillstart
+   * Successful Response
+   */
+  200: {
+    [key: string]: string;
+  };
+};
+
+export type BackfillStartResponse =
+  BackfillStartResponses[keyof BackfillStartResponses];
+
+export type BackfillPauseData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/pause";
+};
+
+export type BackfillPauseErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillPauseError = BackfillPauseErrors[keyof BackfillPauseErrors];
+
+export type BackfillPauseResponses = {
+  /**
+   * Response Backfillpause
+   * Successful Response
+   */
+  200: {
+    [key: string]: string;
+  };
+};
+
+export type BackfillPauseResponse =
+  BackfillPauseResponses[keyof BackfillPauseResponses];
+
+export type BackfillStopData = {
+  body?: never;
+  path: {
+    /**
+     * Session Name
+     */
+    session_name: string;
+  };
+  query?: never;
+  url: "/sessions/{session_name}/backfill/stop";
+};
+
+export type BackfillStopErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type BackfillStopError = BackfillStopErrors[keyof BackfillStopErrors];
+
+export type BackfillStopResponses = {
+  /**
+   * Response Backfillstop
+   * Successful Response
+   */
+  200: {
+    [key: string]: string;
+  };
+};
+
+export type BackfillStopResponse =
+  BackfillStopResponses[keyof BackfillStopResponses];
+
 export type ClusterSourceData = {
   body?: never;
   path: {
