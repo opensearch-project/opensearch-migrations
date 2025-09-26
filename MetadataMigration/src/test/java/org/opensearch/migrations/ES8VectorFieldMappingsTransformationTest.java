@@ -57,6 +57,9 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         startClusters();
 
         String requestBody = "{\n" +
+                "  \"settings\": {\n" +
+                "    \"number_of_replicas\": 0\n" +
+                "  },\n" +
                 "  \"mappings\": \n" +
                 "    {\n" +
                 "        \"dynamic\": \"strict\",\n" +
