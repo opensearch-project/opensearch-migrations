@@ -42,8 +42,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "discovery.zen.minimum_master_nodes: 1",
         "node.max_local_storage_nodes: 2",
         "path.repo: \"/tmp/snapshots\"",
-        "cluster.routing.allocation.disk.watermark.low: 99%",
-        "cluster.routing.allocation.disk.watermark.high: 99%"
+        "cluster.routing.allocation.disk.watermark.low: 100%",
+        "cluster.routing.allocation.disk.watermark.high: 100%"
     );
 
     // This version of doesn't support path.repo based via env variables, passing this value via config
@@ -52,8 +52,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     private static final String OLDER_ES_CONFIG =
         "network.host: 0.0.0.0\n" +
         "path.repo: \"" + CLUSTER_SNAPSHOT_DIR + "\"\n" +
-        "cluster.routing.allocation.disk.watermark.low: 99%\n" +
-        "cluster.routing.allocation.disk.watermark.high: 99%";
+        "cluster.routing.allocation.disk.watermark.low: 100%\n" +
+        "cluster.routing.allocation.disk.watermark.high: 100%";
 
     private static String buildEs5ConfigYml(List<String> baseLines, String... extraLines) {
         List<String> allLines = new ArrayList<>(baseLines);
@@ -158,9 +158,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "index.store.type", "mmapfs",
             "bootstrap.system_call_filter", "false",
             "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
-            "cluster.routing.allocation.disk.watermark.low", "99%",
-            "cluster.routing.allocation.disk.watermark.high", "99%",
-            "cluster.routing.allocation.disk.watermark.flood_stage", "99%"
+            "cluster.routing.allocation.disk.watermark.low", "100%",
+            "cluster.routing.allocation.disk.watermark.high", "100%",
+            "cluster.routing.allocation.disk.watermark.flood_stage", "100%"
         )),
         ELASTICSEARCH(
             overrideAndRemoveEnv(

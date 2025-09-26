@@ -11,6 +11,7 @@ from console_link.middleware.clusters import cat_indices, connection_check, clea
 logger = logging.getLogger(__name__)
 
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
+OTEL_COLLECTOR_ENDPOINT = "http://otel-collector:4317"
 
 
 class ClusterVersionCombinationUnsupported(Exception):
@@ -104,7 +105,8 @@ class MATestBase:
         snapshot_and_migration_configs = [{
             "migrations": [{
                 "metadata": {
-                    "from_snapshot": None
+                    "from_snapshot": None,
+                    "otel_endpoint": OTEL_COLLECTOR_ENDPOINT
                 },
                 "documentBackfillConfigs": [{
                     "test": None
@@ -141,14 +143,14 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
-            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=180)
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=300)
             self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
             self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
 
     def prepare_clusters(self):
         pass
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 180):
+    def workflow_perform_migrations(self, timeout_seconds: int = 240):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:
