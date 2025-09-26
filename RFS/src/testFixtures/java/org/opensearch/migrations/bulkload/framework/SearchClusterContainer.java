@@ -160,7 +160,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "ES_JAVA_OPTS", "-Xms2g -Xmx2g",
             "cluster.routing.allocation.disk.watermark.low", "99%",
             "cluster.routing.allocation.disk.watermark.high", "99%",
-            "cluster.routing.allocation.disk.watermark.flood_stage", "99%"
+            "cluster.routing.allocation.disk.watermark.flood_stage", "99.99%"
         )),
         ELASTICSEARCH(
             overrideAndRemoveEnv(
