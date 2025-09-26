@@ -450,15 +450,7 @@ class ExprBuilder {
         };
     }
 
-    // String functions
-    concat<ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> {
-        return new ConcatExpression(es);
-    }
-
-    concatWith<ES extends readonly BaseExpression<string, any>[]>(sep: string, ...es: ES): BaseExpression<string, "govaluate"> {
-        return new ConcatExpression(es, sep);
-    }
-
+    // Logical
     ternary<
         B extends BaseExpression<boolean, any>,
         L extends BaseExpression<any, any>,
@@ -473,40 +465,6 @@ class ExprBuilder {
         return new TernaryExpression(cond, whenTrue, whenFalse);
     }
 
-    toLowerCase(data: BaseExpression<string, any>) {
-        return fn<string>("lower", toExpression(data));
-    }
-
-    toUpperCase(data: BaseExpression<string, any>) {
-        return fn<string>("upper", toExpression(data));
-    }
-
-    toArray<ES extends readonly unknown[]>(
-        ...items: ES
-    ): BaseExpression<
-        ElemOfNormalized<ES>[],
-        ComplexityOfNormalized<ES>
-    > {
-        const normalized = items.map((it) =>
-            isExpression(it) ? it : this.literal(it as PlainObject)
-        ) as NormalizeTuple<ES>;
-
-        type N = Extract<typeof normalized, readonly BaseExpression<any, any>[]>;
-
-        return new ArrayMakeExpression<N>(normalized as unknown as N) as BaseExpression<
-            ElemOfNormalized<ES>[],
-            ComplexityOfNormalized<ES>
-        >;
-    }
-
-    nullCoalesce<T extends PlainObject>(
-        v: BaseExpression<T | MissingField, any>,
-        d: AllowLiteralOrExpression<DeepWiden<T>>
-    ) {
-        return fn<DeepWiden<T>>("nullCoalesce", v, toExpression(d));
-    }
-
-    // Comparisons
     equals: {
         <L extends AllowLiteralOrExpression<number, any>, R extends AllowLiteralOrExpression<number, any>>(
             l: NoAny<L>, r: NoAny<R>
@@ -539,7 +497,6 @@ class ExprBuilder {
         return fn<boolean, C>("!", toExpression(data));
     }
 
-    // Arithmetic
     add<
         L extends BaseExpression<boolean, CL>,
         R extends BaseExpression<boolean, CR>,
@@ -576,7 +533,70 @@ class ExprBuilder {
         return new InfixExpression("||", l, r);
     }
 
-    // JSON Handling
+    nullCoalesce<T extends PlainObject>(
+        v: BaseExpression<T | MissingField, any>,
+        d: AllowLiteralOrExpression<DeepWiden<T>>
+    ) {
+        return fn<DeepWiden<T>>("nullCoalesce", v, toExpression(d));
+    }
+
+    // String functions
+    concat<ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> {
+        return new ConcatExpression(es);
+    }
+
+    concatWith<ES extends readonly BaseExpression<string, any>[]>(sep: string, ...es: ES): BaseExpression<string, "govaluate"> {
+        return new ConcatExpression(es, sep);
+    }
+
+    split(arr: AllowLiteralOrExpression<string>, delim: AllowLiteralOrExpression<string>) {
+        return fn<string[], ExpressionType, "complicatedExpression">("split", toExpression(arr), toExpression(delim));
+    }
+
+    fillTemplate<T extends string>(
+        template: T,
+        replacements: TemplateReplacements<T>
+    ): BaseExpression<string, "complicatedExpression"> {
+        const normalizedReplacements: NormalizedReplacements<T> = {} as any;
+
+        for (const [key, value] of Object.entries(replacements)) {
+            const typedValue = value as AllowLiteralOrExpression<string>;
+            normalizedReplacements[key as keyof NormalizedReplacements<T>] =
+                typeof typedValue === 'string' ? this.literal(typedValue) : typedValue;
+        }
+
+        return new TemplateReplacementExpression(template, normalizedReplacements);
+    }
+
+    toLowerCase(data: BaseExpression<string, any>) {
+        return fn<string>("lower", toExpression(data));
+    }
+
+    toUpperCase(data: BaseExpression<string, any>) {
+        return fn<string>("upper", toExpression(data));
+    }
+
+
+
+    toArray<ES extends readonly unknown[]>(
+        ...items: ES
+    ): BaseExpression<
+        ElemOfNormalized<ES>[],
+        ComplexityOfNormalized<ES>
+    > {
+        const normalized = items.map((it) =>
+            isExpression(it) ? it : this.literal(it as PlainObject)
+        ) as NormalizeTuple<ES>;
+
+        type N = Extract<typeof normalized, readonly BaseExpression<any, any>[]>;
+
+        return new ArrayMakeExpression<N>(normalized as unknown as N) as BaseExpression<
+            ElemOfNormalized<ES>[],
+            ComplexityOfNormalized<ES>
+        >;
+    }
+
+    // Record Handling
     hasKey<
         T extends Record<string, PlainObject>,
         K extends keyof T & string
@@ -712,7 +732,6 @@ class ExprBuilder {
     }
 
     // Parameter functions
-
     taskData<T extends PlainObject>(
         taskType: TaskType,
         taskName: string,
@@ -721,36 +740,17 @@ class ExprBuilder {
         return new TaskDataExpression<T>(taskType, taskName, key);
     }
 
-    // Utility
-    split(arr: AllowLiteralOrExpression<string>, delim: AllowLiteralOrExpression<string>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("split", toExpression(arr), toExpression(delim));
-    }
-
     getWorkflowValue(value: WORKFLOW_VALUES) {
         return new WorkflowValueExpression(value);
     }
 
+    // Utility functions
     fromBase64(data: AllowLiteralOrExpression<string>) {
         return fn<string>("fromBase64", toExpression(data));
     }
 
     toBase64(data: AllowLiteralOrExpression<string>) {
         return fn<string>("toBase64", toExpression(data));
-    }
-
-    fillTemplate<T extends string>(
-        template: T,
-        replacements: TemplateReplacements<T>
-    ): BaseExpression<string, "complicatedExpression"> {
-        const normalizedReplacements: NormalizedReplacements<T> = {} as any;
-
-        for (const [key, value] of Object.entries(replacements)) {
-            const typedValue = value as AllowLiteralOrExpression<string>;
-            normalizedReplacements[key as keyof NormalizedReplacements<T>] =
-                typeof typedValue === 'string' ? this.literal(typedValue) : typedValue;
-        }
-
-        return new TemplateReplacementExpression(template, normalizedReplacements);
     }
 }
 
