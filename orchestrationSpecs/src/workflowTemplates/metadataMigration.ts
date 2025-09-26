@@ -1,4 +1,4 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     completeSnapshotConfigParam,
@@ -7,9 +7,9 @@ import {
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {z} from "zod";
 import {CLUSTER_CONFIG, METADATA_OPTIONS, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
-import {MISSING_FIELD} from "@/schemas/plainObject";
-import {selectInputsForRegister} from "@/schemas/parameterConversions";
-import {typeToken} from "@/schemas/sharedTypes";
+import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
+import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export const MetadataMigration = WorkflowBuilder.create({
     k8sResourceName: "metadata-migration",

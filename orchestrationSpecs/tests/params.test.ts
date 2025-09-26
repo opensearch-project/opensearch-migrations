@@ -1,10 +1,10 @@
-import {WorkflowBuilder} from "../src/schemas/workflowBuilder";
-import {TemplateBuilder} from "../src/schemas/templateBuilder";
-import {defineParam, InputParamDef} from "@/schemas/parameterSchemas";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
+import {defineParam, InputParamDef} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {expectTypeOf} from "expect-type";
-import {typeToken} from "@/schemas/sharedTypes";
-import {CallerParams} from "@/schemas/parameterConversions";
-import expr from "@/schemas/expression";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {CallerParams} from "@/argoWorkflowBuilders/models/parameterConversions";
+import expr from "@/argoWorkflowBuilders/models/expression";
 
 export type SIMPLE_ENUM = "a" | "b" | "c";
 

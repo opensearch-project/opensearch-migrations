@@ -16,7 +16,7 @@ import {
     TemplateReplacementExpression,
     TernaryExpression,
     WorkflowValueExpression,
-} from "@/schemas/expression";
+} from "@/argoWorkflowBuilders/models/expression";
 
 /** Lightweight erased type to avoid deep generic instantiation */
 type AnyExpr = BaseExpression<any, any>;

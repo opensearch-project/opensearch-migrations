@@ -4,10 +4,10 @@
  * This file contains types that are needed by multiple modules to prevent
  * circular import dependencies that break TypeScript's type resolution.
  */
-import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {PlainObject} from "@/schemas/plainObject";
-import {SimpleExpression, TemplateExpression} from "@/schemas/expression";
-import {IfNever} from "@/schemas/workflowTypes";
+import {InputParametersRecord, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {SimpleExpression, TemplateExpression} from "@/argoWorkflowBuilders/models/expression";
+import {IfNever} from "@/argoWorkflowBuilders/models/workflowTypes";
 
 export type TaskType = "tasks" | "steps";
 

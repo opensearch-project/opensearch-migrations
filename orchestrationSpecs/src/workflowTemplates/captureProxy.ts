@@ -1,11 +1,11 @@
 // TODO
 
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/sharedTypes";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 import {CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {z} from "zod";
 

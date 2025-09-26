@@ -1,11 +1,11 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {defineRequiredParam} from "@/schemas/parameterSchemas";
+import {defineRequiredParam} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {z} from "zod";
-import {AllowLiteralOrExpression, BaseExpression, expr,} from "@/schemas/expression";
+import {AllowLiteralOrExpression, BaseExpression, expr,} from "@/argoWorkflowBuilders/models/expression";
 import {
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
@@ -13,11 +13,11 @@ import {
     KAFKA_SERVICES_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
-import {INTERNAL} from "@/schemas/taskBuilder";
-import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
-import {MissingField, PlainObject} from "@/schemas/plainObject";
-import {selectInputsForRegister} from "@/schemas/parameterConversions";
-import {TypeToken, typeToken} from "@/schemas/sharedTypes";
+import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
+import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
+import {MissingField, PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {TypeToken, typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 const KafkaServicesConfig = z.object({
     broker_endpoints: z.string(),

@@ -10,14 +10,14 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
-} from "@/schemas/workflowTypes";
+} from "@/argoWorkflowBuilders/models/workflowTypes";
 import {
     extendScope,
     FieldGroupConstraint,
@@ -25,14 +25,14 @@ import {
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
-import {StepsBuilder} from "@/schemas/stepsBuilder";
-import {ContainerBuilder} from "@/schemas/containerBuilder";
-import {PlainObject} from "@/schemas/plainObject";
-import {DagBuilder} from "@/schemas/dagBuilder";
-import {K8sResourceBuilder} from "@/schemas/k8sResourceBuilder";
-import {AllowLiteralOrExpression, expr, isExpression} from "@/schemas/expression";
-import {TypeToken} from "@/schemas/sharedTypes";
-import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterConversions";
+import {StepsBuilder} from "@/argoWorkflowBuilders/models/stepsBuilder";
+import {ContainerBuilder} from "@/argoWorkflowBuilders/models/containerBuilder";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {DagBuilder} from "@/argoWorkflowBuilders/models/dagBuilder";
+import {K8sResourceBuilder} from "@/argoWorkflowBuilders/models/k8sResourceBuilder";
+import {AllowLiteralOrExpression, expr, isExpression} from "@/argoWorkflowBuilders/models/expression";
+import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/argoWorkflowBuilders/models/parameterConversions";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)

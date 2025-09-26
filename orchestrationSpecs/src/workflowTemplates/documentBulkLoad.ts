@@ -1,4 +1,4 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     extractTargetKeysToExpressionMap,
@@ -8,7 +8,7 @@ import {
     TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {BaseExpression, expr} from "@/schemas/expression";
+import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
@@ -16,12 +16,12 @@ import {
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {INTERNAL} from "@/schemas/taskBuilder";
+import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
 import {inputsToEnvVarsList, transformZodObjectToParams} from "@/utils";
-import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
-import {MISSING_FIELD} from "@/schemas/plainObject";
-import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/schemas/parameterConversions";
-import {typeToken} from "@/schemas/sharedTypes";
+import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
+import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
+import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 
 function getRfsReplicasetManifest

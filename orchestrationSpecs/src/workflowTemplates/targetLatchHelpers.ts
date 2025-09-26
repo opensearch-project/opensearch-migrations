@@ -7,9 +7,9 @@ import {
 import initTlhScript from "resources/targetLatchHelper/init.sh";
 import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
 import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
-import {TemplateBuilder} from "@/schemas/templateBuilder";
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {typeToken} from "@/schemas/sharedTypes";
+import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }

@@ -15,18 +15,18 @@ import {
     LogicalOciImages,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {BaseExpression, expr as expr} from "@/schemas/expression";
-import {makeParameterLoop} from "@/schemas/workflowTypes";
-import {configMapKey, defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
-import {INTERNAL} from "@/schemas/taskBuilder";
+import {BaseExpression, expr as expr} from "@/argoWorkflowBuilders/models/expression";
+import {makeParameterLoop} from "@/argoWorkflowBuilders/models/workflowTypes";
+import {configMapKey, defineParam, defineRequiredParam, InputParamDef} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";
 import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
-import {IMAGE_PULL_POLICY} from '@/schemas/containerBuilder';
+import {IMAGE_PULL_POLICY} from '@/argoWorkflowBuilders/models/containerBuilder';
 import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
-import {selectInputsForRegister} from "@/schemas/parameterConversions";
-import {typeToken} from "@/schemas/sharedTypes";
+import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 const latchCoordinationPrefixParam = {
     latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})

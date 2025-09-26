@@ -10,7 +10,7 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
     AllowLiteralOrExpression,
     AllowLiteralOrExpressionIncludingSerialized,
@@ -19,8 +19,8 @@ import {
     InputParameterSource,
     ParameterSource,
     WorkflowParameterSource
-} from "@/schemas/expression";
-import {PlainObject} from "@/schemas/plainObject";
+} from "@/argoWorkflowBuilders/models/expression";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<

@@ -1,13 +1,13 @@
-import {defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
-import {IMAGE_PULL_POLICY} from "@/schemas/containerBuilder";
+import {defineParam, defineRequiredParam, InputParamDef} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
 import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
     DYNAMIC_SNAPSHOT_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
-import {BaseExpression, expr} from "@/schemas/expression";
-import {PlainObject, Serialized} from "@/schemas/plainObject";
+import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
+import {PlainObject, Serialized} from "@/argoWorkflowBuilders/models/plainObject";
 
 export const CommonWorkflowParameters = {
     etcdEndpoints: defineParam({expression: "http://etcd.ma.svc.cluster.local:2379"}),

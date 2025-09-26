@@ -10,14 +10,14 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
     ExtendScope,
     InputParamsToExpressions,
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope,
-} from "@/schemas/workflowTypes";
+} from "@/argoWorkflowBuilders/models/workflowTypes";
 import {
     AllTasksAsOutputReferenceable,
     InputsFrom,
@@ -27,11 +27,11 @@ import {
     TaskBuilder,
     TaskOpts,
     TaskRebinder
-} from "@/schemas/taskBuilder";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder";
-import {PlainObject} from "@/schemas/plainObject";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {NamedTask} from "@/schemas/sharedTypes";
+} from "@/argoWorkflowBuilders/models/taskBuilder";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/argoWorkflowBuilders/models/templateBodyBuilder";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {NamedTask} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
     TaskOpts<LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };

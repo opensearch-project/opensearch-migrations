@@ -8,12 +8,12 @@ import {
     TasksWithOutputs,
     TemplateSignaturesScope,
     WorkflowAndTemplatesScope
-} from "@/schemas/workflowTypes";
-import {Workflow} from "@/schemas/workflowBuilder";
-import {DeepWiden, PlainObject} from "@/schemas/plainObject";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {NamedTask, TaskType} from "@/schemas/sharedTypes";
+} from "@/argoWorkflowBuilders/models/workflowTypes";
+import {Workflow} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {DeepWiden, PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {NamedTask, TaskType} from "@/argoWorkflowBuilders/models/sharedTypes";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
@@ -24,14 +24,14 @@ import {
     StepOutputSource,
     TaskOutputSource,
     TemplateExpression
-} from "@/schemas/expression";
+} from "@/argoWorkflowBuilders/models/expression";
 import {
     buildDefaultsObject,
     CallerParams,
     DefaultsOfInputs,
     HasRequiredByDef,
     NormalizeInputs
-} from "@/schemas/parameterConversions";
+} from "@/argoWorkflowBuilders/models/parameterConversions";
 import {Primitive} from "zod/v3";
 
 export type TaskOpts<LoopT extends PlainObject> = {

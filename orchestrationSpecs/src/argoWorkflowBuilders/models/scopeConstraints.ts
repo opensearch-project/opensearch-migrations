@@ -1,6 +1,6 @@
-import {ExtendScope, GenericScope, ScopeFn} from "@/schemas/workflowTypes";
+import {ExtendScope, GenericScope, ScopeFn} from "@/argoWorkflowBuilders/models/workflowTypes";
 import {TypescriptError} from "@/utils";
-import {InputParamDef, InputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParamDef, InputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 
 // true: worse LSP, but squigglies under the name declaration
 // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support

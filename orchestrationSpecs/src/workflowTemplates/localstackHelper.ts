@@ -1,7 +1,7 @@
-import expr, {BaseExpression} from "@/schemas/expression";
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import expr, {BaseExpression} from "@/argoWorkflowBuilders/models/expression";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {makeRequiredImageParametersForKeys} from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/schemas/sharedTypes";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export function getS3EndpointResolverContainer(s3Endpoint: BaseExpression<string>) {
     const template = `

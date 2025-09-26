@@ -1,7 +1,7 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import { INTERNAL } from "@/schemas/taskBuilder"; // sentinel import
-import {typeToken} from "@/schemas/sharedTypes";
-import {CallerParams} from "@/schemas/parameterConversions";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import { INTERNAL } from "@/argoWorkflowBuilders/models/taskBuilder"; // sentinel import
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {CallerParams} from "@/argoWorkflowBuilders/models/parameterConversions";
 
 describe("paramsFns runtime validation - comprehensive", () => {
     // Shared external templates with different parameter configurations

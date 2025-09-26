@@ -1,9 +1,9 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
-import {INTERNAL} from "@/schemas/taskBuilder";
-import {BaseExpression, expr} from "@/schemas/expression";
-import {selectInputsForRegister} from "@/schemas/parameterConversions";
-import {typeToken} from "@/schemas/sharedTypes";
+import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
+import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
+import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 
 function makeDeployKafkaClusterZookeeperManifest(kafkaName: BaseExpression<string>) {

@@ -2,8 +2,8 @@ import {expectTypeOf, IsAny} from "expect-type";
 import {
     BaseExpression,
     expr,
-} from "../src/schemas/expression";
-import {DeepWiden} from "../src/schemas/plainObject";
+} from "@/argoWorkflowBuilders/models/expression";
+import {DeepWiden} from "@/argoWorkflowBuilders/models/plainObject";
 import {PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,METADATA_OPTIONS} from "@/workflowTemplates/userSchemas";
 import {z} from "zod";
 

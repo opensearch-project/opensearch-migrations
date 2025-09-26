@@ -10,20 +10,20 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
     DataScope,
     ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
-} from "@/schemas/workflowTypes";
+} from "@/argoWorkflowBuilders/models/workflowTypes";
 import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/schemas/templateBodyBuilder"; // <-- import TemplateRebinder
-import {ScopeIsEmptyConstraint} from "@/schemas/scopeConstraints";
-import {PlainObject} from "@/schemas/plainObject";
-import {AllowLiteralOrExpression} from "@/schemas/expression";
-import {TypeToken} from "@/schemas/sharedTypes";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/argoWorkflowBuilders/models/templateBodyBuilder"; // <-- import TemplateRebinder
+import {ScopeIsEmptyConstraint} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {AllowLiteralOrExpression} from "@/argoWorkflowBuilders/models/expression";
+import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 

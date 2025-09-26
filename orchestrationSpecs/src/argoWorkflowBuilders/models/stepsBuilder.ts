@@ -10,7 +10,7 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {InputParametersRecord, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
@@ -18,10 +18,10 @@ import {
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope
-} from "@/schemas/workflowTypes";
-import {TemplateBodyBuilder} from "@/schemas/templateBodyBuilder";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/schemas/scopeConstraints";
-import {PlainObject} from "@/schemas/plainObject";
+} from "@/argoWorkflowBuilders/models/workflowTypes";
+import {TemplateBodyBuilder} from "@/argoWorkflowBuilders/models/templateBodyBuilder";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
 import {
     AllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
@@ -31,8 +31,8 @@ import {
     ParamsTuple,
     TaskBuilder,
     TaskRebinder
-} from "@/schemas/taskBuilder";
-import {NamedTask} from "@/schemas/sharedTypes";
+} from "@/argoWorkflowBuilders/models/taskBuilder";
+import {NamedTask} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export interface StepGroup {
     steps: NamedTask[];

@@ -1,10 +1,10 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {OutputParamDef} from "@/schemas/parameterSchemas";
-import {TemplateBuilder} from "@/schemas/templateBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {OutputParamDef} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
 import {expectTypeOf} from "expect-type";
-import {DagBuilder} from "@/schemas/dagBuilder";
-import {INTERNAL} from "@/schemas/taskBuilder";
-import {typeToken} from "@/schemas/sharedTypes";
+import {DagBuilder} from "@/argoWorkflowBuilders/models/dagBuilder";
+import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 describe("paramsFns runtime validation", () => {
     const sharedNothingTemplate =

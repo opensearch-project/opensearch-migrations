@@ -1,4 +1,4 @@
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
@@ -6,10 +6,10 @@ import {
 import {z} from "zod";
 import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, CONSOLE_SERVICES_CONFIG_FILE} from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {INTERNAL} from "@/schemas/taskBuilder";
-import {MISSING_FIELD} from "@/schemas/plainObject";
-import {selectInputsForRegister} from "@/schemas/parameterConversions";
-import {typeToken} from "@/schemas/sharedTypes";
+import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
+import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
+import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export const CreateSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-snapshot",

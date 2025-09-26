@@ -4,14 +4,14 @@ import {
     InputParametersRecord,
     OutputParamDef,
     OutputParametersRecord
-} from "@/schemas/parameterSchemas";
-import {toArgoExpression} from "@/renderers/argoExpressionRender";
-import {StepGroup} from "@/schemas/stepsBuilder";
-import {MISSING_FIELD, PlainObject} from "@/schemas/plainObject";
-import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
-import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {BaseExpression, FromParameterExpression} from "@/schemas/expression";
-import {NamedTask} from "@/schemas/sharedTypes";
+} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {toArgoExpression} from "@/argoWorkflowBuilders/renderers/argoExpressionRender";
+import {StepGroup} from "@/argoWorkflowBuilders/models/stepsBuilder";
+import {MISSING_FIELD, PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {GenericScope, LoopWithUnion} from "@/argoWorkflowBuilders/models/workflowTypes";
+import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {BaseExpression, FromParameterExpression} from "@/argoWorkflowBuilders/models/expression";
+import {NamedTask} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>

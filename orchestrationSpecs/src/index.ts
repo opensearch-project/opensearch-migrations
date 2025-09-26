@@ -1,5 +1,5 @@
 import * as k8s from '@kubernetes/client-node';
-import {renderWorkflowTemplate} from "@/renderers/argoResourceRenderer";
+import {renderWorkflowTemplate} from "@/argoWorkflowBuilders/renderers/argoResourceRenderer";
 import {CaptureReplay} from "@/workflowTemplates/captureReplay";
 import {CaptureProxy} from "@/workflowTemplates/captureProxy";
 import {CreateOrGetSnapshot} from "@/workflowTemplates/createOrGetSnapshot";

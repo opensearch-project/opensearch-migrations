@@ -4,16 +4,16 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
-} from "@/schemas/workflowTypes";
+} from "@/argoWorkflowBuilders/models/workflowTypes";
 import {
     ScopeIsEmptyConstraint,
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
-} from "@/schemas/scopeConstraints";
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
-import {PlainObject} from "@/schemas/plainObject";
-import {AllowLiteralOrExpression, toExpression} from "@/schemas/expression";
-import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/schemas/parameterConversions";
+} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {AllowLiteralOrExpression, toExpression} from "@/argoWorkflowBuilders/models/expression";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/argoWorkflowBuilders/models/parameterConversions";
 
 export type RetryParameters = GenericScope;
 
