@@ -19,11 +19,15 @@ public class FilterScheme {
             "elastic_agent.",
             "ilm-history-",
             "logs-elastic_agent",
+            "logs-endpoint.",
             "logs-index_pattern",
+            "logs-system.",
             "metricbeat-",
             "metrics-elastic_agent",
             "metrics-endpoint.",
             "metrics-index_pattern",
+            "metrics-metadata-",
+            "metrics-system.",
             "profiling-",
             "synthetics-"
     );
