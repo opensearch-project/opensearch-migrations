@@ -28,6 +28,7 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
     private final String name;
 
     public IndexMetadataData_ES_6_8(ObjectNode root, String indexId, String indexName) {
+        validateRawJson(root);
         this.rawJson = root;
         this.mappings = null;
         this.settings = null;
@@ -59,10 +60,6 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
     public ObjectNode getSettings() {
         if (settings != null) {
             return settings;
-        }
-        if (rawJson == null) {
-            throw new IllegalStateException("Cannot read index metadata: snapshot format may not match the specified source version. " +
-                "Verify --source-version matches your source cluster version and ensure snapshot was created without compression.");
         }
         ObjectNode treeSettings = TransformFunctions.convertFlatSettingsToTree((ObjectNode) rawJson.get("settings"));
         settings = treeSettings;

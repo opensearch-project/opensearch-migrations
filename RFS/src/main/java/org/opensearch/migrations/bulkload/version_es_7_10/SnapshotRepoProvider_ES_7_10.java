@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
@@ -38,8 +39,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         if (targetSnapshot != null) {
             var indexMetadataLookup = targetSnapshot.getIndexMetadataLookup();
             if (indexMetadataLookup == null) {
-                throw new IllegalStateException("Cannot read snapshot metadata: snapshot format may not match the specified source version. " +
-                    "Verify --source-version matches your source cluster version and ensure snapshot was created without compression.");
+                throw new InvalidSnapshotFormatException();
             }
             indexMetadataLookup.keySet().forEach(indexId ->
                 getRepoData().getIndices().forEach((indexName, rawIndex) -> {
