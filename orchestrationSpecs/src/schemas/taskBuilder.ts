@@ -32,10 +32,11 @@ import {
     HasRequiredByDef,
     NormalizeInputs
 } from "@/schemas/parameterConversions";
+import {Primitive} from "zod/v3";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
-    when?: SimpleExpression<boolean>
+    when?: SimpleExpression<boolean> | {templateExp: TemplateExpression<boolean>}
 };
 
 // Sentinel to guarantee that the parameters have been pushed back to the callback
@@ -389,7 +390,7 @@ export abstract class TaskBuilder<
     ): ParamProviderCallbackObject<S, Label, Inputs, LoopT> {
         const tasksByName = this.getTaskOutputsByTaskName();
 
-        const defaultsRecord = buildDefaultsObject(inputs as unknown as Record<string, any>);
+        const defaultsRecord = buildDefaultsObject(inputs as any);
         const defaultKeys = Object.keys(defaultsRecord) as Extract<keyof DefaultsOfInputs<Inputs>, string>[];
 
         return {

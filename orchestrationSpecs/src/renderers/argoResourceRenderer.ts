@@ -1,10 +1,16 @@
-import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/schemas/parameterSchemas";
+import {
+    defineParam,
+    InputParamDef,
+    InputParametersRecord,
+    OutputParamDef,
+    OutputParametersRecord
+} from "@/schemas/parameterSchemas";
 import {toArgoExpression} from "@/renderers/argoExpressionRender";
 import {StepGroup} from "@/schemas/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "@/schemas/plainObject";
 import {GenericScope, LoopWithUnion} from "@/schemas/workflowTypes";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
-import {BaseExpression} from "@/schemas/expression";
+import {BaseExpression, FromParameterExpression} from "@/schemas/expression";
 import {NamedTask} from "@/schemas/sharedTypes";
 
 function isDefault<T extends PlainObject>(
@@ -85,7 +91,7 @@ function renderWithLoop<T extends PlainObject>(loopWith: LoopWithUnion<T>) {
 
 function formatArguments(passedParameters: { parameters?: Record<string, any> | undefined } | undefined) {
     if (passedParameters == undefined) {
-        return {}
+        return [];
     }
     
     return Object.entries(passedParameters).map(([key, value]) => ({
@@ -94,7 +100,7 @@ function formatArguments(passedParameters: { parameters?: Record<string, any> | 
     }));
 }
 
-function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unknown }>(step: T) {
+function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T) {
     const {
         templateRef: {template: trTemplate, ...trRest} = {},
         template = undefined,
@@ -106,10 +112,15 @@ function formatStepOrTask<T extends NamedTask & { args?: unknown, withLoop?: unk
     return {
         ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
         ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
-        ...(undefined === when       ? {} : { when: `${toArgoExpression(when, "IdentifierOnly")}` }),
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
-        ...rest,
-        ...{"arguments": {parameters: (formatArguments(args) as object)}}
+        ...(undefined === when       ? {} : {
+            when:
+                (when && typeof when === "object" && "templateExp" in when) ?
+                `${toArgoExpression(when.templateExp, "Outer")}` :
+                    `${toArgoExpression(when, "IdentifierOnly")}`
+        }),
+        ...{"arguments": {parameters: (formatArguments(args) as object)}},
+        ...rest
     };
 }
 

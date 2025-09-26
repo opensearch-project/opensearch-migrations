@@ -6,7 +6,7 @@
  */
 import {InputParametersRecord, OutputParametersRecord} from "@/schemas/parameterSchemas";
 import {PlainObject} from "@/schemas/plainObject";
-import {SimpleExpression} from "@/schemas/expression";
+import {SimpleExpression, TemplateExpression} from "@/schemas/expression";
 import {IfNever} from "@/schemas/workflowTypes";
 
 export type TaskType = "tasks" | "steps";
@@ -26,7 +26,7 @@ export type WorkflowTask<
     LoopT extends PlainObject = never
 > = {
     args?: { parameters?: Record<string, any> },
-    when?: SimpleExpression<boolean>
+    when?: SimpleExpression<boolean> | { templateExp: TemplateExpression<boolean> }
 } & (
     | { templateRef: { name: string; template: string } }
     | { template: string }

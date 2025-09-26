@@ -73,7 +73,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
     if (isConcatExpression(expr)) {
         const ce = expr as ConcatExpression<BaseExpression<string, any>[]>;
         const parts = ce.expressions.map(e => formatExpression(e, useIdentifierMarkers));
-        const text = parts.map(p => p.text).join(ce.separator ? " + " + ce.separator + " + " : "+");
+        const text = parts.map(p => p.text).join(ce.separator ? " + \"" + ce.separator + "\" + " : "+");
         const compound = (ce.expressions.length > 1) || !!ce.separator || parts.some(p => p.compound);
         return formattedResult(text, compound);
     }
@@ -165,7 +165,7 @@ function formatExpression(expr: AnyExpr, useIdentifierMarkers: boolean, top = fa
                     throw new Error(`Unknown parameter source: ${(pe.source as any).kind}`);
             }
         }).call({});
-        return formattedResult(useIdentifierMarkers ? `{{${expandedName}}}` : expandedName, false);
+        return formattedResult(useIdentifierMarkers ? `'{{${expandedName}}}'` : expandedName, false);
     }
 
     if (isLoopItem(expr)) {

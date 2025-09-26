@@ -79,7 +79,7 @@ const templates = [
 const kc = new k8s.KubeConfig();
 kc.loadFromDefault(); // This loads from ~/.kube/config or in-cluster config
 
-// Create API client for custom resources (Argo Workflows)
+// Create K8s client for resources (Argo Workflows)
 const customObjectsApi = kc.makeApiClient(k8s.CustomObjectsApi);
 
 async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: string) {
@@ -97,7 +97,7 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
             return;
         }
 
-        // First, try to delete the existing template (no error if it doesn't exist)
+        // Delete...
         try {
             await customObjectsApi.deleteNamespacedCustomObject({
                 group: 'argoproj.io',
@@ -106,7 +106,7 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
                 plural: 'workflowtemplates',
                 name: workflowConfig.metadata.name
             });
-            console.log(`🗑️  Deleted existing WorkflowTemplate: ${workflowName}`);
+            console.log(`Deleted existing WorkflowTemplate: ${workflowName}`);
         } catch (deleteError: any) {
             if (deleteError.response?.statusCode === 404) {
                 console.log(`WorkflowTemplate ${workflowName} does not exist, proceeding with creation...`);
@@ -115,7 +115,7 @@ async function applyArgoWorkflowTemplate(workflowConfig: any, workflowName: stri
             }
         }
 
-        // Create the new template
+        // then Add its replacement
         await customObjectsApi.createNamespacedCustomObject({
             group: 'argoproj.io',
             version: 'v1alpha1',
@@ -145,12 +145,11 @@ async function deployAllWorkflows() {
         }
 
         const wfName = wf.metadata.k8sMetadata.name;
-        // Apply to Kubernetes
         try {
             await applyArgoWorkflowTemplate(finalConfig, wfName || finalConfig.metadata?.name || 'unknown');
         } catch (error) {
             console.error(`Failed to deploy WorkflowTemplate ${wfName}:`, error);
-            // Uncomment to stop on first error:
+            // Uncomment to stop on error
             // process.exit(1);
         }
 
@@ -160,7 +159,6 @@ async function deployAllWorkflows() {
     console.log(`Processed ${templates.length} templates.`);
 }
 
-// Run the deployment
 deployAllWorkflows().catch(error => {
     console.error("Deployment failed:", error);
     process.exit(1);

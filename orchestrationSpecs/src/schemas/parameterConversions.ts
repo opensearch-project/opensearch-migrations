@@ -9,6 +9,7 @@ import {
 } from "@/schemas/expression";
 import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "@/schemas/plainObject";
 import {StripUndefined} from "@/schemas/sharedTypes";
+import {Primitive} from "zod/v3";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;
 
@@ -127,7 +128,7 @@ type KeysWithDefaults<Inputs extends InputParametersRecord> =
 export type DefaultsOfInputs<Inputs extends InputParametersRecord> =
     Pick<CallerParams<Inputs>, KeysWithDefaults<Inputs>>;
 
-export function buildDefaultsObject(inputs: Record<string, any>): Record<string, any> {
+export function buildDefaultsObject(inputs: Record<string, InputParamDef<any, false>>): Record<string, any> {
     const out: Record<string, any> = {};
     for (const [k, def] of Object.entries(inputs)) {
         // We treat a param as "optional-at-callsite" if its value type advertises `_hasDefault: true`.
@@ -190,7 +191,7 @@ type SelectedExprRecord<T extends Record<string, any>, CB> =
 
 export function selectInputsFieldsAsExpressionRecord<
     T extends Serialized<Record<string, NonSerializedPlainObject>>,
-    D extends Record<string, any>,
+    D extends Record<string, Primitive>,
     CB extends {
         defaults: D;
         defaultKeys?: readonly (Extract<keyof D, string>)[];
@@ -215,7 +216,7 @@ export function selectInputsFieldsAsExpressionRecord<
         const dh = (c.defaults as any)[k];
 
         if (dh && typeof dh === "object" && "expression" in dh) {
-            out[k] = expr.dig(expr.deserializeRecord(P), "", k as any);
+            out[k] = expr.dig(expr.deserializeRecord(P), [k as any], "");
         } else {
             out[k] = expr.jsonPathStrict(P as any, k as any);
         }

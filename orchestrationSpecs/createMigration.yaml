@@ -27,7 +27,7 @@ spec:
                               "index_4"
                           ],
                           "snapshotConfig": {
-                              "NOTsnapshotName": "indices_3_and_4",
+                              "snapshotName": "indices_3_and_4",
                               "repoConfig": {
                                   "aws_region": "us-east-2",
                                   "endpoint": "http://ma-localstack:4566",
@@ -36,7 +36,7 @@ spec:
                           },
                           "migrations": [
                               {
-                                  "metadata": {
+                                  "NOTmetadata": {
                                       "mappings": {
                                           "properties": {}
                                       },

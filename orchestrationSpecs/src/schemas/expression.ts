@@ -6,7 +6,7 @@ import {
     PlainObject,
     Serialized
 } from "@/schemas/plainObject";
-import {StripUndefined, TaskType, TypeToken} from "@/schemas/sharedTypes";
+import {StripUndefined, TaskType, typeToken, TypeToken} from "@/schemas/sharedTypes";
 import {InputParamDef, OutputParamDef} from "@/schemas/parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
@@ -125,9 +125,10 @@ export class InfixExpression<
     CR extends ExpressionType
 > extends BaseExpression<T, WidenExpressionComplexity2<CL, CR>> {
     constructor(
-        public readonly operator: "+" | "-" | "*" | "/" | "%" | "||" | "&&",
-        public readonly left: BaseExpression<T, CL>,
-        public readonly right: BaseExpression<T, CR>
+        public readonly operator: "+" | "-" | "*" | "/" | "%" | "||" | "&&" | "in",
+        public readonly left: BaseExpression<any, CL>,
+        public readonly right: BaseExpression<any, CR>,
+        phantom?: TypeToken<T>
     ) {
         super("infix");
     }
@@ -262,6 +263,19 @@ type ValueAtSegsMissing<
             : never;
 export type SegmentsValueMissing<T, S extends readonly unknown[]> =
     ValueAtSegsMissing<NonMissing<T>, S, HasMissing<T>>;
+type DigValue<
+    T extends Record<string, NonSerializedPlainObject>,
+    S extends readonly unknown[]
+> =
+    DeepWiden<
+        NonMissing<
+            SegmentsValueMissing<
+                UnwrapSerialize<NonMissing<T>>,
+                S
+            >
+        >
+    >;
+
 
 type ElemFromArrayExpr<A extends BaseExpression<any[], any>> =
     ResultOf<A> extends (infer U)[] ? Extract<U, PlainObject> : never;
@@ -521,7 +535,7 @@ class ExprBuilder {
         return new ComparisonExpression<number, L, R>(">", l, r);
     }
 
-    not<C extends ExpressionType = "govaluate">(data: AllowLiteralOrExpression<boolean, C>) {
+    not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C>) {
         return fn<boolean, C>("!", toExpression(data));
     }
 
@@ -563,6 +577,13 @@ class ExprBuilder {
     }
 
     // JSON Handling
+    hasKey<
+        T extends Record<string, PlainObject>,
+        K extends keyof T & string
+    >(obj: BaseExpression<T>, key: K) {
+        return new InfixExpression("in", this.literal(key), obj, typeToken<boolean>())
+    }
+
     keys<T extends Record<string, any>>(obj: BaseExpression<T>) {
         return fn<string[], ExpressionType, "complicatedExpression">("keys", obj);
     }
@@ -571,41 +592,33 @@ class ExprBuilder {
      * sprig.dig — safely look up nested fields by key segments.
      * If a default is provided, it's returned when any segment is missing.
      *
-     * Examples:
-     *   expr.dig(userExpr, "profile", "email")
-     *   expr.dig(userExpr, "profile", "email", expr.literal("n/a"))
+     * Example:
+     *   expr.dig(userExpr, ["profile", "email"], "N/A")
      */
     dig<
         T extends Record<string, NonSerializedPlainObject>,
-        // D is T unwrapped & non-missing, fixed once so recursion stays shallow
         D extends Record<string, any> = UnwrapSerialize<NonMissing<T>>,
-        S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>
+        const S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>
     >(
         sourceDict: AllowLiteralOrExpression<T, any>,
-        defaultValue: AllowLiteralOrExpression<
-            DeepWiden<NonMissing<SegmentsValueMissing<D, S>>>
-        >,
-        ...segs: S
-    ): BaseExpression<
-        DeepWiden<NonMissing<SegmentsValueMissing<D, S>>>,
-        "complicatedExpression"
-    > {
+        segs: S,
+        defaultValue: AllowLiteralOrExpression<DigValue<T, S>>
+    ): BaseExpression<DigValue<T, S>, "complicatedExpression"> {
         const source = toExpression(sourceDict);
-        // keys are strings only for dict paths; widen every arg to "complicatedExpression"
+
         const keyExprs = (segs as readonly string[]).map(seg =>
             widenComplexity(this.literal(seg))
         ) as readonly BaseExpression<string, "complicatedExpression">[];
 
         const argsComp: readonly BaseExpression<any, "complicatedExpression">[] = [
             ...keyExprs,
-            widenComplexity(toExpression(defaultValue as any)),
+            widenComplexity(toExpression(defaultValue)),
             widenComplexity(source)
         ];
 
-        return new FunctionExpression<any, any, "complicatedExpression", "complicatedExpression">(
-            "sprig.dig",
-            argsComp
-        ) as any;
+        return new FunctionExpression<
+            DigValue<T, S>, any, "complicatedExpression", "complicatedExpression"
+        >("sprig.dig", argsComp);
     }
 
     jsonPathStrict<
@@ -690,7 +703,7 @@ class ExprBuilder {
         return new ArrayIndexExpression(arr, i);
     }
 
-    length<T extends PlainObject>(arr: BaseExpression<T[]>) {
+    length<T extends PlainObject>(arr: BaseExpression<T[]|string>) {
         return fn<number, ExpressionType, "complicatedExpression">("len", arr);
     }
 

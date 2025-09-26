@@ -2,6 +2,8 @@ import {z} from 'zod';
 import {
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
+    DYNAMIC_SNAPSHOT_CONFIG,
+    METADATA_OPTIONS,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
     SOURCE_MIGRATION_CONFIG,
@@ -15,7 +17,7 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {WorkflowBuilder} from "@/schemas/workflowBuilder";
 import {TargetLatchHelpers} from "@/workflowTemplates/targetLatchHelpers";
-import {expr as expr} from "@/schemas/expression";
+import {BaseExpression, expr as expr} from "@/schemas/expression";
 import {makeParameterLoop} from "@/schemas/workflowTypes";
 import {configMapKey, defineParam, defineRequiredParam, InputParamDef} from "@/schemas/parameterSchemas";
 import {INTERNAL} from "@/schemas/taskBuilder";
@@ -75,21 +77,29 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addSteps(b => b
             .addStep("idGenerator", INTERNAL, "doNothing")
-            .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    targetConfig: b.inputs.target,
-                    indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), '', "metadata", "indices"),
-                    metadataMigrationConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), "", "metadata", "options")
-                }))
+            .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
+                    return c.register({
+                        ...selectInputsForRegister(b, c),
+                        targetConfig: b.inputs.target,
+                        indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                            ["metadata", "indices"], []),
+                        metadataMigrationConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                            ["metadata", "options"], {} as z.infer<typeof METADATA_OPTIONS>)
+                    });
+                },
+                {when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "metadata") }}
+            )
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "runBulkLoad", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
                     sessionName: c.steps.idGenerator.id,
                     targetConfig: b.inputs.target,
-                    indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig), '', "documentBackfillConfigs", "indices"),
+                    indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                        ["documentBackfillConfigs", "indices"], [] as string[]),
                     backfillConfig: expr.jsonPathStrict(b.inputs.migrationConfig, "documentBackfillConfigs", "options")
-                }))
+                }),
+                {when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "documentBackfillConfigs")}}
+            )
             .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c =>
                 c.register({
                     ...(selectInputsForRegister(b, c)),
@@ -136,8 +146,10 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                 c => c.register({
                     ...selectInputsForRegister(b, c),
-                    indices: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig), '', "indices"),
-                    snapshotConfig: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig), '', "snapshotConfig"),
+                    indices: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
+                        ["indices"], []),
+                    snapshotConfig: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
+                        ["snapshotConfig"], {} as z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>),
                     autocreateSnapshotName: b.inputs.sourcePipelineName
                 }))
 
@@ -145,7 +157,8 @@ export const FullMigration = WorkflowBuilder.create({
                 c => c.register({
                     ...selectInputsForRegister(b, c),
                     snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                    migrationConfigs: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig), '', "migrations"),
+                    migrationConfigs: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
+                        ["migrations"], []),
                     target: c.item
                 }),
                 {loopWith: makeParameterLoop(b.inputs.targets)})

@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "npm run type-check",
-    "dev": "tsx dev.cjs",
+    "make-templates": "tsx makeTemplates.cjs",
     "schema": "tsx src/dumpSchema.ts",
     "start": "npm run type-check && tsx src/index.ts",
     "type-check": "npx tsgo --noEmit"

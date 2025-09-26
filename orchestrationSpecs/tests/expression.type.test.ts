@@ -4,6 +4,8 @@ import {
     expr,
 } from "../src/schemas/expression";
 import {DeepWiden} from "../src/schemas/plainObject";
+import {PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,METADATA_OPTIONS} from "@/workflowTemplates/userSchemas";
+import {z} from "zod";
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
@@ -70,5 +72,68 @@ describe("expression type contracts", () => {
         const result = expr.jsonPathStrict(expr.recordToString(obj), "a");
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
         console.log(result);
+    });
+
+    it("dig infers precise value type and enforces default type", () => {
+        // type PerIndices = {
+        //     metadata?: {
+        //         indices: string[];
+        //         loggingConfigurationOverrideConfigMap?: { mode?: string };
+        //     };
+        // };
+
+        type PerIndices = z.infer<typeof PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>;
+
+        const cfg = expr.deserializeRecord(
+            expr.recordToString(
+                expr.literal({} as PerIndices) as BaseExpression<PerIndices>));
+
+        // precise type from path ["metadata","indices"] → string[]
+        const indices= expr.dig(
+            cfg,
+            ["metadata", "indices"],
+            [] as string[]
+        );
+        expectTypeOf(indices).not.toBeAny();
+        expectTypeOf(indices).toMatchTypeOf<BaseExpression<string[], any>>();
+        expectTypeOf<BaseExpression<string[], "complicatedExpression">>().toMatchTypeOf(indices);
+        // If your matcher supports exact equality, keep this too:
+        // expectTypeOf(indices).toEqualTypeOf<BaseExpression<string[], "complicatedExpression">>();
+
+        // Plain TS assignment check (compile-time only)
+        const _ok: BaseExpression<string[]> = indices; // should compile
+
+        // Negative: wrong target type must fail
+        // @ts-expect-error - BaseExpression<string[]> is NOT assignable to BaseExpression<number[]>
+        const _nope: BaseExpression<number[]> = indices;
+
+
+
+        // default can be a raw literal (must be string[])
+        const t2 = expr.dig(cfg, ["metadata", "indices"] as const, [] as string[]);
+        expectTypeOf(t2).toExtend<BaseExpression<string[]>>();
+
+        // works when source is Serialized<T> (e.g., JSON string → fromJSON)
+        const cfgSerialized = expr.recordToString(cfg); // BaseExpression<string> & BaseExpression<Serialized<PerIndices>>
+        const t3 = expr.dig(
+            expr.deserializeRecord(cfgSerialized),
+            ["metadata", "indices"] as const,
+            [] as string[]
+        );
+        expectTypeOf(t3).toExtend<BaseExpression<string[]>>();
+
+        // wrong default type is rejected at compile time
+        // @ts-expect-error default must be string[]
+        expr.dig(cfg, ["metadata", "indices"] as const, expr.literal("nope"));
+
+        // another shape: optional nested string with default
+        type Obj = { a?: { hello?: string } };
+        const o = expr.literal({} as Obj);
+        const v = expr.dig(o, ["a", "hello"] as const, "world");
+        expectTypeOf(v).toExtend<BaseExpression<string>>();
+
+        // unknown key is rejected by the tuple path typing
+        // @ts-expect-error "metadatas" is not a valid key
+        expr.dig(cfg, ["metadatas", "indices"] as const, [] as string[]);
     });
 });

@@ -20,7 +20,8 @@ function getReplayerDeploymentManifest
     workflowName: BaseExpression<string>,
     sessionName: BaseExpression<string>,
 
-    loggingConfigMap: BaseExpression<string>
+    useCustomLogging: BaseExpression<boolean>,
+    loggingConfigMap: BaseExpression<string>,
 
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
@@ -38,7 +39,8 @@ function getReplayerDeploymentManifest
         ]
     };
     const finalContainerDefinition =
-        setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition);
+        setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
+            {container: baseContainerDefinition, volumes: []});
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
@@ -64,7 +66,8 @@ function getReplayerDeploymentManifest
                     },
                 },
                 spec: {
-                    containers: [finalContainerDefinition]
+                    containers: [finalContainerDefinition.container],
+                    volumes: finalContainerDefinition.volumes
                 },
             },
         }
@@ -94,6 +97,9 @@ export const Replayer = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: b.inputs.podReplicas,
+                    useCustomLogging:
+                        expr.equals(expr.literal(""),
+                            expr.nullCoalesce(b.inputs.loggingConfigurationOverrideConfigMap, expr.literal(""))),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     sessionName: expr.literal(""),//b.inputs.sessionName,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,

@@ -30,8 +30,9 @@ function getRfsReplicasetManifest
     sessionName: BaseExpression<string>,
     numPods: BaseExpression<number>,
 
-    useLocalstackAwsCreds: BaseExpression<boolean>
-    loggingConfigMap: BaseExpression<string>
+    useLocalstackAwsCreds: BaseExpression<boolean>,
+    loggingConfigMap: BaseExpression<string>,
+    useCustomLogging: BaseExpression<boolean>,
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
@@ -48,7 +49,8 @@ function getRfsReplicasetManifest
     };
     const finalContainerDefinition =
         setupTestCredsForContainer(args.useLocalstackAwsCreds,
-            setupLog4jConfigForContainer(args.loggingConfigMap, baseContainerDefinition));
+            setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
+                { container: baseContainerDefinition, volumes: []}));
     return {
         apiVersion: "apps/v1",
         kind: "ReplicaSet",
@@ -73,7 +75,8 @@ function getRfsReplicasetManifest
                     },
                 },
                 spec: {
-                    containers: [finalContainerDefinition]
+                    containers: [finalContainerDefinition.container],
+                    volumes: finalContainerDefinition.volumes
                 },
             },
         }
@@ -163,6 +166,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 manifest: getRfsReplicasetManifest({
                     numPods: b.inputs.numPods,
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
+                    useCustomLogging:
+                        expr.equals(expr.literal(""),
+                            expr.nullCoalesce(b.inputs.loggingConfigurationOverrideConfigMap, expr.literal(""))),
                     useLocalstackAwsCreds: b.inputs.useLocalStack,
                     sessionName: b.inputs.sessionName,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
@@ -194,9 +200,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
                     ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
-                    s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "endpoint"),
-                    s3Region: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "repoConfig", "aws_region"),
-                    snapshotName: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), "", "snapshotName"),
+                    s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
+                    s3Region: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "aws_region"], ""),
+                    snapshotName: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["snapshotName"], ""),
                     snapshotRepoPath: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig", "repoPath")
                 })))
     )
