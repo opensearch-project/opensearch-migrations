@@ -12,6 +12,9 @@ spec:
           - name: migrationConfig
             default: "{\"k\":4}"
           - name: dr
+            # Without marshalling the contents to JSON representation, the expression that uses the parameter below
+            # fails to insert the json contents, even if it's wrapped within a toJSON() and the expression fails
+            # (leaving just the original input EXPRESSION, as it appears here - argo's normal failure mode)
             value: "{{=toJSON(sprig.dig('documentBackfillConfigs', 'options', {'a':9}, fromJSON(inputs.parameters.migrationConfig)))}}"
           - name: drBase64
             value: "{{=toBase64(sprig.dig('documentBackfillConfigs', 'options', toJSON({'a':9}), fromJSON(inputs.parameters.migrationConfig)))}}"

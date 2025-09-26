@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: safe-conditional-
+spec:
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: userInput
+        value: ""
+        # Note: No default value set here - could be unset
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: userInput
+            value: ""  # Safe default at template level
+      steps:
+        - - name: check-input
+            template: echo-step
+            when: "'{{inputs.parameters.userInput}}' != ''"
+            arguments:
+              parameters:
+                - name: message
+                  value: "Input was: {{inputs.parameters.userInput}}"
+        - - name: no-input
+            template: echo-step
+            when: "'{{inputs.parameters.userInput}}' == ''"
+            arguments:
+              parameters:
+                - name: message
+                  value: "No input provided"
+
+    - name: echo-step
+      inputs:
+        parameters:
+          - name: message
+      container:
+        image: alpine:latest
+        command: [echo]
+        args: ["{{inputs.parameters.message}}"]
