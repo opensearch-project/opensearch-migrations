@@ -12,7 +12,7 @@ export class Serialized<OutputT> {
 export type Primitive = string | number | boolean | MissingField;
 export type NonSerializedPlainObject = Primitive | AggregateType;
 export type AggregateType = readonly PlainObject[] | { [key: string]: PlainObject };
-export type PlainObject = Primitive | AggregateType | Serialized<AggregateType>;
+export type PlainObject = Primitive | AggregateType | Serialized<PlainObject>;
 
 export type WidenPrimitive<T> =
     T extends string ? string :

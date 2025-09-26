@@ -216,7 +216,7 @@ export function selectInputsFieldsAsExpressionRecord<
         const dh = (c.defaults as any)[k];
 
         if (dh && typeof dh === "object" && "expression" in dh) {
-            out[k] = expr.dig(expr.deserializeRecord(P), [k as any], "");
+            out[k] = expr.dig(expr.deserializeRecord(P) as any, [k as any], "");
         } else {
             out[k] = expr.jsonPathStrict(P as any, k as any);
         }

@@ -36,8 +36,8 @@ export function isExpression(v: unknown): v is BaseExpression<any, any> {
 
 export function toExpression<T extends PlainObject, C extends ExpressionType>(
     v: AllowLiteralOrExpression<T, C>
-): BaseExpression<T, any> {
-    return isExpression(v) ? v : new LiteralExpression(v as T);
+): BaseExpression<T, C> {
+    return isExpression(v) ? v : widenComplexity(new LiteralExpression(v as T));
 }
 
 type Scalar = number | string;
@@ -53,10 +53,13 @@ type WidenComplexity3<A extends ExpressionType, B extends ExpressionType, C exte
 type WidenExpressionComplexity2<L, R> = WidenComplexity2<ExprC<L>, ExprC<R>>;
 type WidenExpressionComplexity3<A, B, C> = WidenComplexity3<ExprC<A>, ExprC<B>, ExprC<C>>;
 
-export function widenComplexity<T extends PlainObject>(
+export function widenComplexity<
+    T extends PlainObject,
+    C extends ExpressionType="complicatedExpression"
+>(
     v: BaseExpression<T, any>
-): BaseExpression<T, "complicatedExpression"> {
-    return v as BaseExpression<T, "complicatedExpression">;
+): BaseExpression<T, C> {
+    return v as BaseExpression<T, C>;
 }
 
 export class LiteralExpression<T extends PlainObject>
@@ -533,11 +536,11 @@ class ExprBuilder {
         return new InfixExpression("||", l, r);
     }
 
-    nullCoalesce<T extends PlainObject>(
+    nullCoalesce<T extends PlainObject, CIn extends ExpressionType>(
         v: BaseExpression<T | MissingField, any>,
-        d: AllowLiteralOrExpression<DeepWiden<T>>
+        d: AllowLiteralOrExpression<DeepWiden<T>, CIn>
     ) {
-        return fn<DeepWiden<T>>("nullCoalesce", v, toExpression(d));
+        return fn<DeepWiden<T>,CIn,"complicatedExpression">("nullCoalesce", v, toExpression(d));
     }
 
     // String functions
@@ -568,15 +571,17 @@ class ExprBuilder {
         return new TemplateReplacementExpression(template, normalizedReplacements);
     }
 
-    toLowerCase(data: BaseExpression<string, any>) {
+    toLowerCase(data: AllowLiteralOrExpression<string, any>) {
         return fn<string>("lower", toExpression(data));
     }
 
-    toUpperCase(data: BaseExpression<string, any>) {
+    toUpperCase(data: AllowLiteralOrExpression<string, any>) {
         return fn<string>("upper", toExpression(data));
     }
 
-
+    join(data: BaseExpression<string[], any>) {
+        return fn<string>("join", data);
+    }
 
     toArray<ES extends readonly unknown[]>(
         ...items: ES
@@ -632,7 +637,7 @@ class ExprBuilder {
 
         const argsComp: readonly BaseExpression<any, "complicatedExpression">[] = [
             ...keyExprs,
-            widenComplexity(toExpression(defaultValue)),
+            widenComplexity(this.serialize(toExpression(defaultValue))),
             widenComplexity(source)
         ];
 
@@ -663,18 +668,25 @@ class ExprBuilder {
         return new RecordFieldSelectExpression(source, path) as any;
     }
 
-    deserializeRecord<R extends AggregateType>(data: BaseExpression<Serialized<R>>) {
-        return fn<R>("fromJSON", toExpression(data));
+    deserializeRecord<R extends AggregateType, CIn extends ExpressionType>(data: BaseExpression<Serialized<R>,CIn>) {
+        return fn<R,CIn,"complicatedExpression">("fromJSON", data);
     }
 
-    stringToRecord<R extends PlainObject>(capture: TypeToken<R>, data: AllowLiteralOrExpression<string>) {
-        return fn<R>("fromJSON", toExpression(data));
+    serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<R,CIn>) {
+        return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);
     }
 
-    recordToString<T extends AggregateType>(
-        data: AllowLiteralOrExpression<T>
+    stringToRecord<
+        R extends PlainObject,
+        CIn extends ExpressionType
+    >(capture: TypeToken<R>, data: AllowLiteralOrExpression<string,CIn>) {
+        return fn<R,CIn,"complicatedExpression">("fromJSON", toExpression(data));
+    }
+
+    recordToString<T extends AggregateType, CIn extends ExpressionType>(
+        data: AllowLiteralOrExpression<T, CIn>
     ): BaseExpression<string, "complicatedExpression"> & BaseExpression<Serialized<T>, "complicatedExpression"> {
-        return fn<Serialized<T>>("toJSON", toExpression(data)) as any;
+        return fn<Serialized<T>,CIn,"complicatedExpression">("toJSON", toExpression(data)) as any;
     }
 
     makeDict<R extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
@@ -745,12 +757,12 @@ class ExprBuilder {
     }
 
     // Utility functions
-    fromBase64(data: AllowLiteralOrExpression<string>) {
-        return fn<string>("fromBase64", toExpression(data));
+    fromBase64<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string,CIn>) {
+        return fn<string,CIn>("fromBase64", toExpression(data));
     }
 
-    toBase64(data: AllowLiteralOrExpression<string>) {
-        return fn<string>("toBase64", toExpression(data));
+    toBase64<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string,CIn>) {
+        return fn<string,CIn>("toBase64", toExpression(data));
     }
 }
 

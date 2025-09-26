@@ -4,7 +4,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     DYNAMIC_SNAPSHOT_CONFIG,
     METADATA_OPTIONS,
-    PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
+    PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, RFS_OPTIONS,
     SNAPSHOT_MIGRATION_CONFIG,
     SOURCE_MIGRATION_CONFIG,
     TARGET_CLUSTER_CONFIG
@@ -96,7 +96,8 @@ export const FullMigration = WorkflowBuilder.create({
                     targetConfig: b.inputs.target,
                     indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
                         ["documentBackfillConfigs", "indices"], [] as string[]),
-                    backfillConfig: expr.jsonPathStrict(b.inputs.migrationConfig, "documentBackfillConfigs", "options")
+                    backfillConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                        ["documentBackfillConfigs", "options"], {} as z.infer<typeof RFS_OPTIONS>)
                 }),
                 {when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "documentBackfillConfigs")}}
             )

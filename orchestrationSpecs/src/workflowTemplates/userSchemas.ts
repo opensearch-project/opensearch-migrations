@@ -68,11 +68,11 @@ export const RFS_OPTIONS = z.object({
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     metadata: z.object({
         indices: z.array(z.string()),
-        options: METADATA_OPTIONS
+        options: METADATA_OPTIONS.optional()
     }).optional(),
     documentBackfillConfigs: z.object({
         indices: z.array(z.string()),
-        options: RFS_OPTIONS
+        options: RFS_OPTIONS.optional()
     }).optional()
 });
 
