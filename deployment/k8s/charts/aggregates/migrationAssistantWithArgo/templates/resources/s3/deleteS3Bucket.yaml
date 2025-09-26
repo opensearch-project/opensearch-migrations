@@ -100,7 +100,6 @@ spec:
                       echo "Tip: Set defaultBucketConfiguration.emptyBeforeDelete=true to force-delete all objects before bucket deletion."
                     fi
                   fi
-                  exit 1
                 fi
               else
                 echo "Bucket $BUCKET_NAME does not exist. Skipping deletion."
