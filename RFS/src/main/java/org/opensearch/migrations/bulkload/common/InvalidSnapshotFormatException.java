@@ -8,9 +8,11 @@ package org.opensearch.migrations.bulkload.common;
  * 3. The snapshot metadata is corrupted or unreadable
  */
 public class InvalidSnapshotFormatException extends RuntimeException {
-    private static final String DEFAULT_MESSAGE = 
-        "Cannot read snapshot metadata: snapshot format may not match the specified source version. " +
-        "Verify --source-version matches your source cluster version and ensure snapshot was created without compression.";
+    private static final String DEFAULT_MESSAGE =
+            "Failed to read snapshot metadata. This may happen if the specified --source-version does not match " +
+            "the actual cluster version that created the snapshot, if the snapshot was created with compression enabled, " +
+            "or if the snapshot metadata is corrupted or unreadable. Please verify the source version and snapshot settings. " +
+            "If your snapshot was created with compression enabled, take a new full snapshot without compression and retry.";
     
     public InvalidSnapshotFormatException() {
         super(DEFAULT_MESSAGE);
