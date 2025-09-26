@@ -1,5 +1,6 @@
 conditionalPackageInstalls:
   localstack: false
+  jaeger: false
 
 aws:
   configureAwsEksResources: true
@@ -24,6 +25,57 @@ defaultBucketConfiguration:
 #    pullPolicy: Always
 #  installer:
 #    pullPolicy: Always
+
+# For OTEL Daemonset
+otelConfiguration:
+  collectorConfig: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 8192
+        send_batch_max_size: 10000
+      cumulativetodelta:
+      resource/metrics:
+        attributes:
+          - key: qualifier
+            value: ${env:QUALIFIER}
+            action: upsert
+      resource/remove_default_attributes:
+        attributes:
+          - key: telemetry.sdk.name
+            action: delete
+          - key: telemetry.sdk.version
+            action: delete
+          - key: telemetry.sdk.language
+            action: delete
+          - key: service.name
+            action: delete
+    extensions:
+      health_check:
+        endpoint: :13133
+    exporters:
+      awsemf:
+        namespace: 'OpenSearchMigrations'
+        dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
+        resource_to_telemetry_conversion:
+          enabled: true
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        send_timestamps: true
+        metric_expiration: 5m
+        enable_open_metrics: true
+    service:
+      extensions: [health_check]
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
+          exporters: [awsemf, prometheus]
 
 charts:
   fluent-bit:

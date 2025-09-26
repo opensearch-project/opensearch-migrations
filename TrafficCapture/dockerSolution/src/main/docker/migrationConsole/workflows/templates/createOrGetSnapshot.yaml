@@ -13,6 +13,7 @@ spec:
           - name: snapshot-and-migration-config
           - name: s3-config
           - name: image-config
+          - name: otel-collector-endpoint
       steps:
         - - name: get-existing-snapshot
             template: get-existing-snapshot
@@ -35,6 +36,8 @@ spec:
                   value: "{{inputs.parameters.source-config}}"
                 - name: s3-config
                   value: "{{inputs.parameters.s3-config}}"
+                - name: otel-collector-endpoint
+                  value: "{{inputs.parameters.otel-collector-endpoint}}"
                 - name: indices
                   value: "{{=let sc=inputs.parameters['snapshot-and-migration-config']; hasKey(fromJSON(sc), 'indices') ? join(fromJSON(sc).indices, ',') : ''}}"
                 - name: migration-console-image
