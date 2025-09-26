@@ -153,10 +153,12 @@ export const CaptureReplay = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c),
                         name: expr.concat(expr.literal("diagnostic-console-"), b.inputs.sessionName),
                         command: "tail -f /dev/null",
-                        kafkaInfo: expr.makeDict({
-                            broker_endpoints: c.tasks.getBrokersList.outputs.bootstrapServers,
-                            standard: ""
-                        }),
+                        kafkaInfo: expr.serialize(
+                            expr.makeDict({
+                                broker_endpoints: c.tasks.getBrokersList.outputs.bootstrapServers,
+                                standard: ""
+                            })
+                        ),
                         snapshotConfig: MISSING_FIELD,
                     }),
                 {dependencies: ["getBrokersList"]}

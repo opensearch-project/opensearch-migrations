@@ -42,14 +42,13 @@ spec:
                                       },
                                       "settings": {}
                                   },
-                                  "documentBackfillConfigs": [
+                                  "documentBackfillConfig":
                                       {
                                           "indices": [
                                               "index_3",
                                               "index_4"
-                                          ]
+                                          ], "options": {}
                                       }
-                                  ]
                               }
                           ]
                       }

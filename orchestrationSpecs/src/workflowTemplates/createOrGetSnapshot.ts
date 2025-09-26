@@ -30,10 +30,12 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
             .addStep("createSnapshot", CreateSnapshot, "snapshotWorkflow", c => c
                 .register({
                     ...selectInputsForKeys(b, getAcceptedRegisterKeys(c)),
-                    snapshotConfig: expr.makeDict({
-                        repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
-                        snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName)
-                    }),
+                    snapshotConfig: expr.serialize(
+                        expr.makeDict({
+                            repoConfig: expr.jsonPathStrict(b.inputs.snapshotConfig, "repoConfig"),
+                            snapshotName: expr.toLowerCase(b.inputs.autocreateSnapshotName)
+                        }),
+                    )
                 }), {when: expr.equals(b.inputs.alreadyDefinedName, expr.literal("")) })
         )
         .addExpressionOutput("snapshotConfig", c =>

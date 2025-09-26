@@ -81,10 +81,12 @@ export const FullMigration = WorkflowBuilder.create({
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         targetConfig: b.inputs.target,
-                        indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                            ["metadata", "indices"], []),
-                        metadataMigrationConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                            ["metadata", "options"], {} as z.infer<typeof METADATA_OPTIONS>)
+                        indices: expr.serialize(
+                            expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                                ["metadata", "indices"], [])),
+                        metadataMigrationConfig: expr.serialize(
+                            expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                                ["metadata", "options"], {} as z.infer<typeof METADATA_OPTIONS>))
                     });
                 },
                 {when: { templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "metadata") }}
@@ -94,10 +96,10 @@ export const FullMigration = WorkflowBuilder.create({
                     ...(selectInputsForRegister(b, c)),
                     sessionName: c.steps.idGenerator.id,
                     targetConfig: b.inputs.target,
-                    indices: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                        ["documentBackfillConfigs", "indices"], [] as string[]),
-                    backfillConfig: expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                        ["documentBackfillConfigs", "options"], {} as z.infer<typeof RFS_OPTIONS>)
+                    indices: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                        ["documentBackfillConfigs", "indices"], [] as string[])),
+                    backfillConfig: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
+                        ["documentBackfillConfigs", "options"], {} as z.infer<typeof RFS_OPTIONS>))
                 }),
                 {when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "documentBackfillConfigs")}}
             )
@@ -132,7 +134,7 @@ export const FullMigration = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     migrationConfig: c.item
                 }),
-                {loopWith: makeParameterLoop(b.inputs.migrationConfigs)})
+                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.migrationConfigs))})
         )
     )
 
@@ -147,22 +149,25 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot",
                 c => c.register({
                     ...selectInputsForRegister(b, c),
-                    indices: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
-                        ["indices"], []),
-                    snapshotConfig: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
-                        ["snapshotConfig"], {} as z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>),
+                    indices: expr.serialize(
+                        expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
+                            ["indices"], [])),
+                    snapshotConfig: expr.serialize(
+                        expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
+                            ["snapshotConfig"], {} as z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>)),
                     autocreateSnapshotName: b.inputs.sourcePipelineName
                 }))
 
             .addStep("pipelineSnapshotToTarget", INTERNAL, "pipelineSnapshotToTarget",
                 c => c.register({
                     ...selectInputsForRegister(b, c),
-                    snapshotConfig: c.steps.createOrGetSnapshot.outputs.snapshotConfig,
-                    migrationConfigs: expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
-                        ["migrations"], []),
+                    snapshotConfig: expr.serialize(c.steps.createOrGetSnapshot.outputs.snapshotConfig),
+                    migrationConfigs: expr.serialize(
+                        expr.dig(expr.deserializeRecord(b.inputs.snapshotAndMigrationConfig),
+                            ["migrations"], [])),
                     target: c.item
                 }),
-                {loopWith: makeParameterLoop(b.inputs.targets)})
+                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.targets))})
         )
     )
 
@@ -178,11 +183,13 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("snapshotAndLoad", INTERNAL, "snapshotAndLoad", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
-                        sourceConfig: expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "source"),
+                        sourceConfig: expr.serialize(expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "source")),
                         snapshotAndMigrationConfig: c.item,
-                        sourcePipelineName: expr.toBase64(expr.asString(expr.recordToString(expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "source"))))
+                        sourcePipelineName: expr.toBase64(expr.asString(expr.recordToString(
+                            expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "source"))))
                     }),
-                {loopWith: makeParameterLoop(expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "snapshotExtractAndLoadConfigs"))}
+                {loopWith: makeParameterLoop(
+                    expr.jsonPathStrict(b.inputs.sourceMigrationConfig, "snapshotExtractAndLoadConfigs"))}
             )
         )
     )
@@ -223,7 +230,7 @@ export const FullMigration = WorkflowBuilder.create({
                     sourceMigrationConfig: c.item,
                     latchCoordinationPrefix: c.steps.init.outputs.prefix
                 }),
-                {loopWith: makeParameterLoop(b.inputs.sourceMigrationConfigs)})
+                {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.sourceMigrationConfigs))})
             .addStep("cleanup", TargetLatchHelpers, "cleanup",
                 c => c.register({
                     ...selectInputsForRegister(b, c),

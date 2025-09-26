@@ -173,7 +173,7 @@ type PayloadOf<V> = V extends BaseExpression<infer U, any> ? U : V;
 /** Apply your helper to drop `| undefined` from the inner payload. */
 type CleanPayload<V> = StripUndefined<PayloadOf<V>>;
 
-/** Helper type for serialized expressions similar to AllowLiteralOrExpressionIncludingSerialized */
+/** Helper type for serialized expressions similar to AllowSerializedAggregateOrPrimitiveExpressionOrLiteral */
 type AllowExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
     // Handle both aggregate T and already-serialized T to ensure we return a union of BaseExpression<U> | BaseExpression<Serialized<U>>
     T extends Serialized<infer U>

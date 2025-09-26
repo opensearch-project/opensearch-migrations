@@ -15,7 +15,7 @@ import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaratio
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {NamedTask, TaskType} from "@/argoWorkflowBuilders/models/sharedTypes";
 import {
-    AllowLiteralOrExpression,
+    AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
     expr,
     FromParameterExpression,
@@ -110,7 +110,7 @@ export type ParamProviderCallbackObject<
         defaults: DefaultsOfInputs<Inputs>;
         defaultKeys?: readonly (Extract<keyof DefaultsOfInputs<Inputs>, string>)[];
     } & AllTasksAsOutputReferenceable<TasksScope, Label>
-    & IfNever<LoopItemsType, {}, { item: AllowLiteralOrExpression<LoopItemsType> }>;
+    & IfNever<LoopItemsType, {}, { item: AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<LoopItemsType> }>;
 
 /**
  * ParamsRegistrationFn is an alias placeholder that defines the callback that addTasks uses.

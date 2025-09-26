@@ -25,9 +25,9 @@ export type TemplateExpression<T extends PlainObject> = BaseExpression<T, "compl
 export type AllowLiteralOrExpression<T extends PlainObject, C extends ExpressionType = ExpressionType> =
     T | BaseExpression<T, C>;
 
-export type AllowLiteralOrExpressionIncludingSerialized<T extends PlainObject, C extends ExpressionType = ExpressionType> =
+export type AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<T extends PlainObject, C extends ExpressionType = ExpressionType> =
     T extends AggregateType
-        ? T | BaseExpression<T, C> | BaseExpression<Serialized<T>, C>
+        ? BaseExpression<Serialized<T>, C>
         : T | BaseExpression<T, C>;
 
 export function isExpression(v: unknown): v is BaseExpression<any, any> {
@@ -637,7 +637,7 @@ class ExprBuilder {
 
         const argsComp: readonly BaseExpression<any, "complicatedExpression">[] = [
             ...keyExprs,
-            widenComplexity(this.serialize(toExpression(defaultValue))),
+            widenComplexity(toExpression(defaultValue)),
             widenComplexity(source)
         ];
 

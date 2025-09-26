@@ -13,7 +13,7 @@
 import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
 import {
     AllowLiteralOrExpression,
-    AllowLiteralOrExpressionIncludingSerialized,
+    AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
     FromParameterExpression,
     InputParameterSource,
@@ -84,8 +84,8 @@ export type ParamsWithLiteralsOrExpressionsIncludingSerialized<T> = {
     [K in keyof T]:
     T[K] extends PlainObject | undefined
         ? HasUndefined<T[K]> extends true
-            ? AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>> | undefined
-            : AllowLiteralOrExpressionIncludingSerialized<StripUndefined<T[K]>>
+            ? AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<StripUndefined<T[K]>> | undefined
+            : AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<StripUndefined<T[K]>>
         : T[K] extends BaseExpression<any, any>
             ? NormalizeBaseExpression<T[K]>
             : InvalidType<T[K]>;
@@ -151,7 +151,7 @@ export type LoopWithParam<T extends PlainObject> = {
     value: BaseExpression<T[]>
 }
 
-export function makeParameterLoop<T extends PlainObject>(expr: AllowLiteralOrExpressionIncludingSerialized<T[]>) {
+export function makeParameterLoop<T extends PlainObject>(expr: BaseExpression<T[]>) {
     return {
         loopWith: "params",
         value: expr
