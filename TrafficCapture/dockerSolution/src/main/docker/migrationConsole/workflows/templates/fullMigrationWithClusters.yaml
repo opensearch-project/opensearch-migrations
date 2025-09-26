@@ -175,14 +175,23 @@ spec:
         command: [sh, -c]
         args:
           - |
-            echo "Waiting for {{inputs.parameters.cluster-type}} cluster pod to be ready..."
+            echo "Waiting for {{inputs.parameters.cluster-type}} cluster to be ready..."
             
-            # Use kubectl wait for conventional pod readiness check
-            kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
-              --namespace={{inputs.parameters.namespace}} \
-              --timeout=200s
-            
-            echo "{{inputs.parameters.cluster-type}} cluster pod is ready!"
+            # Check if StatefulSet pod exists first
+            if kubectl get pod/{{inputs.parameters.cluster-name}}-0 \
+                 --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
+              echo "Found StatefulSet pod {{inputs.parameters.cluster-name}}-0, waiting for readiness..."
+              kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
+                --namespace={{inputs.parameters.namespace}} \
+                --timeout=200s
+              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
+            else
+              echo "StatefulSet pod not found, checking Deployment..."
+              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
+                --namespace={{inputs.parameters.namespace}} \
+                --timeout=200s
+              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
+            fi
 
     # Generic suspend template for pausing workflow execution
     - name: suspend-step
