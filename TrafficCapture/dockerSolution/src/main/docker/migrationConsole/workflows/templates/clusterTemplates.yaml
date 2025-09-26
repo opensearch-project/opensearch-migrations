@@ -198,10 +198,7 @@ spec:
                   targetPort: 9300
             EOF
 
-            # 4) Wait for it to be available (nice UX + reliable handoff)
-            kubectl -n "${NAMESPACE}" rollout status deploy/${CLUSTER_NAME} --timeout=300s
-
-            # 5) Emit cluster config as output
+            # 4) Emit cluster config as output
             cat > /tmp/cluster-config.json <<EOF
             {
               "endpoint": "http://${CLUSTER_NAME}:9200",
@@ -393,10 +390,7 @@ spec:
                   targetPort: 9300
             EOF
 
-            # 4) Wait for it to be available (nice UX + reliable handoff)
-            kubectl -n "${NAMESPACE}" rollout status deploy/${CLUSTER_NAME} --timeout=300s
-
-            # 5) Emit cluster config as output
+            # 4) Emit cluster config as output
             cat > /tmp/cluster-config.json <<EOF
             {
               "endpoint": "http://${CLUSTER_NAME}:9200",
