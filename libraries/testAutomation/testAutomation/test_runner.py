@@ -183,11 +183,11 @@ class TestRunner:
 
         # Cleanup non-Helm Kubernetes resources (ES 1.x and 2.x)
         try:
-            self.k8s_service.exec_migration_console_cmd([
+            self.k8s_service.run_command([
                 "kubectl", "delete", "all,configmap,secret",
                 "-l", "migration-test=true",
                 "--ignore-not-found"
-            ])
+            ], ignore_errors=True)
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
