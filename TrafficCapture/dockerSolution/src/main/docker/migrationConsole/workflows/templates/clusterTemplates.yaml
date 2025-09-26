@@ -523,11 +523,14 @@ spec:
             helm repo add elastic https://helm.elastic.co
             helm repo update
             
-            # Create Elasticsearch configuration for ES 6.8.23 (no deprecated cloud.aws settings)
+            # Create Elasticsearch configuration for ES 6.8.23 with S3 settings
             cat > /tmp/elasticsearch.yml << EOF
             bootstrap.system_call_filter: false
             network.host: 0.0.0.0
             discovery.zen.minimum_master_nodes: 1
+            s3.client.default.endpoint: http://localstack.ma.svc.cluster.local:4566
+            s3.client.default.path_style_access: true
+            s3.client.default.region: us-east-2
             EOF
             
             # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
@@ -536,7 +539,7 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "6.8.23"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m"
+            esJavaOpts: "-Xmx512m -Xms512m -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
             protocol: "http"
             replicas: 1
             createCert: false
@@ -549,7 +552,11 @@ spec:
                 value: ""
               - name: "node.roles"
                 value: ""
-              - name: "AWS_REGION"
+              - name: "AWS_ACCESS_KEY_ID"
+                value: "test"
+              - name: "AWS_SECRET_ACCESS_KEY"
+                value: "test"
+              - name: "AWS_DEFAULT_REGION"
                 value: "us-east-2"
             persistence:
               enabled: false
