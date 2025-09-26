@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_5.6", "ES_7.10"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_7.10"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19"]
 MA_RELEASE_NAME = "ma"
 
@@ -181,6 +181,16 @@ class TestRunner:
             if pattern.match(configmap) and configmap.endswith("migration-config"):
                 self.k8s_service.delete_configmap(configmap_name=configmap)
 
+        # Cleanup non-Helm Kubernetes resources (ES 1.x and 2.x)
+        try:
+            self.k8s_service.run_command([
+                "kubectl", "delete", "all,configmap,secret",
+                "-l", "migration-test=true",
+                "--ignore-not-found"
+            ], ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
+
     def cleanup_deployment(self) -> None:
         self.cleanup_clusters()
         self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
@@ -192,6 +202,16 @@ class TestRunner:
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False, developer_mode: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None) -> None:
+        if developer_mode:
+            workflow_templates_dir = (
+                "../../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/"
+                "workflows/templates/"
+            )
+            self.k8s_service.run_command([
+                "kubectl", "apply", "-f", workflow_templates_dir, "-n", "ma"
+            ])
+            logger.info("Applied workflow templates directory")
+
         for source_version, target_version in self.combinations:
             try:
                 logger.info(f"Performing helm deployment for migration testing environment "

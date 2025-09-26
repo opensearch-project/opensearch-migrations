@@ -24,6 +24,8 @@ class ClusterVersion:
         return f"{self.cluster_type}_{self.major_version}.{self.minor_version}"
 
 
+ElasticsearchV1_X = ClusterVersion("ES_1.x")
+ElasticsearchV2_X = ClusterVersion("ES_2.x")
 ElasticsearchV5_X = ClusterVersion("ES_5.x")
 ElasticsearchV6_X = ClusterVersion("ES_6.x")
 ElasticsearchV7_X = ClusterVersion("ES_7.x")
