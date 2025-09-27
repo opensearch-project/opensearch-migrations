@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: json-merge-
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: merge-json
+  arguments:
+    parameters:
+      - name: a
+        value: '{"name": "john", "age": 30}'
+      - name: b
+        value: '{"city": "NYC", "active": true}'
+  templates:
+    - name: merge-json
+      inputs:
+        parameters:
+          - name: ia
+            value: "{{workflow.parameters.a}}"
+          - name: ib
+            value: "{{workflow.parameters.b}}"
+          - name: merged
+            value: "{{= toJSON(sprig.merge(sprig.dict(\"inner\", fromJSON('{\"a\":\"b\"}')), fromJSON(inputs.parameters.ib))) }}"
+      container:
+        image: alpine
+        command: [echo]
+        args:
+          - |
+            Hi
