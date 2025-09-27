@@ -1,6 +1,6 @@
 import logging
 from ..cluster_version import (
-    ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X, ElasticsearchV7_X,
+    ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X, ElasticsearchV6_8, ElasticsearchV7_X,
     OpensearchV1_X, OpensearchV2_X
 )
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
@@ -18,6 +18,8 @@ class Test0001SingleDocumentBackfill(MATestBase):
             (ElasticsearchV2_X, OpensearchV2_X),
             (ElasticsearchV5_X, OpensearchV1_X),
             (ElasticsearchV5_X, OpensearchV2_X),
+            (ElasticsearchV6_8, OpensearchV1_X),
+            (ElasticsearchV6_8, OpensearchV2_X),
             (ElasticsearchV7_X, OpensearchV1_X),
             (ElasticsearchV7_X, OpensearchV2_X),
         ]
