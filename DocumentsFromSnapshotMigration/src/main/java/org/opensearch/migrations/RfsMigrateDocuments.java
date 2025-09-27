@@ -213,8 +213,8 @@ public class RfsMigrateDocuments {
         @Parameter(required = true,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
-            description = ("Version of the source cluster."))
-        public Version sourceVersion = Version.fromString("ES 7.10");
+            description = ("Version of the source cluster. Required parameter - no default fallback."))
+        public Version sourceVersion;
 
         @Parameter(required = false,
             names = { "--session-name", "--sessionName" },
