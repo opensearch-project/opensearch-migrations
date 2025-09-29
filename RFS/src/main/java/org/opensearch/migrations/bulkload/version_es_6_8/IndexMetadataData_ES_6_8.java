@@ -28,6 +28,7 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
     private final String name;
 
     public IndexMetadataData_ES_6_8(ObjectNode root, String indexId, String indexName) {
+        validateRawJson(root);
         this.rawJson = root;
         this.mappings = null;
         this.settings = null;
