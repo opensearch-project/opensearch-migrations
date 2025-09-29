@@ -27,16 +27,6 @@ import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 
-export function inputsToEnvVarNames<T extends Record<string, AllowLiteralOrExpression<string>>>(
-    inputs: T
-): Record<string, AllowLiteralOrExpression<string>> {
-    const result: Record<string, AllowLiteralOrExpression<string>> = {};
-    Object.entries(inputs).forEach(([key, value]) => {
-        result[toEnvVarName(key)] = value;
-    });
-    return result;
-}
-
 export class ContainerBuilder<
     ContextualScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
@@ -247,8 +237,10 @@ export class ContainerBuilder<
         ModifiedInputs extends Record<string, AllowLiteralOrExpression<string>> =
             { [K in keyof InputParamsScope as Uppercase<string & K>]: AllowLiteralOrExpression<string> }
     >(
+        prefix: string,
+        suffix: string,
         modifierFn: (inputs: InputParamsToExpressions<InputParamsScope>) => ModifiedInputs =
-        inputsToEnvVars as any
+            (inputs: InputParamsToExpressions<InputParamsScope>) => inputsToEnvVars(inputs, prefix, suffix) as any
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<
             ContextualScope,

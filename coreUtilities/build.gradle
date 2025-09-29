@@ -24,7 +24,8 @@ dependencies {
     testImplementation libs.log4j.slf4j2.impl
 
     // JCommander
-    compileOnly libs.jcommander
+    compileOnly     libs.jcommander
+    testCompileOnly libs.jcommander
 
     // OpenTelemetry core
     api libs.opentelemetry.api

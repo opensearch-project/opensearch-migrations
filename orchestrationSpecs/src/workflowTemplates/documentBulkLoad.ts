@@ -174,7 +174,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
                     inputsAsEnvList: [
-                        ...inputsToEnvVarsList({...b.inputs})
+                        ...inputsToEnvVarsList({...b.inputs}, "RFS_", "_CMD_LINE_ARG")
                     ],
                     workflowName: expr.getWorkflowValue("name")
                 })

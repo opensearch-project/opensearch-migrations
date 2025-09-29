@@ -70,7 +70,7 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         indices: z.array(z.string()),
         options: METADATA_OPTIONS.optional()
     }).optional(),
-    documentBackfillConfigs: z.object({
+    documentBackfillConfig: z.object({
         indices: z.array(z.string()),
         options: RFS_OPTIONS.optional()
     }).optional()

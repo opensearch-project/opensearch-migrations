@@ -40,27 +40,34 @@ export function remapRecordNames<
     return result;
 }
 
-export function toEnvVarName(str: string): string {
-    return str
+export function toEnvVarName(str: string, prefix:string, suffix:string): string {
+    if (prefix === undefined || suffix === undefined) {
+        console.log("checkme");
+    }
+    return prefix + str
         .replace(/([a-z])([A-Z])/g, '$1_$2')
         .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
-        .toUpperCase();
+        .toUpperCase() + suffix;
 }
 
 export function inputsToEnvVars<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
-    inputs: T
+    inputs: T,
+    prefix: string,
+    suffix: string
 ): { [K in keyof T as (string & K)]: T[K] } {
     const result: Record<string, AllowLiteralOrExpression<PlainObject>> = {};
     Object.entries(inputs).forEach(([key, value]) => {
-        result[toEnvVarName(key)] = value;
+        result[toEnvVarName(key, prefix, suffix)] = value;
     });
     return result as any;
 }
 
 export function inputsToEnvVarsList<T extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
-    inputs: T
+    inputs: T,
+    prefix: string,
+    suffix: string
 ) {
-    return Object.entries(inputsToEnvVars(inputs)).map(([name, value]) => ({name, value}));
+    return Object.entries(inputsToEnvVars(inputs, prefix, suffix)).map(([name, value]) => ({name, value}));
 }
 
 // Helper to check if a Zod type has a default value

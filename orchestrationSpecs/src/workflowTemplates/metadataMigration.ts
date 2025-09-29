@@ -42,7 +42,9 @@ export const MetadataMigration = WorkflowBuilder.create({
                     // see selectInputsFieldsAsExpressionRecord for an easy way to route this
                     // (would need another helper template)
                     configContents: c.steps.migrateMetadataFromConfig.outputs.configContents,
-                    command: "echo \"failure, but pretending\""
+                    command: "set -e && " +
+                        "console --config-file=/config/migration_services.yaml -v metadata evaluate ; " +
+                        "console --config-file=/config/migration_services.yaml -v metadata migrate"
                 }))
         )
     )

@@ -36,7 +36,7 @@ spec:
                           },
                           "migrations": [
                               {
-                                  "NOTmetadata": {
+                                  "metadata": {
                                       "mappings": {
                                           "properties": {}
                                       },

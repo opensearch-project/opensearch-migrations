@@ -97,11 +97,11 @@ export const FullMigration = WorkflowBuilder.create({
                     sessionName: c.steps.idGenerator.id,
                     targetConfig: b.inputs.target,
                     indices: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                        ["documentBackfillConfigs", "indices"], [] as string[])),
+                        ["documentBackfillConfig", "indices"], [] as string[])),
                     backfillConfig: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                        ["documentBackfillConfigs", "options"], {} as z.infer<typeof RFS_OPTIONS>))
+                        ["documentBackfillConfig", "options"], {} as z.infer<typeof RFS_OPTIONS>))
                 }),
-                {when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "documentBackfillConfigs")}}
+                {when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.migrationConfig), "documentBackfillConfig")}}
             )
             .addStep("targetBackfillCompleteCheck", TargetLatchHelpers, "decrementLatch", c =>
                 c.register({

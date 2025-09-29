@@ -8,6 +8,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
+import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -36,18 +37,17 @@ public class MetadataMigration {
                 args,
                 ArgNameConstants.joinLists(ArgNameConstants.CENSORED_SOURCE_ARGS, ArgNameConstants.CENSORED_TARGET_ARGS)
         )));
-        var metadataArgs = new MetadataArgs();
-        var migrateArgs = new MigrateArgs();
-        var evaluateArgs = new EvaluateArgs();
+        var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), "METADATA_");
+        var migrateArgs = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(), "METADATA_");
+        var evaluateArgs = EnvVarParameterPuller.injectFromEnv(new EvaluateArgs(), "METADATA_");
         var jCommander = JCommander.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)
             .addCommand(evaluateArgs)
             .build();
         jCommander.parse(args);
-        EnvArgs.injectFromEnv(migrateArgs);
-        EnvArgs.injectFromEnv(evaluateArgs);
-        
+
+
         if (migrateArgs.outputFormat == OutputFormat.JSON || evaluateArgs.outputFormat == OutputFormat.JSON) {
             outputFormat.set(OutputFormat.JSON);
         } else {
