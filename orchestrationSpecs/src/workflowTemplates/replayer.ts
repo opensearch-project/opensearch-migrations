@@ -105,7 +105,8 @@ export const Replayer = WorkflowBuilder.create({
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
                     inputsAsEnvList: [
-                        ...inputsToEnvVarsList({...remapRecordNames(b.inputs, {"targetInsecure": "insecure"})}),
+                        ...inputsToEnvVarsList({...remapRecordNames(b.inputs, {"targetInsecure": "insecure"})},
+                            "REPLAYER_", "_CMD_LINE_ARG"),
                     ],
                     workflowName: expr.getWorkflowValue("name")
                 })

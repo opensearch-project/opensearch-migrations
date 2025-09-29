@@ -38,7 +38,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         .addRequiredInput("configuration", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>())
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars()
+            .addInputsAsEnvVars("", "")
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
 
@@ -54,7 +54,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         .addRequiredInput("processorId", typeToken<string>())
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars()
+            .addInputsAsEnvVars("", "")
             .addCommand(["sh", "-c"])
             .addArgs([decrementTlhScript])
 
@@ -67,7 +67,7 @@ export const TargetLatchHelpers = WorkflowBuilder.create({
         .addInputs(addCommonTargetLatchInputs)
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars()
+            .addInputsAsEnvVars("", "")
             .addCommand(["sh", "-c"])
             .addArgs([cleanupTlhScript])
         )
