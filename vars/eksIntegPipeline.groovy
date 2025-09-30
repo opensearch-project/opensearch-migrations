@@ -118,7 +118,11 @@ def call(Map config = [:]) {
                                 def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
                                 writeFile (file: "${clusterContextFilePath}", text: contextJsonStr)
                                 sh "echo 'Using cluster context file options: ' && cat ${clusterContextFilePath}"
-                                sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
+                                    }
+                                }
 
                                 def rawJsonFile = readFile "tmp/cluster-details-${maStageName}"
                                 def parsedClusterDetails = new JsonSlurper().parseText(rawJsonFile)
