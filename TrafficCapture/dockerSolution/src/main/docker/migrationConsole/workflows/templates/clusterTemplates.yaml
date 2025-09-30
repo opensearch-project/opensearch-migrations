@@ -527,7 +527,8 @@ spec:
             cat > /tmp/elasticsearch.yml << EOF
             bootstrap.system_call_filter: false
             network.host: 0.0.0.0
-            discovery.zen.minimum_master_nodes: 1
+            discovery.type: single-node
+            cloud.aws.s3.endpoint: http://localstack.ma.svc.cluster.local:4566
             s3.client.default.endpoint: http://localstack.ma.svc.cluster.local:4566
             s3.client.default.path_style_access: true
             s3.client.default.region: us-east-2
@@ -546,6 +547,7 @@ spec:
             
             # Disable default readiness probe to avoid conflicts
             readinessProbe: {}
+            livenessProbe: {}
             
             extraEnvs:
               - name: "cluster.initial_master_nodes"
@@ -581,6 +583,8 @@ spec:
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
                     # Copy keystore to shared volume location
                     cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                    chown 1000:0 /shared/elasticsearch.keystore
+                    chmod 660 /shared/elasticsearch.keystore
                     echo "Keystore created and saved to shared volume"
                 volumeMounts:
                   - name: elasticsearch-keystore
