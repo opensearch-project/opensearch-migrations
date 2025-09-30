@@ -2,7 +2,7 @@ import groovy.json.JsonSlurper
 
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eks-integ"
-    def jobName = config.jobName ?: "eks-full-integ-test"
+    def jobName = config.jobName ?: "eks-integ-test"
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
@@ -68,10 +68,6 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
-                    env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
-                    env.targetVer = targetVersion ?: params.TARGET_VERSION
-                    env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
-                    env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
                 }
             }
 
@@ -98,6 +94,10 @@ def call(Map config = [:]) {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
                             script {
+                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                env.targetVer = targetVersion ?: params.TARGET_VERSION
+                                env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
+                                env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
                                 def clusterContextValues = [
                                     stage     : "<STAGE>",
                                     vpcAZCount: 2,
