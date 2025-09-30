@@ -1,3 +1,4 @@
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 def call(Map config = [:]) {
@@ -114,7 +115,8 @@ def call(Map config = [:]) {
                                         ]
                                     ]
                                 ]
-                                writeFile (file: "${clusterContextFilePath}", text: clusterContextValues)
+                                def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
+                                writeFile (file: "${clusterContextFilePath}", text: contextJsonStr)
                                 sh "echo 'Using cluster context file options: ' && cat ${clusterContextFilePath}"
                                 sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
 
