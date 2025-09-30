@@ -23,6 +23,7 @@ TrafficCapture/**/out/
 # CDK files from end-to-end testing
 opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/
+test/amazon-opensearch-service-sample-cdk/
 TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 
 # Directory used to temporarily store snapshots during testing
