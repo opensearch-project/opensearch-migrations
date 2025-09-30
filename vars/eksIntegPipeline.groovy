@@ -104,12 +104,12 @@ def call(Map config = [:]) {
                                     vpcAZCount: 2,
                                     clusters  : [
                                         [
-                                                clusterId     : "source-cluster",
+                                                clusterId     : "source",
                                                 clusterVersion: "${env.sourceVer}",
                                                 clusterType   : "${env.sourceClusterType}"
                                         ],
                                         [
-                                                clusterId     : "target-cluster",
+                                                clusterId     : "target",
                                                 clusterVersion: "${env.targetVer}",
                                                 clusterType   : "${env.targetClusterType}"
                                         ]
@@ -137,10 +137,14 @@ def call(Map config = [:]) {
                         dir('deployment/migration-assistant-solution') {
                             script {
                                 env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
+                                def sourceCluster = clusterDetails.clusters.find { it.clusterId == 'source' }
+                                def targetCluster = clusterDetails.clusters.find { it.clusterId == 'target' }
+                                def vpcId = targetCluster.vpcId
+                                def securityGroupIds = "${sourceCluster.securityGroupId},${targetCluster.securityGroupId}"
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --parameters Stage=${maStageName} --require-approval never --concurrency 3"
+                                        sh "cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --parameters Stage=${maStageName} --parameters VPCId=${vpcId} --parameters VPCSecurityGroupIds=${securityGroupIds} --require-approval never --concurrency 3"
                                     }
                                 }
                             }
