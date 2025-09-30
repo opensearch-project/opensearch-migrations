@@ -94,4 +94,31 @@ public class FilterSchemeTest {
         // Similar index names to not exclude
         assertThat(filter.test("watch_custom"), equalTo(true));
     }
+
+    @Test
+    void testExcludedES717SystemIndices() {
+        var filter = FilterScheme.filterByAllowList(null);
+
+        // Endpoint logs should be excluded
+        assertThat(filter.test("logs-endpoint.alerts"), equalTo(false));
+        assertThat(filter.test("logs-endpoint.events.file"), equalTo(false));
+        
+        // System logs should be excluded
+        assertThat(filter.test("logs-system.application"), equalTo(false));
+        assertThat(filter.test("logs-system.auth"), equalTo(false));
+        
+        // System metrics should be excluded
+        assertThat(filter.test("metrics-system.cpu"), equalTo(false));
+        assertThat(filter.test("metrics-system.memory"), equalTo(false));
+        
+        // Metadata metrics should be excluded
+        assertThat(filter.test("metrics-metadata-current"), equalTo(false));
+        assertThat(filter.test("metrics-metadata-united"), equalTo(false));
+        
+        // Custom indices with similar names should not be excluded
+        assertThat(filter.test("logs-myendpoint-custom"), equalTo(true));
+        assertThat(filter.test("logs-mysystem-custom"), equalTo(true));
+        assertThat(filter.test("metrics-mysystem-custom"), equalTo(true));
+        assertThat(filter.test("metrics-mymetadata-custom"), equalTo(true));
+    }
 }
