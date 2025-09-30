@@ -1,0 +1,2781 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = `
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Mappings": {
+    "Solution": {
+      "Config": {
+        "CodeVersion": "0.0.1",
+        "KeyPrefix": "test-solution/0.0.1",
+        "S3Bucket": "test-bucket",
+        "SendAnonymousUsage": "No",
+        "SolutionId": "SO0000",
+      },
+    },
+  },
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Imported VPC parameters",
+          },
+          "Parameters": [
+            "VPCId",
+            "VPCSubnetIds",
+            "VPCSecurityGroupIds",
+          ],
+        },
+        {
+          "Label": {
+            "default": "Additional parameters",
+          },
+          "Parameters": [
+            "Stage",
+          ],
+        },
+      ],
+      "ParameterLabels": {
+        "VPCId": {
+          "default": "VPC",
+        },
+        "VPCSecurityGroupIds": {
+          "default": "Security Groups",
+        },
+        "VPCSubnetIds": {
+          "default": "Subnets",
+        },
+      },
+    },
+  },
+  "Outputs": {
+    "MigrationsExportString": {
+      "Description": "Export string for Migration resources created from this deployment",
+      "Export": {
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              "MigrationsExportString-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "export MIGRATIONS_APP_REGISTRY_ARN=",
+            {
+              "Fn::GetAtt": [
+                "AppRegistry968496A3",
+                "Arn",
+              ],
+            },
+            "; export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-",
+            {
+              "Ref": "Stage",
+            },
+            "-",
+            {
+              "Ref": "AWS::Region",
+            },
+            "; export MIGRATIONS_ECR_REGISTRY=",
+            {
+              "Fn::Select": [
+                4,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EKSInfraMigrationsECRRepositoryEAD8241B",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".dkr.ecr.",
+            {
+              "Fn::Select": [
+                3,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EKSInfraMigrationsECRRepositoryEAD8241B",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "EKSInfraMigrationsECRRepositoryEAD8241B",
+            },
+            "; export AWS_ACCOUNT=",
+            {
+              "Ref": "AWS::AccountId",
+            },
+            "; export AWS_CFN_REGION=us-west-1; export VPC_ID=",
+            {
+              "Ref": "VPCId",
+            },
+            "; export STAGE=",
+            {
+              "Ref": "Stage",
+            },
+          ],
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "Stage": {
+      "Default": "dev",
+      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1",
+      "Type": "String",
+    },
+    "VPCId": {
+      "Description": "(Required) Select a VPC, we recommend choosing the VPC of the target cluster.",
+      "Type": "AWS::EC2::VPC::Id",
+    },
+    "VPCSecurityGroupIds": {
+      "Description": "(Required) Select one or more security groups that will allow Source and/or Target cluster access",
+      "Type": "List<AWS::EC2::SecurityGroup::Id>",
+    },
+    "VPCSubnetIds": {
+      "Description": "(Required) Select at least two private/public subnets, each in a unique Availability Zone.",
+      "Type": "List<AWS::EC2::Subnet::Id>",
+    },
+  },
+  "Resources": {
+    "AppRegistry968496A3": {
+      "Properties": {
+        "Description": "Service Catalog application to track and manage all your resources for the solution test-solution",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              "test-solution",
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Ref": "AWS::AccountId",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+            ],
+          ],
+        },
+        "Tags": {
+          "Solutions:ApplicationType": "AWS-Solutions",
+          "Solutions:SolutionID": "SO0000",
+          "Solutions:SolutionName": "test-solution",
+          "Solutions:SolutionVersion": "0.0.1",
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::Application",
+    },
+    "AppRegistryAssociation": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "Resource": {
+          "Ref": "AWS::StackId",
+        },
+        "ResourceType": "CFN_STACK",
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
+    },
+    "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "AttributeGroup": {
+          "Fn::GetAtt": [
+            "DefaultApplicationAttributesFC1CC26B",
+            "Id",
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation",
+    },
+    "DefaultApplicationAttributesFC1CC26B": {
+      "Properties": {
+        "Attributes": {
+          "applicationType": "AWS-Solutions",
+          "solutionID": "SO0000",
+          "solutionName": "test-solution",
+          "version": "0.0.1",
+        },
+        "Description": "Attribute group for solution information",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+              "attributes",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
+    },
+    "EKSInfraArgoWorkflowPodIdentityAssociation9EBD0AE8": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "argo-workflow-executor",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraBuildImagesPodIdentityAssociation596A820C": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "build-images-service-account",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraMigrationsECRRepositoryEAD8241B": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "EmptyOnDelete": true,
+        "RepositoryName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-ecr-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ECR::Repository",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "EKSInfraMigrationsEKSCluster4497841A": {
+      "Properties": {
+        "AccessConfig": {
+          "AuthenticationMode": "API",
+        },
+        "ComputeConfig": {
+          "Enabled": true,
+          "NodePools": [
+            "general-purpose",
+            "system",
+          ],
+          "NodeRoleArn": {
+            "Fn::GetAtt": [
+              "EKSInfraMigrationsEKSEC2NodeRoleF6EC8DA1",
+              "Arn",
+            ],
+          },
+        },
+        "KubernetesNetworkConfig": {
+          "ElasticLoadBalancing": {
+            "Enabled": true,
+          },
+        },
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "ResourcesVpcConfig": {
+          "EndpointPrivateAccess": true,
+          "EndpointPublicAccess": true,
+          "SecurityGroupIds": {
+            "Fn::Split": [
+              ",",
+              {
+                "Fn::Join": [
+                  ",",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+                        "GroupId",
+                      ],
+                    },
+                    {
+                      "Fn::Join": [
+                        ",",
+                        {
+                          "Ref": "VPCSecurityGroupIds",
+                        },
+                      ],
+                    },
+                  ],
+                ],
+              },
+            ],
+          },
+          "SubnetIds": {
+            "Ref": "VPCSubnetIds",
+          },
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsEKSClusterRoleE2A19155",
+            "Arn",
+          ],
+        },
+        "StorageConfig": {
+          "BlockStorage": {
+            "Enabled": true,
+          },
+        },
+        "UpgradePolicy": {
+          "SupportType": "STANDARD",
+        },
+        "Version": "1.32",
+      },
+      "Type": "AWS::EKS::Cluster",
+    },
+    "EKSInfraMigrationsEKSClusterRoleE2A19155": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "eks.amazonaws.com",
+              },
+            },
+            {
+              "Action": [
+                "sts:AssumeRole",
+                "sts:TagSession",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "eks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSClusterPolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSBlockStoragePolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSComputePolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSLoadBalancingPolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSNetworkingPolicy",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EKSInfraMigrationsEKSEC2NodeRoleF6EC8DA1": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSWorkerNodePolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKS_CNI_Policy",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EKSInfraMigrationsPodIdentityAssociationF5A652A7": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "migrations-service-account",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraMigrationsPodIdentityPolicy66E9CD0D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchGetImage",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:DescribeRepositories",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:CompleteLayerUpload",
+                "ecr:InitiateLayerUpload",
+                "ecr:PutImage",
+                "ecr:UploadLayerPart",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "es:ESHttp*",
+                "aoss:APIAccessAll",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+                "secretsmanager:ListSecrets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket",
+                "s3:ListAllMyBuckets",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion",
+                "s3:ListBucketVersions",
+                "s3:ListBucketMultipartUploads",
+                "s3:AbortMultipartUpload",
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:DescribeLogGroups",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "MigrationsPodPolicy",
+        "Roles": [
+          {
+            "Ref": "EKSInfraMigrationsPodIdentityRole873942CE",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EKSInfraMigrationsPodIdentityRole873942CE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "pods.eks.amazonaws.com",
+              },
+            },
+            {
+              "Action": [
+                "sts:AssumeRole",
+                "sts:TagSession",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "pods.eks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "Migrations IAM role assumed by pods via EKS Pod Identity",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEC2ContainerRegistryFullAccess",
+              ],
+            ],
+          },
+        ],
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+              "-migrations-role",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EKSInfraMigrationsSecurityGroup8BCFC8DB": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/EKSInfra/MigrationsSecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+          {
+            "CidrIpv6": "::/0",
+            "Description": "Allow all outbound ipv6 traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VPCId",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7ALLTRAFFICB4BFD1CE": {
+      "Properties": {
+        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7:ALL TRAFFIC",
+        "GroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsEKSCluster4497841A",
+            "ClusterSecurityGroupId",
+          ],
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37ALLTRAFFICEE0DE2F2": {
+      "Properties": {
+        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37:ALL TRAFFIC",
+        "GroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Mappings": {
+    "Solution": {
+      "Config": {
+        "CodeVersion": "0.0.1",
+        "KeyPrefix": "test-solution/0.0.1",
+        "S3Bucket": "test-bucket",
+        "SendAnonymousUsage": "No",
+        "SolutionId": "SO0000",
+      },
+    },
+  },
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Additional parameters",
+          },
+          "Parameters": [
+            "Stage",
+          ],
+        },
+      ],
+      "ParameterLabels": {},
+    },
+  },
+  "Outputs": {
+    "MigrationsExportString": {
+      "Description": "Export string for Migration resources created from this deployment",
+      "Export": {
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              "MigrationsExportString-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "export MIGRATIONS_APP_REGISTRY_ARN=",
+            {
+              "Fn::GetAtt": [
+                "AppRegistry968496A3",
+                "Arn",
+              ],
+            },
+            "; export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-",
+            {
+              "Ref": "Stage",
+            },
+            "-",
+            {
+              "Ref": "AWS::Region",
+            },
+            "; export MIGRATIONS_ECR_REGISTRY=",
+            {
+              "Fn::Select": [
+                4,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EKSInfraMigrationsECRRepositoryEAD8241B",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".dkr.ecr.",
+            {
+              "Fn::Select": [
+                3,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EKSInfraMigrationsECRRepositoryEAD8241B",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "EKSInfraMigrationsECRRepositoryEAD8241B",
+            },
+            "; export AWS_ACCOUNT=",
+            {
+              "Ref": "AWS::AccountId",
+            },
+            "; export AWS_CFN_REGION=us-west-1; export VPC_ID=",
+            {
+              "Ref": "Vpc8378EB38",
+            },
+            "; export STAGE=",
+            {
+              "Ref": "Stage",
+            },
+          ],
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "Stage": {
+      "Default": "dev",
+      "Description": "Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1",
+      "Type": "String",
+    },
+  },
+  "Resources": {
+    "AppRegistry968496A3": {
+      "Properties": {
+        "Description": "Service Catalog application to track and manage all your resources for the solution test-solution",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              "test-solution",
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Ref": "AWS::AccountId",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+            ],
+          ],
+        },
+        "Tags": {
+          "Solutions:ApplicationType": "AWS-Solutions",
+          "Solutions:SolutionID": "SO0000",
+          "Solutions:SolutionName": "test-solution",
+          "Solutions:SolutionVersion": "0.0.1",
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::Application",
+    },
+    "AppRegistryAssociation": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "Resource": {
+          "Ref": "AWS::StackId",
+        },
+        "ResourceType": "CFN_STACK",
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
+    },
+    "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
+      "Properties": {
+        "Application": {
+          "Fn::GetAtt": [
+            "AppRegistry968496A3",
+            "Id",
+          ],
+        },
+        "AttributeGroup": {
+          "Fn::GetAtt": [
+            "DefaultApplicationAttributesFC1CC26B",
+            "Id",
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation",
+    },
+    "DefaultApplicationAttributesFC1CC26B": {
+      "Properties": {
+        "Attributes": {
+          "applicationType": "AWS-Solutions",
+          "solutionID": "SO0000",
+          "solutionName": "test-solution",
+          "version": "0.0.1",
+        },
+        "Description": "Attribute group for solution information",
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              {
+                "Ref": "AWS::Region",
+              },
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Ref": "Stage",
+                    },
+                    "-",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                  ],
+                ],
+              },
+              "attributes",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
+    },
+    "EKSInfraArgoWorkflowPodIdentityAssociation9EBD0AE8": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "argo-workflow-executor",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraBuildImagesPodIdentityAssociation596A820C": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "build-images-service-account",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraMigrationsECRRepositoryEAD8241B": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "EmptyOnDelete": true,
+        "RepositoryName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-ecr-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ECR::Repository",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "EKSInfraMigrationsEKSCluster4497841A": {
+      "Properties": {
+        "AccessConfig": {
+          "AuthenticationMode": "API",
+        },
+        "ComputeConfig": {
+          "Enabled": true,
+          "NodePools": [
+            "general-purpose",
+            "system",
+          ],
+          "NodeRoleArn": {
+            "Fn::GetAtt": [
+              "EKSInfraMigrationsEKSEC2NodeRoleF6EC8DA1",
+              "Arn",
+            ],
+          },
+        },
+        "KubernetesNetworkConfig": {
+          "ElasticLoadBalancing": {
+            "Enabled": true,
+          },
+        },
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "ResourcesVpcConfig": {
+          "EndpointPrivateAccess": true,
+          "EndpointPublicAccess": true,
+          "SecurityGroupIds": {
+            "Fn::Split": [
+              ",",
+              {
+                "Fn::GetAtt": [
+                  "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+                  "GroupId",
+                ],
+              },
+            ],
+          },
+          "SubnetIds": [],
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsEKSClusterRoleE2A19155",
+            "Arn",
+          ],
+        },
+        "StorageConfig": {
+          "BlockStorage": {
+            "Enabled": true,
+          },
+        },
+        "UpgradePolicy": {
+          "SupportType": "STANDARD",
+        },
+        "Version": "1.32",
+      },
+      "Type": "AWS::EKS::Cluster",
+    },
+    "EKSInfraMigrationsEKSClusterRoleE2A19155": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "eks.amazonaws.com",
+              },
+            },
+            {
+              "Action": [
+                "sts:AssumeRole",
+                "sts:TagSession",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "eks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSClusterPolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSBlockStoragePolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSComputePolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSLoadBalancingPolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSNetworkingPolicy",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EKSInfraMigrationsEKSEC2NodeRoleF6EC8DA1": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKSWorkerNodePolicy",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEKS_CNI_Policy",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EKSInfraMigrationsPodIdentityAssociationF5A652A7": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSCluster4497841A",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "migrations-service-account",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraMigrationsPodIdentityPolicy66E9CD0D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchGetImage",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:DescribeRepositories",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:CompleteLayerUpload",
+                "ecr:InitiateLayerUpload",
+                "ecr:PutImage",
+                "ecr:UploadLayerPart",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "es:ESHttp*",
+                "aoss:APIAccessAll",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+                "secretsmanager:ListSecrets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket",
+                "s3:ListAllMyBuckets",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion",
+                "s3:ListBucketVersions",
+                "s3:ListBucketMultipartUploads",
+                "s3:AbortMultipartUpload",
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:DescribeLogGroups",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "MigrationsPodPolicy",
+        "Roles": [
+          {
+            "Ref": "EKSInfraMigrationsPodIdentityRole873942CE",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EKSInfraMigrationsPodIdentityRole873942CE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "pods.eks.amazonaws.com",
+              },
+            },
+            {
+              "Action": [
+                "sts:AssumeRole",
+                "sts:TagSession",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "pods.eks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "Migrations IAM role assumed by pods via EKS Pod Identity",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/AmazonEC2ContainerRegistryFullAccess",
+              ],
+            ],
+          },
+        ],
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+              "-migrations-role",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EKSInfraMigrationsSecurityGroup8BCFC8DB": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/EKSInfra/MigrationsSecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+          {
+            "CidrIpv6": "::/0",
+            "Description": "Allow all outbound ipv6 traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7ALLTRAFFICB4BFD1CE": {
+      "Properties": {
+        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsEKSClusterDefaultSGB9B387E7:ALL TRAFFIC",
+        "GroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsEKSCluster4497841A",
+            "ClusterSecurityGroupId",
+          ],
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "EKSInfraMigrationsSecurityGroupfromTestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37ALLTRAFFICEE0DE2F2": {
+      "Properties": {
+        "Description": "from TestMigrationAssistantStackEKSInfraMigrationsSecurityGroup64E68E37:ALL TRAFFIC",
+        "GroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsSecurityGroup8BCFC8DB",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "S3VpcEndpoint1F0CDE18": {
+      "Properties": {
+        "RouteTableIds": [
+          {
+            "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+          },
+          {
+            "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+          },
+          {
+            "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+          },
+        ],
+        "ServiceName": {
+          "Fn::Join": [
+            "",
+            [
+              "com.amazonaws.",
+              {
+                "Ref": "AWS::Region",
+              },
+              ".s3",
+            ],
+          ],
+        },
+        "VpcEndpointType": "Gateway",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "Vpc8378EB38": {
+      "Properties": {
+        "CidrBlock": "10.212.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-vpc-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::VPC",
+    },
+    "VpcEIGW61416F369": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-vpc-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::EgressOnlyInternetGateway",
+    },
+    "VpcIGWD7BA715C": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-vpc-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::InternetGateway",
+    },
+    "VpcPrivateSubnet1DefaultRoute6B45CB740": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "EgressOnlyInternetGatewayId": {
+          "Ref": "VpcEIGW61416F369",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet1DefaultRouteBE02A9ED": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "VpcPublicSubnet1NATGateway4D7517AA",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet1RouteTableAssociation70C59FA6": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTableB2C5B500",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet1Subnet536B997A",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet1RouteTableB2C5B500": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet1Subnet536B997A": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.128.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            2,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPrivateSubnet2DefaultRoute060D2087": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "VpcPublicSubnet2NATGateway9182C01D",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet2DefaultRoute6DDF1236D": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "EgressOnlyInternetGatewayId": {
+          "Ref": "VpcEIGW61416F369",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet2RouteTableA678073B": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet2RouteTableAssociationA89CAD56": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTableA678073B",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet2Subnet3788AAA1": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.192.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            3,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet1DefaultRoute3DA9E72A": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet1DefaultRoute6A21265FB": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet1EIPD7E02669": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "VpcPublicSubnet1NATGateway4D7517AA": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcPublicSubnet1DefaultRoute3DA9E72A",
+        "VpcPublicSubnet1DefaultRoute6A21265FB",
+        "VpcPublicSubnet1RouteTableAssociation97140677",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "VpcPublicSubnet1EIPD7E02669",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet1Subnet5C2D37C4",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "VpcPublicSubnet1RouteTable6C95E38E": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet1RouteTableAssociation97140677": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable6C95E38E",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet1Subnet5C2D37C4",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet1Subnet5C2D37C4": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.0.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-1-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet2DefaultRoute63E63096C": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet2DefaultRoute97F91067": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet2EIP3C605A87": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "VpcPublicSubnet2NATGateway9182C01D": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcPublicSubnet2DefaultRoute97F91067",
+        "VpcPublicSubnet2DefaultRoute63E63096C",
+        "VpcPublicSubnet2RouteTableAssociationDD5762D8",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "VpcPublicSubnet2EIP3C605A87",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet2Subnet691E08A3",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "VpcPublicSubnet2RouteTable94F7E489": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet2RouteTableAssociationDD5762D8": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable94F7E489",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet2Subnet691E08A3",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet2Subnet691E08A3": {
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.64.0/18",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                4,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcVPCGWBF912B6E": {
+      "Properties": {
+        "InternetGatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+    },
+    "Vpcipv6cidr40D3CB78": {
+      "Properties": {
+        "AmazonProvidedIpv6CidrBlock": true,
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCCidrBlock",
+    },
+    "ecrapiVpcEndpointCCA70B2E": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "ecrapiVpcEndpointSecurityGroup449D3A58",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.ecr.api",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "ecrapiVpcEndpointSecurityGroup449D3A58": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/ecr.apiVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "ecrdkrVpcEndpointF40451CA": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "ecrdkrVpcEndpointSecurityGroup9D0FF409",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.ecr.dkr",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "ecrdkrVpcEndpointSecurityGroup9D0FF409": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/ecr.dkrVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "elasticfilesystemVpcEndpoint6435CF45": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "elasticfilesystemVpcEndpointSecurityGroupECB42CD1",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.elasticfilesystem",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "elasticfilesystemVpcEndpointSecurityGroupECB42CD1": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/elasticfilesystemVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "logsVpcEndpoint032E6ACC": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "logsVpcEndpointSecurityGroupAC2FD242",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-west-1.logs",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet536B997A",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "logsVpcEndpointSecurityGroupAC2FD242": {
+      "Properties": {
+        "GroupDescription": "TestMigrationAssistantStack/logsVpcEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "Vpc8378EB38",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "Vpc8378EB38",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
