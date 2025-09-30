@@ -12,7 +12,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             choice(
                     name: 'SOURCE_VERSION',
-                    choices: ['ES_5.6', 'ES_7.10'],
+                    choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_7.10'],
                     description: 'Pick a specific source version'
             )
             choice(

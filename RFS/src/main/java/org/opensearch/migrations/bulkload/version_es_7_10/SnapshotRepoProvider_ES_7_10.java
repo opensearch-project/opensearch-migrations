@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
@@ -36,7 +37,11 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
             .orElse(null);
 
         if (targetSnapshot != null) {
-            targetSnapshot.getIndexMetadataLookup().keySet().forEach(indexId ->
+            var indexMetadataLookup = targetSnapshot.getIndexMetadataLookup();
+            if (indexMetadataLookup == null) {
+                throw new InvalidSnapshotFormatException();
+            }
+            indexMetadataLookup.keySet().forEach(indexId ->
                 getRepoData().getIndices().forEach((indexName, rawIndex) -> {
                     if (indexId.equals(rawIndex.getId())) {
                         matchedIndices.add(SnapshotRepoData_ES_7_10.Index.fromRawIndex(indexName, rawIndex));

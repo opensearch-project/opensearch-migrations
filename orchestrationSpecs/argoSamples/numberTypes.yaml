@@ -1,0 +1,36 @@
+metadata:
+  generateName: wonderful-whale-
+  namespace: ma
+  labels:
+    example: "true"
+spec:
+  serviceAccountName: argo-workflow-executor
+  arguments:
+    parameters:
+      - name: wo
+        value: "{\"hello\": 1}"
+      - name: wnum
+        value: 7
+  entrypoint: argosay
+  templates:
+    - name: argosay
+      inputs:
+        parameters:
+          - name: num
+            value: "{{=fromJSON('{\"n\": 2}')['n'] - (len(keys(fromJSON(\"{}\"))) == 0 ? 1 : 2) }}"
+          - name: obj
+            value: "{{=fromJSON(workflow.parameters.wo)['hello']}}"
+          - name: message1
+            value: "{{inputs.parameters.num}}-{{inputs.parameters.obj}}"
+      container:
+        name: main
+        image: argoproj/argosay:v2
+        command:
+          - /argosay
+        args:
+          - echo
+          - "agg... {{inputs.parameters.message1}}"
+  ttlStrategy:
+    secondsAfterCompletion: 300
+  podGC:
+    strategy: OnPodCompletion
