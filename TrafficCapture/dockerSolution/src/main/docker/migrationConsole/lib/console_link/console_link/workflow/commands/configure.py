@@ -100,7 +100,7 @@ def view_config(ctx, format):
 
     config = result.value
     if config is None or not config:
-        click.echo(f"No configuration found.")
+        click.echo("No configuration found.")
         return
 
     if format == 'json':

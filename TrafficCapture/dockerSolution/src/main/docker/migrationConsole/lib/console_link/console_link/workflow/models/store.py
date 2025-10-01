@@ -1,7 +1,7 @@
 """Storage implementation for workflow configurations using Kubernetes ConfigMaps."""
 
 import logging
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, List
 
 from ...models.command_result import CommandResult
 from .config import WorkflowConfig
@@ -17,7 +17,12 @@ class WorkflowConfigStore:
     Stores configurations persistently in the Kubernetes cluster and provides session management.
     """
 
-    def __init__(self, namespace: str = "default", config_map_prefix: str = "workflow-config", k8s_client: Optional[client.CoreV1Api] = None):
+    def __init__(
+        self,
+        namespace: str = "default",
+        config_map_prefix: str = "workflow-config",
+        k8s_client: Optional[client.CoreV1Api] = None
+    ):
         """Initialize the store with Kubernetes configuration
 
         Args:

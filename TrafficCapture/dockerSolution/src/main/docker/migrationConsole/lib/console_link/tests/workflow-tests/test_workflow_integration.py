@@ -16,7 +16,6 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from testcontainers.k3s import K3SContainer
 from unittest.mock import patch
-import yaml
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.store import WorkflowConfigStore
@@ -218,8 +217,9 @@ class TestWorkflowCLICommands:
             assert result.exit_code == 0
             assert "targets:" in result.output
             assert "test:" in result.output
-            import yaml
-            config_data = yaml.safe_load(result.output)
+            # Parse YAML output to verify structure
+            import yaml as yaml_parser
+            config_data = yaml_parser.safe_load(result.output)
             endpoint = config_data['targets']['test']['endpoint']
             assert endpoint == "https://test.com:9200"
 
