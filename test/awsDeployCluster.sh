@@ -120,7 +120,7 @@ cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 sed -i -e "s/<STAGE>/$STAGE/g" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
-cdk deploy "*" --require-approval never
+cdk deploy "*" --require-approval never --concurrency 3
 
 CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
 write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH"

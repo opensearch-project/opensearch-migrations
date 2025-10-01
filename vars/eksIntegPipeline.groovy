@@ -124,7 +124,7 @@ def call(Map config = [:]) {
                                     }
                                 }
 
-                                def rawJsonFile = readFile "tmp/cluster-details-${maStageName}"
+                                def rawJsonFile = readFile "tmp/cluster-details-${maStageName}.json"
                                 def parsedClusterDetails = new JsonSlurper().parseText(rawJsonFile)
 
                                 // Store as global variable so other stages can use it
