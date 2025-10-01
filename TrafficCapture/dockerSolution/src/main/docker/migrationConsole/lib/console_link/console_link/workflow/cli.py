@@ -26,10 +26,10 @@ def workflow_cli(ctx, verbose):
     # Configure logging
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
-    
+
     # Initialize ctx.obj as a dictionary before assigning to it
     ctx.ensure_object(dict)
-    
+
     # Use 'ma' namespace where the migration console is deployed and has RBAC permissions
     ctx.obj['store'] = WorkflowConfigStore(namespace="ma")
 
@@ -38,6 +38,8 @@ def workflow_cli(ctx, verbose):
 @click.pass_context
 def util_group(ctx):
     """Utility commands"""
+
+
 pass
 
 

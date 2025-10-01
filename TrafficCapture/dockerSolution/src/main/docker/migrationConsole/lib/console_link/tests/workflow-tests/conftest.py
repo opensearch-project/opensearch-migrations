@@ -7,6 +7,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="kubernete
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="testcontainers")
 
 # Configure pytest to suppress specific warnings during test collection and execution
+
+
 def pytest_configure(config):
     """Configure pytest with custom warning filters."""
     config.addinivalue_line(
@@ -14,6 +16,6 @@ def pytest_configure(config):
         "ignore::DeprecationWarning:kubernetes.client.rest"
     )
     config.addinivalue_line(
-        "filterwarnings", 
+        "filterwarnings",
         "ignore::DeprecationWarning:testcontainers"
     )
