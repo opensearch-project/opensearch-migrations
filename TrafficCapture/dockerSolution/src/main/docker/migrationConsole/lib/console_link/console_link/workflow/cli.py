@@ -30,8 +30,17 @@ def workflow_cli(ctx, verbose):
     # Initialize ctx.obj as a dictionary before assigning to it
     ctx.ensure_object(dict)
 
-    # Use 'ma' namespace where the migration console is deployed and has RBAC permissions
-    ctx.obj['store'] = WorkflowConfigStore(namespace="ma")
+    # Store initialization is deferred - will be created when first accessed
+    # This allows utility commands (like completions) to run without K8s access
+    ctx.obj['store'] = None
+    ctx.obj['namespace'] = "ma"  # Use 'ma' namespace where the migration console is deployed
+
+
+def get_store(ctx) -> WorkflowConfigStore:
+    """Lazy initialization of WorkflowConfigStore"""
+    if ctx.obj['store'] is None:
+        ctx.obj['store'] = WorkflowConfigStore(namespace=ctx.obj['namespace'])
+    return ctx.obj['store']
 
 
 @workflow_cli.group(name="util")
