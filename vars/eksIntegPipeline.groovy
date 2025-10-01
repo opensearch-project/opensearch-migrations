@@ -142,11 +142,20 @@ def call(Map config = [:]) {
                                 def targetCluster = clusterDetails.target
                                 def vpcId = targetCluster.vpcId
                                 def securityGroupIds = "${targetCluster.securityGroupId}"
+                                def subnetIds = "${targetCluster.subnetIds}"
 
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} --parameters Stage=${maStageName} --parameters VPCId=${vpcId} --parameters VPCSecurityGroupIds=${securityGroupIds} --require-approval never --concurrency 3"
+                                        sh """
+                                            cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
+                                              --parameters Stage=${maStageName} \
+                                              --parameters VPCId=${vpcId} \
+                                              --parameters VPCSecurityGroupIds=${securityGroupIds} \
+                                              --parameters VPCSubnetIds=${subnetIds} \
+                                              --require-approval never \
+                                              --concurrency 3
+                                        """
                                     }
                                 }
                             }

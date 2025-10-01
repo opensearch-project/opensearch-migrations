@@ -49,12 +49,14 @@ write_cluster_outputs() {
     cluster_endpoint=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterEndpoint")) | .OutputValue')
     cluster_endpoint="https://$cluster_endpoint"
     cluster_sg=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterAccessSecurityGroupId")) | .OutputValue')
+    cluster_subnets=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterSubnets")) | .OutputValue')
 
     jq --arg id "$cluster_id" \
        --arg vpc "$vpc_id" \
        --arg endpoint "$cluster_endpoint" \
        --arg security_group "$cluster_sg" \
-       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group}}' \
+       --arg subnets "$cluster_subnets" \
+       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group, subnetIds: $subnets}}' \
        "$tmpfile" > "$tmpfile.new"
 
     mv "$tmpfile.new" "$tmpfile"
