@@ -40,9 +40,6 @@ def util_group(ctx):
     """Utility commands"""
 
 
-pass
-
-
 @util_group.command(name="completions")
 @click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))
 @click.pass_context

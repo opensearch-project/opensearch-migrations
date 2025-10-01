@@ -10,6 +10,9 @@ from kubernetes.client.rest import ApiException
 
 logger = logging.getLogger(__name__)
 
+# Constants
+CONFIG_JSON_KEY = "config.json"
+
 
 class WorkflowConfigStore:
     """
@@ -77,7 +80,7 @@ class WorkflowConfigStore:
                     }
                 ),
                 data={
-                    "config.json": config_json,
+                    CONFIG_JSON_KEY: config_json,
                     "session_name": session_name
                 }
             )
@@ -129,11 +132,11 @@ class WorkflowConfigStore:
                 else:
                     raise
 
-            if not config_map.data or "config.json" not in config_map.data:
-                logger.warning(f"ConfigMap {config_map_name} exists but has no config.json data")
+            if not config_map.data or CONFIG_JSON_KEY not in config_map.data:
+                logger.warning(f"ConfigMap {config_map_name} exists but has no {CONFIG_JSON_KEY} data")
                 return CommandResult(success=True, value=None)
 
-            config_json = config_map.data["config.json"]
+            config_json = config_map.data[CONFIG_JSON_KEY]
             config = WorkflowConfig.from_json(config_json)
 
             logger.info(f"Loaded workflow config for session: {session_name}")

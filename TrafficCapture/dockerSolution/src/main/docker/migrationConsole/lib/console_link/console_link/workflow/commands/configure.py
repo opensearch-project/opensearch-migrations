@@ -63,14 +63,14 @@ def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> Comman
             return CommandResult(success=True, value=new_config)
         except Exception as e:
             logger.error(f"Failed to parse edited configuration: {e}")
-            return CommandResult(success=False, value=f"Failed to parse configuration: {e}")
+            return CommandResult(success=False, value=e)
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Editor exited with error: {e}")
-        return CommandResult(success=False, value=f"Editor failed: {e}")
+        return CommandResult(success=False, value=e)
     except Exception as e:
         logger.error(f"Error launching editor: {e}")
-        return CommandResult(success=False, value=f"Failed to launch editor: {e}")
+        return CommandResult(success=False, value=e)
     finally:
         # Clean up temp file
         try:
@@ -109,6 +109,60 @@ def view_config(ctx, format):
         click.echo(config.to_yaml())
 
 
+def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
+    """Parse configuration from stdin content, trying JSON first then YAML"""
+    if not stdin_content.strip():
+        raise click.ClickException("No input provided on stdin")
+
+    # Try to parse as JSON first, then YAML
+    try:
+        return WorkflowConfig.from_json(stdin_content)
+    except Exception:
+        try:
+            return WorkflowConfig.from_yaml(stdin_content)
+        except Exception as e:
+            raise click.ClickException(f"Failed to parse input as JSON or YAML: {e}")
+
+
+def _handle_stdin_edit(store, session_name: str):
+    """Handle configuration edit from stdin"""
+    stdin_stream = click.get_text_stream('stdin')
+    stdin_content = stdin_stream.read()
+    
+    new_config = _parse_config_from_stdin(stdin_content)
+    
+    # Save the new config
+    save_result = store.save_config(new_config, session_name)
+    if not save_result.success:
+        raise click.ClickException(f"Failed to save configuration: {save_result.value}")
+    
+    click.echo(save_result.value)
+
+
+def _handle_editor_edit(store, session_name: str):
+    """Handle configuration edit via editor"""
+    # Load existing config
+    load_result = store.load_config(session_name)
+    if not load_result.success:
+        raise click.ClickException(f"Failed to load configuration: {load_result.value}")
+
+    current_config = load_result.value
+
+    # Launch editor
+    edit_result = _launch_editor_for_config(current_config)
+    if not edit_result.success:
+        raise click.ClickException(edit_result.value)
+
+    new_config = edit_result.value
+
+    # Save updated config
+    save_result = store.save_config(new_config, session_name)
+    if not save_result.success:
+        raise click.ClickException(f"Failed to save configuration: {save_result.value}")
+
+    click.echo(save_result.value)
+
+
 @configure_group.command(name="edit")
 @click.option('--stdin', is_flag=True, help='Read configuration from stdin instead of launching editor')
 @click.pass_context
@@ -117,49 +171,9 @@ def edit_config(ctx, stdin):
     store = ctx.obj['store']
 
     if stdin:
-        # Read configuration from stdin
-        stdin_stream = click.get_text_stream('stdin')
-        stdin_content = stdin_stream.read()
-
-        if not stdin_content.strip():
-            raise click.ClickException("No input provided on stdin")
-
-        # Try to parse as JSON first, then YAML
-        try:
-            new_config = WorkflowConfig.from_json(stdin_content)
-        except Exception:
-            try:
-                new_config = WorkflowConfig.from_yaml(stdin_content)
-            except Exception as e:
-                raise click.ClickException(f"Failed to parse input as JSON or YAML: {e}")
-
-        # Save the new config
-        save_result = store.save_config(new_config, session_name)
-        if not save_result.success:
-            raise click.ClickException(f"Failed to save configuration: {save_result.value}")
-
-        click.echo(save_result.value)
+        _handle_stdin_edit(store, session_name)
     else:
-        # Load existing config
-        load_result = store.load_config(session_name)
-        if not load_result.success:
-            raise click.ClickException(f"Failed to load configuration: {load_result.value}")
-
-        current_config = load_result.value
-
-        # Launch editor
-        edit_result = _launch_editor_for_config(current_config)
-        if not edit_result.success:
-            raise click.ClickException(edit_result.value)
-
-        new_config = edit_result.value
-
-        # Save updated config
-        save_result = store.save_config(new_config, session_name)
-        if not save_result.success:
-            raise click.ClickException(f"Failed to save configuration: {save_result.value}")
-
-        click.echo(save_result.value)
+        _handle_editor_edit(store, session_name)
 
 
 @configure_group.command(name="clear")
