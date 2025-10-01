@@ -48,26 +48,37 @@ export const COMPLETE_SNAPSHOT_CONFIG = DYNAMIC_SNAPSHOT_CONFIG.extend({
 });
 
 export const METADATA_OPTIONS = z.object({
-    loggingConfigurationOverrideConfigMap: z.string().default("")
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
+    allowLooseVersionMatching: z.boolean().optional(),
+    clusterAwarenessAttributes: z.number().optional(),
+    disableCompression: z.boolean().optional(),
+    multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).optional(),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
+    output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).optional(),
+    transformerBase64: z.string().default(""),
 });
 
 export const RFS_OPTIONS = z.object({
     requiredThing: z.number(),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
-    docTransformerBase64: z.string().default("not a transform"),
+    docTransformerBase64: z.string().default(""),
     documentsPerBulkRequest: z.number().default(0),
-    indexAllowlist: z.string().default(""),
     initialLeaseDuration: z.string().default(""),
     maxConnections: z.number().default(0),
     maxShardSizeBytes: z.number().default(0),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-    targetCompression: z.boolean().default(true)
+    targetCompression: z.boolean().default(true),
+
+    indexAllowlist: z.array(z.string()).optional(),
 });
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     metadata: z.object({
-        indices: z.array(z.string()),
+        // indexAllowlist: z.array(z.string()).optional(),
+        // componentTemplateAllowlist: z.array(z.string()).optional(),
+        // indexTemplateAllowlist: z.array(z.string()).optional(),
+
         options: METADATA_OPTIONS.optional()
     }).optional(),
     documentBackfillConfig: z.object({
@@ -87,7 +98,7 @@ export const REPLAYER_OPTIONS = z.object({
     podReplicas: z.number(),
     authHeaderOverride: z.optional(z.string()),
     loggingConfigurationOverrideConfigMap: z.string().default(""),
-    docTransformerBase64: z.string().default("not a transform"),
+    docTransformerBase64: z.string().default(""),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 

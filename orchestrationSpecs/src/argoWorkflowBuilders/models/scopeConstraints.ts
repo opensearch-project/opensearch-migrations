@@ -26,8 +26,8 @@ export type FieldSpecsToInputParams<T extends FieldSpecs> = {
 
 // Like UniqueNameConstraintAtDeclaration, but for a set of field names
 export type FieldGroupConstraint<
-    Existing extends InputParametersRecord,
-    NewGroup extends InputParametersRecord
+    Existing extends Record<string, any>,
+    NewGroup extends Record<string, any>,
 > =
     Extract<keyof Existing & keyof NewGroup, PropertyKey> extends never
         ? NewGroup

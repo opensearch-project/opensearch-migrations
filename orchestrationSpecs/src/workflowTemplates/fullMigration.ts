@@ -81,9 +81,6 @@ export const FullMigration = WorkflowBuilder.create({
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         targetConfig: b.inputs.target,
-                        indices: expr.serialize(
-                            expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
-                                ["metadata", "indices"], [])),
                         metadataMigrationConfig: expr.serialize(
                             expr.dig(expr.deserializeRecord(b.inputs.migrationConfig),
                                 ["metadata", "options"], {} as z.infer<typeof METADATA_OPTIONS>))
