@@ -30,3 +30,5 @@ DocumentsFromSnapshotMigration/docker/snapshots/
 transformation/standardJavascriptTransforms/coverage
 transformation/standardJavascriptTransforms/node_modules
 transformation/standardJavascriptTransforms/package-lock.json
+orchestrationSpecs/dist
+orchestrationSpecs/node_modules

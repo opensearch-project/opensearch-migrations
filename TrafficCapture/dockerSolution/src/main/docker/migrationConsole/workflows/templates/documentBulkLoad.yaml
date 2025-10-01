@@ -26,6 +26,8 @@ spec:
             description: "Map of MA images and settings (e.g. pull policy)"
           - name: localstack-enabled
             description: "Is Localstack being used for AWS endpoints"
+          - name: otel-collector-endpoint
+            description: "The OpenTelemetry endpoint to send metrics/traces to"
       steps:
         - - name: run-bulk-load
             template: run-bulk-load
@@ -57,6 +59,8 @@ spec:
                   value: "{{inputs.parameters.image-config}}"
                 - name: use-localstack-aws-creds
                   value: "{{inputs.parameters.localstack-enabled}}"
+                - name: otel-collector-endpoint
+                  value: "{{inputs.parameters.otel-collector-endpoint}}"
                   # TODO - parse the other stuff out and into the args.
 
     - name: run-bulk-load
@@ -84,6 +88,8 @@ spec:
             description: "Map of MA images and settings (e.g. pull policy)"
           - name: use-localstack-aws-creds
             description: "Is Localstack being used for AWS endpoints"
+          - name: otel-collector-endpoint
+            description: "The OpenTelemetry endpoint to send metrics/traces to"
 
           # Parameters with defaults - split into input and default pairs
           - name: replicas
@@ -166,6 +172,8 @@ spec:
                   value: "{{=fromJSON(inputs.parameters['image-config'])['migration-console']['pull-policy']}}"
                 - name: use-localstack-aws-creds
                   value: "{{inputs.parameters.use-localstack-aws-creds}}"
+                - name: otel-collector-endpoint
+                  value: "{{inputs.parameters.otel-collector-endpoint}}"
 
         - - name: setup-wait-for-completion
             templateRef:
@@ -209,10 +217,9 @@ spec:
         parameters:
           - name: logging-configuration-contents
             value: '{"configuration":{"status":"ERROR","appenders":{"Console":{"name":"ConsoleAppender","PatternLayout":{"pattern":"%d{yyyy-MM-dd HH:mm:ss} %-5p %c{1}:%L - %m%n"}}},"loggers":{"logger":{"name":"org.opensearch.migrations","level":"trace","additivity":"false","AppenderRef":{"ref":"ConsoleAppender"}},"root":{"level":"warn","AppenderRef":{"ref":"ConsoleAppender"}}}}}'
-          - name: otel-collector-endpoint
-            value: "http://otel-collector:4317"
           - name: use-localstack-aws-creds
             value: "false"
+          - name: otel-collector-endpoint
           - name: target-host
           - name: snapshot-name
           - name: session-name

@@ -15,3 +15,5 @@ data:
   reindexFromSnapshotPullPolicy: "{{ .Values.images.reindexFromSnapshot.pullPolicy }}"
   migrationConsoleImage: "{{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}"
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
+  etcdUtilsImage: "{{ .Values.images.etcdUtils.repository }}:{{ .Values.images.etcdUtils.tag }}"
+  etcdUtilsPullPolicy: "{{ .Values.images.etcdUtils.pullPolicy }}"
