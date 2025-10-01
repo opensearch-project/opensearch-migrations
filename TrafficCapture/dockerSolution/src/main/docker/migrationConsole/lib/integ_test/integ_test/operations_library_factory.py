@@ -8,7 +8,9 @@ from .elasticsearch_operations import (
     ElasticsearchV5_XOperationsLibrary, ElasticsearchV6_XOperationsLibrary,
     ElasticsearchV7_XOperationsLibrary, ElasticsearchV8_XOperationsLibrary
 )
-from .opensearch_operations import OpensearchV1_XOperationsLibrary, OpensearchV2_XOperationsLibrary, OpensearchV3_XOperationsLibrary
+from .opensearch_operations import (
+    OpensearchV1_XOperationsLibrary, OpensearchV2_XOperationsLibrary, OpensearchV3_XOperationsLibrary
+)
 
 
 def get_operations_library_by_version(version: ClusterVersion):
