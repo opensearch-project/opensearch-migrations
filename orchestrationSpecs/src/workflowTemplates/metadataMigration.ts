@@ -3,12 +3,10 @@ import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {z} from "zod";
 import {
     CLUSTER_CONFIG,
-    COMPLETE_SNAPSHOT_CONFIG,
-    METADATA_OPTIONS, REPLAYER_OPTIONS,
+    METADATA_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
@@ -17,12 +15,10 @@ import {
     selectInputsForRegister
 } from "@/argoWorkflowBuilders/models/parameterConversions";
 import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import expr from "@/argoWorkflowBuilders/models/expression";
-import {K8sActionVerb} from "@/argoWorkflowBuilders/models/k8sResourceBuilder";
-import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
 import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
 import {inputsToEnvVars, inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams} from "@/utils";
 import {defineRequiredParam} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {COMPLETE_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:

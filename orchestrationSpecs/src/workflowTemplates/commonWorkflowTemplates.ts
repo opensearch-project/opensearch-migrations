@@ -2,8 +2,6 @@ import {defineParam, defineRequiredParam, InputParamDef} from "@/argoWorkflowBui
 import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
 import {z} from "zod";
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
-    DYNAMIC_SNAPSHOT_CONFIG,
     TARGET_CLUSTER_CONFIG
 } from "@/workflowTemplates/userSchemas";
 import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";

@@ -71,7 +71,6 @@ describe("expression type contracts", () => {
 
         const result = expr.jsonPathStrict(expr.recordToString(obj), "a");
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
-        console.log(result);
     });
 
     it("dig infers precise value type and enforces default type", () => {
