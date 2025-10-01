@@ -21,7 +21,6 @@ export const HTTP_AUTH_MTLS = z.object({
 });
 
 export const CLUSTER_CONFIG = z.object({
-    name: z.string(),
     endpoint: z.string().optional(),
     allow_insecure: z.boolean().optional(),
     version: z.string().optional(),
@@ -38,20 +37,26 @@ export const S3_REPO_CONFIG = z.object({
     repoPath: z.string()
 });
 
-export const DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    repoConfig: S3_REPO_CONFIG,
+export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
+    repoConfigName: z.string(),
     snapshotName: z.string().optional()
 });
 
-export const COMPLETE_SNAPSHOT_CONFIG = DYNAMIC_SNAPSHOT_CONFIG.extend({
+export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
     snapshotName: z.string() // override to required
 });
 
 export const METADATA_OPTIONS = z.object({
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
+    enabled: z.boolean(),
+
+    componentTemplateAllowlist: z.array(z.string()).optional(),
+    indexAllowlist: z.array(z.string()).optional(),
+    indexTemplateAllowlist: z.array(z.string()).optional(),
+
     allowLooseVersionMatching: z.boolean().optional(),
     clusterAwarenessAttributes: z.number().optional(),
     disableCompression: z.boolean().optional(),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
     multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).optional(),
@@ -59,7 +64,10 @@ export const METADATA_OPTIONS = z.object({
 });
 
 export const RFS_OPTIONS = z.object({
-    requiredThing: z.number(),
+    enabled: z.boolean(),
+
+    indexAllowlist: z.array(z.string()).optional(),
+
     loggingConfigurationOverrideConfigMap: z.string().default(""),
     allowLooseVersionMatching: z.boolean().default(true).describe(""),
     docTransformerBase64: z.string().default(""),
@@ -69,31 +77,21 @@ export const RFS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(0),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
     targetCompression: z.boolean().default(true),
-
-    indexAllowlist: z.array(z.string()).optional(),
 });
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    metadata: z.object({
-        // indexAllowlist: z.array(z.string()).optional(),
-        // componentTemplateAllowlist: z.array(z.string()).optional(),
-        // indexTemplateAllowlist: z.array(z.string()).optional(),
-
-        options: METADATA_OPTIONS.optional()
-    }).optional(),
-    documentBackfillConfig: z.object({
-        indices: z.array(z.string()),
-        options: RFS_OPTIONS.optional()
-    }).optional()
+    metadataConfig: METADATA_OPTIONS.optional(),
+    documentBackfillConfig: RFS_OPTIONS.optional()
 });
 
-export const SNAPSHOT_MIGRATION_CONFIG = z.object({
+export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     indices: z.array(z.string()),
-    migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG),
-    snapshotConfig: DYNAMIC_SNAPSHOT_CONFIG
+    snapshotConfig: NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
+    migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)
 });
 
 export const REPLAYER_OPTIONS = z.object({
+    enabled: z.boolean(),
     speedupFactor: z.number(),
     podReplicas: z.number(),
     authHeaderOverride: z.optional(z.string()),
@@ -102,20 +100,27 @@ export const REPLAYER_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
-export const SOURCE_MIGRATION_CONFIG = z.object({
-    source: CLUSTER_CONFIG,
-    snapshotExtractAndLoadConfigs: z.array(SNAPSHOT_MIGRATION_CONFIG),
+export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
+    sources: z.array(z.string()),
+    targets: z.array(z.string()),
+    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG),
     replayerConfig: REPLAYER_OPTIONS,
 });
 
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
     kafka: KAFKA_SERVICES_CONFIG.optional(),
     source_cluster: CLUSTER_CONFIG.optional(),
-    snapshot: COMPLETE_SNAPSHOT_CONFIG.optional(),
+    snapshot: NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.optional(),
     target_cluster: TARGET_CLUSTER_CONFIG.optional()
 });
 
+export const SOURCE_CLUSTERS_MAP = z.record(z.string(), CLUSTER_CONFIG);
+export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
+export const REPO_CONFIGS_MAP = z.record(z.string(), S3_REPO_CONFIG);
+
 export const OVERALL_MIGRATION_CONFIG = z.object({
-    targets: z.array(TARGET_CLUSTER_CONFIG),
-    sourceMigrationConfigs: z.array(SOURCE_MIGRATION_CONFIG)
+    sourceClusters: SOURCE_CLUSTERS_MAP,
+    targetClusters: TARGET_CLUSTERS_MAP,
+    migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG),
+    repoConfigs: REPO_CONFIGS_MAP
 });

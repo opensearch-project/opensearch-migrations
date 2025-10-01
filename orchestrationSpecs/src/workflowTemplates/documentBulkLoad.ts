@@ -10,7 +10,6 @@ import {
 import {z} from "zod";
 import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     RFS_OPTIONS,
     TARGET_CLUSTER_CONFIG
@@ -22,6 +21,7 @@ import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder"
 import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
 import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
 import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {COMPLETE_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
 
 
 function getRfsReplicasetManifest

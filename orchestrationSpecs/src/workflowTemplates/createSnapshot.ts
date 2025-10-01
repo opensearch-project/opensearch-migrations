@@ -4,12 +4,13 @@ import {
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, CONSOLE_SERVICES_CONFIG_FILE} from "@/workflowTemplates/userSchemas";
+import {CLUSTER_CONFIG, CONSOLE_SERVICES_CONFIG_FILE} from "@/workflowTemplates/userSchemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
 import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
 import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
 import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {COMPLETE_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
 
 export const CreateSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-snapshot",

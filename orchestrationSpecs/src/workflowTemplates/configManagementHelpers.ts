@@ -1,15 +1,21 @@
 import {z} from 'zod';
-import {CLUSTER_CONFIG, SOURCE_MIGRATION_CONFIG} from '@/workflowTemplates/userSchemas'
+import {
+    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, REPO_CONFIGS_MAP,
+    SOURCE_CLUSTERS_MAP,
+    TARGET_CLUSTERS_MAP
+} from '@/workflowTemplates/userSchemas'
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import initTlhScript from "resources/targetLatchHelper/init.sh";
-import decrementTlhScript from "resources/targetLatchHelper/decrement.sh";
-import cleanupTlhScript from "resources/targetLatchHelper/cleanup.sh";
 import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
 import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {PARAMETERIZED_MIGRATION_CONFIG} from "@/workflowTemplates/internalSchemas";
+
+import initTlhScript from "resources/configManagementHelpers/init.sh";
+import decrementTlhScript from "resources/configManagementHelpers/decrement.sh";
+import cleanupTlhScript from "resources/configManagementHelpers/cleanup.sh";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }
@@ -21,29 +27,31 @@ function addCommonTargetLatchInputs<
         .addOptionalInput("etcdEndpoints", s => s.workflowParameters.etcdEndpoints)
         .addOptionalInput("etcdPassword", s => s.workflowParameters.etcdPassword)
         .addOptionalInput("etcdUser", s => s.workflowParameters.etcdUser)
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]))
-        ;
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["EtcdUtils"]));
 }
 
-export const TargetLatchHelpers = WorkflowBuilder.create({
+export const ConfigManagementHelpers = WorkflowBuilder.create({
     k8sResourceName: "target-latch-helpers",
     serviceAccountName: "argo-workflow-executor",
     k8sMetadata: {},
     parallelism: 1
 })
     .addParams(CommonWorkflowParameters)
-    .addTemplate("init", t => t
+    .addTemplate("prepareConfigs", t => t
         .addInputs(addCommonTargetLatchInputs)
-        .addRequiredInput("targets", typeToken<z.infer<typeof CLUSTER_CONFIG>[]>())
-        .addRequiredInput("configuration", typeToken<z.infer<typeof SOURCE_MIGRATION_CONFIG>[]>())
+        .addRequiredInput("targetClusters", typeToken<z.infer<typeof TARGET_CLUSTERS_MAP>>())
+        .addRequiredInput("sourceClusters", typeToken<z.infer<typeof SOURCE_CLUSTERS_MAP>>())
+        .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>[]>())
+        .addRequiredInput("snapshotRepoConfigs", typeToken<z.infer<typeof REPO_CONFIGS_MAP>[]>())
+
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)
-            .addInputsAsEnvVars("", "")
+            .addInputsAsEnvVars("WF_SETUP_", "")
             .addCommand(["sh", "-c"])
             .addArgs([initTlhScript])
 
             .addPathOutput("prefix", "/tmp/prefix", typeToken<string>())
-            .addPathOutput("processorsPerTarget", "/tmp/processors-per-target", typeToken<number>())
+            .addPathOutput("denormalizedConfigArray", "/tmp/denormalizedConfigs", typeToken<z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]>())
         )
     )
 
