@@ -20,9 +20,13 @@ import {
 } from "@/argoWorkflowBuilders/models/workflowTypes";
 import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/argoWorkflowBuilders/models/templateBodyBuilder"; // <-- import TemplateRebinder
-import {ScopeIsEmptyConstraint} from "@/argoWorkflowBuilders/models/scopeConstraints";
+import {
+    extendScope,
+    FieldGroupConstraint,
+    ScopeIsEmptyConstraint
+} from "@/argoWorkflowBuilders/models/scopeConstraints";
 import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
-import {AllowLiteralOrExpression} from "@/argoWorkflowBuilders/models/expression";
+import {AllowLiteralOrExpression, BaseExpression, toExpression} from "@/argoWorkflowBuilders/models/expression";
 import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
@@ -111,12 +115,12 @@ export class ContainerBuilder<
         );
     }
 
-    addCommand(s: string[]):
+    addCommand(strArr: AllowLiteralOrExpression<string>[]):
         ContainerBuilder<ContextualScope, InputParamsScope,
-            ExtendScope<ContainerScope, { command: string[] }>, EnvScope, OutputParamsScope> {
+            ExtendScope<ContainerScope, { command: BaseExpression<string>[] }>, EnvScope, OutputParamsScope> {
         return new ContainerBuilder(this.contextualScope, this.inputsScope, {
                 ...this.bodyScope,
-                command: s
+                command: strArr.map(s=>toExpression(s))
             },
             this.envScope,  // Preserve env scope
             this.outputsScope,
@@ -181,6 +185,26 @@ export class ContainerBuilder<
         OutputParamsScope
     > {
         return this.addEnvVarUnchecked(name as string, value) as any;
+    }
+
+    addEnvVarsFromRecord<
+        R extends EnvScope
+    >(
+        envVars: FieldGroupConstraint<EnvScope, R>
+    ): ContainerBuilder<
+        ContextualScope,
+        InputParamsScope,
+        ContainerScope,
+        ExtendScope<EnvScope, R>,
+        OutputParamsScope
+    > {
+        return new ContainerBuilder(
+            this.contextualScope,
+            this.inputsScope,
+            this.bodyScope,
+            extendScope(this.envScope, () => envVars as R),
+            this.outputsScope,
+            this.retryParameters);
     }
 
     addEnvVars<NewEnvScope extends DataScope>(

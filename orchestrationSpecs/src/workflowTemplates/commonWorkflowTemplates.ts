@@ -67,18 +67,6 @@ export function extractTargetKeysToExpressionMap(targetConfig: BaseExpression<Se
     };
 }
 
-export const dynamicSnapshotConfigParam = {
-    snapshotConfig: defineRequiredParam<z.infer<typeof DYNAMIC_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"
-    })
-};
-
-export const completeSnapshotConfigParam = {
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"
-    })
-};
-
 export function safeSpread<T>(list: T[]) {
     return list === undefined ? [] : list;
 }

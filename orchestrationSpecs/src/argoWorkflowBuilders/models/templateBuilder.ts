@@ -141,11 +141,10 @@ export class TemplateBuilder<
             OutputParamsScope
         >
     > {
-        const newScope = extendScope(this.inputScope, () => inputs as R);
         return new TemplateBuilder(
             this.contextualScope,
             this.bodyScope,
-            newScope,
+            extendScope(this.inputScope, () => inputs as R),
             this.outputScope
         ) as any;
     }
