@@ -175,20 +175,20 @@ class TestWorkflowCLICommands:
 
     def test_workflow_configure_view_no_config(self, runner, k8s_workflow_store):
         """Test workflow configure view when no config exists"""
-        session_name = "test-no-config"
+        session_name = "default"
 
         # Clean up any existing test data
         k8s_workflow_store.delete_config(session_name)
 
-        with patch('workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['--session', session_name, 'configure', 'view'])
+        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
+            result = runner.invoke(workflow_cli, ['configure', 'view'])
 
             assert result.exit_code == 0
             assert "No configuration found" in result.output
 
     def test_workflow_configure_view_existing_config(self, runner, k8s_workflow_store, sample_workflow_config):
         """Test workflow configure view with existing config"""
-        session_name = "test-view-config"
+        session_name = "default"
 
         # Clean up any existing test data
         k8s_workflow_store.delete_config(session_name)
@@ -211,8 +211,8 @@ class TestWorkflowCLICommands:
         save_result = k8s_workflow_store.save_config(config, session_name)
         assert save_result.success
 
-        with patch('workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['--session', session_name, 'configure', 'view'])
+        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
+            result = runner.invoke(workflow_cli, ['configure', 'view'])
 
             assert result.exit_code == 0
             assert "targets:" in result.output
@@ -228,7 +228,7 @@ class TestWorkflowCLICommands:
 
     def test_workflow_configure_view_json_format(self, runner, k8s_workflow_store):
         """Test workflow configure view with JSON format"""
-        session_name = "test-json-format"
+        session_name = "default"
 
         # Clean up any existing test data
         k8s_workflow_store.delete_config(session_name)
@@ -250,8 +250,8 @@ class TestWorkflowCLICommands:
         save_result = k8s_workflow_store.save_config(config, session_name)
         assert save_result.success
 
-        with patch('workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['--session', session_name, 'configure', 'view', '--format', 'json'])
+        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
+            result = runner.invoke(workflow_cli, ['configure', 'view', '--format', 'json'])
 
             assert result.exit_code == 0
             assert '"targets"' in result.output
@@ -262,14 +262,14 @@ class TestWorkflowCLICommands:
 
     def test_workflow_configure_clear_with_confirmation(self, runner, k8s_workflow_store, sample_workflow_config):
         """Test workflow configure clear with confirmation"""
-        session_name = "test-clear-config"
+        session_name = "default"
 
         # Create a config to clear
         save_result = k8s_workflow_store.save_config(sample_workflow_config, session_name)
         assert save_result.success
 
-        with patch('workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['--session', session_name, 'configure', 'clear', '--confirm'])
+        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
+            result = runner.invoke(workflow_cli, ['configure', 'clear', '--confirm'])
 
             assert result.exit_code == 0
             assert f"Cleared workflow configuration for session: {session_name}" in result.output
@@ -283,7 +283,7 @@ class TestWorkflowCLICommands:
 
     def test_workflow_configure_edit_with_stdin_json(self, runner, k8s_workflow_store):
         """Test workflow configure edit with JSON input from stdin"""
-        session_name = "test-stdin-json"
+        session_name = "default"
 
         # Clean up any existing test data
         k8s_workflow_store.delete_config(session_name)
@@ -308,7 +308,7 @@ class TestWorkflowCLICommands:
 
     def test_workflow_configure_edit_with_stdin_yaml(self, runner, k8s_workflow_store):
         """Test workflow configure edit with YAML input from stdin"""
-        session_name = "test-stdin-yaml"
+        session_name = "default"
 
         # Clean up any existing test data
         k8s_workflow_store.delete_config(session_name)
@@ -357,14 +357,14 @@ class TestWorkflowCLICommands:
             assert "Failed to parse input" in result.output
 
     def test_workflow_with_custom_session(self, runner, k8s_workflow_store):
-        """Test workflow commands with custom session name"""
-        session_name = "custom-test-session"
+        """Test workflow commands with default session in isolated namespace"""
+        session_name = "default"
 
         # Clean up any existing test data
         k8s_workflow_store.delete_config(session_name)
 
-        with patch('workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['--session', session_name, 'configure', 'view'])
+        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
+            result = runner.invoke(workflow_cli, ['configure', 'view'])
 
             assert result.exit_code == 0
             assert "No configuration found" in result.output
