@@ -124,6 +124,7 @@ def call(Map config = [:]) {
                                 }
 
                                 def rawJsonFile = readFile "tmp/cluster-details-${maStageName}.json"
+                                echo "Cluster details JSON:\n${rawJsonFile}"
                                 env.clusterDetailsJson = rawJsonFile
                             }
                         }
@@ -138,10 +139,10 @@ def call(Map config = [:]) {
                             script {
                                 env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
-                                def sourceCluster = clusterDetails.clusters.find { it.clusterId == 'source' }
-                                def targetCluster = clusterDetails.clusters.find { it.clusterId == 'target' }
+                                def targetCluster = clusterDetails.target
                                 def vpcId = targetCluster.vpcId
-                                def securityGroupIds = "${sourceCluster.securityGroupId},${targetCluster.securityGroupId}"
+                                def securityGroupIds = "${targetCluster.securityGroupId}"
+
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
