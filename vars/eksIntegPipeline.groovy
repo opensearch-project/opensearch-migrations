@@ -1,5 +1,4 @@
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eks-integ"
@@ -125,10 +124,7 @@ def call(Map config = [:]) {
                                 }
 
                                 def rawJsonFile = readFile "tmp/cluster-details-${maStageName}.json"
-                                def parsedClusterDetails = new JsonSlurper().parseText(rawJsonFile)
-
-                                // Store as global variable so other stages can use it
-                                clusterDetails = parsedClusterDetails
+                                env.clusterDetailsJson = rawJsonFile
                             }
                         }
                     }
@@ -141,6 +137,7 @@ def call(Map config = [:]) {
                         dir('deployment/migration-assistant-solution') {
                             script {
                                 env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
+                                def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def sourceCluster = clusterDetails.clusters.find { it.clusterId == 'source' }
                                 def targetCluster = clusterDetails.clusters.find { it.clusterId == 'target' }
                                 def vpcId = targetCluster.vpcId
