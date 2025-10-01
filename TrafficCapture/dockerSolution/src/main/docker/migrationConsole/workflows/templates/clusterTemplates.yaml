@@ -523,15 +523,13 @@ spec:
             helm repo add elastic https://helm.elastic.co
             helm repo update
             
-            # Create Elasticsearch configuration for ES 6.8.23 with S3 settings
+            # Create Elasticsearch configuration for ES 6.8.23 OSS (minimal config)
             cat > /tmp/elasticsearch.yml << EOF
             bootstrap.system_call_filter: false
             network.host: 0.0.0.0
             discovery.type: single-node
-            cloud.aws.s3.endpoint: http://localstack.ma.svc.cluster.local:4566
-            s3.client.default.endpoint: http://localstack.ma.svc.cluster.local:4566
-            s3.client.default.path_style_access: true
-            s3.client.default.region: us-east-2
+            transport.port: 9300
+            http.port: 9200
             EOF
             
             # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
@@ -545,7 +543,11 @@ spec:
             replicas: 1
             createCert: false
             
-            # Disable default readiness probe to avoid conflicts
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
+            
+            masterService: ""
+            
+            # Disable probes to avoid transient warnings
             readinessProbe: {}
             livenessProbe: {}
             
@@ -554,13 +556,15 @@ spec:
                 value: ""
               - name: "node.roles"
                 value: ""
-              - name: "AWS_ACCESS_KEY_ID"
-                value: "test"
-              - name: "AWS_SECRET_ACCESS_KEY"
-                value: "test"
-              - name: "AWS_DEFAULT_REGION"
-                value: "us-east-2"
+            
+            sysctlInitContainer:
+              enabled: true
+            
             persistence:
+              enabled: false
+            
+            podDisruptionBudget:
+              create: false
               enabled: false
             
             extraInitContainers:
@@ -616,7 +620,7 @@ spec:
             {
               "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
               "allow_insecure": true,
-              "no_auth": null,
+              "no_auth": true,
               "version": "ES_6.8"
             }
             EOF
