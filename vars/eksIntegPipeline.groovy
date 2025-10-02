@@ -79,15 +79,15 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Build') {
-                steps {
-                    timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
-                        }
-                    }
-                }
-            }
+//            stage('Build') {
+//                steps {
+//                    timeout(time: 1, unit: 'HOURS') {
+//                        script {
+//                            sh './gradlew clean build --no-daemon --stacktrace'
+//                        }
+//                    }
+//                }
+//            }
 
             stage('Deploy Clusters') {
                 steps {
@@ -211,7 +211,7 @@ def call(Map config = [:]) {
                                     } else {
                                         sh "docker buildx create --name ecr-builder --driver docker-container"
                                     }
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
+                                    //sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
                                 }
                             }
                         }
@@ -224,10 +224,9 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('deployment/k8s/aws') {
                             script {
-                                def orgName = params.GIT_REPO_URL.split('/')[3]
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --org-name ${orgName} --branch ${params.GIT_BRANCH} --use-public-images false"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ../../..  --use-public-images false"
                                     }
                                 }
                             }
@@ -265,11 +264,11 @@ def call(Map config = [:]) {
                     dir('libraries/testAutomation') {
                         script {
                             sh "pipenv install --deploy"
-                            sh "pipenv run app --delete-only"
                             if (env.eksClusterName) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
+                                        sh "pipenv run app --delete-only"
                                         sh "kubectl -n ma delete namespace ma"
                                     }
                                 }
