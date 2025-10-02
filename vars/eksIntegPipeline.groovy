@@ -79,15 +79,15 @@ def call(Map config = [:]) {
                 }
             }
 
-//            stage('Build') {
-//                steps {
-//                    timeout(time: 1, unit: 'HOURS') {
-//                        script {
-//                            sh './gradlew clean build --no-daemon --stacktrace'
-//                        }
-//                    }
-//                }
-//            }
+            stage('Build') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            sh './gradlew clean build --no-daemon --stacktrace'
+                        }
+                    }
+                }
+            }
 
             stage('Deploy Clusters') {
                 steps {
@@ -164,15 +164,33 @@ def call(Map config = [:]) {
                 }
             }
 
-//            stage('Build Docker Images') {
-//                steps {
-//                    timeout(time: 1, unit: 'HOURS') {
-//                        script {
-//                            sh './gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repo -PimageArch=amd64'
-//                        }
-//                    }
-//                }
-//            }
+            stage('Build Docker Images') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    def registryEndpoint = sh(
+                                            script: """
+                                              aws cloudformation describe-stacks \
+                                                --stack-name Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
+                                                --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+                                                --output text \
+                                              | tr ';' '\\n' \
+                                              | awk -F= '\$1=="MIGRATIONS_ECR_REGISTRY" {print \$2}'
+                                            """,
+                                            returnStdout: true
+                                    ).trim()
+                                    if (!registryEndpoint) {
+                                        error("Unable to parse ECR registry endpoint from export 'MigrationsExportString' on stack: Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}")
+                                    }
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 //
 //            stage('Install Helm Chart') {
 //                steps {
