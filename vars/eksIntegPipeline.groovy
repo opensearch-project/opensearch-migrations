@@ -193,11 +193,13 @@ def call(Map config = [:]) {
                                     if (!registryPair) {
                                         error("MIGRATIONS_ECR_REGISTRY key not found in MigrationsExportString output")
                                     }
-
                                     def registryEndpoint = registryPair.split('=')[1]
-                                    if (!registryEndpoint) {
-                                        error("MIGRATIONS_ECR_REGISTRY value is empty")
+
+                                    def eksClusterPair = pairs.find { it.startsWith("MIGRATIONS_EKS_CLUSTER_NAME=") }
+                                    if (!eksClusterPair) {
+                                        error("MIGRATIONS_EKS_CLUSTER_NAME key not found in MigrationsExportString output")
                                     }
+                                    env.eksClusterName = eksClusterPair.split('=')[1]
 
                                     def builderExists = sh(
                                             script: "docker buildx ls | grep -q '^ecr-builder'",
@@ -216,56 +218,62 @@ def call(Map config = [:]) {
                     }
                 }
             }
-//
-//            stage('Install Helm Chart') {
-//                steps {
-//                    timeout(time: 15, unit: 'MINUTES') {
-//                        dir('deployment/k8s') {
-//                            script {
-//                                env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
-//                                sh "npm install"
-//                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-//                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-//                                        sh "./aws-bootstrap.sh"
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//
-//            stage('Integ Tests') {
-//                steps {
-//                    timeout(time: 1, unit: 'HOURS') {
-//                        dir('test') {
-//                            script {
-//                                def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
-//                                def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", maStageName)
-//                                def command = "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
-//                                        "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
-//                                        "--unique_id ${testUniqueId} " +
-//                                        "--stage ${maStageName} " +
-//                                        "-s"
-//                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-//                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-//                                        sh "./awsRunIntegTests.sh --command '${command}' " +
-//                                                "--test-result-file ${test_result_file} " +
-//                                                "--stage ${maStageName}"
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//                }
-//            }
+
+            stage('Install Helm Chart') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        dir('deployment/k8s/aws') {
+                            script {
+                                def orgName = params.GIT_REPO_URL.split('/')[3]
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "./aws-bootstrap.sh --org-name ${orgName} --branch ${params.GIT_BRANCH} --use-public-images false"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Perform Python E2E Tests') {
+                steps {
+                    timeout(time: 2, unit: 'HOURS') {
+                        dir('libraries/testAutomation') {
+                            script {
+                                def testIdsArg = ""
+                                def testIdsResolved = testIds ?: params.TEST_IDS
+                                if (testIdsResolved != "" && testIdsResolved != "all") {
+                                    testIdsArg = "--test-ids='$testIdsResolved'"
+                                }
+                                sh "pipenv install --deploy"
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0000 --skip-delete"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         post {
             always {
-                timeout(time: 10, unit: 'MINUTES') {
-                    dir('test') {
+                timeout(time: 15, unit: 'MINUTES') {
+                    dir('libraries/testAutomation') {
                         script {
-                            sh "echo 'Default post step performs no actions'"
+                            sh "pipenv install --deploy"
+                            sh "pipenv run app --delete-only"
+                            if (env.eksClusterName) {
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
+                                        sh "kubectl -n ma delete namespace ma"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
