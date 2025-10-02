@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Alert, Box } from "@cloudscape-design/components";
 import WorkflowWizard, {
   WorkflowWizardStep,
@@ -16,8 +16,14 @@ export default function BackfillPage() {
 }
 
 function BackfillPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const sessionName = searchParams?.get("sessionName") ?? "";
+
+  const onSubmit = useCallback(
+    () => router.push(`/viewSession?sessionName=${sessionName}`),
+    [router, sessionName],
+  );
 
   if (!sessionName) {
     return (
@@ -45,6 +51,7 @@ function BackfillPageInner() {
       steps={steps}
       sessionName={sessionName}
       submitButtonText="Complete Backfill"
+      onSubmit={onSubmit}
     />
   );
 }

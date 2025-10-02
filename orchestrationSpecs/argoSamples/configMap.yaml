@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: configmap-test-
+  namespace: ma
+spec:
+  serviceAccountName: "argo-workflow-executor"
+  entrypoint: configmap-demo
+  templates:
+    - name: configmap-demo
+      container:
+        image: busybox:1.35
+        command: [sh, -c]
+        args:
+          - |
+            echo "=== Checking mounted volumes ==="
+            echo
+            echo "Contents of /optional-config-septweb (optional - should be empty if 'anything' ConfigMap doesn't exist):"
+            ls -laR /optional-config-septweb/ || echo "Directory /optional-config-septweb does not exist or is empty"
+            echo
+            echo "Contents of /s3-config-nonce925 (required - should contain repo_uri):"
+            ls -laR /s3-config-nonce925/ || echo "Directory /s3-config-nonce925 does not exist"
+            if [ -f /s3-config-nonce925/repo_uri ]; then
+              echo "repo_uri content:"
+              cat /s3-config-nonce925/repo_uri
+            else
+              echo "repo_uri file not found"
+            fi
+            echo
+            echo "=== Sleeping for 30 seconds to observe pod ==="
+            sleep 30
+            echo "Done!"
+        volumeMounts:
+          - name: optional-config-septweb
+            mountPath: /optional-config-septweb
+          - name: s3-config-nonce925
+            mountPath: /s3-config-nonce925
+      volumes:
+        - name: optional-config-septweb
+          configMap:
+            name: {}
+            optional: true  # This ConfigMap won't exist, but pod should still start
+        - name: s3-config-nonce925
+          configMap:
+            name: s3-snapshot-config  # This ConfigMap should exist

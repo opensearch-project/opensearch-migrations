@@ -225,7 +225,7 @@
               "-c",
               "until kubectl wait --for=condition=Ready kafka/captured-traffic -n ma --timeout=10s; do echo waiting for kafka cluster is ready; sleep 1; done"
             ],
-            "image": "bitnami/kubectl:latest",
+            "image": "bitnamisecure/kubectl:latest",
             "imagePullPolicy": "Always",
             "name": "wait-for-kafka",
             "resources": {},

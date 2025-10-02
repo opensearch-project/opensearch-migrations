@@ -1,5 +1,15 @@
 from .cluster_version import (
     ClusterVersion, ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X,
+    ElasticsearchV6_X, ElasticsearchV7_X, ElasticsearchV8_X, OpensearchV1_X,
+    OpensearchV2_X, is_incoming_version_supported
+)
+from .elasticsearch_operations import (
+    ElasticsearchV1_XOperationsLibrary, ElasticsearchV2_XOperationsLibrary,
+    ElasticsearchV5_XOperationsLibrary, ElasticsearchV6_XOperationsLibrary,
+    ElasticsearchV7_XOperationsLibrary, ElasticsearchV8_XOperationsLibrary
+)
+from .cluster_version import (
+    ClusterVersion, ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X,
     ElasticsearchV6_X, ElasticsearchV6_8, ElasticsearchV7_X, ElasticsearchV8_X, OpensearchV1_X,
     OpensearchV2_X, is_incoming_version_supported
 )

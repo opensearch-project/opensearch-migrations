@@ -15,7 +15,7 @@ spec:
       labels:
         app: otel-collector
     spec:
-      serviceAccountName: otel-collector
+      serviceAccountName: {{ .Values.otelConfiguration.serviceAccountName }}
       containers:
         - name: otel-collector
           image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.2
@@ -24,6 +24,10 @@ spec:
               value: "true"
             - name: OTEL_LOG_LEVEL
               value: "debug"
+            - name: QUALIFIER
+              value: {{ .Values.stageName }}
+            - name: TRACE_SAMPLING_PERCENTAGE
+              value: "1"
           args:
             - "--config=/etc/otel/collector.yaml"
           ports:
@@ -61,55 +65,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   collector.yaml: |
-    receivers:
-      otlp:
-        protocols:
-          grpc:
-            endpoint: 0.0.0.0:4317
-    processors:
-      batch:
-        timeout: 10s
-        send_batch_size: 8192
-        send_batch_max_size: 10000
-    extensions:
-      zpages:
-        endpoint: :55679
-      pprof:
-        endpoint: :1888
-      health_check:
-    exporters:
-      debug:
-        verbosity: detailed
-        sampling_initial: 5
-        sampling_thereafter: 200
-      awsemf:
-        namespace: 'OpenSearchMigrations'
-      awsxray:
-        index_all_attributes: true
-      prometheus:
-        endpoint: "0.0.0.0:8889"
-        send_timestamps: true
-        metric_expiration: 5m
-        enable_open_metrics: true
-      otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
-        endpoint: jaeger-collector:4317
-        tls:
-          insecure: true
-    service:
-      extensions: [ zpages, pprof, health_check ]
-      pipelines:
-        metrics:
-          receivers: [ otlp ]
-          processors: [ batch ]
-          exporters: [ prometheus ]
-        traces:
-          receivers: [ otlp ]
-          processors: [ batch ]
-          exporters: [ otlp/jaeger ]
-        logs:
-          receivers: [ otlp ]
-          processors:
-          exporters: [ debug ]
+{{ .Values.otelConfiguration.collectorConfig | indent 4 }}
+
 ---
 apiVersion: v1
 kind: Service
@@ -140,7 +97,6 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "1"
-    "helm.sh/hook-delete-policy": hook-succeeded
   labels:
     app: otel-collector
     release: kube-prometheus-stack

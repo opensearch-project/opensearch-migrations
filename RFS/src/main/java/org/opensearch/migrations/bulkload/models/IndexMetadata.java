@@ -6,13 +6,14 @@ import java.io.InputStream;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
-import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.transformation.entity.Index;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import shadow.lucene9.org.apache.lucene.codecs.CodecUtil;
 
@@ -36,6 +37,12 @@ public interface IndexMetadata extends Index {
 
     IndexMetadata deepCopy();
 
+    default void validateRawJson(ObjectNode rawJson) {
+        if (rawJson == null) {
+            throw new InvalidSnapshotFormatException();
+        }
+    }
+
     /**
     * Defines the behavior required to read a snapshot's index metadata as JSON and convert it into a Data object
     */
@@ -58,7 +65,7 @@ public interface IndexMetadata extends Index {
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
             } catch (Exception e) {
-                throw new RfsException("Could not load index metadata file: " + filePath.toString(), e);
+                throw new InvalidSnapshotFormatException("File: " + filePath.toString(), e);
             }
         }
 
