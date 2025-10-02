@@ -190,14 +190,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>())
 
-        .addOptionalInput("backfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
+        .addOptionalInput("documentBackfillConfig", c => ({} as z.infer<typeof RFS_OPTIONS>))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
             .addStep("createReplicaset", INTERNAL, "createReplicaset", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...selectInputsFieldsAsExpressionRecord(b.inputs.backfillConfig, c),
+                    ...selectInputsFieldsAsExpressionRecord(b.inputs.documentBackfillConfig, c),
                     ...(extractTargetKeysToExpressionMap(b.inputs.targetConfig)),
 
                     s3Endpoint: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "endpoint"], ""),
