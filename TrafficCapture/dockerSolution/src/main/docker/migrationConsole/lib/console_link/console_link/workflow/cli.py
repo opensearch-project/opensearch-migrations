@@ -3,11 +3,9 @@
 import sys
 import logging
 import click
-import traceback
 from click.shell_completion import get_completion_class
 
 from .models.utils import ExitCode
-from .models.store import WorkflowConfigStore
 from .commands.configure import configure_group
 
 logger = logging.getLogger(__name__)
@@ -33,8 +31,11 @@ def workflow_cli(ctx, verbose):
 
     # Store initialization is deferred - will be created when first accessed
     # This allows utility commands (like completions) to run without K8s access
-    ctx.obj['store'] = None
-    ctx.obj['namespace'] = "ma"  # Use 'ma' namespace where the migration console is deployed
+    # Only set defaults if not already provided (e.g., in tests)
+    if 'store' not in ctx.obj:
+        ctx.obj['store'] = None
+    if 'namespace' not in ctx.obj:
+        ctx.obj['namespace'] = "ma"  # Use 'ma' namespace where the migration console is deployed
 
 
 @workflow_cli.group(name="util")

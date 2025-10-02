@@ -1,13 +1,11 @@
 """Unit tests for workflow models."""
 
-import pytest
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.utils import ExitCode
 from console_link.models.command_result import CommandResult
 import yaml
 
 
-@pytest.mark.unit
 class TestWorkflowModels:
     """Test workflow configuration models."""
 

@@ -14,7 +14,6 @@ from click.testing import CliRunner
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from testcontainers.k3s import K3SContainer
-from unittest.mock import patch
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.store import WorkflowConfigStore
@@ -184,11 +183,11 @@ class TestWorkflowCLICommands:
         except ApiException:
             pass  # Ignore if doesn't exist
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'view'])
+        result = runner.invoke(workflow_cli, ['configure', 'view'], obj={
+                               'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code == 0
-            assert "No configuration found" in result.output
+        assert result.exit_code == 0
+        assert "No configuration found" in result.output
 
     def test_workflow_configure_view_existing_config(self, runner, k8s_workflow_store, sample_workflow_config):
         """Test workflow configure view with existing config"""
@@ -218,17 +217,17 @@ class TestWorkflowCLICommands:
         message = k8s_workflow_store.save_config(config, session_name)
         assert "created" in message or "updated" in message
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'view'])
+        result = runner.invoke(workflow_cli, ['configure', 'view'], obj={
+                               'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code == 0
-            assert "targets:" in result.output
-            assert "test:" in result.output
-            # Parse YAML output to verify structure
-            import yaml as yaml_parser
-            config_data = yaml_parser.safe_load(result.output)
-            endpoint = config_data['targets']['test']['endpoint']
-            assert endpoint == "https://test.com:9200"
+        assert result.exit_code == 0
+        assert "targets:" in result.output
+        assert "test:" in result.output
+        # Parse YAML output to verify structure
+        import yaml as yaml_parser
+        config_data = yaml_parser.safe_load(result.output)
+        endpoint = config_data['targets']['test']['endpoint']
+        assert endpoint == "https://test.com:9200"
 
         # Cleanup
         try:
@@ -263,12 +262,12 @@ class TestWorkflowCLICommands:
         message = k8s_workflow_store.save_config(config, session_name)
         assert "created" in message or "updated" in message
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'view', '--format', 'json'])
+        result = runner.invoke(workflow_cli, ['configure', 'view', '--format', 'json'],
+                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code == 0
-            assert '"targets"' in result.output
-            assert '"test"' in result.output
+        assert result.exit_code == 0
+        assert '"targets"' in result.output
+        assert '"test"' in result.output
 
         # Cleanup
         try:
@@ -284,11 +283,11 @@ class TestWorkflowCLICommands:
         message = k8s_workflow_store.save_config(sample_workflow_config, session_name)
         assert "created" in message or "updated" in message
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'clear', '--confirm'])
+        result = runner.invoke(workflow_cli, ['configure', 'clear', '--confirm'],
+                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code == 0
-            assert f"Cleared workflow configuration for session: {session_name}" in result.output
+        assert result.exit_code == 0
+        assert f"Cleared workflow configuration for session: {session_name}" in result.output
 
         # Verify config was cleared (should be empty)
         config = k8s_workflow_store.load_config(session_name)
@@ -309,11 +308,11 @@ class TestWorkflowCLICommands:
         # Prepare JSON input
         json_input = '{"targets": {"test": {"endpoint": "https://test.com:9200"}}}'
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input)
+        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input,
+                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code == 0
-            assert "Configuration" in result.output
+        assert result.exit_code == 0
+        assert "Configuration" in result.output
 
         # Verify config was saved
         config = k8s_workflow_store.load_config(session_name)
@@ -345,11 +344,11 @@ class TestWorkflowCLICommands:
       password: password
 """
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input)
+        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input,
+                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code == 0
-            assert "Configuration" in result.output
+        assert result.exit_code == 0
+        assert "Configuration" in result.output
 
         # Verify config was saved
         config = k8s_workflow_store.load_config(session_name)
@@ -365,37 +364,21 @@ class TestWorkflowCLICommands:
 
     def test_workflow_configure_edit_with_stdin_empty(self, runner, k8s_workflow_store):
         """Test workflow configure edit with empty stdin input"""
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input='')
+        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input='',
+                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code != 0
-            assert "Configuration was empty, a value is required." in result.output
+        assert result.exit_code != 0
+        assert "Configuration was empty, a value is required" in result.output
 
     def test_workflow_configure_edit_with_stdin_invalid(self, runner, k8s_workflow_store):
         """Test workflow configure edit with invalid stdin input"""
         invalid_input = "this is not valid JSON or YAML: {{{["
 
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=invalid_input)
+        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=invalid_input,
+                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
-            assert result.exit_code != 0
-            assert "Failed to parse input" in result.output
-
-    def test_workflow_with_custom_session(self, runner, k8s_workflow_store):
-        """Test workflow commands with default session in isolated namespace"""
-        session_name = "default"
-
-        # Clean up any existing test data
-        try:
-            k8s_workflow_store.delete_config(session_name)
-        except ApiException:
-            pass  # Ignore if doesn't exist
-
-        with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
-            result = runner.invoke(workflow_cli, ['configure', 'view'])
-
-            assert result.exit_code == 0
-            assert "No configuration found" in result.output
+        assert result.exit_code != 0
+        assert "Failed to parse input" in result.output
 
     def test_workflow_util_completions_bash(self, runner):
         """Test workflow util completions for bash"""

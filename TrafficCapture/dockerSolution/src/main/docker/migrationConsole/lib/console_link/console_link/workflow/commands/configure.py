@@ -93,7 +93,6 @@ def configure_group(ctx):
 @click.pass_context
 def view_config(ctx, format):
     """Show workflow configuration"""
-    from ..cli import get_store
     store = get_store(ctx)
 
     try:
@@ -180,7 +179,6 @@ def edit_config(ctx, stdin):
 @click.pass_context
 def clear_config(ctx, confirm):
     """Reset the pending workflow configuration"""
-    from ..cli import get_store
     store = get_store(ctx)
 
     if not confirm and not click.confirm(f'Clear workflow configuration for session "{session_name}"?'):
