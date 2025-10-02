@@ -3,7 +3,7 @@ import {
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG, S3_REPO_CONFIG,
     NORMALIZED_SNAPSHOT_MIGRATION_CONFIG,
     TARGET_CLUSTER_CONFIG, REPLAYER_OPTIONS, SOURCE_CLUSTER_CONFIG
-} from "@/workflowTemplates/userSchemas";
+} from "./userSchemas";
 import {z} from "zod";
 
 export const NAMED_SOURCE_CLUSTER_CONFIG = SOURCE_CLUSTER_CONFIG.extend({
