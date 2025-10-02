@@ -20,15 +20,10 @@ tag=""
 skip_git_pull=false
 
 base_dir="./opensearch-migrations"
-build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
-ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 namespace="ma"
 build_images=false
 use_public_images=true
 keep_build_images_job_alive=false
-
-RELEASE_VERSION=$(<"$base_dir/VERSION")
-RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -84,6 +79,11 @@ case "$TOOLS_ARCH" in
 esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 HELM_VERSION="3.14.0"
+
+build_images_chart_dir="${base_dir}/deployment/k8s/charts/components/buildImages"
+ma_chart_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
+RELEASE_VERSION=$(<"$base_dir/VERSION")
+RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
 
 install_helm() {
   echo "Installing Helm ${HELM_VERSION} for ${OS}/${TOOLS_ARCH}..."
@@ -163,7 +163,7 @@ eval "$output"
 
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
 
-kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace ma
+kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
 kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
 
 if ! helm status aws-efs-csi-driver -n kube-system >/dev/null 2>&1; then
