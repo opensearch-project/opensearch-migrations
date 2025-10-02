@@ -170,19 +170,32 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    def registryEndpoint = sh(
+                                    def rawOutput = sh(
                                             script: """
                                               aws cloudformation describe-stacks \
-                                                --stack-name Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
-                                                --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
-                                                --output text \
-                                              | tr ';' '\\n' \
-                                              | awk -F= '\$1=="MIGRATIONS_ECR_REGISTRY" {print \$2}'
+                                              --stack-name Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
+                                              --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+                                              --output text
                                             """,
                                             returnStdout: true
                                     ).trim()
+                                    if (!rawOutput) {
+                                        error("Could not retrieve CloudFormation Output 'MigrationsExportString' from stack Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}")
+                                    }
+
+                                    def pairs = rawOutput.split(';').collect { it.trim() }
+                                    if (!pairs || pairs.size() == 0) {
+                                        error("No key=value pairs found in MigrationsExportString output")
+                                    }
+
+                                    def registryPair = pairs.find { it.startsWith("MIGRATIONS_ECR_REGISTRY=") }
+                                    if (!registryPair) {
+                                        error("MIGRATIONS_ECR_REGISTRY key not found in MigrationsExportString output")
+                                    }
+
+                                    def registryEndpoint = registryPair.split('=')[1]
                                     if (!registryEndpoint) {
-                                        error("Unable to parse ECR registry endpoint from export 'MigrationsExportString' on stack: Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}")
+                                        error("MIGRATIONS_ECR_REGISTRY value is empty")
                                     }
                                     sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64"
                                 }
