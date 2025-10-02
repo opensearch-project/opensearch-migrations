@@ -162,20 +162,20 @@ def test_snapshot_status(request, snapshot_fixture):
 def test_snapshot_status_full(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
-    
+
     # Set up mock responses for both API endpoints
     basic_response = mock.Mock()
     basic_response.json.return_value = mock_snapshot_api_response
-    
+
     status_response = mock.Mock()
     status_response.json.return_value = mock_snapshot_api_response
-    
+
     # Configure call_api to return different responses based on path
     def mock_call_api(path, *args, **kwargs):
         if "_status" in path:
             return status_response
         return basic_response
-    
+
     source_cluster.call_api.side_effect = mock_call_api
 
     result = snapshot_.status(snapshot=snapshot, deep_check=True)
@@ -183,28 +183,28 @@ def test_snapshot_status_full(request, snapshot_fixture):
     # Basic result validations
     assert isinstance(result, CommandResult)
     assert result.success
-    
+
     # Content validations
     assert "SUCCESS" in result.value
     assert "Percent completed: 100.00%" in result.value
     assert "Total shards: 304" in result.value
     assert "Successful shards: 304" in result.value
-    
+
     # Check format string entries
     assert "Start time:" in result.value
     assert "Estimated time to completion:" in result.value
     assert "Throughput:" in result.value
-    
+
     # Verify date/time formatting is correct (timezone-agnostic check)
     # The timestamps in mock data are: start=1719343996753ms, duration=79426ms
     # Just verify the date format is present, not the exact time (which varies by timezone)
     assert "2024-06-25" in result.value  # Date is present
     assert re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', result.value)  # Time format is correct
-    
+
     # Verify snapshot progress information
     assert "64.000/64.000 MiB" in result.value  # Data processed
     assert "MiB/sec" in result.value  # Throughput format
-    
+
     # No "N/A" placeholders should be present
     assert "N/A" not in result.value
 
@@ -617,7 +617,7 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     mocker.patch("sys.stderr.write")
     mock = mocker.patch('subprocess.run', autospec=True)
     extra_args = ['--extra-flag', '--extra-arg', 'extra-arg-value', 'this-is-an-option']
-    
+
     result = snapshot.create(extra_args=extra_args)
 
     assert "creation initiated successfully" in result

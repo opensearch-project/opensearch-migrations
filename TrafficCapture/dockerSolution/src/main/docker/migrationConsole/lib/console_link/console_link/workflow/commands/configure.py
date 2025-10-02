@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
-from typing import Optional
+from typing import Optional, cast
 
 import click
 from ...models.command_result import CommandResult
@@ -62,14 +62,14 @@ def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> Comman
             new_config = WorkflowConfig.from_yaml(edited_content)
             return CommandResult(success=True, value=new_config)
         except Exception as e:
-            logger.error(f"Failed to parse edited configuration: {e}")
+            logger.exception(f"Failed to parse edited configuration: {e}")
             return CommandResult(success=False, value=e)
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"Editor exited with error: {e}")
+        logger.exception(f"Editor exited with error: {e}")
         return CommandResult(success=False, value=e)
     except Exception as e:
-        logger.error(f"Error launching editor: {e}")
+        logger.exception(f"Error launching editor: {e}")
         return CommandResult(success=False, value=e)
     finally:
         # Clean up temp file
@@ -95,25 +95,26 @@ def view_config(ctx, format):
     from ..cli import get_store
     store = get_store(ctx)
 
-    result = store.load_config(session_name)
-    if not result.success:
-        raise click.ClickException(f"Failed to load configuration: {result.value}")
+    try:
+        config = store.load_config(session_name)
+        if config is None or not config:
+            logger.info("No configuration found")
+            click.echo("No configuration found.")
+            return
 
-    config = result.value
-    if config is None or not config:
-        click.echo("No configuration found.")
-        return
-
-    if format == 'json':
-        click.echo(config.to_json())
-    else:
-        click.echo(config.to_yaml())
+        if format == 'json':
+            click.echo(config.to_json())
+        else:
+            click.echo(config.to_yaml())
+    except Exception as e:
+        logger.exception(f"Failed to load configuration: {e}")
+        raise click.ClickException(f"Failed to load configuration: {e}")
 
 
 def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
     """Parse configuration from stdin content, trying JSON first then YAML"""
     if not stdin_content.strip():
-        raise click.ClickException("No input provided on stdin")
+        raise click.ClickException("Configuration was empty, a value is required")
 
     # Try to parse as JSON first, then YAML
     try:
@@ -125,43 +126,39 @@ def _parse_config_from_stdin(stdin_content: str) -> WorkflowConfig:
             raise click.ClickException(f"Failed to parse input as JSON or YAML: {e}")
 
 
+def _save_config(store, new_config: WorkflowConfig, session_name: str):
+    """Save configuration to store"""
+    try:
+        message = store.save_config(new_config, session_name)
+        logger.info(f"Configuration saved: {message}")
+        click.echo(message)
+    except Exception as e:
+        logger.exception(f"Failed to save configuration: {e}")
+        raise click.ClickException(f"Failed to save configuration: {e}")
+
+
 def _handle_stdin_edit(store, session_name: str):
     """Handle configuration edit from stdin"""
     stdin_stream = click.get_text_stream('stdin')
     stdin_content = stdin_stream.read()
-    
+
     new_config = _parse_config_from_stdin(stdin_content)
-    
-    # Save the new config
-    save_result = store.save_config(new_config, session_name)
-    if not save_result.success:
-        raise click.ClickException(f"Failed to save configuration: {save_result.value}")
-    
-    click.echo(save_result.value)
+    _save_config(store, new_config, session_name)
 
 
 def _handle_editor_edit(store, session_name: str):
     """Handle configuration edit via editor"""
-    # Load existing config
-    load_result = store.load_config(session_name)
-    if not load_result.success:
-        raise click.ClickException(f"Failed to load configuration: {load_result.value}")
+    try:
+        current_config = store.load_config(session_name)
+    except Exception as e:
+        logger.exception(f"Failed to load configuration: {e}")
+        raise click.ClickException(f"Failed to load configuration: {e}")
 
-    current_config = load_result.value
-
-    # Launch editor
     edit_result = _launch_editor_for_config(current_config)
     if not edit_result.success:
-        raise click.ClickException(edit_result.value)
+        raise click.ClickException(str(edit_result.value))
 
-    new_config = edit_result.value
-
-    # Save updated config
-    save_result = store.save_config(new_config, session_name)
-    if not save_result.success:
-        raise click.ClickException(f"Failed to save configuration: {save_result.value}")
-
-    click.echo(save_result.value)
+    _save_config(store, cast(WorkflowConfig, edit_result.value), session_name)
 
 
 @configure_group.command(name="edit")
@@ -186,17 +183,19 @@ def clear_config(ctx, confirm):
     from ..cli import get_store
     store = get_store(ctx)
 
-    if not confirm:
-        if not click.confirm(f'Clear workflow configuration for session "{session_name}"?'):
-            click.echo("Cancelled")
-            return
+    if not confirm and not click.confirm(f'Clear workflow configuration for session "{session_name}"?'):
+        logger.info("Clear configuration cancelled by user")
+        click.echo("Cancelled")
+        return
 
     # Create empty configuration
     empty_config = WorkflowConfig()
 
     # Save the empty configuration
-    save_result = store.save_config(empty_config, session_name)
-    if not save_result.success:
-        raise click.ClickException(f"Failed to clear configuration: {save_result.value}")
-
-    click.echo(f"Cleared workflow configuration for session: {session_name}")
+    try:
+        store.save_config(empty_config, session_name)
+        logger.info(f"Cleared workflow configuration for session: {session_name}")
+        click.echo(f"Cleared workflow configuration for session: {session_name}")
+    except Exception as e:
+        logger.exception(f"Failed to clear configuration: {e}")
+        raise click.ClickException(f"Failed to clear configuration: {e}")

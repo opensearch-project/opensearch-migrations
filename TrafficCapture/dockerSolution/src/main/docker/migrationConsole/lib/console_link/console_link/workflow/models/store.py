@@ -3,7 +3,6 @@
 import logging
 from typing import Optional, List
 
-from ...models.command_result import CommandResult
 from .config import WorkflowConfig
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -11,7 +10,7 @@ from kubernetes.client.rest import ApiException
 logger = logging.getLogger(__name__)
 
 # Constants
-CONFIG_JSON_KEY = "config.json"
+CONFIG_JSON_KEY = "workflow_config.json"
 
 
 class WorkflowConfigStore:
@@ -57,148 +56,149 @@ class WorkflowConfigStore:
 
             self.v1 = client.CoreV1Api()
 
-    def _get_config_map_name(self, session_name: str) -> str:
-        """Generate ConfigMap name for a session"""
-        # Kubernetes names must be DNS-1123 compliant
-        safe_session = session_name.lower().replace('_', '-').replace('.', '-')
-        return f"{self.config_map_prefix}-{safe_session}"
+    def save_config(self, config: WorkflowConfig, session_name: str = "default") -> str:
+        """Save workflow configuration to Kubernetes ConfigMap
 
-    def save_config(self, config: WorkflowConfig, session_name: str = "default") -> CommandResult:
-        """Save workflow configuration to Kubernetes ConfigMap"""
-        try:
-            config_map_name = self._get_config_map_name(session_name)
-            config_json = config.to_json()
+        Args:
+            config: The workflow configuration to save
+            session_name: Name of the session/ConfigMap
 
-            # Create ConfigMap body
-            config_map_body = client.V1ConfigMap(
-                metadata=client.V1ObjectMeta(
-                    name=config_map_name,
-                    labels={
-                        "app": "migration-assistant",
-                        "component": "workflow-config",
-                        "session": session_name
-                    }
-                ),
-                data={
-                    CONFIG_JSON_KEY: config_json,
-                    "session_name": session_name
+        Returns:
+            A message describing the action taken (created/updated)
+
+        Raises:
+            ApiException: If Kubernetes API call fails
+            Exception: For other errors during save operation
+        """
+        config_json = config.to_json()
+
+        # Create ConfigMap body
+        config_map_body = client.V1ConfigMap(
+            metadata=client.V1ObjectMeta(
+                name=session_name,
+                labels={
+                    "app": "migration-assistant",
+                    "component": "workflow-config",
+                    "session": session_name
                 }
-            )
+            ),
+            data={
+                CONFIG_JSON_KEY: config_json,
+                "session_name": session_name
+            }
+        )
 
-            try:
-                # Try to update existing ConfigMap
-                self.v1.patch_namespaced_config_map(
-                    name=config_map_name,
+        try:
+            # Try to update existing ConfigMap
+            self.v1.patch_namespaced_config_map(
+                name=session_name,
+                namespace=self.namespace,
+                body=config_map_body
+            )
+            logger.info(f"Updated workflow config ConfigMap for session: {session_name}")
+            return f"Configuration updated for session: {session_name}"
+        except ApiException as e:
+            if e.status == 404:
+                # ConfigMap doesn't exist, create it
+                self.v1.create_namespaced_config_map(
                     namespace=self.namespace,
                     body=config_map_body
                 )
-                logger.info(f"Updated workflow config ConfigMap for session: {session_name}")
-                action = "updated"
-            except ApiException as e:
-                if e.status == 404:
-                    # ConfigMap doesn't exist, create it
-                    self.v1.create_namespaced_config_map(
-                        namespace=self.namespace,
-                        body=config_map_body
-                    )
-                    logger.info(f"Created workflow config ConfigMap for session: {session_name}")
-                    action = "created"
-                else:
-                    raise
+                logger.info(f"Created workflow config ConfigMap for session: {session_name}")
+                return f"Configuration created for session: {session_name}"
+            else:
+                logger.error(f"Kubernetes API error saving config for session {session_name}: {e}")
+                raise
 
-            return CommandResult(success=True, value=f"Configuration {action} for session: {session_name}")
+    def load_config(self, session_name: str = "default") -> Optional[WorkflowConfig]:
+        """Load workflow configuration from Kubernetes ConfigMap
 
-        except ApiException as e:
-            logger.error(f"Kubernetes API error saving config for session {session_name}: {e}")
-            return CommandResult(success=False, value=f"Failed to save configuration: {e.reason}")
-        except Exception as e:
-            logger.error(f"Failed to save config for session {session_name}: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to save configuration: {str(e)}")
+        Args:
+            session_name: Name of the session/ConfigMap to load
 
-    def load_config(self, session_name: str = "default") -> CommandResult:
-        """Load workflow configuration from Kubernetes ConfigMap"""
+        Returns:
+            WorkflowConfig if found, None if not found or empty
+
+        Raises:
+            ApiException: If Kubernetes API call fails (except 404)
+            Exception: For other errors during load operation
+        """
         try:
-            config_map_name = self._get_config_map_name(session_name)
-
-            try:
-                config_map = self.v1.read_namespaced_config_map(
-                    name=config_map_name,
-                    namespace=self.namespace
-                )
-            except ApiException as e:
-                if e.status == 404:
-                    logger.info(f"No configuration found for session: {session_name}")
-                    return CommandResult(success=True, value=None)
-                else:
-                    raise
-
-            if not config_map.data or CONFIG_JSON_KEY not in config_map.data:
-                logger.warning(f"ConfigMap {config_map_name} exists but has no {CONFIG_JSON_KEY} data")
-                return CommandResult(success=True, value=None)
-
-            config_json = config_map.data[CONFIG_JSON_KEY]
-            config = WorkflowConfig.from_json(config_json)
-
-            logger.info(f"Loaded workflow config for session: {session_name}")
-            return CommandResult(success=True, value=config)
-
-        except ApiException as e:
-            logger.error(f"Kubernetes API error loading config for session {session_name}: {e}")
-            return CommandResult(success=False, value=None)
-        except Exception as e:
-            logger.error(f"Failed to load config for session {session_name}: {str(e)}")
-            return CommandResult(success=False, value=None)
-
-    def delete_config(self, session_name: str = "default") -> CommandResult:
-        """Delete workflow configuration from Kubernetes ConfigMap"""
-        try:
-            config_map_name = self._get_config_map_name(session_name)
-
-            try:
-                self.v1.delete_namespaced_config_map(
-                    name=config_map_name,
-                    namespace=self.namespace
-                )
-                logger.info(f"Deleted workflow config ConfigMap for session: {session_name}")
-                return CommandResult(success=True, value=f"Configuration deleted for session: {session_name}")
-            except ApiException as e:
-                if e.status == 404:
-                    return CommandResult(success=False, value=f"No configuration found for session: {session_name}")
-                else:
-                    raise
-
-        except ApiException as e:
-            logger.error(f"Kubernetes API error deleting config for session {session_name}: {e}")
-            return CommandResult(success=False, value=f"Failed to delete configuration: {e.reason}")
-        except Exception as e:
-            logger.error(f"Failed to delete config for session {session_name}: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to delete configuration: {str(e)}")
-
-    def list_sessions(self) -> CommandResult:
-        """List all available workflow sessions from Kubernetes ConfigMaps"""
-        try:
-            # List ConfigMaps with our label selector
-            config_maps = self.v1.list_namespaced_config_map(
-                namespace=self.namespace,
-                label_selector="app=migration-assistant,component=workflow-config"
+            config_map = self.v1.read_namespaced_config_map(
+                name=session_name,
+                namespace=self.namespace
             )
-
-            sessions: List[str] = []
-            for config_map in config_maps.items:
-                if config_map.data and "session_name" in config_map.data:
-                    sessions.append(config_map.data["session_name"])
-                elif config_map.metadata.labels and "session" in config_map.metadata.labels:
-                    sessions.append(config_map.metadata.labels["session"])
-
-            logger.info(f"Found {len(sessions)} workflow sessions")
-            return CommandResult(success=True, value=sessions)
-
         except ApiException as e:
-            logger.error(f"Kubernetes API error listing sessions: {e}")
-            return CommandResult(success=False, value=[])
-        except Exception as e:
-            logger.error(f"Failed to list sessions: {str(e)}")
-            return CommandResult(success=False, value=[])
+            if e.status == 404:
+                logger.info(f"No configuration found for session: {session_name}")
+                return None
+            else:
+                logger.error(f"Kubernetes API error loading config for session {session_name}: {e}")
+                raise
+
+        if not config_map.data or CONFIG_JSON_KEY not in config_map.data:
+            logger.info(f"ConfigMap {session_name} exists but has no {CONFIG_JSON_KEY} data")
+            return None
+
+        config_json = config_map.data[CONFIG_JSON_KEY]
+        config = WorkflowConfig.from_json(config_json)
+
+        logger.info(f"Loaded workflow config for session: {session_name}")
+        return config
+
+    def delete_config(self, session_name: str = "default") -> str:
+        """Delete workflow configuration from Kubernetes ConfigMap
+
+        Args:
+            session_name: Name of the session/ConfigMap to delete
+
+        Returns:
+            A message describing the deletion
+
+        Raises:
+            ApiException: If Kubernetes API call fails (including 404 if not found)
+            Exception: For other errors during delete operation
+        """
+        try:
+            self.v1.delete_namespaced_config_map(
+                name=session_name,
+                namespace=self.namespace
+            )
+            logger.info(f"Deleted workflow config ConfigMap for session: {session_name}")
+            return f"Configuration deleted for session: {session_name}"
+        except ApiException as e:
+            if e.status == 404:
+                logger.warning(f"No configuration found for session: {session_name}")
+                raise ApiException(status=404, reason=f"No configuration found for session: {session_name}")
+            else:
+                logger.error(f"Kubernetes API error deleting config for session {session_name}: {e}")
+                raise
+
+    def list_sessions(self) -> List[str]:
+        """List all available workflow sessions from Kubernetes ConfigMaps
+
+        Returns:
+            List of session names
+
+        Raises:
+            ApiException: If Kubernetes API call fails
+            Exception: For other errors during list operation
+        """
+        # List ConfigMaps with our label selector
+        config_maps = self.v1.list_namespaced_config_map(
+            namespace=self.namespace,
+            label_selector="app=migration-assistant,component=workflow-config"
+        )
+
+        sessions: List[str] = []
+        for config_map in config_maps.items:
+            if config_map.data and "session_name" in config_map.data:
+                sessions.append(config_map.data["session_name"])
+            elif config_map.metadata.labels and "session" in config_map.metadata.labels:
+                sessions.append(config_map.metadata.labels["session"])
+
+        logger.info(f"Found {len(sessions)} workflow sessions")
+        return sessions
 
     def close(self):
         """Close any connections (no-op for Kubernetes client)"""

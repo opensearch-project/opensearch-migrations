@@ -6,6 +6,7 @@ import click
 import traceback
 from click.shell_completion import get_completion_class
 
+from .models.utils import ExitCode
 from .models.store import WorkflowConfigStore
 from .commands.configure import configure_group
 
@@ -19,9 +20,9 @@ def workflow_cli(ctx, verbose):
     """Workflow-based migration management CLI"""
 
     if ctx.invoked_subcommand is None:
-        click.echo("Error: Missing command.", err=True)
+        logger.info("Missing command")
         click.echo(workflow_cli.get_help(ctx))
-        ctx.exit(2)
+        ctx.exit(ExitCode.INVALID_INPUT.value)
 
     # Configure logging
     logging.basicConfig(level=logging.WARN - (10 * verbose))
@@ -77,8 +78,8 @@ def completion(ctx, shell):
     """
     completion_class = get_completion_class(shell)
     if completion_class is None:
-        click.echo(f"Error: {shell} shell is currently not supported", err=True)
-        ctx.exit(1)
+        logger.error(f"{shell} shell is currently not supported")
+        ctx.exit(ExitCode.INVALID_INPUT.value)
 
     try:
         completion_script = completion_class(lambda: workflow_cli(ctx),
@@ -87,8 +88,8 @@ def completion(ctx, shell):
                                              "_WORKFLOW_COMPLETE").source()
         click.echo(completion_script)
     except RuntimeError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        ctx.exit(1)
+        logger.error(f"Failed to generate completion script: {exc}")
+        ctx.exit(ExitCode.FAILURE.value)
 
 
 # Add command groups
@@ -101,17 +102,8 @@ def main():
     try:
         workflow_cli()
     except Exception as e:
-        # Check if verbose mode is enabled by looking at the root logger level
-        # Verbose mode sets logging level to INFO (20) or DEBUG (10), default is WARN (30)
-        root_logger = logging.getLogger()
-        if root_logger.getEffectiveLevel() <= logging.INFO:
-            # Verbose mode is enabled, show full traceback
-            click.echo("Error occurred with verbose mode enabled, showing full traceback:", err=True)
-            click.echo(traceback.format_exc(), err=True)
-        else:
-            # Normal mode, show clean error message
-            click.echo(f"Error: {str(e)}", err=True)
-        sys.exit(1)
+        logger.exception(e)
+        sys.exit(ExitCode.FAILURE.value)
 
 
 if __name__ == "__main__":

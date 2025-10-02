@@ -3,10 +3,9 @@ Integration tests for workflow CLI commands using real k3s test containers.
 
 These tests use testcontainers-python with k3s to provide a lightweight
 Kubernetes environment for testing.
-
-Run with: pytest tests/test_workflow_integration.py -m integration
 """
 
+import logging
 import os
 import pytest
 import tempfile
@@ -19,10 +18,12 @@ from unittest.mock import patch
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.store import WorkflowConfigStore
+from testcontainers.core.container import DockerContainer
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="session")
-@pytest.mark.slow
 def k3s_container():
     """Set up k3s container for all workflow tests"""
     print("\nStarting k3s container for workflow tests...")
@@ -83,7 +84,7 @@ def test_namespace(k3s_container):
         v1.delete_namespace(name=namespace_name)
     except ApiException as e:
         # Ignore errors during cleanup
-        print(f"Warning: Failed to delete namespace {namespace_name}: {e}")
+        logger.warning(f"Failed to delete namespace {namespace_name}: {e}")
 
 
 @pytest.fixture
@@ -161,7 +162,7 @@ def sample_workflow_config():
     return WorkflowConfig(data)
 
 
-@pytest.mark.integration
+@pytest.mark.slow
 class TestWorkflowCLICommands:
     """Integration tests for workflow CLI commands using real k3s"""
 
@@ -178,7 +179,10 @@ class TestWorkflowCLICommands:
         session_name = "default"
 
         # Clean up any existing test data
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass  # Ignore if doesn't exist
 
         with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
             result = runner.invoke(workflow_cli, ['configure', 'view'])
@@ -191,7 +195,10 @@ class TestWorkflowCLICommands:
         session_name = "default"
 
         # Clean up any existing test data
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass  # Ignore if doesn't exist
 
         # Create a test config
         data = {
@@ -208,8 +215,8 @@ class TestWorkflowCLICommands:
         config = WorkflowConfig(data)
 
         # Save config to k3s
-        save_result = k8s_workflow_store.save_config(config, session_name)
-        assert save_result.success
+        message = k8s_workflow_store.save_config(config, session_name)
+        assert "created" in message or "updated" in message
 
         with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
             result = runner.invoke(workflow_cli, ['configure', 'view'])
@@ -224,14 +231,20 @@ class TestWorkflowCLICommands:
             assert endpoint == "https://test.com:9200"
 
         # Cleanup
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass
 
     def test_workflow_configure_view_json_format(self, runner, k8s_workflow_store):
         """Test workflow configure view with JSON format"""
         session_name = "default"
 
         # Clean up any existing test data
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass  # Ignore if doesn't exist
 
         data = {
             "targets": {
@@ -247,8 +260,8 @@ class TestWorkflowCLICommands:
         config = WorkflowConfig(data)
 
         # Save config to k3s
-        save_result = k8s_workflow_store.save_config(config, session_name)
-        assert save_result.success
+        message = k8s_workflow_store.save_config(config, session_name)
+        assert "created" in message or "updated" in message
 
         with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
             result = runner.invoke(workflow_cli, ['configure', 'view', '--format', 'json'])
@@ -258,15 +271,18 @@ class TestWorkflowCLICommands:
             assert '"test"' in result.output
 
         # Cleanup
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass
 
     def test_workflow_configure_clear_with_confirmation(self, runner, k8s_workflow_store, sample_workflow_config):
         """Test workflow configure clear with confirmation"""
         session_name = "default"
 
         # Create a config to clear
-        save_result = k8s_workflow_store.save_config(sample_workflow_config, session_name)
-        assert save_result.success
+        message = k8s_workflow_store.save_config(sample_workflow_config, session_name)
+        assert "created" in message or "updated" in message
 
         with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
             result = runner.invoke(workflow_cli, ['configure', 'clear', '--confirm'])
@@ -275,18 +291,20 @@ class TestWorkflowCLICommands:
             assert f"Cleared workflow configuration for session: {session_name}" in result.output
 
         # Verify config was cleared (should be empty)
-        load_result = k8s_workflow_store.load_config(session_name)
-        assert load_result.success
+        config = k8s_workflow_store.load_config(session_name)
         # Config should exist but be empty
-        assert load_result.value is not None
-        assert load_result.value.data == {}
+        assert config is not None
+        assert config.data == {}
 
     def test_workflow_configure_edit_with_stdin_json(self, runner, k8s_workflow_store):
         """Test workflow configure edit with JSON input from stdin"""
         session_name = "default"
 
         # Clean up any existing test data
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass  # Ignore if doesn't exist
 
         # Prepare JSON input
         json_input = '{"targets": {"test": {"endpoint": "https://test.com:9200"}}}'
@@ -298,20 +316,25 @@ class TestWorkflowCLICommands:
             assert "Configuration" in result.output
 
         # Verify config was saved
-        load_result = k8s_workflow_store.load_config(session_name)
-        assert load_result.success
-        assert load_result.value is not None
-        assert load_result.value.get("targets")["test"]["endpoint"] == "https://test.com:9200"
+        config = k8s_workflow_store.load_config(session_name)
+        assert config is not None
+        assert config.get("targets")["test"]["endpoint"] == "https://test.com:9200"
 
         # Cleanup
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass
 
     def test_workflow_configure_edit_with_stdin_yaml(self, runner, k8s_workflow_store):
         """Test workflow configure edit with YAML input from stdin"""
         session_name = "default"
 
         # Clean up any existing test data
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass  # Ignore if doesn't exist
 
         # Prepare YAML input
         yaml_input = """targets:
@@ -329,14 +352,16 @@ class TestWorkflowCLICommands:
             assert "Configuration" in result.output
 
         # Verify config was saved
-        load_result = k8s_workflow_store.load_config(session_name)
-        assert load_result.success
-        assert load_result.value is not None
-        assert load_result.value.get("targets")["test"]["endpoint"] == "https://test.com:9200"
-        assert load_result.value.get("targets")["test"]["auth"]["username"] == "admin"
+        config = k8s_workflow_store.load_config(session_name)
+        assert config is not None
+        assert config.get("targets")["test"]["endpoint"] == "https://test.com:9200"
+        assert config.get("targets")["test"]["auth"]["username"] == "admin"
 
         # Cleanup
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass
 
     def test_workflow_configure_edit_with_stdin_empty(self, runner, k8s_workflow_store):
         """Test workflow configure edit with empty stdin input"""
@@ -344,7 +369,7 @@ class TestWorkflowCLICommands:
             result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input='')
 
             assert result.exit_code != 0
-            assert "No input provided on stdin" in result.output
+            assert "Configuration was empty, a value is required." in result.output
 
     def test_workflow_configure_edit_with_stdin_invalid(self, runner, k8s_workflow_store):
         """Test workflow configure edit with invalid stdin input"""
@@ -361,7 +386,10 @@ class TestWorkflowCLICommands:
         session_name = "default"
 
         # Clean up any existing test data
-        k8s_workflow_store.delete_config(session_name)
+        try:
+            k8s_workflow_store.delete_config(session_name)
+        except ApiException:
+            pass  # Ignore if doesn't exist
 
         with patch('console_link.workflow.cli.WorkflowConfigStore', return_value=k8s_workflow_store):
             result = runner.invoke(workflow_cli, ['configure', 'view'])
@@ -391,7 +419,6 @@ class TestWorkflowCLICommands:
 def test_k3s_container_support():
     """Test that k3s container support is available"""
     try:
-        from testcontainers.core.container import DockerContainer
         # Just verify the import works
         assert DockerContainer is not None
     except ImportError:
