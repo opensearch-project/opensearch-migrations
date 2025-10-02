@@ -198,7 +198,18 @@ def call(Map config = [:]) {
                                     if (!registryEndpoint) {
                                         error("MIGRATIONS_ECR_REGISTRY value is empty")
                                     }
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64 -Pbuilder=default"
+
+                                    def builderExists = sh(
+                                            script: "docker buildx ls | grep -q '^ecr-builder'",
+                                            returnStatus: true
+                                    ) == 0
+
+                                    if (builderExists) {
+                                        echo "The buildx builder 'ecr-builder' already exists"
+                                    } else {
+                                        sh "docker buildx create --name ecr-builder --driver docker-container"
+                                    }
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64 -Pbuilder=ecr-builder"
                                 }
                             }
                         }
