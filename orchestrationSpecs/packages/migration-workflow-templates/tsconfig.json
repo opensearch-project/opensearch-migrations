@@ -4,12 +4,15 @@
     "outDir": "./dist",
     "composite": true,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"],
   "references": [
-    { "path": "../argo-workflow-builders" },
     { "path": "../schemas" }
   ]
 }
