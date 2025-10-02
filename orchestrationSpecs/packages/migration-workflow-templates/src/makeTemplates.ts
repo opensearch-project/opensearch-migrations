@@ -1,5 +1,5 @@
 import * as k8s from '@kubernetes/client-node';
-import {renderWorkflowTemplate} from "@/argoWorkflowBuilders/renderers/argoResourceRenderer";
+import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders/renderers/argoResourceRenderer";
 import {AllWorkflowTemplates} from "@/workflowTemplates/allWorkflowTemplates";
 
 
