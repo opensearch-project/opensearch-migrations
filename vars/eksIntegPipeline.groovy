@@ -226,7 +226,7 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir \"../../..\" --use-public-images false"
+                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false"
                                     }
                                 }
                             }
@@ -270,6 +270,7 @@ def call(Map config = [:]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
                                         sh "kubectl -n ma config current-context"
+                                        sh "kubectl -n ma get pods"
                                         sh "pipenv run app --delete-only"
                                         sh "kubectl -n ma delete namespace ma"
                                     }
