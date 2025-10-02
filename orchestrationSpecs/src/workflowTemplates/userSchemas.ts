@@ -5,45 +5,27 @@ export const KAFKA_SERVICES_CONFIG = z.object({
     standard: z.string()
 });
 
-export const HTTP_AUTH_BASIC = z.object({
-    username: z.string(),
-    password: z.string(),
-});
-
-export const HTTP_AUTH_SIGV4 = z.object({
-    region: z.string(),
-    service: z.string().default("es").optional(),
-});
-
-export const HTTP_AUTH_MTLS = z.object({
-    caCert: z.string(),
-    clientSecretName: z.string()
-});
-
-export const CLUSTER_CONFIG = z.object({
-    endpoint: z.string().optional(),
-    allow_insecure: z.boolean().optional(),
-    version: z.string().optional(),
-    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
-});
-
-export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    endpoint: z.string(), // override to required
-});
-
 export const S3_REPO_CONFIG = z.object({
     aws_region: z.string(),
     endpoint: z.string(),
     repoPath: z.string()
 });
 
-export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
-    repoConfigName: z.string(),
-    snapshotName: z.string().optional()
+
+export const PROXY_OPTIONS = z.object({
+    enabled: z.boolean(),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
-export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
-    snapshotName: z.string() // override to required
+export const REPLAYER_OPTIONS = z.object({
+    enabled: z.boolean(),
+    speedupFactor: z.number(),
+    podReplicas: z.number(),
+    authHeaderOverride: z.optional(z.string()),
+    loggingConfigurationOverrideConfigMap: z.string().default(""),
+    docTransformerBase64: z.string().default(""),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
 });
 
 export const METADATA_OPTIONS = z.object({
@@ -79,8 +61,50 @@ export const RFS_OPTIONS = z.object({
     targetCompression: z.boolean().default(true),
 });
 
+
+export const HTTP_AUTH_BASIC = z.object({
+    username: z.string(),
+    password: z.string(),
+});
+
+export const HTTP_AUTH_SIGV4 = z.object({
+    region: z.string(),
+    service: z.string().default("es").optional(),
+});
+
+export const HTTP_AUTH_MTLS = z.object({
+    caCert: z.string(),
+    clientSecretName: z.string()
+});
+
+
+export const CLUSTER_CONFIG = z.object({
+    endpoint: z.string().optional(),
+    allow_insecure: z.boolean().optional(),
+    version: z.string().optional(),
+    authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
+});
+
+export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+    endpoint: z.string(), // override to required
+});
+
+export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
+    snapshotRepos: z.record(z.string(), S3_REPO_CONFIG).optional(),
+    proxy: PROXY_OPTIONS.optional()
+});
+
+export const NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG = z.object({
+    repoConfigName: z.string(),
+    snapshotName: z.string().optional()
+});
+
+export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG.extend({
+    snapshotName: z.string() // override to required
+});
+
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
-    metadataConfig: METADATA_OPTIONS.optional(),
+    metadataMigrationConfig: METADATA_OPTIONS.optional(),
     documentBackfillConfig: RFS_OPTIONS.optional()
 });
 
@@ -90,21 +114,11 @@ export const NORMALIZED_SNAPSHOT_MIGRATION_CONFIG = z.object({
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)
 });
 
-export const REPLAYER_OPTIONS = z.object({
-    enabled: z.boolean(),
-    speedupFactor: z.number(),
-    podReplicas: z.number(),
-    authHeaderOverride: z.optional(z.string()),
-    loggingConfigurationOverrideConfigMap: z.string().default(""),
-    docTransformerBase64: z.string().default(""),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317"),
-});
-
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    sources: z.array(z.string()),
-    targets: z.array(z.string()),
-    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG),
-    replayerConfig: REPLAYER_OPTIONS,
+    fromSource: z.string(),
+    toTarget: z.string(),
+    snapshotExtractAndLoadConfigs: z.array(NORMALIZED_SNAPSHOT_MIGRATION_CONFIG).optional(),
+    replayerConfig: REPLAYER_OPTIONS.optional()
 });
 
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
@@ -114,13 +128,11 @@ export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
     target_cluster: TARGET_CLUSTER_CONFIG.optional()
 });
 
-export const SOURCE_CLUSTERS_MAP = z.record(z.string(), CLUSTER_CONFIG);
+export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG);
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
-export const REPO_CONFIGS_MAP = z.record(z.string(), S3_REPO_CONFIG);
 
 export const OVERALL_MIGRATION_CONFIG = z.object({
     sourceClusters: SOURCE_CLUSTERS_MAP,
     targetClusters: TARGET_CLUSTERS_MAP,
-    migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG),
-    repoConfigs: REPO_CONFIGS_MAP
+    migrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG)
 });

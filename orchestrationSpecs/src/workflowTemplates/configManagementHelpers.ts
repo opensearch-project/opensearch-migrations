@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {
-    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, REPO_CONFIGS_MAP,
+    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTERS_MAP
 } from '@/workflowTemplates/userSchemas'
@@ -42,7 +42,6 @@ export const ConfigManagementHelpers = WorkflowBuilder.create({
         .addRequiredInput("targetClusters", typeToken<z.infer<typeof TARGET_CLUSTERS_MAP>>())
         .addRequiredInput("sourceClusters", typeToken<z.infer<typeof SOURCE_CLUSTERS_MAP>>())
         .addRequiredInput("sourceMigrationConfigs", typeToken<z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>[]>())
-        .addRequiredInput("snapshotRepoConfigs", typeToken<z.infer<typeof REPO_CONFIGS_MAP>[]>())
 
         .addContainer(b => b
             .addImageInfo(b.inputs.imageEtcdUtilsLocation, b.inputs.imageEtcdUtilsPullPolicy)

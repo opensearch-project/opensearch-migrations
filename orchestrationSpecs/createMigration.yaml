@@ -11,11 +11,19 @@ spec:
       - name: snapshotRepoConfigs
         value: |
           {
-              "mainRepo": {
-                  "aws_region": "us-east-2",
-                  "endpoint": "http://ma-localstack:4566",
-                  "repoPath": "s3://snapshot"
+            "mainRepo": {
+              "aws_region": "us-east-2",
+              "endpoint": "http://ma-localstack:4566",
+              "repoPath": "s3://snapshot"
+            },
+            "snapshotRepos": {
+              "main": {
+                "aws_region": "us-east-2",
+                "endpoint": "http://ma-localstack:4566",
+                "s3RepoPathUri": "s3://snapshotbucket/snapshot"
               }
+            },
+           "proxy": { "enabled": true}
           }
       - name: sourceClusters
         value: |
@@ -26,9 +34,10 @@ spec:
                "authConfig": {
                    "username": "admin",
                    "password": "admin"
-               }
+               },
+          
            }
-          },
+          }
       - name: targetClusters
         value: |
           {
