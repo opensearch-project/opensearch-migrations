@@ -523,11 +523,13 @@ spec:
             helm repo add elastic https://helm.elastic.co
             helm repo update
             
-            # Create Elasticsearch configuration for ES 6.8.23 (no deprecated cloud.aws settings)
+            # Create Elasticsearch configuration for ES 6.8.23 OSS (minimal config)
             cat > /tmp/elasticsearch.yml << EOF
             bootstrap.system_call_filter: false
             network.host: 0.0.0.0
-            discovery.zen.minimum_master_nodes: 1
+            discovery.type: single-node
+            transport.port: 9300
+            http.port: 9200
             EOF
             
             # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
@@ -536,22 +538,33 @@ spec:
             image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
             imageTag: "6.8.23"
             antiAffinity: "soft"
-            esJavaOpts: "-Xmx512m -Xms512m"
+            esJavaOpts: "-Xmx512m -Xms512m -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
             protocol: "http"
             replicas: 1
             createCert: false
             
-            # Disable default readiness probe to avoid conflicts
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
+            
+            masterService: ""
+            
+            # Disable probes to avoid transient warnings
             readinessProbe: {}
+            livenessProbe: {}
             
             extraEnvs:
               - name: "cluster.initial_master_nodes"
                 value: ""
               - name: "node.roles"
                 value: ""
-              - name: "AWS_REGION"
-                value: "us-east-2"
+            
+            sysctlInitContainer:
+              enabled: true
+            
             persistence:
+              enabled: false
+            
+            podDisruptionBudget:
+              create: false
               enabled: false
             
             extraInitContainers:
@@ -572,8 +585,11 @@ spec:
                     echo 'y' | bin/elasticsearch-keystore create
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                     echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                    echo "http://localstack.ma.svc.cluster.local:4566" | bin/elasticsearch-keystore add --stdin s3.client.default.endpoint --force
                     # Copy keystore to shared volume location
                     cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                    chown 1000:0 /shared/elasticsearch.keystore
+                    chmod 660 /shared/elasticsearch.keystore
                     echo "Keystore created and saved to shared volume"
                 volumeMounts:
                   - name: elasticsearch-keystore
@@ -605,7 +621,7 @@ spec:
             {
               "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
               "allow_insecure": true,
-              "no_auth": null,
+              "no_auth": true,
               "version": "ES_6.8"
             }
             EOF

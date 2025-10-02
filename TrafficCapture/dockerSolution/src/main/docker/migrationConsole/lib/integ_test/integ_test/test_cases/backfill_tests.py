@@ -1,5 +1,7 @@
 import logging
-from ..cluster_version import ElasticsearchV5_X, ElasticsearchV6_8, ElasticsearchV7_X, ElasticsearchV8_X, OpensearchV1_X, OpensearchV2_X
+from ..cluster_version import (ElasticsearchV5_X, ElasticsearchV6_8,
+                               ElasticsearchV7_X, ElasticsearchV8_X,
+                               OpensearchV1_X, OpensearchV2_X)
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
