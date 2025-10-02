@@ -183,10 +183,11 @@ def call(Map config = [:]) {
                                         error("Could not retrieve CloudFormation Output 'MigrationsExportString' from stack Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX}")
                                     }
 
-                                    def pairs = rawOutput.split(';').collect { it.trim() }
+                                    def pairs = rawOutput.split(';').collect { it.trim().replaceFirst(/^export\s+/, '') }
                                     if (!pairs || pairs.size() == 0) {
                                         error("No key=value pairs found in MigrationsExportString output")
                                     }
+                                    echo "Found ${pairs.size()} key=value pairs in MigrationsExportString output"
 
                                     def registryPair = pairs.find { it.startsWith("MIGRATIONS_ECR_REGISTRY=") }
                                     if (!registryPair) {
