@@ -1,0 +1,14 @@
+{
+  "name": "@opensearch-migrations/schemas",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "schema": "tsx src/dumpSchema.ts"
+  },
+  "dependencies": {
+    "zod": "^4.0.5",
+    "@asteasolutions/zod-to-openapi": "^8.1.0"
+  }
+}
