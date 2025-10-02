@@ -9,6 +9,7 @@ from typing import Optional, cast
 import click
 from ...models.command_result import CommandResult
 from ..models.config import WorkflowConfig
+from ..models.utils import get_store
 
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ def view_config(ctx, format):
         else:
             click.echo(config.to_yaml())
     except Exception as e:
-        logger.exception(f"Failed to load configuration: {e}")
+        logger.error(f"Failed to load configuration: {e}")
         raise click.ClickException(f"Failed to load configuration: {e}")
 
 
@@ -166,7 +167,6 @@ def _handle_editor_edit(store, session_name: str):
 @click.pass_context
 def edit_config(ctx, stdin):
     """Edit workflow configuration"""
-    from ..cli import get_store
     store = get_store(ctx)
 
     if stdin:

@@ -37,13 +37,6 @@ def workflow_cli(ctx, verbose):
     ctx.obj['namespace'] = "ma"  # Use 'ma' namespace where the migration console is deployed
 
 
-def get_store(ctx) -> WorkflowConfigStore:
-    """Lazy initialization of WorkflowConfigStore"""
-    if ctx.obj['store'] is None:
-        ctx.obj['store'] = WorkflowConfigStore(namespace=ctx.obj['namespace'])
-    return ctx.obj['store']
-
-
 @workflow_cli.group(name="util")
 @click.pass_context
 def util_group(ctx):
