@@ -198,7 +198,7 @@ def call(Map config = [:]) {
                                     if (!registryEndpoint) {
                                         error("MIGRATIONS_ECR_REGISTRY value is empty")
                                     }
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64"
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${registryEndpoint} -PimageArch=amd64 -Pbuilder=default"
                                 }
                             }
                         }
