@@ -22,8 +22,9 @@ skip_git_pull=false
 base_dir="./opensearch-migrations"
 namespace="ma"
 build_images=false
-use_public_images=true
 keep_build_images_job_alive=false
+use_public_images=true
+skip_console_exec=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -39,7 +40,8 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="$2"; shift 2 ;;
     --build-images) build_images="$2"; shift 2 ;;
     --use-public-images) use_public_images="$2"; shift 2 ;;
-    --keep-build-images-job-alive) keep_build_images_job_alive="$2"; shift 2 ;;
+    --keep-build-images-job-alive) keep_build_images_job_alive=true; shift 1 ;;
+    --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --release-version) RELEASE_VERSION="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
@@ -55,7 +57,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --namespace <val>                         (default: $namespace)"
       echo "  --build-images <true|false>               (default: $build_images)"
       echo "  --use-public-images <true|false>          (default: $use_public_images)"
-      echo "  --keep-build-images-job-alive <true|false>(default: $keep_build_images_job_alive)"
+      echo "  --keep-build-images-job-alive             (default: $keep_build_images_job_alive)"
+      echo "  --skip-console-exec                       (default: $skip_console_exec)"
       echo "  --release-version <val>                   (default: $RELEASE_VERSION)"
       exit 0
       ;;
@@ -281,7 +284,9 @@ helm install "$namespace" "${ma_chart_dir}" \
   $IMAGE_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
-kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
-cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
-echo "Accessing migration console with command: $cmd"
-eval "$cmd"
+if [[ "$skip_console_exec" == "false" ]]; then
+  kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
+  cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
+  echo "Accessing migration console with command: $cmd"
+  eval "$cmd"
+fi
