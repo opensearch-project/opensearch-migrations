@@ -1,6 +1,6 @@
 // TODO
 
-import {WorkflowBuilder,typeToken} from "@opensearch-migrations/argo-workflow-builders";
+import {typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys

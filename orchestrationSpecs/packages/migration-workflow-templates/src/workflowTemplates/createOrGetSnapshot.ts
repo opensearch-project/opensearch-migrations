@@ -4,8 +4,14 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
-import {COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG, CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
-import {WorkflowBuilder, expr, typeToken, getAcceptedRegisterKeys, selectInputsForKeys} from "@opensearch-migrations/argo-workflow-builders";
+import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@opensearch-migrations/schemas";
+import {
+    expr,
+    getAcceptedRegisterKeys,
+    selectInputsForKeys,
+    typeToken,
+    WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-or-get-snapshot",

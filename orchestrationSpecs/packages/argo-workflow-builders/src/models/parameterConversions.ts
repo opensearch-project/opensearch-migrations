@@ -1,6 +1,5 @@
 import {InputParamDef, InputParametersRecord} from "@/models/parameterSchemas";
 import {
-    AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
     expr,
     ExpressionType,

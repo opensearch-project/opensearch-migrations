@@ -8,15 +8,26 @@ import {
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
 import {
+    COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     RFS_OPTIONS,
-    TARGET_CLUSTER_CONFIG,
-    COMPLETE_SNAPSHOT_CONFIG
+    TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
 
-import {WorkflowBuilder, BaseExpression, expr, INTERNAL, inputsToEnvVarsList, transformZodObjectToParams, IMAGE_PULL_POLICY,
-    MISSING_FIELD, selectInputsFieldsAsExpressionRecord, selectInputsForRegister, typeToken} from "@opensearch-migrations/argo-workflow-builders";
+import {
+    BaseExpression,
+    expr,
+    IMAGE_PULL_POLICY,
+    inputsToEnvVarsList,
+    INTERNAL,
+    MISSING_FIELD,
+    selectInputsFieldsAsExpressionRecord,
+    selectInputsForRegister,
+    transformZodObjectToParams,
+    typeToken,
+    WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
 
 
 function getRfsReplicasetManifest

@@ -1,9 +1,5 @@
-import {expectTypeOf, IsAny} from "expect-type";
-import {
-    BaseExpression,
-    expr,
-    DeepWiden
-} from "../src";
+import {expectTypeOf} from "expect-type";
+import {BaseExpression, DeepWiden, expr} from "../src";
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {

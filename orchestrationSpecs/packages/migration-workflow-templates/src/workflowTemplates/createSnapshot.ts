@@ -3,9 +3,15 @@ import {
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {CLUSTER_CONFIG, CONSOLE_SERVICES_CONFIG_FILE, COMPLETE_SNAPSHOT_CONFIG} from "@opensearch-migrations/schemas";
+import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, CONSOLE_SERVICES_CONFIG_FILE} from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {WorkflowBuilder, INTERNAL, MISSING_FIELD, selectInputsForRegister, typeToken} from "@opensearch-migrations/argo-workflow-builders";
+import {
+    INTERNAL,
+    MISSING_FIELD,
+    selectInputsForRegister,
+    typeToken,
+    WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
 
 export const CreateSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-snapshot",

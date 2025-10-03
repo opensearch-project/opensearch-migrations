@@ -1,4 +1,11 @@
-import {INTERNAL, BaseExpression, expr, selectInputsForRegister, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
+import {
+    BaseExpression,
+    expr,
+    INTERNAL,
+    selectInputsForRegister,
+    typeToken,
+    WorkflowBuilder
+} from "@opensearch-migrations/argo-workflow-builders";
 import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
 
 

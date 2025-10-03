@@ -18,13 +18,9 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
 } from "@/models/workflowTypes";
-import {inputsToEnvVars, toEnvVarName, TypescriptError} from "@/utils";
+import {inputsToEnvVars, TypescriptError} from "@/utils";
 import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/models/templateBodyBuilder"; // <-- import TemplateRebinder
-import {
-    extendScope,
-    FieldGroupConstraint,
-    ScopeIsEmptyConstraint
-} from "@/models/scopeConstraints";
+import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "@/models/scopeConstraints";
 import {PlainObject} from "@/models/plainObject";
 import {AllowLiteralOrExpression, BaseExpression, toExpression} from "@/models/expression";
 import {TypeToken} from "@/models/sharedTypes";
