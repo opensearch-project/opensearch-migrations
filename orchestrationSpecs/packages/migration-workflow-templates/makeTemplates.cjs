@@ -14,4 +14,4 @@ require('tsx/cjs/api').register();
 require('tsconfig-paths/register');
 
 // Now require your main file
-require('./src/index.ts');
+require('./src/makeTemplates.ts');
