@@ -220,6 +220,7 @@ def call(Map config = [:]) {
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
                                     """
 
+                                    sh 'kubectl get namespace ma || kubectl create namespace ma'
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.target
                                     writeJSON file: '/tmp/source-cluster-config.json', json: [
