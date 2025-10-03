@@ -6,8 +6,7 @@ module.exports = {
     moduleFileExtensions: ["ts", "js", "json", "yaml", "yml", "sh"],
 
     transform: {
-        "^.+\\.(ts|js)$": "ts-jest",              // Jest 29 syntax
-        "\\.(sh|ya?ml)$": "<rootDir>/tests/rawFileTransformer.cjs",
+        "^.+\\.(ts|js)$": "ts-jest"
     },
 
     moduleNameMapper: {

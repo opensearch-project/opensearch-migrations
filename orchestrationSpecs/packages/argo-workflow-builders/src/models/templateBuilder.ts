@@ -10,14 +10,14 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "@/models/parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
-} from "@/argoWorkflowBuilders/models/workflowTypes";
+} from "@/models/workflowTypes";
 import {
     extendScope,
     FieldGroupConstraint,
@@ -25,14 +25,14 @@ import {
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
-import {StepsBuilder} from "@/argoWorkflowBuilders/models/stepsBuilder";
-import {ContainerBuilder} from "@/argoWorkflowBuilders/models/containerBuilder";
-import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
-import {DagBuilder} from "@/argoWorkflowBuilders/models/dagBuilder";
-import {K8sResourceBuilder} from "@/argoWorkflowBuilders/models/k8sResourceBuilder";
-import {AllowLiteralOrExpression, expr, isExpression} from "@/argoWorkflowBuilders/models/expression";
-import {TypeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/argoWorkflowBuilders/models/parameterConversions";
+import {StepsBuilder} from "@/models/stepsBuilder";
+import {ContainerBuilder} from "@/models/containerBuilder";
+import {PlainObject} from "@/models/plainObject";
+import {DagBuilder} from "@/models/dagBuilder";
+import {K8sResourceBuilder} from "@/models/k8sResourceBuilder";
+import {AllowLiteralOrExpression, expr, isExpression} from "@/models/expression";
+import {TypeToken} from "@/models/sharedTypes";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/models/parameterConversions";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)

@@ -10,12 +10,12 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
-import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScopeTyped} from "@/argoWorkflowBuilders/models/workflowTypes";
+import {InputParametersRecord} from "@/models/parameterSchemas";
+import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScopeTyped} from "@/models/workflowTypes";
 import {TypescriptError} from "@/utils";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/argoWorkflowBuilders/models/scopeConstraints";
-import {TemplateBuilder} from "@/argoWorkflowBuilders/models/templateBuilder";
-import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/models/scopeConstraints";
+import {TemplateBuilder} from "@/models/templateBuilder";
+import {PlainObject} from "@/models/plainObject";
 
 type MetadataScopeBase = {
     k8sMetadata: { name: string } & GenericScope,

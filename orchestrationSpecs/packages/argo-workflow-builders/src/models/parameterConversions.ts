@@ -1,4 +1,4 @@
-import {InputParamDef, InputParametersRecord} from "@/argoWorkflowBuilders/models/parameterSchemas";
+import {InputParamDef, InputParametersRecord} from "@/models/parameterSchemas";
 import {
     AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
@@ -7,9 +7,9 @@ import {
     FromParameterExpression,
     ParameterSource,
     UnwrapSerialize
-} from "@/argoWorkflowBuilders/models/expression";
-import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "@/argoWorkflowBuilders/models/plainObject";
-import {StripUndefined} from "@/argoWorkflowBuilders/models/sharedTypes";
+} from "@/models/expression";
+import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "@/models/plainObject";
+import {StripUndefined} from "@/models/sharedTypes";
 import {Primitive} from "zod/v3";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;

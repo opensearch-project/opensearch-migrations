@@ -1,12 +1,11 @@
 // TODO
 
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {WorkflowBuilder,typeToken} from "@opensearch-migrations/argo-workflow-builders";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
+import {CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
 export const CaptureProxy = WorkflowBuilder.create({

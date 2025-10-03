@@ -1,15 +1,11 @@
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
-import {expr} from "@/argoWorkflowBuilders/models/expression";
 import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
-import {getAcceptedRegisterKeys, selectInputsForKeys} from "@/argoWorkflowBuilders/models/parameterConversions";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
+import {COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG, CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {WorkflowBuilder, expr, typeToken, getAcceptedRegisterKeys, selectInputsForKeys} from "@opensearch-migrations/argo-workflow-builders";
 
 export const CreateOrGetSnapshot = WorkflowBuilder.create({
     k8sResourceName: "create-or-get-snapshot",

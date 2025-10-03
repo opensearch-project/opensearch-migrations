@@ -32,3 +32,5 @@ transformation/standardJavascriptTransforms/node_modules
 transformation/standardJavascriptTransforms/package-lock.json
 orchestrationSpecs/dist
 orchestrationSpecs/node_modules
+orchestrationSpecs/packages/schemas/dist
+orchestrationSpecs/packages/migration-workflow-templates/dist

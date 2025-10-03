@@ -1,18 +1,19 @@
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
+import {
+    WorkflowBuilder,
+    INTERNAL,
+    typeToken,
+    expr,
+    selectInputsForRegister, MISSING_FIELD
+} from "@opensearch-migrations/argo-workflow-builders";
+import {CLUSTER_CONFIG, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
 } from "@/workflowTemplates/commonWorkflowTemplates";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {CLUSTER_CONFIG, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
 import {z} from "zod";
-import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
 import {SetupKafka} from "@/workflowTemplates/setupKafka";
-import expr from "@/argoWorkflowBuilders/models/expression";
 import {Replayer} from "@/workflowTemplates/replayer";
-import {selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
 import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
 import {CaptureProxy} from "@/workflowTemplates/captureProxy";
 
 
