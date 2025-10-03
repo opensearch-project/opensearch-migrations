@@ -220,6 +220,7 @@ def call(Map config = [:]) {
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
                                     """
 
+                                    def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.target
                                     sh """
                                         cat > /tmp/source-cluster-config.json <<EOF
