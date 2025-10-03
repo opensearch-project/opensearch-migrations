@@ -201,9 +201,24 @@ def call(Map config = [:]) {
                                     }
                                     env.eksClusterName = eksClusterPair.split('=')[1]
 
-                                    sh "aws eks create-access-entry --cluster-name ${env.eksClusterName} --principal-arn arn:aws:iam::${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole --type STANDARD"
-                                    sh "aws eks associate-access-policy --cluster-name ${env.eksClusterName} --principal-arn arn:aws:iam::${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy --access-scope type=cluster"
-                                    sh "aws eks update-kubeconfig --region us-east-1 --name ${env.eksClusterName}"
+                                    def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
+
+                                    sh """
+                                        if aws eks describe-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
+                                          echo "Access entry already exists, skipping create."
+                                        else
+                                          aws eks create-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn --type STANDARD
+                                        fi
+                                        
+                                        aws eks associate-access-policy \
+                                          --cluster-name $env.eksClusterName \
+                                          --principal-arn $principalArn \
+                                          --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+                                          --access-scope type=cluster
+                                        
+                                        # Update kubeconfig to use this role
+                                        aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
+                                    """
                                 }
                             }
                         }
