@@ -164,12 +164,12 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Configure EKS Access Policy') {
+            stage('Configure EKS') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 300, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
                                             script: """
                                               aws cloudformation describe-stacks \
