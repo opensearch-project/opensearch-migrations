@@ -12,7 +12,7 @@ module.exports = {
 
     // only transform TS, not JS
     transform: {
-        '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
+        '^.+\\.ts$': ['ts-jest'],
         "\\.(sh|ya?ml)$": "<rootDir>/tests/rawFileTransformer.cjs"
     },
 
