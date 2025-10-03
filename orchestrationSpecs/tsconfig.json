@@ -1,9 +1,8 @@
 {
-  "files": [],
   "references": [
-    { "path": "./packages/argo-workflow-builders" },
     { "path": "./packages/schemas" },
-    { "path": "./packages/workflow-templates" },
+    { "path": "./packages/argo-workflow-builders" },
+    { "path": "./packages/migration-workflow-templates"},
     { "path": "./packages/config-processor" }
   ]
 }

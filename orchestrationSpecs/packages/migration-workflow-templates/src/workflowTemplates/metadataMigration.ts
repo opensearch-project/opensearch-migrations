@@ -1,4 +1,3 @@
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
@@ -8,17 +7,10 @@ import {
     CLUSTER_CONFIG,
     METADATA_OPTIONS,
     TARGET_CLUSTER_CONFIG
-} from "@/workflowTemplates/userSchemas";
-import {MISSING_FIELD} from "@/argoWorkflowBuilders/models/plainObject";
-import {
-    selectInputsFieldsAsExpressionRecord,
-    selectInputsForRegister
-} from "@/argoWorkflowBuilders/models/parameterConversions";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
-import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
-import {inputsToEnvVars, inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams} from "@/utils";
-import {defineRequiredParam} from "@/argoWorkflowBuilders/models/parameterSchemas";
-import {COMPLETE_SNAPSHOT_CONFIG} from "@/workflowTemplates/internalSchemas";
+} from "@opensearch-migrations/schemas";
+import {typeToken, INTERNAL, inputsToEnvVars, inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams, WorkflowBuilder, selectInputsFieldsAsExpressionRecord,
+    selectInputsForRegister, defineRequiredParam} from "@opensearch-migrations/argo-workflow-builders";
+import {COMPLETE_SNAPSHOT_CONFIG} from "@opensearch-migrations/schemas";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:

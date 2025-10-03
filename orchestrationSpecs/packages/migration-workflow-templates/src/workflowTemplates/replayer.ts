@@ -1,4 +1,3 @@
-import {WorkflowBuilder} from "@/argoWorkflowBuilders/models/workflowBuilder";
 import {
     CommonWorkflowParameters,
     extractTargetKeysToExpressionMap,
@@ -7,13 +6,8 @@ import {
     TargetClusterParameters
 } from "@/workflowTemplates/commonWorkflowTemplates";
 import {z} from "zod";
-import {BaseExpression, expr} from "@/argoWorkflowBuilders/models/expression";
-import {REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@/workflowTemplates/userSchemas";
-import {INTERNAL} from "@/argoWorkflowBuilders/models/taskBuilder";
-import {inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams} from "@/utils";
-import {IMAGE_PULL_POLICY} from "@/argoWorkflowBuilders/models/containerBuilder";
-import {selectInputsFieldsAsExpressionRecord, selectInputsForRegister} from "@/argoWorkflowBuilders/models/parameterConversions";
-import {typeToken} from "@/argoWorkflowBuilders/models/sharedTypes";
+import {REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {inputsToEnvVarsList, remapRecordNames, transformZodObjectToParams, WorkflowBuilder, BaseExpression, expr, INTERNAL, IMAGE_PULL_POLICY, selectInputsFieldsAsExpressionRecord, selectInputsForRegister, typeToken} from "@opensearch-migrations/argo-workflow-builders";
 
 function getReplayerDeploymentManifest
 (args: {

@@ -1,7 +1,7 @@
-import {AllowLiteralOrExpression, expr} from "@/argoWorkflowBuilders/models/expression";
+import {AllowLiteralOrExpression, expr} from "@/models/expression";
 import {z} from "zod";
-import {defineParam, defineRequiredParam} from "@/argoWorkflowBuilders/models/parameterSchemas";
-import {PlainObject} from "@/argoWorkflowBuilders/models/plainObject";
+import {defineParam, defineRequiredParam} from "@/models/parameterSchemas";
+import {PlainObject} from "@/models/plainObject";
 
 export type TypescriptError<Message extends string> = {
     readonly __error: Message;

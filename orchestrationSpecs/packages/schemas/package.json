@@ -1,10 +1,17 @@
 {
   "name": "@opensearch-migrations/schemas",
   "version": "1.0.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "type-check": "tsc --build --noEmit",
     "schema": "tsx src/dumpSchema.ts"
   },
   "dependencies": {
