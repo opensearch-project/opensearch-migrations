@@ -1,5 +1,5 @@
 import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
-import {AllWorkflowTemplates} from "@/workflowTemplates/allWorkflowTemplates";
+import {AllWorkflowTemplates} from "../src/workflowTemplates/allWorkflowTemplates";
 
 describe('test workflow template renderings', () => {
     test.each(AllWorkflowTemplates)('should produce correct output for %s',
