@@ -1,10 +1,5 @@
-import {WorkflowBuilder} from "@/models/workflowBuilder";
-import {TemplateBuilder} from "@/models/templateBuilder";
-import {defineParam, InputParamDef} from "@/models/parameterSchemas";
 import {expectTypeOf} from "expect-type";
-import {typeToken} from "@/models/sharedTypes";
-import {CallerParams} from "@/models/parameterConversions";
-import expr from "@/models/expression";
+import {WorkflowBuilder, TemplateBuilder, defineParam, InputParamDef, typeToken, CallerParams, expr} from "../src";
 
 export type SIMPLE_ENUM = "a" | "b" | "c";
 

@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc",
     "type-check": "tsc --build --noEmit",
     "schema": "tsx src/dumpSchema.ts"
   },

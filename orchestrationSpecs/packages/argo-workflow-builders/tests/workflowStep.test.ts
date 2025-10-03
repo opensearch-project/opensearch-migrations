@@ -1,7 +1,4 @@
-import {WorkflowBuilder} from "@/models/workflowBuilder";
-import { INTERNAL } from "@/models/taskBuilder"; // sentinel import
-import {typeToken} from "@/models/sharedTypes";
-import {CallerParams} from "@/models/parameterConversions";
+import {typeToken, INTERNAL, CallerParams, WorkflowBuilder} from "../src";
 
 describe("paramsFns runtime validation - comprehensive", () => {
     // Shared external templates with different parameter configurations

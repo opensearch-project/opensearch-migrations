@@ -9,6 +9,6 @@
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"],
   "references": [
-    { "path": "../schemas" }
+    { "path": "../schemas/tsconfig.json" }
   ]
 }
