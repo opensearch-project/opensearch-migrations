@@ -219,6 +219,44 @@ def call(Map config = [:]) {
                                         # Update kubeconfig to use this role
                                         aws eks update-kubeconfig --region us-east-1 --name $env.eksClusterName
                                     """
+
+                                    def sourceCluster = clusterDetails.target
+                                    sh """
+                                        cat > /tmp/source-cluster-config.json <<EOF
+                                        {
+                                          "endpoint": ${sourceCluster.endpoint},
+                                          "allow_insecure": true,
+                                          "sigv4": {
+                                            "region": "us-east-1",
+                                            "service": "es"
+                                          }
+                                          "version": ${env.sourceVer}
+                                        }
+                                        EOF
+                    
+                                        kubectl create configmap source-elasticsearch-7-10-migration-config \\
+                                          --from-file=cluster-config=/tmp/source-cluster-config.json \\
+                                          --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                    """
+                                    def targetCluster = clusterDetails.target
+                                    sh """
+                                        cat > /tmp/target-cluster-config.json <<EOF
+                                        {
+                                          "endpoint": ${targetCluster.endpoint},
+                                          "allow_insecure": true,
+                                          "sigv4": {
+                                            "region": "us-east-1",
+                                            "service": "es"
+                                          }
+                                          "version": ${env.targetVer}
+                                        }
+                                        EOF
+                    
+                                        kubectl create configmap target-opensearch-1-3-migration-config \\
+                                          --from-file=cluster-config=/tmp/target-cluster-config.json \\
+                                          --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+                                    """
+
                                 }
                             }
                         }
@@ -231,7 +269,7 @@ def call(Map config = [:]) {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                     def builderExists = sh(
                                             script: "docker buildx ls | grep -q '^ecr-builder'",
                                             returnStatus: true
@@ -256,7 +294,7 @@ def call(Map config = [:]) {
                         dir('deployment/k8s/aws') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "./aws-bootstrap.sh --skip-git-pull --base-dir /home/ec2-user/workspace/eks-integ-test --use-public-images false --skip-console-exec"
                                     }
                                 }
@@ -279,7 +317,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0000 --skip-delete"
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0001 --skip-delete"
                                     }
                                 }
                             }
