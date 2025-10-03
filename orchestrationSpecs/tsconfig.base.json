@@ -4,6 +4,7 @@
     "module": "commonjs",
     "lib": ["ES2022"],
     "strict": true,
+    "incremental": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
