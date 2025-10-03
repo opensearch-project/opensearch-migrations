@@ -10,20 +10,20 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/models/parameterSchemas";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {
     DataScope,
     ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope
-} from "@/models/workflowTypes";
-import {inputsToEnvVars, TypescriptError} from "@/utils";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/models/templateBodyBuilder"; // <-- import TemplateRebinder
-import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "@/models/scopeConstraints";
-import {PlainObject} from "@/models/plainObject";
-import {AllowLiteralOrExpression, BaseExpression, toExpression} from "@/models/expression";
-import {TypeToken} from "@/models/sharedTypes";
+} from "./workflowTypes";
+import {inputsToEnvVars, TypescriptError} from "../utils";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder"; // <-- import TemplateRebinder
+import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
+import {PlainObject} from "./plainObject";
+import {AllowLiteralOrExpression, BaseExpression, toExpression} from "./expression";
+import {TypeToken} from "./sharedTypes";
 
 export type IMAGE_PULL_POLICY = "ALWAYS" | "NEVER" | "IF_NOT_PRESENT";
 

@@ -19,8 +19,8 @@ import {
     ImageParameters,
     LogicalOciImages,
     makeRequiredImageParametersForKeys
-} from "@/workflowTemplates/commonWorkflowTemplates";
-import {ConfigManagementHelpers} from "@/workflowTemplates/configManagementHelpers";
+} from "./commonWorkflowTemplates";
+import {ConfigManagementHelpers} from "./configManagementHelpers";
 import {
     AllowLiteralOrExpression,
     configMapKey,
@@ -36,8 +36,8 @@ import {
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
-import {DocumentBulkLoad} from "@/workflowTemplates/documentBulkLoad";
-import {MetadataMigration} from "@/workflowTemplates/metadataMigration";
+import {DocumentBulkLoad} from "./documentBulkLoad";
+import {MetadataMigration} from "./metadataMigration";
 
 const latchCoordinationPrefixParam = {
     latchCoordinationPrefix: defineRequiredParam<string>({description: "Workflow session nonce"})

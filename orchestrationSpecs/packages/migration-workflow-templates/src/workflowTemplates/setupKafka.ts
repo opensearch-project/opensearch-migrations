@@ -6,7 +6,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {CommonWorkflowParameters} from "@/workflowTemplates/commonWorkflowTemplates";
+import {CommonWorkflowParameters} from "./commonWorkflowTemplates";
 
 
 function makeDeployKafkaClusterZookeeperManifest(kafkaName: BaseExpression<string>) {

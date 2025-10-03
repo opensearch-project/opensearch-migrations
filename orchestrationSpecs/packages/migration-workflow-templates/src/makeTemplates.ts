@@ -1,6 +1,7 @@
+import 'tsconfig-paths/register';
 import * as k8s from '@kubernetes/client-node';
 import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
-import {AllWorkflowTemplates} from "@/workflowTemplates/allWorkflowTemplates";
+import {AllWorkflowTemplates} from "./workflowTemplates/allWorkflowTemplates";
 
 
 // Parse command line arguments and environment variables

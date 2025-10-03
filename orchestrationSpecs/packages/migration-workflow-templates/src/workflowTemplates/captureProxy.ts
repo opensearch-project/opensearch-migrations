@@ -4,7 +4,7 @@ import {typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-b
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 

@@ -10,12 +10,12 @@ import {CLUSTER_CONFIG, REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensear
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {z} from "zod";
-import {SetupKafka} from "@/workflowTemplates/setupKafka";
-import {Replayer} from "@/workflowTemplates/replayer";
-import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
-import {CaptureProxy} from "@/workflowTemplates/captureProxy";
+import {SetupKafka} from "./setupKafka";
+import {Replayer} from "./replayer";
+import {MigrationConsole} from "./migrationConsole";
+import {CaptureProxy} from "./captureProxy";
 
 
 export const CaptureReplay = WorkflowBuilder.create({

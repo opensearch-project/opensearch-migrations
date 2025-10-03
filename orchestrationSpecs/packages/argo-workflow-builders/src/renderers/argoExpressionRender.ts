@@ -16,7 +16,7 @@ import {
     TemplateReplacementExpression,
     TernaryExpression,
     WorkflowValueExpression,
-} from "@/models/expression";
+} from "../models/expression";
 
 /** Lightweight erased type to avoid deep generic instantiation */
 type AnyExpr = BaseExpression<any, any>;

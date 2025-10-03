@@ -10,7 +10,6 @@ module.exports = {
     },
 
     moduleNameMapper: {
-        "^@/(.*)$": "<rootDir>/src/$1",
         // NOTE: add `$` so we don’t over-match and ensure a clean capture group
         "^resources/(.*)$": "<rootDir>/resources/$1",   // <-- was src/resources
     },

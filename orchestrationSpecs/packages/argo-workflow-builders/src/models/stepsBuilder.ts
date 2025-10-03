@@ -10,7 +10,7 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParametersRecord} from "@/models/parameterSchemas";
+import {InputParametersRecord, OutputParametersRecord} from "./parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
@@ -18,10 +18,10 @@ import {
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope
-} from "@/models/workflowTypes";
-import {TemplateBodyBuilder} from "@/models/templateBodyBuilder";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/models/scopeConstraints";
-import {PlainObject} from "@/models/plainObject";
+} from "./workflowTypes";
+import {TemplateBodyBuilder} from "./templateBodyBuilder";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
+import {PlainObject} from "./plainObject";
 import {
     AllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
@@ -31,8 +31,8 @@ import {
     ParamsTuple,
     TaskBuilder,
     TaskRebinder
-} from "@/models/taskBuilder";
-import {NamedTask} from "@/models/sharedTypes";
+} from "./taskBuilder";
+import {NamedTask} from "./sharedTypes";
 
 export interface StepGroup {
     steps: NamedTask[];

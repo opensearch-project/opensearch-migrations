@@ -10,7 +10,7 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/models/parameterSchemas";
+import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {
     AllowLiteralOrExpression,
     AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
@@ -19,8 +19,8 @@ import {
     InputParameterSource,
     ParameterSource,
     WorkflowParameterSource
-} from "@/models/expression";
-import {PlainObject} from "@/models/plainObject";
+} from "./expression";
+import {PlainObject} from "./plainObject";
 
 // Specific scope types for different purposes
 export type WorkflowAndTemplatesScope<

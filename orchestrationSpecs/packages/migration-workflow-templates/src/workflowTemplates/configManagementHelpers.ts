@@ -8,12 +8,12 @@ import {
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {TemplateBuilder, typeToken, WorkflowBuilder} from "@opensearch-migrations/argo-workflow-builders";
 
-import initTlhScript from "resources/configManagementHelpers/init.sh";
-import decrementTlhScript from "resources/configManagementHelpers/decrement.sh";
-import cleanupTlhScript from "resources/configManagementHelpers/cleanup.sh";
+import {initTlhScript} from "../resourceLoader";
+import {decrementTlhScript} from "../resourceLoader";
+import {cleanupTlhScript} from "../resourceLoader";
 
 function addCommonTargetLatchInputs<
     C extends { workflowParameters: typeof CommonWorkflowParameters }

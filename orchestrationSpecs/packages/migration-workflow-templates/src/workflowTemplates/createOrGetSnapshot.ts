@@ -1,9 +1,9 @@
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {z} from "zod";
-import {CreateSnapshot} from "@/workflowTemplates/createSnapshot";
+import {CreateSnapshot} from "./createSnapshot";
 import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG} from "@opensearch-migrations/schemas";
 import {
     expr,

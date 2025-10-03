@@ -11,7 +11,6 @@
     "expect-type": "^1.2.2",
     "prettier": "^3.6.2",
     "ts-jest": "^29.4.4",
-    "tsc-alias": "^1.8.16",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3"
   },
@@ -35,11 +34,20 @@
     "check:templates": "npm run -w @opensearch-migrations/migration-workflow-templates type-check",
 
     "test": "npm run build && npm -ws --if-present run test",
-    "premake-templates": "npm run build",
-    "make-templates": "npm run make-templates -w @opensearch-migrations/migration-workflow-templates -- ",
-    "preschema": "npm run build",
-    "schema": "npm run schema -w @opensearch-migrations/schemas -- ",
-    "process-config": "npm run start -w @opensearch-migrations/config-processor"
+
+    "predist-make-templates": "npm run build",
+    "dist-make-templates": "npm run make-templates -w @opensearch-migrations/migration-workflow-templates -- ",
+    "predist-schema": "npm run build",
+    "dist-schema": "npm run schema -w @opensearch-migrations/schemas -- ",
+    "predist-process-config": "npm run build",
+    "dist-process-config": "npm run start -w @opensearch-migrations/config-processor",
+
+    "dev-make-templates": "npm run dev -w @opensearch-migrations/migration-workflow-templates -- ",
+    "dev-schema": "npm run dev -w @opensearch-migrations/schemas -- ",
+    "dev-process-config": "npm run dev -w @opensearch-migrations/config-processor",
+
+    "make-templates": "npm run dev-make-templates -- ",
+    "schema": "npm run dev-schema"
   },
   "dependencies": {
     "tsconfig-paths": "^4.2.0"

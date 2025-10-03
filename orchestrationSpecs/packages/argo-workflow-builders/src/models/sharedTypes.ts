@@ -4,10 +4,10 @@
  * This file contains types that are needed by multiple modules to prevent
  * circular import dependencies that break TypeScript's type resolution.
  */
-import {InputParametersRecord, OutputParametersRecord} from "@/models/parameterSchemas";
-import {PlainObject} from "@/models/plainObject";
-import {SimpleExpression, TemplateExpression} from "@/models/expression";
-import {IfNever} from "@/models/workflowTypes";
+import {InputParametersRecord, OutputParametersRecord} from "./parameterSchemas";
+import {PlainObject} from "./plainObject";
+import {SimpleExpression, TemplateExpression} from "./expression";
+import {IfNever} from "./workflowTypes";
 
 export type TaskType = "tasks" | "steps";
 

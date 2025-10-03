@@ -10,12 +10,12 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord} from "@/models/parameterSchemas";
-import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScopeTyped} from "@/models/workflowTypes";
-import {TypescriptError} from "@/utils";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/models/scopeConstraints";
-import {TemplateBuilder} from "@/models/templateBuilder";
-import {PlainObject} from "@/models/plainObject";
+import {InputParametersRecord} from "./parameterSchemas";
+import {ExtendScope, GenericScope, TemplateSigEntry, TemplateSignaturesScopeTyped} from "./workflowTypes";
+import {TypescriptError} from "../utils";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
+import {TemplateBuilder} from "./templateBuilder";
+import {PlainObject} from "./plainObject";
 
 type MetadataScopeBase = {
     k8sMetadata: { name: string } & GenericScope,

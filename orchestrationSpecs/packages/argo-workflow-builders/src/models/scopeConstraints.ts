@@ -1,6 +1,6 @@
-import {ExtendScope, GenericScope, ScopeFn} from "@/models/workflowTypes";
-import {TypescriptError} from "@/utils";
-import {InputParamDef} from "@/models/parameterSchemas";
+import {ExtendScope, GenericScope, ScopeFn} from "./workflowTypes";
+import {TypescriptError} from "../utils";
+import {InputParamDef} from "./parameterSchemas";
 
 // true: worse LSP, but squigglies under the name declaration
 // false: squigglies under other parts of named constructs instead of the declaration, but better LSP support
