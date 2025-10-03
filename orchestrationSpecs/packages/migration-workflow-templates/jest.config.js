@@ -12,8 +12,7 @@ module.exports = {
 
     // only transform TS, not JS
     transform: {
-        '^.+\\.ts$': ['ts-jest'],
-        "\\.(sh|ya?ml)$": "<rootDir>/tests/rawFileTransformer.cjs"
+        '^.+\\.ts$': ['ts-jest']
     },
 
     // ignore workspace deps (absolute-path friendly)

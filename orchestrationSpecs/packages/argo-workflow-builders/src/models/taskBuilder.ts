@@ -8,12 +8,12 @@ import {
     TasksWithOutputs,
     TemplateSignaturesScope,
     WorkflowAndTemplatesScope
-} from "@/models/workflowTypes";
-import {Workflow} from "@/models/workflowBuilder";
-import {DeepWiden, PlainObject} from "@/models/plainObject";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/models/scopeConstraints";
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/models/parameterSchemas";
-import {NamedTask, TaskType} from "@/models/sharedTypes";
+} from "./workflowTypes";
+import {Workflow} from "./workflowBuilder";
+import {DeepWiden, PlainObject} from "./plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {NamedTask, TaskType} from "./sharedTypes";
 import {
     AllowSerializedAggregateOrPrimitiveExpressionOrLiteral,
     BaseExpression,
@@ -24,14 +24,14 @@ import {
     StepOutputSource,
     TaskOutputSource,
     TemplateExpression
-} from "@/models/expression";
+} from "./expression";
 import {
     buildDefaultsObject,
     CallerParams,
     DefaultsOfInputs,
     HasRequiredByDef,
     NormalizeInputs
-} from "@/models/parameterConversions";
+} from "./parameterConversions";
 
 export type TaskOpts<LoopT extends PlainObject> = {
     loopWith?: LoopWithUnion<LoopT>,
