@@ -1,10 +1,10 @@
 import {
     CommonWorkflowParameters,
     makeRequiredImageParametersForKeys
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {CLUSTER_CONFIG, COMPLETE_SNAPSHOT_CONFIG, CONSOLE_SERVICES_CONFIG_FILE} from "@opensearch-migrations/schemas";
-import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
+import {MigrationConsole} from "./migrationConsole";
 import {
     INTERNAL,
     MISSING_FIELD,

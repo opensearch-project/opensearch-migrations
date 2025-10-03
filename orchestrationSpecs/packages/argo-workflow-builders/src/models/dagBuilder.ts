@@ -10,14 +10,14 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParametersRecord} from "@/models/parameterSchemas";
+import {InputParametersRecord, OutputParametersRecord} from "./parameterSchemas";
 import {
     ExtendScope,
     InputParamsToExpressions,
     TasksOutputsScope,
     TasksWithOutputs,
     WorkflowAndTemplatesScope,
-} from "@/models/workflowTypes";
+} from "./workflowTypes";
 import {
     AllTasksAsOutputReferenceable,
     InputsFrom,
@@ -27,11 +27,11 @@ import {
     TaskBuilder,
     TaskOpts,
     TaskRebinder
-} from "@/models/taskBuilder";
-import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "@/models/templateBodyBuilder";
-import {PlainObject} from "@/models/plainObject";
-import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "@/models/scopeConstraints";
-import {NamedTask} from "@/models/sharedTypes";
+} from "./taskBuilder";
+import {RetryParameters, TemplateBodyBuilder, TemplateRebinder} from "./templateBodyBuilder";
+import {PlainObject} from "./plainObject";
+import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
+import {NamedTask} from "./sharedTypes";
 
 export type DagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainObject> =
     TaskOpts<LoopT> & { dependencies?: ReadonlyArray<Extract<keyof TaskScope, string>> };

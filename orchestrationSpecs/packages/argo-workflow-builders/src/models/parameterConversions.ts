@@ -1,4 +1,4 @@
-import {InputParamDef, InputParametersRecord} from "@/models/parameterSchemas";
+import {InputParamDef, InputParametersRecord} from "./parameterSchemas";
 import {
     BaseExpression,
     expr,
@@ -6,9 +6,9 @@ import {
     FromParameterExpression,
     ParameterSource,
     UnwrapSerialize
-} from "@/models/expression";
-import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "@/models/plainObject";
-import {StripUndefined} from "@/models/sharedTypes";
+} from "./expression";
+import {AggregateType, NonSerializedPlainObject, PlainObject, Serialized} from "./plainObject";
+import {StripUndefined} from "./sharedTypes";
 import {Primitive} from "zod/v3";
 
 export type ValueHasDefault<V> = V extends { _hasDefault: true } ? true : false;

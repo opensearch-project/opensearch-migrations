@@ -5,7 +5,7 @@ import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
     TargetClusterParameters
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
@@ -13,7 +13,7 @@ import {
     RFS_OPTIONS,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
-import {MigrationConsole} from "@/workflowTemplates/migrationConsole";
+import {MigrationConsole} from "./migrationConsole";
 
 import {
     BaseExpression,

@@ -5,10 +5,7 @@
     "rootDir": "./src",
     "composite": true,
     "declaration": true,
-    "declarationMap": true,
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "declarationMap": true
   },
   "include": ["./src/**/*"],
   "exclude": ["./node_modules", "./dist", "./test"],

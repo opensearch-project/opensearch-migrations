@@ -10,14 +10,14 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "@/models/parameterSchemas";
+import {defineParam, InputParamDef, InputParametersRecord, OutputParametersRecord} from "./parameterSchemas";
 import {
     ExtendScope,
     GenericScope,
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
-} from "@/models/workflowTypes";
+} from "./workflowTypes";
 import {
     extendScope,
     FieldGroupConstraint,
@@ -25,14 +25,14 @@ import {
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
-import {StepsBuilder} from "@/models/stepsBuilder";
-import {ContainerBuilder} from "@/models/containerBuilder";
-import {PlainObject} from "@/models/plainObject";
-import {DagBuilder} from "@/models/dagBuilder";
-import {K8sResourceBuilder} from "@/models/k8sResourceBuilder";
-import {AllowLiteralOrExpression, expr, isExpression} from "@/models/expression";
-import {TypeToken} from "@/models/sharedTypes";
-import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/models/parameterConversions";
+import {StepsBuilder} from "./stepsBuilder";
+import {ContainerBuilder} from "./containerBuilder";
+import {PlainObject} from "./plainObject";
+import {DagBuilder} from "./dagBuilder";
+import {K8sResourceBuilder} from "./k8sResourceBuilder";
+import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
+import {TypeToken} from "./sharedTypes";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)

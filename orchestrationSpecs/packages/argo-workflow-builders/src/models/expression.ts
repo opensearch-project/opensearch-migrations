@@ -5,9 +5,9 @@ import {
     NonSerializedPlainObject,
     PlainObject,
     Serialized
-} from "@/models/plainObject";
-import {StripUndefined, TaskType, typeToken, TypeToken} from "@/models/sharedTypes";
-import {InputParamDef, OutputParamDef} from "@/models/parameterSchemas";
+} from "./plainObject";
+import {StripUndefined, TaskType, typeToken, TypeToken} from "./sharedTypes";
+import {InputParamDef, OutputParamDef} from "./parameterSchemas";
 
 export type ExpressionType = "govaluate" | "complicatedExpression";
 

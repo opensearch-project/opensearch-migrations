@@ -4,16 +4,16 @@ import {
     InputParamsToExpressions,
     WorkflowAndTemplatesScope,
     WorkflowInputsToExpressions,
-} from "@/models/workflowTypes";
+} from "./workflowTypes";
 import {
     ScopeIsEmptyConstraint,
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
-} from "@/models/scopeConstraints";
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "@/models/parameterSchemas";
-import {PlainObject} from "@/models/plainObject";
-import {AllowLiteralOrExpression, toExpression} from "@/models/expression";
-import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "@/models/parameterConversions";
+} from "./scopeConstraints";
+import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {PlainObject} from "./plainObject";
+import {AllowLiteralOrExpression, toExpression} from "./expression";
+import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 
 export type RetryParameters = GenericScope;
 

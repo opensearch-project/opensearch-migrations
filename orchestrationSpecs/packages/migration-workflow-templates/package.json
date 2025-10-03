@@ -2,7 +2,8 @@
   "name": "@opensearch-migrations/migration-workflow-templates",
   "version": "1.0.0",
   "scripts": {
-    "build": "npx tsgo && tsc-alias",
+    "dev": "NODE_OPTIONS='--conditions=development' tsx src/makeTemplates.ts",
+    "build": "npx tsgo",
     "make-templates": "tsx makeTemplates.cjs",
     "pretype-check": "npm run -w @opensearch-migrations/schemas build && npm run -w @opensearch-migrations/argo-workflow-builders build",
     "type-check": "npx tsgo --noEmit",

@@ -10,15 +10,15 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {AggregateType, DeepWiden, PlainObject} from "@/models/plainObject";
+import {AggregateType, DeepWiden, PlainObject} from "./plainObject";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
     FromParameterExpression,
     StepOutputSource,
     TaskOutputSource
-} from "@/models/expression";
-import {typeToken, TypeToken} from "@/models/sharedTypes";
+} from "./expression";
+import {typeToken, TypeToken} from "./sharedTypes";
 
 type DefaultSpec<T extends PlainObject> =
     | {

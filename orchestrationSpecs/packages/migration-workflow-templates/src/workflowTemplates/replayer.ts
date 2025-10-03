@@ -4,7 +4,7 @@ import {
     makeRequiredImageParametersForKeys,
     setupLog4jConfigForContainer,
     TargetClusterParameters
-} from "@/workflowTemplates/commonWorkflowTemplates";
+} from "./commonWorkflowTemplates";
 import {z} from "zod";
 import {REPLAYER_OPTIONS, TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {
