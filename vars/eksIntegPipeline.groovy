@@ -168,7 +168,6 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
-                            sh "npm install"
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 300, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
