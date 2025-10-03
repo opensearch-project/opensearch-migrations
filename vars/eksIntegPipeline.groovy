@@ -118,7 +118,7 @@ def call(Map config = [:]) {
                                 writeFile (file: "${clusterContextFilePath}", text: contextJsonStr)
                                 sh "echo 'Using cluster context file options: ' && cat ${clusterContextFilePath}"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
                                     }
                                 }
@@ -146,7 +146,7 @@ def call(Map config = [:]) {
 
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh """
                                             cdk deploy Migration-Assistant-Infra-Import-VPC-v3-${env.STACK_NAME_SUFFIX} \
                                               --parameters Stage=${maStageName} \
@@ -169,7 +169,7 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
                                     def rawOutput = sh(
                                             script: """
                                               aws cloudformation describe-stacks \
@@ -317,8 +317,8 @@ def call(Map config = [:]) {
 //                                }
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0001 --skip-delete"
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids=0001 --reuse-clusters --skip-delete "
                                     }
                                 }
                             }
@@ -335,7 +335,7 @@ def call(Map config = [:]) {
                             sh "pipenv install --deploy"
                             if (env.eksClusterName) {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "$MIGRATIONS_TEST_ACCOUNT_ID", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "kubectl -n ma config current-context"
                                         sh "kubectl -n ma get pods"
                                         sh "pipenv run app --delete-only"
